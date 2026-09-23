@@ -180,7 +180,7 @@ services:
       # futuro y el overlay docker-compose.mtls.yml. Sin secretos de la
       # central ni de otros servicios (W-1/SEC-3).
       - ../certs:/certs:ro
-    networks: [control]
+    networks: [edge, control]
     depends_on:
       central-api:
         condition: service_healthy
