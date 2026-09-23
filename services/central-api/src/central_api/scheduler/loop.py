@@ -15,6 +15,8 @@ import asyncio
 import secrets
 import uuid
 
+from mrbot_contracts.version import PROTOCOL_VERSION
+
 from central_api.db import db_configurado, nueva_sesion
 from central_api.scheduler import circuit_breaker, dispatcher
 from central_api.scheduler import reaper as reaper_mod
@@ -47,9 +49,6 @@ async def reap_pg_vencidas() -> list[str]:
         if lease is not None:
             lease["expires_at"] = min(lease["expires_at"], ahora)
     return [str(jid) for jid in ids]
-
-PROTOCOL_VERSION = 1  # espejo de mrbot_contracts.version.PROTOCOL_VERSION
-
 
 def has_schedulable_work() -> bool:
     """``EXISTS`` barato: hay PENDIENTE sin cancelación pedida (nunca count)."""

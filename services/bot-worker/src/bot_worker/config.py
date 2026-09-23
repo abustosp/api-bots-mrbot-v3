@@ -23,7 +23,13 @@ import argparse
 import os
 from dataclasses import dataclass
 
-PROTOCOL_VERSION = 1  # espejo de mrbot_contracts.version.PROTOCOL_VERSION (int en el wire)
+from mrbot_contracts.version import PROTOCOL_VERSION as CONTRACT_PROTOCOL_VERSION
+
+# Alias explícito para la prueba stdlib-only y guardia de build. La fuente
+# normativa sigue siendo mrbot-contracts.
+PROTOCOL_VERSION: int = 1
+if PROTOCOL_VERSION != CONTRACT_PROTOCOL_VERSION:  # pragma: no cover - guardia de build
+    raise RuntimeError("bot-worker: versión de protocolo desalineada")
 
 # Prefijos y nombres exactos que NUNCA deben estar en el entorno del worker:
 # ni secretos propios (el worker no tiene ninguno) ni de otros servicios.

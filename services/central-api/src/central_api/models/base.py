@@ -13,10 +13,7 @@ import uuid
 
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase
-
-#: Version normativa del protocolo central-worker (entero 1, espejo de
-#: ``mrbot_contracts.version.PROTOCOL_VERSION``). Se persiste como entero.
-PROTOCOL_VERSION: int = 1
+from mrbot_contracts.version import PROTOCOL_VERSION
 
 #: Tope duro de trabajos simultaneos por worker (invariante W-2).
 WORKER_CAPACITY_MAX: int = 5

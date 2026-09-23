@@ -21,13 +21,10 @@ import secrets
 import time
 from uuid import UUID
 
+from mrbot_contracts.version import PROTOCOL_VERSION
+
 INTERNAL_AUDIENCE = "central-api-internal"
 SERVICE_TOKEN_TTL_SECONDS = 600
-
-#: Versión normativa del protocolo central-worker (entero 1, espejo de
-#: ``mrbot_contracts.version.PROTOCOL_VERSION``). Viaja dentro del token v2.
-PROTOCOL_VERSION = 1
-
 
 def _firmar(signing_key: str, body: str) -> str:
     """Firma HMAC-SHA256 del cuerpo con la clave de firma interna."""

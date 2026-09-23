@@ -18,6 +18,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from mrbot_contracts.version import PROTOCOL_VERSION as CONTRACT_PROTOCOL_VERSION
 
 from central_api.db import db_configurado, nueva_sesion
 from central_api.security.worker_auth import mint_service_token, mint_worker_token
@@ -166,7 +167,12 @@ async def _reincorporar_por_latido(node: str) -> WorkerEntry | None:
 
 router = APIRouter()
 
-PROTOCOL_VERSION = 1  # espejo de mrbot_contracts.version.PROTOCOL_VERSION
+# Alias explícito para conservar la comprobación estática de compatibilidad
+# mientras la fuente normativa permanece en mrbot-contracts.
+PROTOCOL_VERSION: int = 1
+if PROTOCOL_VERSION != CONTRACT_PROTOCOL_VERSION:  # pragma: no cover - guardia de build
+    raise RuntimeError("central-api: versión de protocolo desalineada")
+
 MAX_WORKER_CAPACITY = 5  # W-2: tope duro inicial de 5 ejecuciones
 
 

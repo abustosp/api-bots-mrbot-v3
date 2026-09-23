@@ -5,6 +5,7 @@ description = "MrBot V3 central-api: plano de control (API v3, scheduler, flota)
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "mrbot-contracts>=1.0,<2.0",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "pydantic>=2.7",

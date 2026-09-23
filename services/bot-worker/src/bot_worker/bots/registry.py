@@ -16,11 +16,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Protocol
 
+from mrbot_contracts.version import PROTOCOL_VERSION as CONTRACT_PROTOCOL_VERSION
+
 if TYPE_CHECKING:
     from bot_worker.runtime.context import BotResult, BotRuntime
 
-#: Version del protocolo worker <-> central: entero 1 (no "1.0").
+# Alias explícito para la prueba stdlib-only y guardia de build. La fuente
+# normativa sigue siendo mrbot-contracts.
 PROTOCOL_VERSION: int = 1
+if PROTOCOL_VERSION != CONTRACT_PROTOCOL_VERSION:  # pragma: no cover - guardia de build
+    raise RuntimeError("bot-worker: versión de protocolo desalineada")
 
 
 @dataclass(frozen=True)

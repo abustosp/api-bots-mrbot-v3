@@ -525,4 +525,4 @@ Además:
 |---|---|
 | [`plans/ANEXO-decisiones.md`](plans/ANEXO-decisiones.md) | Las 7 decisiones de producto con evidencia medida de la base V2 y una propuesta por defecto para cada una |
 
-Total de los planes: 10.342 líneas. Investigación de base: 4.584 líneas. Estas cifras las verifica `infra/check-consistency.py`.
+Total de los planes: 10.462 líneas. Investigación de base: 4.584 líneas. Estas cifras las verifica `infra/check-consistency.py`.
