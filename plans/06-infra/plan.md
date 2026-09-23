@@ -348,9 +348,17 @@ El Compose de desarrollo simula la topología real.
 
 La producción inicial usa la misma topología en un VPS, con valores, secretos, imágenes por digest y proxy externos distintos.
 
-El servicio de central se publica al proxy.
+El servicio de central se publica al proxy con el dominio
+`central-api.mrbot.com.ar`.
 
-Los workers no publican puertos al host.
+Los workers no publican puertos al host. Cuando se habilita el ingress
+nginx-v2, cada instancia usa `worker-${WORKER_NUMBER}.mrbot.com.ar` sobre la
+red externa `proxy-edge` y mantiene la validación de asignaciones firmadas.
+
+La inspección de la base se ofrece mediante una UI HTTP opcional llamada
+`database-bots`, publicada como `database-bots.mrbot.com.ar` solo con el perfil
+`database-ui`. PostgreSQL nunca se publica directamente: nginx-v2 es un proxy
+HTTP(S), no un proxy TCP de PostgreSQL.
 
 MinIO puede ser externo existente.
 
@@ -416,6 +424,13 @@ services:
       - minio_central_credentials
     ports:
       - "127.0.0.1:8000:8000"
+    labels:
+      nginx.host.enable: "true"
+      nginx.host.route: "central-api"
+      nginx.host.domains: "central-api.mrbot.com.ar"
+      nginx.host.port: "8000"
+      nginx.host.tls: "true"
+      nginx.host.profile: "long-running-api"
     networks: [edge, control, storage]
     depends_on:
       postgres:
@@ -457,12 +472,19 @@ services:
       - "5"
     volumes:
       - ../certs:/certs:ro
-    networks: [control]
+    networks: [edge, control]
     depends_on:
       central-api:
         condition: service_healthy
     expose:
       - "8080"
+    labels:
+      nginx.host.enable: "true"
+      nginx.host.route: "worker-${WORKER_NUMBER:-1}"
+      nginx.host.domains: "worker-${WORKER_NUMBER:-1}.mrbot.com.ar"
+      nginx.host.port: "8080"
+      nginx.host.tls: "true"
+      nginx.host.profile: "long-running-api"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/status', timeout=2)"]
       interval: 15s
@@ -484,6 +506,26 @@ services:
       - /dev/shm:rw,nosuid,nodev,size=2g
       - /work:rw,nosuid,nodev,size=4g
     read_only: true
+    restart: unless-stopped
+
+  database-bots:
+    image: adminer:5.4.1-standalone
+    profiles: [database-ui]
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    networks: [edge, control]
+    expose:
+      - "8080"
+    labels:
+      nginx.host.enable: "true"
+      nginx.host.route: "database-bots"
+      nginx.host.domains: "database-bots.mrbot.com.ar"
+      nginx.host.port: "8080"
+      nginx.host.tls: "true"
+      nginx.host.profile: "long-running-api"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   minio:
@@ -510,6 +552,8 @@ services:
 
 networks:
   edge:
+    external: true
+    name: proxy-edge
   control:
     internal: true
   storage:

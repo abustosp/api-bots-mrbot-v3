@@ -19,6 +19,7 @@ infra/
 ├── verify-packaging.sh           # compose y Dockerfiles contra las herramientas de Docker
 ├── verify-worker-isolation.sh    # el worker real sin driver PG ni secretos central
 ├── compose/
+│   ├── compose.yaml              # entrada estándar desde infra/compose
 │   ├── docker-compose.yml        # stack completo de desarrollo
 │   ├── docker-compose.prod.yml   # superposicion de produccion
 │   └── .env.example              # WORKER_NODES, CENTRAL_URL, secretos por destino
@@ -47,6 +48,10 @@ Cada destino se despliega con lo minimo que necesita:
   [`deploy/runbooks/despliegue-worker.md`](deploy/runbooks/despliegue-worker.md).
 - Central: solo la lista de IPs de workers, ver
   [`deploy/runbooks/despliegue-central.md`](deploy/runbooks/despliegue-central.md).
+- Entrada estándar: `compose.yaml` desde la raíz o desde `infra/compose`.
+- nginx-v2: `central-api.mrbot.com.ar`, `worker-${WORKER_NUMBER:-1}.mrbot.com.ar`
+  y, mediante el perfil explícito `database-ui`, `database-bots.mrbot.com.ar`.
+  El último es Adminer sobre PostgreSQL, no una publicación TCP de la base.
 - Imagenes: [`../services/central-api/Dockerfile`](../services/central-api/Dockerfile)
   y [`../services/bot-worker/Dockerfile`](../services/bot-worker/Dockerfile),
   con [guia de central](../services/central-api/DEPLOY.md) y

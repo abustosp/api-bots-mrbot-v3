@@ -85,6 +85,12 @@ Reglas operativas:
 9. no ejecutar comandos de cutover, migración V2 ni limpieza de volúmenes en
    este ciclo.
 
+El Compose también puede invocarse como `compose.yaml` desde la raíz o desde
+`infra/compose`. Las labels de nginx-v2 crean automáticamente DNS y TLS para
+`central-api.mrbot.com.ar` y `worker-${WORKER_NUMBER:-1}.mrbot.com.ar`. La UI
+`database-bots.mrbot.com.ar` se activa separadamente con el perfil
+`database-ui`; no representa una exposición TCP de PostgreSQL.
+
 El primer despliegue debe usar el stub de constancias. El endpoint público de
 constancias solo se habilita en un segundo paso explícito y con credenciales
 del entorno de prueba.
@@ -117,4 +123,3 @@ La evidencia de cada ciclo debe registrar commit, imagen, resultado de
 migración, salud de la central, heartbeat del worker, job de prueba y estado de
 los contenedores. No se deben registrar claves, credenciales ni payloads
 sellados.
-

@@ -249,6 +249,11 @@ def verify_envelope_signature(request: Request, env: "JobEnvelope", *, scope: st
     adulterada, devuelve el rechazo 403 sin ejecutar nada.
     """
     key = getattr(request.app.state, "central_verify_key", None)
+    sealed_for_signature = env.sealed_section
+    if sealed_for_signature is None and isinstance(env.sealed, dict):
+        # Compatibilidad con sobres previos que transportaban el objeto bajo
+        # `sealed` y no tenían aún `sealed_section`.
+        sealed_for_signature = env.sealed
     try:
         verify_assignment(
             key,
@@ -257,7 +262,7 @@ def verify_envelope_signature(request: Request, env: "JobEnvelope", *, scope: st
             attempt=env.attempt,
             lease_id=env.lease_id,
             expires_at=env.assignment_expires_at,
-            sealed_section=env.sealed,
+            sealed_section=sealed_for_signature,
             signature_b64=env.assignment_signature,
         )
     except AssignmentDenied:

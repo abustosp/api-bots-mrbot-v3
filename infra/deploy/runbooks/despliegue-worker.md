@@ -13,6 +13,8 @@ MercadoPago (ver [plan de infra](../../../plans/06-infra/plan.md) seccion 6).
   Python y temporales), `/dev/shm` respaldado en memoria de 2 GiB
   (lo provee el compose con `shm_size` y `tmpfs`, no tocar).
 - `init: true` activo (viene en el compose, recolecta hijos Chromium).
+- Si se publica mediante nginx-v2, la red externa `proxy-edge` debe existir y
+  cada despliegue debe usar un `WORKER_NUMBER` distinto.
 
 ## 2. Configurar solo CENTRAL_URL mas token
 
@@ -22,6 +24,7 @@ cat > .env <<EOF
 CENTRAL_URL=https://central.ejemplo.com
 WORKER_TOKEN=cambiar-por-token-generado
 MAX_CONCURRENT_JOBS=5
+WORKER_NUMBER=1
 EOF
 printf '%s\n' "$WORKER_TOKEN" > secrets/worker_auth_token.txt
 # Solo si el plugin los usa: proxy, captcha, CUIT, IA.
@@ -31,6 +34,10 @@ chmod 600 .env secrets/*
 
 `MAX_CONCURRENT_JOBS` tiene tope duro de 5 (invariante W-2). Un valor
 mayor se rechaza: la central degrada al worker a SATURADO.
+
+Con nginx-v2, el worker queda disponible en
+`https://worker-${WORKER_NUMBER}.mrbot.com.ar`. El dominio no sustituye la
+firma Ed25519 de las asignaciones y no se debe agregar un `ports:` al servicio.
 
 ## 3. Levantar el worker sin la central
 

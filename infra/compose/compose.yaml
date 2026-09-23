@@ -1,0 +1,4 @@
+# Nombre estándar del stack cuando se opera desde infra/compose.
+# docker-compose.yml se conserva como compatibilidad con los runbooks actuales.
+include:
+  - path: docker-compose.yml

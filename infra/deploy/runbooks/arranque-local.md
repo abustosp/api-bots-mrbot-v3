@@ -35,6 +35,7 @@ Variables que sí hay que revisar en `.env` (el resto puede quedar por defecto):
 | `ADMIN_TOKEN` | Bearer [REDACTED] mutaciones de `/admin/*`; sin él son `403` |
 | `WORKER_CONCURRENCY` / `MAX_CONCURRENT_JOBS` | tope duro: jamás mayor a `5` (W-2) |
 | `CENTRAL_URL` | en el stack local ya apunta a `http://central-api:8000` |
+| `WORKER_NUMBER` | número usado por nginx-v2 en `worker-{numero}.mrbot.com.ar` |
 
 ## 2. Secretos de desarrollo (placeholders)
 
@@ -78,14 +79,28 @@ externo, ver `docker-compose.prod.yml`). Escala de workers con `--scale`:
 
 ```bash
 cd infra/compose
+docker network inspect proxy-edge >/dev/null 2>&1 || docker network create proxy-edge
 docker compose --profile local-storage up -d --scale bot-worker=2
 docker compose ps
 ```
 
 Topología resultante: `postgres` (red `control`, sin puertos al host, I-4) +
 `central-api` (`127.0.0.1:8000`, redes `edge`/`control`/`storage`) +
-`bot-worker` réplicas (solo red `control`, sin puertos publicados, W-3) +
+`bot-worker` réplicas (red `control` y `proxy-edge`, sin puertos publicados, W-3) +
 `minio` (`127.0.0.1:9000` API S3, `127.0.0.1:9001` consola).
+
+Las labels de nginx-v2 crean `central-api.mrbot.com.ar` y
+`worker-${WORKER_NUMBER:-1}.mrbot.com.ar` cuando el proxy tiene DNS y ACME
+habilitados. Para publicar la UI de inspección PostgreSQL, activar únicamente
+el perfil explícito:
+
+```bash
+docker compose --profile database-ui up -d database-bots
+```
+
+La URL `database-bots.mrbot.com.ar` es Adminer sobre la red interna hacia
+PostgreSQL. No se publica el puerto TCP 5432 y el login requiere las
+credenciales de la base.
 
 ## 4b. Modo stub local (sin salida a internet)
 

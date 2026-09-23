@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -406,3 +406,48 @@ def test_sobre_con_lease_pasa_admision_del_worker():
     assert sobre["attempt"] == 1
     recibido = JobEnvelope(**sobre)
     assert envelope_errors(recibido) == []
+
+
+def test_gate_worker_verifica_sealed_section_y_no_la_bandera():
+    """La firma se liga al objeto sellado, no al booleano histórico ``sealed``."""
+    from types import SimpleNamespace
+
+    from bot_worker.main import JobEnvelope, verify_envelope_signature
+    from bot_worker.runtime.sealed import generate_sealed_keypair
+    from bot_worker.security.assignments import load_verify_key
+    from central_api.scheduler.dispatcher import build_envelope
+    from central_api.security.assignments import (
+        ASSIGNMENT_SCOPE_ASSIGN,
+        process_signing_key,
+        public_pem,
+    )
+    from central_api.store import Job, WorkerEntry
+
+    _, publica_worker = generate_sealed_keypair()
+    trabajo = Job(
+        id=str(uuid.uuid4()),
+        bot="consulta_cuit",
+        operation="consulta",
+        payload={"cuit": "20123456786"},
+        credentials={"clave": "ficticia"},
+        assignment_attempt=1,
+    )
+    sobre = build_envelope(
+        trabajo,
+        WorkerEntry(node="192.0.2.23:8080", sealed_pubkey_pem=publica_worker),
+        "tok-ficticio",
+        str(uuid.uuid4()),
+        (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat(),
+    )
+    privada_central, _ = process_signing_key("")
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                central_verify_key=load_verify_key(public_pem(privada_central)),
+            )
+        )
+    )
+    recibido = JobEnvelope(**sobre)
+    assert verify_envelope_signature(
+        request, recibido, scope=ASSIGNMENT_SCOPE_ASSIGN
+    ) is None

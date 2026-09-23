@@ -512,10 +512,10 @@ duplicada.
 | [`plans/00-arquitectura/plan.md`](plans/00-arquitectura/plan.md) | Decisiones transversales, ADRs, especificación normativa del protocolo central↔worker, análisis de conflicto con el plan previo de la V2 | 1480 |
 | [`plans/01-database/plan.md`](plans/01-database/plan.md) | Esquema PostgreSQL completo con DDL, estrategia de UUIDv4/v7, unificación de las 28 tablas de logs, migraciones | 1028 |
 | [`plans/02-central-api/plan.md`](plans/02-central-api/plan.md) | API pública v3, autenticación, planificador y balanceo de carga, gobierno de la flota, deprecación de sync | 2369 |
-| [`plans/03-worker/plan.md`](plans/03-worker/plan.md) | API secundaria, contrato de plugin de bot, tope de 5 jobs, reporte de salud, empaquetado | 1029 |
+| [`plans/03-worker/plan.md`](plans/03-worker/plan.md) | API secundaria, contrato de plugin de bot, tope de 5 jobs, reporte de salud, empaquetado | 1037 |
 | [`plans/04-billing/plan.md`](plans/04-billing/plan.md) | Tiers, ciclo de cuota, créditos, ledger append-only, integración con MercadoPago | 1109 |
 | [`plans/05-admin-panel/plan.md`](plans/05-admin-panel/plan.md) | Panel de administración, observabilidad de la flota y alertas de workers caídos | 796 |
-| [`plans/06-infra/plan.md`](plans/06-infra/plan.md) | Imágenes Docker, Compose, secretos por destino, CI/CD, despliegue y dimensionamiento | 1109 |
+| [`plans/06-infra/plan.md`](plans/06-infra/plan.md) | Imágenes Docker, Compose, secretos por destino, CI/CD, despliegue y dimensionamiento | 1153 |
 | [`plans/07-migracion/plan.md`](plans/07-migracion/plan.md) | Migración de código, de datos y de clientes. Portado de bots, cutover y rollback | 802 |
 | [`plans/08-testing/plan.md`](plans/08-testing/plan.md) | Pirámide de pruebas, tests de contrato e invariantes, caos, criterios de aceptación | 620 |
 
@@ -525,4 +525,4 @@ Además:
 |---|---|
 | [`plans/ANEXO-decisiones.md`](plans/ANEXO-decisiones.md) | Las 7 decisiones de producto con evidencia medida de la base V2 y una propuesta por defecto para cada una |
 
-Total de los planes: 10.462 líneas. Investigación de base: 4.584 líneas. Estas cifras las verifica `infra/check-consistency.py`.
+Total de los planes: 10.519 líneas. Investigación de base: 4.584 líneas. Estas cifras las verifica `infra/check-consistency.py`.

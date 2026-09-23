@@ -65,5 +65,9 @@ services:
         max-file: "5"
     restart: unless-stopped
 
+  database-bots:
+    # La UI de base solo se permite en el stack de desarrollo explícito.
+    profiles: [prod-desactivado]
+
   minio:
     profiles: [prod-desactivado]

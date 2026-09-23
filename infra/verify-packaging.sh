@@ -201,7 +201,7 @@ if suspicious:
 else:
     ok("W-1: el entorno del worker no menciona base de datos ni pagos")
 
-# --- W-3: el worker no es alcanzable desde afuera -----------------------
+# --- W-3: el worker no publica puertos y el ingress queda controlado ------
 if worker.get("ports"):
     bad(f"W-3: el worker publica puertos: {worker['ports']}")
 else:
@@ -209,12 +209,19 @@ else:
 
 wnets, cnets = net_names(worker), net_names(central)
 edge = {n for n in cnets if "edge" in n or "borde" in n}
-if edge & wnets:
-    bad(f"W-3: el worker esta en la red de borde {sorted(edge & wnets)}")
+shared_edge = edge & wnets
+unexpected_edge = shared_edge - {"edge", "proxy-edge"}
+if unexpected_edge:
+    bad(f"W-3: el worker esta en redes de borde no permitidas {sorted(unexpected_edge)}")
+elif shared_edge:
+    ok(
+        "W-3: el worker no publica puertos y solo comparte proxy-edge "
+        "para el endpoint TLS etiquetado"
+    )
 elif not wnets:
     bad("W-3: el worker no declara red, quedaria en la red por defecto")
 else:
-    ok(f"W-3: el worker solo esta en {sorted(wnets)}, sin la red de borde")
+    ok(f"W-3: el worker solo esta en {sorted(wnets)}, sin ingress externo")
 
 # --- I-4: solo la central llega a Postgres ------------------------------
 if pg.get("ports"):

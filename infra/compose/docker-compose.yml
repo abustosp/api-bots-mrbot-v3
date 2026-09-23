@@ -3,7 +3,8 @@
 #
 # Topologia: postgres 17 (volumen administrado) mas central-api
 # (plano de control, unico cliente de la base) mas bot-worker
-# (plano de ejecucion, escalable con --scale, sin puertos al host).
+# (plano de ejecucion, sin puertos al host). central y worker comparten la
+# red externa proxy-edge para que nginx-v2 termine TLS por labels.
 # MinIO local solo existe bajo el perfil local-storage; en
 # produccion el broker es externo (ver docker-compose.prod.yml).
 #
@@ -29,7 +30,8 @@
 # Invariantes que este archivo respeta (ver infra/verify-packaging.sh):
 #   W-1/SEC-3: el worker no recibe secretos de la central.
 #   W-2: MAX_CONCURRENT_JOBS=5 en el worker.
-#   W-3: el worker no publica puertos ni esta en la red de borde.
+#   W-3: el worker no publica puertos. proxy-edge solo sirve su ingress TLS
+#   etiquetado y la ejecución sigue exigiendo firma de la central.
 #   I-4: solo la central llega a PostgreSQL; postgres no publica puertos.
 
 name: mrbot-v3
@@ -125,6 +127,13 @@ services:
       - ../certs:/certs:ro
     ports:
       - "127.0.0.1:8000:8000"
+    labels:
+      nginx.host.enable: "true"
+      nginx.host.route: "central-api"
+      nginx.host.domains: "central-api.mrbot.com.ar"
+      nginx.host.port: "8000"
+      nginx.host.tls: "true"
+      nginx.host.profile: "long-running-api"
     networks: [edge, control, storage]
     depends_on:
       postgres:
@@ -177,6 +186,13 @@ services:
         condition: service_healthy
     expose:
       - "8080"
+    labels:
+      nginx.host.enable: "true"
+      nginx.host.route: "worker-${WORKER_NUMBER:-1}"
+      nginx.host.domains: "worker-${WORKER_NUMBER:-1}.mrbot.com.ar"
+      nginx.host.port: "8080"
+      nginx.host.tls: "true"
+      nginx.host.profile: "long-running-api"
     # Liveness anonima sin auth: solo la ejecución (POST /jobs) y la
     # cancelación exigen firma de la central; el resto es red privada.
     healthcheck:
@@ -259,8 +275,33 @@ services:
       - /tmp:mode=1777,size=64m
     restart: unless-stopped
 
+  # UI HTTP opcional para inspeccionar la base de desarrollo. PostgreSQL no
+  # se publica como TCP: nginx-v2 solo enruta HTTP(S), por eso esta interfaz
+  # vive en el perfil `database-ui` y exige autenticación propia de Adminer.
+  database-bots:
+    image: adminer:5.4.1-standalone
+    profiles: [database-ui]
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    networks: [edge, control]
+    expose:
+      - "8080"
+    labels:
+      nginx.host.enable: "true"
+      nginx.host.route: "database-bots"
+      nginx.host.domains: "database-bots.mrbot.com.ar"
+      nginx.host.port: "8080"
+      nginx.host.tls: "true"
+      nginx.host.profile: "long-running-api"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   edge:
+    external: true
+    name: proxy-edge
   control:
     internal: true
   storage:

@@ -1,0 +1,5 @@
+# Punto de entrada Compose estándar para el stack V3.
+# La definición única vive en infra/compose para conservar los runbooks y los
+# overlays existentes. Este include permite `docker compose` desde la raíz.
+include:
+  - path: infra/compose/docker-compose.yml

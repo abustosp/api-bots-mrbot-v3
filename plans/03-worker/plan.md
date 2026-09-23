@@ -313,10 +313,18 @@ No responde `503` porque CapMonster, ARCA o el bucket estén caídos. Eso sería
 ### 4.2 Diseño recomendado
 Cada worker arranca con un secreto de bootstrap de un solo uso, montado por el orquestador. Se registra mediante `POST /internal/v1/workers/register` de la central y recibe `worker_id`, token Bearer aleatorio de 256 bits, fecha de vencimiento y parámetros de heartbeat. La central almacena solo un verificador HMAC del token y su período de validez.
 El token se monta en archivo secreto de solo lectura o variable inyectada por el orquestador. No se escribe en `.env`, no se imprime, no se adjunta a excepciones y no se pasa a plugins. El cliente HTTP del runtime centraliza el header y aplica redacción de `Authorization`.
-La red tiene dos zonas:
-1. `control_internal`: `central-api` y `bot-worker`. Aquí viven asignación, cancelación, status y callbacks. No hay puerto publicado al host.
-2. `egress_bots`: salida solo a organismos, proveedores de proxy, CapMonster y URL prefirmadas. Su política se restringe por manifiesto cuando sea posible.
-Nunca se expone un worker a Internet. Una URL pública permitiría a terceros consumir Chromium, forzar navegación a sitios hostiles, ensayar bot payloads o obtener metadatos de versión. Un reverse proxy público, un Ingress y un `ports: "8000:8000"` contradicen W-3 incluso si existe Bearer.
+La red tiene tres zonas cuando se habilita el proxy de desarrollo:
+1. `control_internal`: `central-api` y `bot-worker`. Aquí viven asignación,
+   cancelación, status y callbacks. No hay puerto publicado al host.
+2. `proxy-edge`: ingress TLS de nginx-v2 para `worker-{numero}.mrbot.com.ar`.
+   No habilita ejecución por sí mismo: las órdenes siguen requiriendo la firma
+   Ed25519 de la central y el worker no publica puertos Docker al host.
+3. `egress_bots`: salida solo a organismos, proveedores de proxy, CapMonster y
+   URL prefirmadas. Su política se restringe por manifiesto cuando sea posible.
+
+El dominio del worker es opt-in y queda limitado por TLS, validación de firma,
+límites de capacidad y el perfil de nginx-v2. La exposición directa mediante
+`ports:` continúa prohibida.
 ### 4.3 Rotación de token
 La central emite un token nuevo antes de `expires_at` y acepta el token previo durante una ventana máxima de cinco minutos. El worker conserva ambos en memoria, prueba el nuevo para enviar heartbeat y, una vez confirmado, destruye la referencia al anterior. La rotación se puede entregar como respuesta de heartbeat firmada por la central o por reinicio controlado con el secreto actualizado.
 Una revocación urgente marca el worker `DRENANDO` o `CAIDO` según corresponda, niega asignaciones futuras y fuerza su retiro. El token no representa un usuario, no contiene cuotas, no necesita lookup local y no exige que el worker tenga una base de datos de usuarios.
