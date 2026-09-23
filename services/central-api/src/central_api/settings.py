@@ -24,13 +24,16 @@ from central_api.worker_nodes import parse_worker_nodes
 
 def _secret_file_content(alias: str) -> str:
     """Lee ``<ALIAS>_FILE`` (Docker secrets). Vacío si no existe o ilegible."""
-    path = (os.environ.get(f"{alias}_FILE") or "").strip()
-    if not path:
-        return ""
-    try:
-        return Path(path).read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
+    nombres = (f"{alias}_FILE", f"{alias.upper()}_FILE")
+    for nombre in dict.fromkeys(nombres):
+        path = (os.environ.get(nombre) or "").strip()
+        if not path:
+            continue
+        try:
+            return Path(path).read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+    return ""
 
 
 class Settings(BaseSettings):
