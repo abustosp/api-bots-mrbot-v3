@@ -1,0 +1,9 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "representado_nombre": "CONTRIBUYENTE DE EJEMPLO",
+  "periodo_desde": "202501",
+  "periodo_hasta": "202503",
+  "incluir_json": true,
+  "subir_archivos": false
+}

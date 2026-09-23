@@ -1,0 +1,8 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456786",
+  "periodo_desde": "04/2000",
+  "incluir_movimientos": true,
+  "incluir_pdf": false,
+  "subir": true
+}

@@ -1,0 +1,9 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "denominacion": "EJEMPLO S A",
+  "situacion_excluyente": ["Plan Cancelado"],
+  "incluir_pdf": true,
+  "incluir_xlsx": true,
+  "subir_archivos": true
+}

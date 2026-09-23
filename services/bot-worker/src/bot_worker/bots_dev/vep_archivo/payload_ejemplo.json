@@ -1,0 +1,9 @@
+{
+  "operacion": "generar",
+  "representado_cuit": "20123456789",
+  "medio_pago": "internet_banking",
+  "archivo_nombre": "lote_ejemplo.txt",
+  "archivo_b64": "MDEyMDEyMzQ1Njc4OTIwMDAxMDAxMDAwMDMwMDMwMDAxCjAyPFZFUCBucm9Gb3JtdWxhcmlvPSIyMDAwMSIgY29kVGlwb1BhZ289IjAxIiBjb250cmlidXllbnRlQ1VJVD0iMjAxMjM0NTY3ODkiIGNvbmNlcHRvPSIwMDMiIHN1YkNvbmNlcHRvPSIwMDMiIHBlcmlvZG9GaXNjYWw9IjIwMjQwMSIgaW1wb3J0ZT0iMTAwLjAwIj4gPE9ibGlnYWNpb24gaW1wdWVzdG89IjAwMyIgaW1wb3J0ZT0iMTAwLjAwIi8+PC9WRVA+Cg==",
+  "incluir_json": true,
+  "subir_pdf": false
+}

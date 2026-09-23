@@ -1,0 +1,9 @@
+*.key
+*.srl
+*.csr
+*.ext.cnf
+# Los certificados generados (.pem) tampoco se versionan: cada entorno
+# ejecuta gen-certs.sh (desarrollo) o usa su secret manager (produccion).
+*.pem
+!README.md
+!.gitignore

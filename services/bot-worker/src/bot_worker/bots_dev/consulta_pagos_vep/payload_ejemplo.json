@@ -1,0 +1,7 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "periodo": "72",
+  "incluir_json": true,
+  "subir_csv": false
+}

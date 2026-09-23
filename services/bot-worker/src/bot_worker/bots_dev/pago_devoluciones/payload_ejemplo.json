@@ -1,0 +1,6 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "incluir_json": true,
+  "subir_archivo": true
+}

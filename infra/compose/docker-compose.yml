@@ -1,0 +1,309 @@
+# Stack de desarrollo de la V3.
+# Diseno: plans/06-infra/plan.md seccion 5.
+#
+# Topologia: postgres 17 (volumen administrado) mas central-api
+# (plano de control, unico cliente de la base) mas bot-worker
+# (plano de ejecucion, escalable con --scale, sin puertos al host).
+# MinIO local solo existe bajo el perfil local-storage; en
+# produccion el broker es externo (ver docker-compose.prod.yml).
+#
+# Uso:
+#   cp .env.example .env
+#   # crear secretos de desarrollo (placeholders, nunca valores reales):
+#   mkdir -p secrets && for s in postgres_app_password database_url \
+#     api_key_hmac_secret session_signing_key smtp_password \
+#     mercadopago_access_token minio_central_credentials worker_auth_token \
+#     proxy_credentials capmonster_arca_key capmonster_srt_key \
+#     cuit_service_key ai_api_key minio_root_user minio_root_password \
+#     oidc_client_secret; do
+#     [ -f secrets/$s.txt ] || printf 'dev-placeholder\n' > secrets/$s.txt; done
+#   # la clave RSA se monta como .pem (ver secrets: rsa_private_key):
+#   [ -f secrets/rsa_private_key.pem ] || printf 'dev-placeholder\n' > secrets/rsa_private_key.pem
+#   chmod 600 secrets/*
+#   ./infra/certs/gen-certs.sh   # PKI local para mTLS (ver infra/certs)
+#   docker compose up -d --scale bot-worker=2
+#   # mTLS mutuo central<->worker (uvicorn con certificados de /certs):
+#   # docker compose -f docker-compose.yml -f docker-compose.mtls.yml up -d
+#   docker compose --profile migrate run --rm migrate   # migracion one-off
+#
+# Invariantes que este archivo respeta (ver infra/verify-packaging.sh):
+#   W-1/SEC-3: el worker no recibe secretos de la central.
+#   W-2: MAX_CONCURRENT_JOBS=5 en el worker.
+#   W-3: el worker no publica puertos ni esta en la red de borde.
+#   I-4: solo la central llega a PostgreSQL; postgres no publica puertos.
+
+name: mrbot-v3
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mrbot}
+      POSTGRES_USER: ${POSTGRES_USER:-mrbot_app}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_app_password
+    secrets:
+      - postgres_app_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [control]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mrbot_app} -d ${POSTGRES_DB:-mrbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  migrate:
+    image: ${CENTRAL_IMAGE:-mrbot-central-api:dev}
+    profiles: [migrate]
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets:
+      - database_url
+      - api_key_hmac_secret
+      - session_signing_key
+      - rsa_private_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [control]
+    # One-off via el entrypoint documentado (el binario `alembic` no lleva
+    # ini/versions dentro de la imagen; ver runbook §5 y migrate.py).
+    command: ["python", "-m", "central_api.migrate"]
+    restart: "no"
+
+  central-api:
+    image: ${CENTRAL_IMAGE:-mrbot-central-api:dev}
+    init: true
+    env_file: [.env]
+    environment:
+      # Efectivas hoy (las lee Settings): resto via Docker secrets para
+      # el soporte *_FILE del plan de infra seccion 6.3.
+      DATABASE_URL: ${DATABASE_URL:-}
+      WORKER_NODES: ${WORKER_NODES:-}
+      DATABASE_URL_FILE: /run/secrets/database_url
+      API_KEY_HMAC_SECRET_FILE: /run/secrets/api_key_hmac_secret
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
+      RSA_PRIVATE_KEY_FILE: /run/secrets/rsa_private_key
+      # OIDC admin (plan 02 seccion 4.6): issuer configurable, secreto
+      # solo por archivo (ver central_api.security.oidc).
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc_client_secret
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      # Firma de asignaciones + provisión del worker (sin entorno en el
+      # worker): claves solo por archivo; en dev valen los defaults vacíos
+      # (clave efímera, sin proxy, captcha deshabilitado, endpoints públicos).
+      ASSIGNMENT_SIGNING_KEY_FILE: /run/secrets/assignment_signing_key
+      CAPMONSTER_ARCA_KEY_FILE: /run/secrets/capmonster_arca_key
+      CAPMONSTER_SRT_KEY_FILE: /run/secrets/capmonster_srt_key
+      # mTLS (plan 02 seccion 4.8): rutas dentro de /certs (solo lectura).
+      TLS_CA_FILE: /certs/ca.pem
+      TLS_CERT_FILE: /certs/central-server.pem
+      TLS_KEY_FILE: /certs/central-server.key
+      TLS_CLIENT_CERT_FILE: /certs/central-client.pem
+      TLS_CLIENT_KEY_FILE: /certs/central-client.key
+      TLS_REQUIRE_PEER: "1"
+      TLS_EXPECTED_PEER_CN: worker-local-01
+    secrets:
+      - database_url
+      - api_key_hmac_secret
+      - session_signing_key
+      - rsa_private_key
+      - assignment_signing_key
+      - smtp_password
+      - mercadopago_access_token
+      - minio_central_credentials
+      - oidc_client_secret
+      - capmonster_arca_key
+      - capmonster_srt_key
+    volumes:
+      - ../certs:/certs:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks: [edge, control, storage]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 512M
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    restart: unless-stopped
+
+  bot-worker:
+    image: ${WORKER_IMAGE:-mrbot-bot-worker:dev}
+    init: true
+    # Sin entorno a propósito: el worker no lee variables (su config entra
+    # por `command:` y su arranque falla si ve secretos en el entorno).
+    # Todo lo que necesita (credenciales, proxy, captcha, endpoints, URLs
+    # prefirmadas) lo provisiona la central por asignación sellada; el
+    # token y la clave de verificación llegan en el registro, en memoria.
+    command:
+      - python
+      - -u
+      - -m
+      - bot_worker
+      - --central-url
+      - http://central-api:8000
+      - --advertised-url
+      - ${WORKER_ADVERTISED_URL:-http://bot-worker:8080}
+      - --concurrency
+      - "5"
+    volumes:
+      # Identidad mTLS montada (archivos, no entorno): la usa el canal
+      # futuro y el overlay docker-compose.mtls.yml. Sin secretos de la
+      # central ni de otros servicios (W-1/SEC-3).
+      - ../certs:/certs:ro
+    networks: [control]
+    depends_on:
+      central-api:
+        condition: service_healthy
+    expose:
+      - "8080"
+    # Liveness anonima sin auth: solo la ejecución (POST /jobs) y la
+    # cancelación exigen firma de la central; el resto es red privada.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.5"
+          memory: 3G
+          pids: 512
+        reservations:
+          memory: 2G
+    stop_grace_period: 150s
+    shm_size: "2gb"
+    # uid/gid 10001 (mrbot) + mode 1777: el tmpfs nace root y taparía el
+    # chown del Dockerfile, dejando al worker sin escritura en /work.
+    tmpfs:
+      - /dev/shm:rw,nosuid,nodev,size=2g,uid=10001,gid=10001,mode=1777
+      - /work:rw,nosuid,nodev,size=4g,uid=10001,gid=10001,mode=1777
+    read_only: true
+    restart: unless-stopped
+
+  minio:
+    # quay.io: el repositorio minio/minio de Docker Hub ya no es accesible
+    # (pull denied); quay.io distribuye los mismos releases oficiales.
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: [local-storage]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+    secrets:
+      - minio_root_user
+      - minio_root_password
+    volumes:
+      - minio_data:/data
+    networks: [storage]
+    expose:
+      - "9000"
+      - "9001"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    # La imagen minio/minio no trae `mc`: el chequeo usa el endpoint
+    # de liveness del propio servidor (API S3 en :9000).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+  # Stub del servicio de constancias: SOLO desarrollo (perfil `stub`).
+  # Sin salida a internet el plugin consulta_cuit no alcanza el endpoint
+  # público; este stdlib emula sus respuestas en la red de control para
+  # el ciclo E2E local. Nunca va a producción (el overlay prod no lo
+  # activa y el plugin usa el endpoint público por defecto).
+  stub-constancias:
+    image: python:3.14-slim
+    profiles: [stub]
+    command: ["python", "/stub/stub-constancias.py"]
+    volumes:
+      - ./stub-constancias.py:/stub/stub-constancias.py:ro
+    networks: [control]
+    expose:
+      - "8081"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/consulta_constancia/?cuit=20123456786', timeout=2)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    restart: unless-stopped
+
+networks:
+  edge:
+  control:
+    internal: true
+  storage:
+    internal: true
+
+volumes:
+  postgres_data:
+  minio_data:
+
+secrets:
+  postgres_app_password:
+    file: ./secrets/postgres_app_password.txt
+  database_url:
+    file: ./secrets/database_url.txt
+  api_key_hmac_secret:
+    file: ./secrets/api_key_hmac_secret.txt
+  session_signing_key:
+    file: ./secrets/session_signing_key.txt
+  rsa_private_key:
+    file: ./secrets/rsa_private_key.pem
+  assignment_signing_key:
+    file: ./secrets/assignment_signing_key.pem
+  smtp_password:
+    file: ./secrets/smtp_password.txt
+  mercadopago_access_token:
+    file: ./secrets/mercadopago_access_token.txt
+  minio_central_credentials:
+    file: ./secrets/minio_central_credentials.txt
+  worker_auth_token:
+    file: ./secrets/worker_auth_token.txt
+  proxy_credentials:
+    file: ./secrets/proxy_credentials.txt
+  capmonster_arca_key:
+    file: ./secrets/capmonster_arca_key.txt
+  capmonster_srt_key:
+    file: ./secrets/capmonster_srt_key.txt
+  cuit_service_key:
+    file: ./secrets/cuit_service_key.txt
+  ai_api_key:
+    file: ./secrets/ai_api_key.txt
+  minio_root_user:
+    file: ./secrets/minio_root_user.txt
+  minio_root_password:
+    file: ./secrets/minio_root_password.txt
+  oidc_client_secret:
+    file: ./secrets/oidc_client_secret.txt

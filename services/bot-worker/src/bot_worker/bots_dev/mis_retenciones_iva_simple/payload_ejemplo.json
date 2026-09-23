@@ -1,0 +1,9 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "representado_nombre": "EJEMPLO S A",
+  "fecha_desde": "01/06/2025",
+  "fecha_hasta": "15/07/2025",
+  "incluir_json": true,
+  "subir_csv": true
+}

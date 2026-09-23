@@ -1,0 +1,10 @@
+{
+  "operacion": "descargar",
+  "representado_cuit": "20123456789",
+  "representado_nombre": "EJEMPLO S A",
+  "periodo": "06/2025",
+  "descarga_ventas": true,
+  "descarga_compras": true,
+  "incluir_json": true,
+  "subir_csv": true
+}

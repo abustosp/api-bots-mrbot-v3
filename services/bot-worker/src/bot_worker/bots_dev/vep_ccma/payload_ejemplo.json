@@ -1,0 +1,10 @@
+{
+  "operacion": "generar",
+  "representado_cuit": "20123456789",
+  "medio_pago": "internet_banking",
+  "seleccionar_impuestos": true,
+  "seleccionar_intereses": false,
+  "generar_volante": true,
+  "incluir_json": true,
+  "subir_pdf": false
+}

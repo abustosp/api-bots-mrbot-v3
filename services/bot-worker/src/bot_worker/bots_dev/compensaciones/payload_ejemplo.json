@@ -1,0 +1,10 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456786",
+  "fecha_desde": "01/01/2024",
+  "fecha_hasta": "31/12/2024",
+  "excel": true,
+  "csv": true,
+  "pdf": false,
+  "subir": true
+}

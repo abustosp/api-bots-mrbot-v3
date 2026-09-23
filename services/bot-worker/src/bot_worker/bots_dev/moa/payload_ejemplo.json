@@ -1,0 +1,10 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "despachos": ["24001MANI123456A", "24001MANI123457B"],
+  "tipo_agente": "IMEX-IMEX-IMPORTADOR/EXPORT.",
+  "rol": "IMEX-Rol Importador Exportador",
+  "metodo": "url",
+  "incluir_json": true,
+  "subir_csv": true
+}

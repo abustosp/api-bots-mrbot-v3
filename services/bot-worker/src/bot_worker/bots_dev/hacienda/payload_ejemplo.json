@@ -1,0 +1,11 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "denominacion": "CONTRIBUYENTE DE EJEMPLO",
+  "fecha_desde": "01/01/2025",
+  "fecha_hasta": "31/01/2025",
+  "por_emisor": true,
+  "por_receptor": true,
+  "incluir_json": true,
+  "subir_excel": false
+}

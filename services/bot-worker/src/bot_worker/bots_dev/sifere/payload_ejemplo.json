@@ -1,0 +1,9 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "periodo": "202401",
+  "representado_nombre": "EJEMPLO SA",
+  "jurisdicciones": [901, 902],
+  "incluir_json": true,
+  "subir": false
+}

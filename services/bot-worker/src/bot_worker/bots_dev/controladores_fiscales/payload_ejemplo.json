@@ -1,0 +1,6 @@
+{
+  "operacion": "presentar",
+  "archivos": ["F931_ejemplo.txt"],
+  "subir_constancia": false,
+  "incluir_json": true
+}

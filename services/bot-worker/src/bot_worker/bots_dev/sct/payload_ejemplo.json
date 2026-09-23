@@ -1,0 +1,8 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "secciones": ["vencimientos"],
+  "formatos": ["pdf"],
+  "incluir_json": true,
+  "subir": false
+}

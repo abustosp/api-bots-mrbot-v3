@@ -1,0 +1,8 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "incluir_detalle": true,
+  "incluir_categorias": false,
+  "incluir_json": true,
+  "subir": false
+}

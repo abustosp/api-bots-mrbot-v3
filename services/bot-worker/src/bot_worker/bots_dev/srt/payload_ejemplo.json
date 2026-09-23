@@ -1,0 +1,6 @@
+{
+  "operacion": "consultar_alicuotas",
+  "cuits_consulta": ["20123456789"],
+  "incluir_json": true,
+  "subir_json": false
+}

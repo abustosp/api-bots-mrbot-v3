@@ -1,0 +1,34 @@
+# Python y herramientas de desarrollo
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Entornos, secretos y credenciales locales
+.env
+.env.*
+!.env.example
+**/secrets/*
+!**/secrets/.gitkeep
+
+# Certificados y claves generados por entorno
+**/*.key
+**/*.pem
+**/*.srl
+**/*.csr
+
+# Salidas locales y temporales
+dist/
+build/
+*.log
+*.tmp
+*.bak
+.DS_Store
+

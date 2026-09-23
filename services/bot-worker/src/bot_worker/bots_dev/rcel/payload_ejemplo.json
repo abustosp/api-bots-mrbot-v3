@@ -1,0 +1,9 @@
+{
+  "operacion": "descargar",
+  "representado_cuit": "20123456789",
+  "representado_nombre": "EJEMPLO SA",
+  "fecha_desde": "01/01/2024",
+  "fecha_hasta": "31/01/2024",
+  "incluir_json": true,
+  "subir_pdf": false
+}

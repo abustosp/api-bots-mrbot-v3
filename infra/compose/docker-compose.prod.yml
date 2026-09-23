@@ -1,0 +1,69 @@
+# Superposicion de produccion para VPS.
+# Diseno: plans/06-infra/plan.md secciones 5 y 9.
+#
+# Uso (host de central + postgres):
+#   CENTRAL_IMAGE='registry/grupo/mrbot-central-api@sha256:<digest>' \
+#   WORKER_IMAGE='registry/grupo/mrbot-bot-worker@sha256:<digest>' \
+#   WORKER_NODES='192.0.2.10:8080,192.0.2.11:8080' \
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Reglas de produccion:
+#   - Imagenes siempre por digest inmutable, nunca por tag movil.
+#   - CENTRAL_IMAGE y WORKER_IMAGE son obligatorias (sin default).
+#   - WORKER_NODES es obligatorio: direcciones "ip:puerto" de workers
+#     que la central acepta, separadas por coma. Es capa extra sobre el
+#     token: la central solo necesita esta lista, ningun secreto de worker.
+#   - MinIO local queda desactivado: el broker es externo y la central
+#     lo alcanza por la red storage o la URL configurada.
+#   - Los workers en hosts dedicados se levantan con el runbook
+#     ../deploy/runbooks/despliegue-worker.md usando solo
+#     CENTRAL_URL mas el token.
+
+services:
+  postgres:
+    ports: []
+    restart: unless-stopped
+
+  migrate:
+    image: ${CENTRAL_IMAGE:?fijar digest de central-api publicado}
+    env_file: [.env]
+    restart: "no"
+
+  central-api:
+    image: ${CENTRAL_IMAGE:?fijar digest de central-api publicado}
+    env_file: [.env]
+    environment:
+      WORKER_NODES: ${WORKER_NODES:?fijar lista de IPs o DNS de workers}
+    ports:
+      - "127.0.0.1:8000:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    restart: unless-stopped
+
+  bot-worker:
+    image: ${WORKER_IMAGE:?fijar digest de bot-worker publicado}
+    # Sin entorno (igual que la base): el worker no lee variables; todo
+    # entra por CLI y lo sensible lo provisiona la central por asignación.
+    command:
+      - python
+      - -u
+      - -m
+      - bot_worker
+      - --central-url
+      - ${CENTRAL_URL:?fijar URL publica o interna de la central}
+      - --advertised-url
+      - ${WORKER_ADVERTISED_URL:?fijar URL propia http(s)://IP:8080}
+      - --concurrency
+      - "5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    restart: unless-stopped
+
+  minio:
+    profiles: [prod-desactivado]

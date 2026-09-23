@@ -1,0 +1,13 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "representado_nombre": "EJEMPLO S A",
+  "fecha_desde": "01/06/2025",
+  "fecha_hasta": "30/06/2025",
+  "lpg_emitidas": true,
+  "lpg_recibidas": true,
+  "lsg_emitidas": true,
+  "lsg_recibidas": true,
+  "certificados_deposito": true,
+  "subir_archivos": true
+}

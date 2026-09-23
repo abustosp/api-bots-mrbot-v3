@@ -1,0 +1,69 @@
+# Superposicion mTLS para desarrollo local (requiere infra/certs generado).
+#
+# Diseno: plans/02-central-api/plan.md seccion 4.8 y plans/03-worker/plan.md
+# seccion 4.4 (camino a mTLS). Activa TLS mutuo end-to-end entre
+# central-api y bot-worker con uvicorn: cada servidor presenta su
+# certificado y exige certificado de cliente firmado por la CA de /certs.
+# El token de servicio existente se mantiene como defensa en profundidad
+# durante la migracion (no como sustituto del canal).
+#
+# Uso (desde infra/compose, con ../certs generado por gen-certs.sh):
+#   docker compose -f docker-compose.yml -f docker-compose.mtls.yml up -d
+#
+# Notas:
+#   - Los healthchecks usan contexto TLS sin verificar (solo vivacidad
+#     local); la autenticacion real la hace el handshake mTLS.
+#   - W-1/SEC-3 intactos: el worker sigue sin secretos de la central.
+#   - W-2 intacto: MAX_CONCURRENT_JOBS sigue en 5 (viene de la base).
+#   - W-3 intacto: el worker no publica puertos ni toca la red de borde.
+
+name: mrbot-v3
+
+services:
+  central-api:
+    command:
+      - uvicorn
+      - central_api.main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --ssl-certfile
+      - /certs/central-server.pem
+      - --ssl-keyfile
+      - /certs/central-server.key
+      - --ssl-ca-certs
+      - /certs/ca.pem
+      - --ssl-cert-reqs
+      - "2"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import ssl, urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health', timeout=2, context=ssl._create_unverified_context())",
+        ]
+
+  bot-worker:
+    command:
+      - python
+      - -u
+      - -m
+      - bot_worker
+      - --central-url
+      - https://central-api:8000
+      - --advertised-url
+      - https://bot-worker:8080
+      - --concurrency
+      - "5"
+      - --tls
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import ssl, urllib.request; urllib.request.urlopen('https://127.0.0.1:8080/internal/v1/health', timeout=2, context=ssl._create_unverified_context())",
+        ]

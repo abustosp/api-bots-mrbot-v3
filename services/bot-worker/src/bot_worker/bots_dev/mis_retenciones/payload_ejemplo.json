@@ -1,0 +1,12 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456789",
+  "representado_nombre": "EJEMPLO S A",
+  "fecha_desde": "01/06/2025",
+  "fecha_hasta": "30/06/2025",
+  "impuestos": ["217", "219"],
+  "tipos": ["Retencion", "Percepcion"],
+  "exportar_para_aplicativo": false,
+  "incluir_json": true,
+  "subir_csv": true
+}
