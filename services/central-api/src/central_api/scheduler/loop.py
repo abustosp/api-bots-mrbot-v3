@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import uuid
+import logging
 
 from mrbot_contracts.version import PROTOCOL_VERSION
 
@@ -24,6 +25,8 @@ from central_api.scheduler.claim import leases_vencidas_db
 from central_api.scheduler.selector import select_worker
 from central_api.settings import get_settings
 from central_api.store import ADMIN_NODES, JOBS, WORKERS, Job, utcnow
+
+log = logging.getLogger(__name__)
 from central_api.worker_nodes import merge_nodes
 
 
@@ -66,7 +69,7 @@ def claim_next_job() -> Job | None:
     return candidates[0] if candidates else None
 
 
-def claim_and_reserve(job: Job):
+async def claim_and_reserve(job: Job):
     """Elige worker least-loaded y reserva el slot (transacción lógica).
 
     Devuelve ``(worker, token, lease_id, lease_expires_at)`` o
@@ -93,9 +96,32 @@ def claim_and_reserve(job: Job):
         return None, "", "", None
     token = f"tok-{uuid.uuid4().hex}"
     lease_id = new_job_id()
+    if db_configurado():
+        # Antes del HTTP dispatch, la misma asignación debe ser durable para
+        # que callbacks posteriores autentiquen worker_id/attempt tras restart.
+        try:
+            import uuid as uuid_mod
+
+            from central_api.repositories.jobs import JobRepository
+
+            worker_uuid = uuid_mod.UUID(str(worker.worker_id))
+            async with nueva_sesion() as session:
+                repo = JobRepository(session)  # type: ignore[arg-type]
+                attempt = await repo.assign_for_dispatch(
+                    job_id=uuid_mod.UUID(str(job.id)),
+                    worker_id=worker_uuid,
+                    lease_seconds=settings.worker_ack_lease_seconds,
+                )
+        except Exception:  # noqa: BLE001 - no despachar sin claim durable
+            log.warning("claim PostgreSQL fallido; job queda sin dispatch")
+            return None, "", "", None
+        if attempt is None:
+            return None, "", "", None
+        job.assignment_attempt = attempt
+    else:
+        job.assignment_attempt += 1
     job.status = "ASIGNADO"
     job.worker_node = worker.node
-    job.assignment_attempt += 1
     expira = reaper_mod.grant_lease(
         job.id, worker.node, token, job.assignment_attempt
     )
@@ -109,6 +135,23 @@ async def handle_dispatch_result(job: Job, worker_node: str, ok: bool) -> str:
         circuit_breaker.record_success(worker_node)
         return "ASIGNADO"
     circuit_breaker.record_failure(worker_node)
+    if db_configurado():
+        try:
+            from uuid import UUID
+
+            from central_api.internal.dependencies import resolve_worker_uuid
+            from central_api.repositories.jobs import JobRepository
+
+            worker_id = resolve_worker_uuid(worker_node)
+            if worker_id is None:
+                return "ASIGNADO"
+            async with nueva_sesion() as session:
+                await JobRepository(session).release_assignment(
+                    job_id=UUID(str(job.id)), worker_id=worker_id
+                )
+        except Exception:  # noqa: BLE001 - conservar lease hasta reaper
+            log.warning("no se pudo liberar claim PostgreSQL; queda bajo lease")
+            return "ASIGNADO"
     # Sin entrega confirmada: liberar slot y reencolar con backoff.
     reaper_mod.clear_lease(job.id)
     job.status = "PENDIENTE"
@@ -150,7 +193,7 @@ async def scheduler_round() -> dict:
                 break  # contención sostenida: ceder el turno
             continue
         empty_rounds = 0
-        worker, token, lease_id, expira = claim_and_reserve(job)
+        worker, token, lease_id, expira = await claim_and_reserve(job)
         if worker is None:
             job.status = "PENDIENTE"
             job.worker_node = None

@@ -1049,7 +1049,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 bot_result = {
                     "result": result.result,
                     "data": _sanitize(result.data, secrets),
-                    "artifacts": result.artifacts,
+                    "artifacts": _sanitize(result.artifacts, secrets),
                     "warnings": result.warnings,
                     "metrics": result.metrics,
                 }
@@ -1118,10 +1118,11 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
             datos = bot_result.get("data") or {}
             payload = {
                 "result": (
-                    "OK" if outcome == "completado"
+                    bot_result.get("result", "OK") if outcome == "completado"
                     else "CANCELADO" if outcome == "cancelado" else "ERROR"
                 ),
                 "data": datos if isinstance(datos, dict) else {},
+                "artifacts": bot_result.get("artifacts", []),
                 "error": (
                     None if outcome == "completado"
                     else {"error_code": category or "unexpected"}

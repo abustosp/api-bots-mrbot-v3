@@ -14,59 +14,32 @@ from pydantic import BaseModel, Field
 
 from central_api.db import db_configurado, nueva_sesion
 from central_api.internal.dependencies import require_worker
+from central_api.internal.job_access import job_para_worker
 from central_api.scheduler import reaper as reaper_mod
-from central_api.store import JOBS, utcnow
+from central_api.store import utcnow
 
 router = APIRouter()
 
 
-async def _espejar_evento_db(job_id: str, body: object) -> None:
-    """Persiste el evento en ``job_events`` (idempotente por clave).
+async def _espejar_evento_db(job_id: str, body: JobEventBody) -> tuple[str, bool]:
+    """Actualiza jobs y job_events idempotentemente dentro de una transacción."""
+    import uuid
 
-    Espejo best-effort: con base configurada la fila canónica vive en
-    PostgreSQL (models + restricción única); el flujo en memoria no se
-    bloquea si la base no responde.
-    """
-    try:
-        import uuid
+    from central_api.repositories.jobs import JobRepository
 
-        from sqlalchemy import select
+    async with nueva_sesion() as sesion:
+        repo = JobRepository(sesion)  # type: ignore[arg-type]
+        job, created = await repo.persist_event(
+            uuid.UUID(str(job_id)),
+            attempt=body.assignment_attempt,
+            event_key=body.event_id,
+            event_type=body.event_type,
+            message=body.message,
+        )
+        return str(job.status), not created
 
-        from central_api.models.base import new_uuid7
-        from central_api.models.execution import JobEvent
-    except Exception:  # noqa: BLE001 - sin modelos, solo memoria
-        return
-    mapa_tipos = {
-        "started": "INICIADO", "progress": "PROGRESO",
-        "heartbeat_hint": "LEASE_RENOVADO", "warning": "PROGRESO",
-        "cancelled": "CANCELADO", "failed_prestart": "REINTENTO",
-    }
-    try:
-        jid = uuid.UUID(str(job_id))
-        intento = int(getattr(body, "assignment_attempt", 0) or 0)
-        clave = str(getattr(body, "event_id", "") or "")[:128]
-        tipo = mapa_tipos.get(str(getattr(body, "event_type", "") or ""), "PROGRESO")
-    except (ValueError, AttributeError, TypeError):
-        return
-    try:
-        async with nueva_sesion() as sesion:
-            existe = (await sesion.execute(
-                select(JobEvent.id).where(
-                    JobEvent.job_id == jid,
-                    JobEvent.attempt == intento,
-                    JobEvent.event_key == clave,
-                )
-            )).scalar_one_or_none()
-            if existe is None:
-                sesion.add(JobEvent(
-                    id=new_uuid7(), job_id=jid, attempt=intento,
-                    event_type=tipo, event_key=clave,
-                    payload={},
-                ))
-    except Exception:  # noqa: BLE001 - espejo best-effort, no bloquea
-        return
 
-SEEN_EVENTS: set[str] = set()
+SEEN_EVENTS: dict[tuple[str, int, str], tuple[str, str]] = {}
 
 VALID_TYPES = (
     "started", "progress", "warning", "cancelled",
@@ -86,22 +59,61 @@ class JobEventBody(BaseModel):
 async def report_event(
     job_id: str, body: JobEventBody, worker_node: str = Depends(require_worker)
 ) -> dict:
-    job = JOBS.get(job_id)
+    job = await job_para_worker(job_id, worker_node)
     if job is None:
         raise HTTPException(status_code=404, detail="job no encontrado")
-    if job.worker_node and job.worker_node != worker_node:
-        raise HTTPException(status_code=403, detail="asignación de otro worker")
-    if body.event_id in SEEN_EVENTS:
-        return {"success": True, "job_id": job.id, "status": job.status, "dedup": True}
     if body.event_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="tipo de evento inválido")
+    event_key = (job.id, body.assignment_attempt, body.event_id)
+    signature = (body.event_type, body.message)
+    seen = SEEN_EVENTS.get(event_key)
+    if seen is not None:
+        if seen != signature:
+            raise HTTPException(status_code=409, detail="evento duplicado divergente")
+        return {"success": True, "job_id": job.id, "status": job.status, "dedup": True}
     lease = reaper_mod.LEASES.get(job_id)
     if body.event_type in ("progress", "heartbeat_hint") and lease:
         if body.assignment_token and body.assignment_token != lease.get("token"):
             raise HTTPException(status_code=409, detail="stale_assignment")
-    SEEN_EVENTS.add(body.event_id)
+    status_before = job.status
+    dedup = False
+    if db_configurado():
+        from central_api.repositories.base import NotFoundError, RepositoryError
+        from central_api.repositories.jobs import (
+            IdempotencyConflict,
+            PersistenceError,
+            StaleAssignmentError,
+        )
+
+        try:
+            persisted_status, dedup = await _espejar_evento_db(job.id, body)
+        except IdempotencyConflict as exc:
+            raise HTTPException(status_code=409, detail="evento duplicado divergente") from exc
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="job no encontrado") from exc
+        except StaleAssignmentError as exc:
+            raise HTTPException(status_code=409, detail="stale_assignment") from exc
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="no se pudo confirmar el evento; reintente",
+                headers={"Retry-After": "3"},
+            ) from exc
+        except RepositoryError as exc:
+            raise HTTPException(status_code=422, detail="evento inválido") from exc
+        except Exception as exc:  # noqa: BLE001 - dejar retry ante fallo de DB
+            raise HTTPException(
+                status_code=503,
+                detail="no se pudo confirmar el evento; reintente",
+                headers={"Retry-After": "3"},
+            ) from exc
+        job.status = persisted_status
+    if dedup:
+        SEEN_EVENTS[event_key] = signature
+        return {"success": True, "job_id": job.id, "status": job.status, "dedup": True}
+    SEEN_EVENTS[event_key] = signature
     now = utcnow().isoformat().replace("+00:00", "Z")
-    if body.event_type == "started" and job.status == "ASIGNADO":
+    if body.event_type == "started" and status_before == "ASIGNADO":
         from central_api.api.dependencies import JOB_META
 
         job.status = "CORRIENDO"
@@ -113,7 +125,7 @@ async def report_event(
     elif body.event_type in ("progress", "heartbeat_hint"):
         if job.status in ("ASIGNADO", "CORRIENDO"):
             reaper_mod.renew_lease(job_id)
-    elif body.event_type == "cancelled" and job.status in ("ASIGNADO", "CORRIENDO"):
+    elif body.event_type == "cancelled" and status_before in ("ASIGNADO", "CORRIENDO"):
         from central_api.api.dependencies import JOB_META
         from central_api.billing.reservation import confirm_usage
 
@@ -126,10 +138,11 @@ async def report_event(
         # Cancelado en vuelo: cobro confirmado por defecto (sin reembolso auto).
         confirm_usage(job.id, motivo="cancelado en vuelo")
         reaper_mod.clear_lease(job_id)
-    elif body.event_type == "failed_prestart" and job.status == "ASIGNADO":
+    elif body.event_type == "failed_prestart" and status_before == "ASIGNADO":
         job.status = "PENDIENTE"
         job.worker_node = None
         reaper_mod.clear_lease(job_id)
-    if db_configurado():
-        await _espejar_evento_db(job_id, body)
+    elif db_configurado():
+        # Para progreso/warning, el estado de DB sigue siendo la autoridad.
+        job.status = persisted_status
     return {"success": True, "job_id": job.id, "status": job.status}

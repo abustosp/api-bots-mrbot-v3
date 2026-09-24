@@ -8,6 +8,8 @@ bots aquí: la operación se resuelve contra el manifiesto registrado.
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,7 +28,11 @@ from central_api.api.dependencies import (
     require_api_principal,
 )
 from central_api.billing.entitlements import BOT_CREDIT_COST, PLANS, get_plan
-from central_api.billing.reservation import QuotaExhausted, reserve_for_job
+from central_api.billing.reservation import (
+    QuotaExhausted,
+    release_usage,
+    reserve_for_job,
+)
 from central_api.db import db_configurado, nueva_sesion
 from central_api.security.principals import ApiPrincipal
 from central_api.security.credentials import (
@@ -41,39 +47,76 @@ from central_api.store import JOBS, Job, new_job_id
 router = APIRouter()
 
 
+class JobPersistenceUnavailable(RuntimeError):
+    """La base está configurada, pero no se pudo confirmar el job canónico."""
+
+
 async def _persistir_job_db(
     user_id: str, bot: str, operacion: str, payload: dict,
     idempotency_key: str | None, credential_ciphertext: str | None = None,
     credential_metadata_value: dict | None = None,
-) -> str | None:
-    """Persiste el job en PostgreSQL; ``None`` si hay que usar memoria.
+    credential_fingerprint: str | None = None,
+    job_id: str | None = None,
+) -> tuple[str, str, bool]:
+    """Persiste el job en PostgreSQL o falla cerrado.
 
-    Usa ``JobRepository`` + ``models`` (idempotencia por restricción única).
-    Solo aplica cuando el principal es UUID (frontera de identidad PG).
+    El trigger crea la fila física por bot en la misma transacción que el
+    INSERT canónico de ``jobs``. ``None`` nunca se usa para degradar a memoria
+    cuando ``DATABASE_URL`` está configurada.
     """
-    try:
-        import uuid
+    import uuid
 
-        from central_api.repositories.jobs import JobRepository
-    except Exception:  # noqa: BLE001 - sin repos, fallback de desarrollo
-        return None
+    from central_api.repositories.base import RepositoryError
+    from central_api.repositories.jobs import IdempotencyConflict, JobRepository
+
     try:
         uid = uuid.UUID(str(user_id))
-    except (ValueError, AttributeError, TypeError):
-        return None
+        jid = uuid.UUID(str(job_id)) if job_id else None
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise JobPersistenceUnavailable("principal o job sin UUID válido") from exc
     try:
         async with nueva_sesion() as sesion:
             repo = JobRepository(sesion)  # type: ignore[arg-type]
-            fila = await repo.create(
+            fila, creado = await repo.create_idempotently(
                 user_id=uid, bot=bot, operation=operacion,
                 request_payload=dict(payload),
                 credential_ciphertext=credential_ciphertext,
                 credential_metadata=credential_metadata_value,
                 idempotency_key=idempotency_key,
+                job_id=jid,
             )
-            return str(fila.id)
-    except Exception:  # noqa: BLE001 - la creación vive igual en memoria
-        return None
+            if not creado:
+                # No persistimos una huella simple de contraseña. En un replay
+                # se abre temporalmente el ciphertext ya custodiado y se compara
+                # con la huella efímera del request, sin exponer el claro.
+                if bool(fila.credential_ciphertext) != bool(credential_fingerprint):
+                    raise IdempotencyConflict(
+                        "clave de idempotencia reutilizada con otras credenciales"
+                    )
+                if credential_fingerprint:
+                    from central_api.security.credentials import (
+                        decrypt_configured_credential,
+                    )
+
+                    try:
+                        anterior = decrypt_configured_credential(
+                            str(fila.credential_ciphertext)
+                        )
+                    except Exception as exc:  # noqa: BLE001 - no exponer material
+                        raise JobPersistenceUnavailable(
+                            "no se pudo verificar replay de credenciales"
+                        ) from exc
+                    if hashlib.sha256(anterior.encode("utf-8")).hexdigest() != credential_fingerprint:
+                        raise IdempotencyConflict(
+                            "clave de idempotencia reutilizada con otras credenciales"
+                        )
+            return str(fila.id), str(fila.status), creado
+    except IdempotencyConflict:
+        raise
+    except RepositoryError as exc:
+        raise JobPersistenceUnavailable("falló la persistencia del job") from exc
+    except Exception as exc:  # noqa: BLE001 - no degradar a memoria
+        raise JobPersistenceUnavailable("falló la persistencia del job") from exc
 
 
 class CreateJobBody(BaseModel):
@@ -319,40 +362,76 @@ async def submit_job(
                     "Location": f"/api/v3/jobs/{job.id}",
                 },
             )
-    # Con base configurada la fila canónica vive en PostgreSQL
-    # (JobRepository + models); el dict en memoria queda como caché.
-    job_id_pg: str | None = None
-    if db_configurado():
-        job_id_pg = await _persistir_job_db(
-            principal.user_id,
-            bot,
-            operacion,
-            normalized_payload,
-            idempotency_key,
-            credential_ciphertext,
-            credential_metadata_value,
+    from central_api.repositories.jobs import IdempotencyConflict
+
+    job_id = new_job_id()
+    reserved_job_id = job_id
+    try:
+        reserve_for_job(principal.user_id, job_id, bot, operacion)
+    except QuotaExhausted:
+        return JSONResponse(
+            status_code=429, content=public_error("quota_exhausted", corr),
+            headers={"X-Correlation-ID": corr, "Retry-After": "60"},
         )
-        if credential_ciphertext and job_id_pg is None:
+
+    if db_configurado():
+        try:
+            job_id, persisted_status, created = await _persistir_job_db(
+                principal.user_id,
+                bot,
+                operacion,
+                normalized_payload,
+                idempotency_key,
+                credential_ciphertext,
+                credential_metadata_value,
+                credential_fingerprint=credential_fingerprint,
+                job_id=job_id,
+            )
+        except IdempotencyConflict:
+            release_usage(reserved_job_id, motivo="idempotency conflict")
+            return JSONResponse(
+                status_code=409,
+                content=public_error("idempotency_conflict", corr),
+                headers={"X-Correlation-ID": corr},
+            )
+        except JobPersistenceUnavailable:
+            release_usage(reserved_job_id, motivo="persistencia fallida")
             return JSONResponse(
                 status_code=503,
                 content=public_error("service_not_enabled", corr),
                 headers={"X-Correlation-ID": corr},
             )
+        if not created:
+            # Una carrera entre retries ganó el INSERT canónico. La reserva
+            # especulativa de este intento no debe quedar huérfana ni encolar
+            # un segundo trabajo en memoria.
+            release_usage(reserved_job_id, motivo="replay idempotente")
+            if idempotency_key:
+                remember_idempotency(
+                    principal.user_id, idempotency_key, fingerprint, job_id
+                )
+            cached = JOBS.get(job_id)
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "success": True,
+                    "job_id": job_id,
+                    "status": cached.status if cached is not None else persisted_status,
+                },
+                headers={
+                    "X-Correlation-ID": corr,
+                    "Location": f"/api/v3/jobs/{job_id}",
+                },
+            )
+
     job = Job(
-        id=job_id_pg or new_job_id(),
+        id=job_id,
         bot=bot,
         operation=operacion,
         payload=normalized_payload,
         credentials=worker_credentials,
         credential_metadata=credential_metadata_value,
     )
-    try:
-        reserve_for_job(principal.user_id, job.id, bot, operacion)
-    except QuotaExhausted:
-        return JSONResponse(
-            status_code=429, content=public_error("quota_exhausted", corr),
-            headers={"X-Correlation-ID": corr, "Retry-After": "60"},
-        )
     JOBS[job.id] = job
     ensure_meta(job.id, principal.user_id)
     if idempotency_key:
