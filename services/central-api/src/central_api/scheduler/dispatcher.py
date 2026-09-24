@@ -7,10 +7,14 @@ La central NUNCA ejecuta bots ni abre la DB del worker: inspecciona
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from central_api.settings import get_settings
 from central_api.store import Job, WorkerEntry
+
+log = logging.getLogger("central_api.scheduler.dispatcher")
 
 ASSIGN_PATH = "/internal/v1/jobs"
 STATUS_PATH = "/internal/v1/status"
@@ -167,6 +171,16 @@ async def dispatch_to_worker(
         resp = await client.post(
             worker_base_url(worker.node) + ASSIGN_PATH,
             json=envelope,
+        )
+    if not 200 <= resp.status_code < 300:
+        # El cuerpo del worker contiene solo códigos de validación y nunca se
+        # debe registrar el envelope, que puede contener credenciales selladas.
+        log.warning(
+            "worker rechazó asignación job=%s worker=%s status=%s detail=%s",
+            job.id,
+            worker.node,
+            resp.status_code,
+            resp.text[:512],
         )
     return 200 <= resp.status_code < 300
 
