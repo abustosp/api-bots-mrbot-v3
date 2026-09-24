@@ -114,15 +114,17 @@ Esta superficie no se expone a internet.
 ### Panel web administrativo V3
 
 `GET /admin/` y `GET /admin/login` sirven una consola HTML inspirada en la
-navegación y el lenguaje visual del panel V2, sin copiar su acceso directo a
-tablas ni exponer credenciales. Incluye estas vistas:
+navegación y el lenguaje visual del panel V2. El explorador `/admin/tables`
+consulta una tabla por vez con filtros y paginación, sin reflejar tablas
+arbitrarias ni exponer secretos. Incluye estas vistas:
 
 - **Resumen:** métricas de jobs, estado de la flota y últimas acciones.
 - **Usuarios:** búsqueda, alta, habilitación/deshabilitación y emisión de
   claves API, cuyo valor se muestra una sola vez.
 - **Jobs:** filtros, métricas, detalle y cancelación de ejecuciones.
-- **Registros:** request saneado, resultado, artefactos y eventos de todos los
-  bots, equivalente operativo a las tablas `consulta_*_logs` de V2.
+- **Registros y tablas:** selección de tablas PostgreSQL canónicas y una tabla
+  física detallada por bot, con request, response, usuario, estado, fechas y
+  nombres de artefactos. Se filtran y paginan sin cargar todas a la vez.
 - **Flota:** estado de workers, capacidad, protocolo y evaluación de alertas.
 - **Auditoría:** consulta de eventos append-only con filtros básicos.
 
@@ -164,14 +166,18 @@ administrativo `GET /admin/jobs/{job_id}/credentials` requiere Bearer, deja
 auditoría y responde sin cachear. La clave privada se configura mediante
 `RSA_PRIVATE_KEY` o `RSA_PRIVATE_KEY_FILE` y nunca se monta en el worker.
 
-El panel también expone `GET /admin/records`, con las tablas normalizadas
-`jobs`, `job_results`, `job_artifacts` y `job_events`, filtros por bot, estado y
-job, y el email del usuario solicitante cuando está disponible. Cada ejecución
-indica los campos de credencial y su contexto fiscal sin incluir el secreto en
-la grilla. El botón de credenciales usa el endpoint autenticado y auditado
-`/admin/jobs/{job_id}/credentials`, que descifra la custodia únicamente para
-esa respuesta sin cachearla. Los artefactos muestran `name` y metadatos de
-archivo, nunca `object_key`, URLs prefirmadas ni enlaces de descarga.
+El panel también expone `GET /admin/records` y `GET /admin/table-catalog`, con
+las tablas normalizadas `jobs`, `job_results`, `job_artifacts` y `job_events`, y
+las tablas físicas `bot_jobs_<bot>` creadas por la migración `0015`. Cada tabla
+por bot contiene una fila por job y se mantiene al día transaccionalmente a
+partir de jobs, resultados y artefactos. Los registros existentes se incorporan
+al migrar. El panel permite seleccionar `bot:<bot>` o un nombre histórico V1/V2,
+filtrar por operación, usuario, estado y texto, y recorrer páginas acotadas.
+Cada ejecución indica los campos de credencial y su contexto fiscal sin incluir
+el secreto en la grilla. El botón de credenciales usa el endpoint autenticado
+y auditado `/admin/jobs/{job_id}/credentials`, que descifra la custodia solo
+para esa respuesta sin cachearla. Los artefactos muestran `name` y metadatos
+de archivo, nunca `object_key`, URLs prefirmadas ni enlaces de descarga.
 
 ## Planificador
 
