@@ -48,6 +48,22 @@ def entorno_limpio(monkeypatch):
     get_settings.cache_clear()
 
 
+def test_secret_files_cargan_campos_con_alias(monkeypatch, tmp_path, entorno_limpio):
+    """Los secretos ``*_FILE`` llenan campos declarados con alias Pydantic."""
+    rsa = tmp_path / "rsa_private_key.pem"
+    hmac = tmp_path / "api_key_hmac_secret.txt"
+    rsa.write_text("rsa-test-value", encoding="utf-8")
+    hmac.write_text("hmac-test-value", encoding="utf-8")
+    monkeypatch.setenv("RSA_PRIVATE_KEY_FILE", str(rsa))
+    monkeypatch.setenv("API_KEY_HMAC_SECRET_FILE", str(hmac))
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.rsa_private_key == "rsa-test-value"
+    assert settings.api_key_hmac_secret == "hmac-test-value"
+
+
 def test_job_id_es_uuid7_sin_correlativos():
     """Los jobs en memoria usan UUIDv7 (plan 02 §3.3, I-1/I-2)."""
     vistos = {new_job_id() for _ in range(5)}

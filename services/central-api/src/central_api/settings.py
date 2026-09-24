@@ -148,7 +148,7 @@ class Settings(BaseSettings):
                 continue
             content = _secret_file_content(alias)
             if content:
-                data[name] = content
+                data[alias] = content
         return data
 
     @field_validator("worker_nodes", mode="before")
