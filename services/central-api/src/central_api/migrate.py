@@ -40,6 +40,7 @@ def main() -> int:
     sys.path.insert(0, str(raiz / "src"))
     from alembic.config import Config
 
+    from central_api.db import normalizar_dsn
     from central_api.settings import get_settings
 
     settings = get_settings()
@@ -50,7 +51,9 @@ def main() -> int:
     ini = dir_alembic / "alembic.ini"
     cfg = Config(str(ini) if ini.is_file() else None)
     cfg.set_main_option("script_location", str(dir_alembic))
-    cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    cfg.set_main_option(
+        "sqlalchemy.url", normalizar_dsn(settings.database_url)
+    )
     from alembic import command
 
     command.upgrade(cfg, "head")

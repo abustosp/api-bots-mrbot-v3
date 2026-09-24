@@ -21,11 +21,25 @@ def db_configurado() -> bool:
     return bool(get_settings().database_url)
 
 
-def _url_async(url: str) -> str:
-    """Adapta la URL al driver asíncrono cuando es postgres estándar."""
-    if url.startswith("postgresql://"):
-        return "postgresql+asyncpg://" + url[len("postgresql://"):]
+def normalizar_dsn(url: str) -> str:
+    """Traduce un DSN PostgreSQL estándar al driver realmente instalado.
+
+    Las dependencias declaran ``psycopg`` (v3), que sirve tanto para el motor
+    síncrono de Alembic como para ``create_async_engine``. Un DSN
+    ``postgresql://`` (o ``postgres://``) sin driver explícito haría que
+    SQLAlchemy eligiera ``psycopg2``/``asyncpg``, que no están instalados, y el
+    arranque fallaría con ``ModuleNotFoundError``. Por eso se reescribe a
+    ``postgresql+psycopg://``; un DSN con driver explícito se respeta.
+    """
+    for prefijo in ("postgresql://", "postgres://"):
+        if url.startswith(prefijo):
+            return "postgresql+psycopg://" + url[len(prefijo):]
     return url
+
+
+def _url_async(url: str) -> str:
+    """Adapta la URL al driver asíncrono instalado."""
+    return normalizar_dsn(url)
 
 
 @lru_cache
@@ -98,4 +112,10 @@ async def cerrar_motor() -> None:
     _motor.cache_clear()
 
 
-__all__ = ["db_configurado", "get_db", "nueva_sesion", "cerrar_motor"]
+__all__ = [
+    "cerrar_motor",
+    "db_configurado",
+    "get_db",
+    "normalizar_dsn",
+    "nueva_sesion",
+]

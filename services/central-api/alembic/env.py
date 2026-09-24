@@ -31,18 +31,27 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
+    url = ""
     try:
         from central_api.settings import get_settings
 
         url = get_settings().database_url
-        if url:
-            return url
     except Exception:  # noqa: BLE001 - cae al entorno en migraciones puras
-        pass
-    url = os.environ.get("DATABASE_URL", "")
+        url = ""
+    if not url:
+        url = os.environ.get("DATABASE_URL", "")
     if not url:
         raise RuntimeError("DATABASE_URL no configurada para Alembic")
-    return url
+    return _normalizar(url)
+
+
+def _normalizar(url: str) -> str:
+    """Usa el driver instalado (``psycopg`` v3) aunque el DSN no lo declare."""
+    try:
+        from central_api.db import normalizar_dsn
+    except Exception:  # noqa: BLE001 - migraciones sin paquete instalado
+        return url
+    return normalizar_dsn(url)
 
 
 def run_migrations_offline() -> None:
