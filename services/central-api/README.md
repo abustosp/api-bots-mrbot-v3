@@ -121,6 +121,8 @@ tablas ni exponer credenciales. Incluye estas vistas:
 - **Usuarios:** búsqueda, alta, habilitación/deshabilitación y emisión de
   claves API, cuyo valor se muestra una sola vez.
 - **Jobs:** filtros, métricas, detalle y cancelación de ejecuciones.
+- **Registros:** request saneado, resultado, artefactos y eventos de todos los
+  bots, equivalente operativo a las tablas `consulta_*_logs` de V2.
 - **Flota:** estado de workers, capacidad, protocolo y evaluación de alertas.
 - **Auditoría:** consulta de eventos append-only con filtros básicos.
 
@@ -130,6 +132,29 @@ endpoints `/admin/*` JSON mantienen su autorización `Bearer` independiente,
 por lo que agregar la interfaz no cambia el contrato de clientes ni workers.
 La sesión persistente, MFA, CSRF y administración de sesiones del diseño
 completo de `plans/05-admin-panel` quedan como una siguiente fase.
+
+### Documentación OpenAPI
+
+- `GET /docs`, `GET /redoc` y `GET /openapi.json` contienen únicamente rutas
+  que utilizan los clientes bajo `/api/v3`.
+- `GET /admin/docs` sirve el shell navegable y `GET /admin/openapi.json`
+  requiere `ADMIN_TOKEN` como Bearer. El shell adjunta el token guardado en
+  `sessionStorage` al cargar el esquema, que contiene la superficie pública,
+  interna y administrativa completa. El JSON administrativo se entrega con
+  `Cache-Control: private, no-store`.
+
+Los aliases V2 documentan cuerpos JSON planos, sin el envelope `credentials`.
+Se conservan nombres como `clave`, `clave_representante`, `contrasena`,
+`cuit_representado`, `desde`, `hasta`, `movimientos`, `pdf` y
+`clave_encriptada`. La central normaliza esos campos al contrato del worker.
+
+Una clave puede llegar en texto plano o como `clave_encriptada` RSA-OAEP-
+SHA256. La central descifra el segundo formato, elimina el secreto del
+payload, cifra la credencial para custodia en `jobs.credential_ciphertext` y
+la entrega al worker únicamente dentro del sobre sellado. El endpoint
+administrativo `GET /admin/jobs/{job_id}/credentials` requiere Bearer, deja
+auditoría y responde sin cachear. La clave privada se configura mediante
+`RSA_PRIVATE_KEY` o `RSA_PRIVATE_KEY_FILE` y nunca se monta en el worker.
 
 ## Planificador
 
@@ -193,7 +218,7 @@ en memoria (fallback para `JOBS`/`WORKERS`). Con `DATABASE_URL` configurada,
 `api`, `internal`, `scheduler` y `admin` usan `repositories` + `models`
 contra PostgreSQL, único source of truth (el worker nunca toca la base, W-1).
 
-Las migraciones viven en `alembic/versions/` (`0001`–`0010`) y se aplican
+Las migraciones viven en `alembic/versions/` (`0001`–`0013`) y se aplican
 **solo** como job efímero con la misma imagen, nunca en el arranque:
 
 ```bash
@@ -209,8 +234,8 @@ docker compose -f infra/compose/docker-compose.yml \
 
 Todo secreto se lee solo desde `central_api.settings`: `DATABASE_URL`,
 `API_KEY_HMAC_SECRET`, `ADMIN_TOKEN`, `INTERNAL_JWT_SIGNING_KEY`,
-`MP_WEBHOOK_SECRET`, `MP_ENVIRONMENT` (`sandbox`/`production`) y
-`MP_ACCESS_TOKEN`. Ningún router lee el entorno directo.
+`RSA_PRIVATE_KEY`, `MP_WEBHOOK_SECRET`, `MP_ENVIRONMENT` (`sandbox`/`production`)
+y `MP_ACCESS_TOKEN`. Ningún router lee el entorno directo.
 
 ## Facturación
 
@@ -230,7 +255,7 @@ Inventario completo en
 |---|---|
 | `DATABASE_URL` | Conexión a PostgreSQL |
 | `API_KEY_HMAC_SECRET` | Secreto del verificador de claves API |
-| `MRBOT_KEYS_DIR` | Directorio del par de claves RSA |
+| `RSA_PRIVATE_KEY_FILE` | Secreto PEM privado RSA de custodia de credenciales |
 | `MINIO_*` | Credenciales y buckets del almacenamiento de objetos |
 | `SMTP_*` | Envío de avisos al administrador |
 | `MERCADOPAGO_*` | Tokens de cobro y validación de webhooks |

@@ -25,7 +25,9 @@ def test_todos_los_aliases_documentan_body_json_y_ejemplo() -> None:
         assert body_schema["type"] == "object"
         assert body_schema["examples"]
         assert set(body_schema["properties"]) == set(body_schema["examples"][0])
-        assert "credentials" in body_schema["properties"]
+        assert "credentials" not in body_schema["properties"]
+        assert "clave" in body_schema["properties"]
+        assert "clave_encriptada" in body_schema["properties"]
 
 
 def test_ccma_muestra_campos_requeridos_y_cancelacion() -> None:

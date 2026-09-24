@@ -144,6 +144,7 @@ details > .details-body { padding: 0 14px 14px; }
       <button type="button" data-view="dashboard">Resumen</button>
       <button type="button" data-view="users">Usuarios</button>
       <button type="button" data-view="jobs">Jobs</button>
+      <button type="button" data-view="executions">Registros</button>
       <button type="button" data-view="fleet">Flota</button>
       <button type="button" data-view="audit">Auditoría</button>
     </nav>
@@ -184,6 +185,12 @@ details > .details-body { padding: 0 14px 14px; }
         <form id="jobs-filter" class="toolbar"><div class="field"><label for="jobs-state">Estado</label><select id="jobs-state"><option value="">Todos</option><option>PENDIENTE</option><option>ASIGNADO</option><option>CORRIENDO</option><option>COMPLETO</option><option>FALLIDO</option><option>CANCELADO</option></select></div><div class="field"><label for="jobs-bot">Bot</label><input id="jobs-bot" type="text" placeholder="consulta_cuit"></div><div class="field"><label for="jobs-user">Usuario</label><input id="jobs-user" type="text" placeholder="UUID"></div><button class="button primary" type="submit">Actualizar</button></form>
         <div class="grid" id="jobs-metrics"><div class="empty">Cargando métricas...</div></div>
         <div class="table-wrap"><table><thead><tr><th>Job</th><th>Estado</th><th>Bot / operación</th><th>Usuario</th><th>Worker</th><th>Intento</th><th>Acciones</th></tr></thead><tbody id="jobs-table"><tr><td colspan="7" class="empty">Cargando...</td></tr></tbody></table></div>
+      </section>
+
+      <section class="view hidden" data-panel="executions">
+        <div class="kicker">Historial unificado</div><h2>Registros de ejecuciones</h2><p class="subtle">Consulta request, resultado, artefactos y eventos de todos los bots desde una sola vista.</p>
+        <form id="executions-filter" class="toolbar"><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><button class="button primary" type="submit">Actualizar</button></form>
+        <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Job</th><th>Bot / operación</th><th>Estado</th><th>Resultado</th><th>Eventos</th><th>Artefactos</th></tr></thead><tbody id="executions-table"><tr><td colspan="7" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="fleet">
@@ -228,7 +235,7 @@ details > .details-body { padding: 0 14px 14px; }
     if (!response.ok) throw new Error(data.detail || data.message || `HTTP ${response.status}`);
     return data;
   }
-  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, fleet: loadFleet, audit: loadAudit }; loaders[view](); }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; loaders[view](); }
   function renderEmpty(target, colspan, message = "Sin datos") { $(target).innerHTML = `<tr><td colspan="${colspan}" class="empty">${esc(message)}</td></tr>`; }
   async function loadDashboard() {
     try {
@@ -258,6 +265,10 @@ details > .details-body { padding: 0 14px 14px; }
     if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const values = [["estado", "#jobs-state"], ["bot", "#jobs-bot"], ["usuario", "#jobs-user"]]; values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
     try { const [data, metrics] = await Promise.all([api(`/admin/jobs?${params}`), api("/admin/jobs/metrics")]); const stateCards = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join(""); $("#jobs-metrics").innerHTML = stateCards || `<div class="card"><div class="metric"><span>Total</span><strong>${esc(data.total || 0)}</strong></div></div>`; const rows = data.jobs || []; $("#jobs-table").innerHTML = rows.length ? rows.map((job) => `<tr><td><code>${esc(short(job.job_id, 22))}</code></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td>${esc(short(job.usuario, 18))}</td><td>${esc(job.worker || "—")}</td><td>${esc(job.intento)}</td><td class="actions"><button class="button secondary small" data-action="job-detail" data-id="${esc(job.job_id)}">Detalle</button>${["PENDIENTE","ASIGNADO","CORRIENDO"].includes(job.estado) ? `<button class="button danger small" data-action="job-cancel" data-id="${esc(job.job_id)}">Cancelar</button>` : ""}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay jobs para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
+  async function loadExecutions(event) {
+    if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const bot = $("#executions-bot").value.trim(); const estado = $("#executions-state").value.trim(); if (bot) params.set("bot", bot); if (estado) params.set("estado", estado);
+    try { const data = await api(`/admin/executions?${params}`); const rows = data.records || []; $("#executions-table").innerHTML = rows.length ? rows.map((record) => { const job = record.job || {}; const result = record.result || {}; return `<tr><td>${esc(date(job.creado_en))}</td><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(result.result || job.resultado || "—")}</td><td>${esc((record.events || []).length)}</td><td>${esc((record.artifacts || []).length)}</td></tr>`; }).join("") : `<tr><td colspan="7" class="empty">No hay ejecuciones para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+  }
   async function jobAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const jobId = button.dataset.id;
     if (button.dataset.action === "job-detail") { try { const data = await api(`/admin/jobs/${encodeURIComponent(jobId)}`); window.alert(json(data)); } catch (error) { flash(error.message, "error"); } return; }
@@ -270,7 +281,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction);
-  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction);
+  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView("dashboard"); } else { showLoggedIn(false); }
 })();

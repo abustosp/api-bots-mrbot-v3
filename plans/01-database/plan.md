@@ -25,7 +25,7 @@ Este plan **no** posee:
 3. **Estado de job normalizado.** `jobs` contiene una fila desde creación hasta estado terminal. No se copia ni borra una fila para moverla entre activa e histórica como hacía V2 con `playwright_jobs_active` y `playwright_jobs_history`.
 4. **Append-only donde importa.** `usage_ledger`, `credit_ledger`, `payment_events`, `job_events` y `audit_log` no se actualizan ni borran por lógica de negocio. Rectificar equivale a agregar un hecho compensatorio ligado al original.
 5. **JSONB solo para variación real.** La identidad, filtros operativos, estados, fechas, claves, ownership y artefactos se tipan en columnas. Los campos que cambian por bot viven en `job_results.payload JSONB`.
-6. **Secretos fuera de logs.** Nunca se persisten `clave`, `clave_representante`, `clave_encriptada`, URL prefirmadas ni tokens de proveedor. Esto corrige el riesgo de `CredentialLogMixin` y de `app/utils/persistence.py` descrito en `.research/03-database-models.md`.
+6. **Secretos fuera de logs.** Nunca se persisten en claro `clave`, `clave_representante` ni `clave_encriptada`; la tabla `jobs` solo guarda `credential_ciphertext` RSA y el acceso administrativo descifra bajo auditoría. Tampoco se persisten URL prefirmadas ni tokens de proveedor.
 7. **UTC y tiempo con zona.** Todos los instantes son `timestamptz`, almacenados y comparados en UTC. Los períodos de facturación son intervalos explícitos, no inferencias desde una fecha del usuario.
 8. **Restricciones en el servidor.** Defaults que son invariantes del servidor se expresan en PostgreSQL. La aplicación genera los UUID, pero checks, FK, unicidad y transiciones admisibles se verifican en la base.
 9. **Diseñado para reintentos.** Webhooks, callbacks, asignación y resultados poseen claves de idempotencia y restricciones únicas. El comportamiento es al menos una vez en el borde y exactamente una vez para efectos contables.
@@ -392,7 +392,7 @@ El inventario exhaustivo en `.research/03-database-models.md` declara 28 tablas 
 | `response_data` | `job_results.payload` | Estructura cambiante por bot. |
 | `archivos` | `job_artifacts` | Artefactos consultables y con retención propia. |
 | `cuit_representante`, `cuit_representado` | `jobs.request_payload` saneado | Son entrada de ejecución, no columnas repetidas. |
-| `clave`, `clave_representante`, `clave_encriptada` | no se persiste | Solo sobre efímero en memoria y auditoría de acceso. |
+| `clave`, `clave_representante`, `clave_encriptada` | `jobs.credential_ciphertext` RSA | Solo ciphertext en DB; texto claro efímero en memoria y auditoría de acceso. |
 El listener V2 `app/utils/persistence.py` retiraba URLs y redactaba datos al bind, pero también podía convertir strings URL en `NULL`. V3 valida y clasifica los payloads en el borde de la central, sin mutaciones ORM implícitas. `object_key` es la única referencia durable a un objeto, y una URL se firma al leer.
 ### 6.2 Campos genuinamente específicos en `job_results.payload`
 | Bot V2 o tabla | Campos específicos reales que viven en `payload` |

@@ -15,11 +15,16 @@ import uuid
 from dataclasses import asdict, dataclass, field
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from central_api.admin._common import require_admin, validar_motivo
+from central_api.admin._common import redactar_metadata, require_admin, validar_motivo
 from central_api.admin.audit import log_event
 from central_api.db import db_configurado, nueva_sesion
+from central_api.security.rsa_credentials import (
+    CredentialDecryptionError,
+    decrypt_configured_credential,
+)
 from central_api.settings import get_settings
 from central_api.store import JOBS, utcnow
 
@@ -81,6 +86,134 @@ async def _conteo_estados_db() -> dict | None:
     except Exception:  # noqa: BLE001 - sin base, solo memoria
         return None
     return {str(estado): int(total) for estado, total in filas}
+
+
+def _iso(value: object) -> str | None:
+    return value.isoformat() if value is not None and hasattr(value, "isoformat") else None
+
+
+def _registro_memoria(job) -> dict:
+    resultado = _sanear_resultado(job)
+    return {
+        "job": {
+            "id": job.id,
+            "bot": job.bot,
+            "operacion": job.operation,
+            "estado": job.status,
+            "intento": job.assignment_attempt,
+            "worker": job.worker_node,
+            "creado_en": _iso(job.created_at),
+            "finalizado_en": None,
+        },
+        "request": redactar_metadata(dict(job.payload or {})),
+        "result": redactar_metadata(resultado) if resultado else None,
+        "artifacts": [],
+        "events": [],
+        "source": "memoria",
+    }
+
+
+async def _ejecuciones_db(
+    *, job_id: str | None = None, bot: str = "", estado: str = "", limit: int = 100
+) -> list[dict] | None:
+    """Lee el agregado completo de ejecución y sus tablas relacionadas."""
+    if not db_configurado():
+        return None
+    try:
+        from sqlalchemy import select
+
+        from central_api.models.execution import Job, JobArtifact, JobEvent, JobResult
+    except Exception:  # noqa: BLE001 - desarrollo sin SQLAlchemy
+        return None
+    try:
+        async with nueva_sesion() as sesion:
+            stmt = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+            if job_id:
+                stmt = stmt.where(Job.id == uuid.UUID(job_id))
+            if bot:
+                stmt = stmt.where(Job.bot == bot)
+            if estado:
+                stmt = stmt.where(Job.status == estado)
+            filas = list((await sesion.execute(stmt.limit(max(1, min(limit, 500))))).scalars())
+            ids = [fila.id for fila in filas]
+            if not ids:
+                return []
+            resultados = {
+                str(fila.job_id): fila
+                for fila in (await sesion.execute(
+                    select(JobResult).where(JobResult.job_id.in_(ids))
+                )).scalars()
+            }
+            artefactos_por_job: dict[str, list] = {}
+            for fila in (await sesion.execute(
+                select(JobArtifact).where(JobArtifact.job_id.in_(ids))
+            )).scalars():
+                artefactos_por_job.setdefault(str(fila.job_id), []).append(fila)
+            eventos_por_job: dict[str, list] = {}
+            for fila in (await sesion.execute(
+                select(JobEvent).where(JobEvent.job_id.in_(ids)).order_by(JobEvent.occurred_at)
+            )).scalars():
+                eventos_por_job.setdefault(str(fila.job_id), []).append(fila)
+    except Exception:  # noqa: BLE001 - la vista no debe romper el panel
+        return None
+
+    salida = []
+    for fila in filas:
+        key = str(fila.id)
+        resultado = resultados.get(key)
+        salida.append({
+            "job": {
+                "id": key,
+                "user_id": str(fila.user_id),
+                "bot": fila.bot,
+                "operacion": fila.operation,
+                "estado": fila.status,
+                "resultado": fila.result,
+                "intento": int(fila.attempts or 0),
+                "worker_id": str(fila.worker_id) if fila.worker_id else None,
+                "creado_en": _iso(fila.created_at),
+                "asignado_en": _iso(fila.assigned_at),
+                "iniciado_en": _iso(fila.started_at),
+                "finalizado_en": _iso(fila.finished_at),
+            },
+            "request": redactar_metadata(dict(fila.request_payload or {})),
+            "result": (
+                {
+                    "attempt": resultado.attempt,
+                    "result": resultado.result,
+                    "payload": redactar_metadata(dict(resultado.payload or {})),
+                    "summary": redactar_metadata(dict(resultado.summary or {})),
+                    "received_at": _iso(resultado.received_at),
+                }
+                if resultado is not None else None
+            ),
+            "artifacts": [
+                {
+                    "id": str(artifact.id),
+                    "kind": artifact.kind,
+                    "filename": artifact.filename,
+                    "content_type": artifact.content_type,
+                    "size_bytes": artifact.size_bytes,
+                    "sha256": artifact.sha256,
+                    "created_at": _iso(artifact.created_at),
+                    "expires_at": _iso(artifact.expires_at),
+                }
+                for artifact in artefactos_por_job.get(key, [])
+            ],
+            "events": [
+                {
+                    "id": str(event.id),
+                    "attempt": event.attempt,
+                    "type": event.event_type,
+                    "key": event.event_key,
+                    "payload": redactar_metadata(dict(event.payload or {})),
+                    "occurred_at": _iso(event.occurred_at),
+                }
+                for event in eventos_por_job.get(key, [])
+            ],
+            "source": "postgresql",
+        })
+    return salida
 
 ESTADOS_TERMINALES = ("COMPLETO", "FALLIDO", "CANCELADO")
 ESTADOS_REINTENTABLES = ("FALLIDO",)
@@ -145,6 +278,58 @@ class PrioridadBody(BaseModel):
     motivo: str = ""
 
 
+@router.get("/executions")
+async def listar_ejecuciones_admin(
+    authorization: str | None = Header(default=None),
+    bot: str = "",
+    estado: str = "",
+    limit: int = 100,
+) -> dict:
+    """Lista el registro unificado de ejecuciones de todos los bots.
+
+    El registro reúne ``jobs``, ``job_results``, ``job_artifacts`` y
+    ``job_events``. Esto reemplaza la vista fragmentada de las tablas
+    ``consulta_*_logs`` de V2 sin perder sus datos operativos.
+    """
+    require_admin(authorization)
+    registros = await _ejecuciones_db(bot=bot, estado=estado, limit=limit)
+    if registros is None:
+        registros = [
+            _registro_memoria(job)
+            for job in sorted(
+                JOBS.values(),
+                key=lambda item: (str(item.created_at), item.id),
+                reverse=True,
+            )
+            if (not bot or job.bot == bot) and (not estado or job.status == estado)
+        ][: max(1, min(limit, 500))]
+    return {
+        "success": True,
+        "total": len(registros),
+        "records": registros,
+        "fuente": "postgresql" if db_configurado() else "memoria",
+    }
+
+
+@router.get("/executions/{job_id}")
+async def ver_ejecucion_admin(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Devuelve el agregado completo de una ejecución."""
+    require_admin(authorization)
+    job_id = _validar_uuid(job_id)
+    registros = await _ejecuciones_db(job_id=job_id, limit=1)
+    if registros is None:
+        job = JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job no encontrado")
+        return {"success": True, "record": _registro_memoria(job)}
+    if not registros:
+        raise HTTPException(status_code=404, detail="job no encontrado")
+    return {"success": True, "record": registros[0]}
+
+
 @router.get("/jobs")
 async def listar_jobs_admin(
     authorization: str | None = Header(default=None),
@@ -185,6 +370,72 @@ async def listar_jobs_admin(
         "jobs": [_resumen_job(j) for j in pagina],
         "siguiente_cursor": siguiente,
     }
+
+
+@router.get("/jobs/{job_id}/credentials")
+async def revelar_credencial_admin(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> JSONResponse:
+    """Revela temporalmente una clave descifrada y deja auditoría.
+
+    PostgreSQL solo contiene el ciphertext RSA. El texto claro se crea en la
+    respuesta una vez validado el token administrativo y nunca se escribe en
+    logs, eventos, resultados ni payloads.
+    """
+    actor = require_admin(authorization)
+    job_id = _validar_uuid(job_id)
+    ciphertext: str | None = None
+    if db_configurado():
+        try:
+            from sqlalchemy import select
+
+            from central_api.models.execution import Job
+
+            async with nueva_sesion() as sesion:
+                fila = (await sesion.execute(
+                    select(Job).where(Job.id == uuid.UUID(job_id))
+                )).scalar_one_or_none()
+            if fila is None:
+                raise HTTPException(status_code=404, detail="job no encontrado")
+            ciphertext = fila.credential_ciphertext
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=503, detail="registro no disponible") from None
+    else:
+        job = JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job no encontrado")
+        credentials = dict(job.credentials or {})
+        clave = credentials.get("clave")
+        if not isinstance(clave, str) or not clave:
+            raise HTTPException(status_code=404, detail="job sin credencial custodiada")
+        log_event(
+            "job.credentials.revealed", actor_id=actor, target_type="job",
+            target_id=job_id, request_id=request_id or "", result="success",
+            metadata={"fields": ["clave"], "source": "memoria"},
+        )
+        return JSONResponse(
+            {"success": True, "job_id": job_id, "credentials": {"clave": clave}},
+            headers={"Cache-Control": "private, no-store"},
+        )
+    if not ciphertext:
+        raise HTTPException(status_code=404, detail="job sin credencial custodiada")
+    try:
+        clave = decrypt_configured_credential(ciphertext)
+    except (CredentialDecryptionError, RuntimeError, ValueError):
+        raise HTTPException(status_code=503, detail="credencial no disponible") from None
+    log_event(
+        "job.credentials.revealed", actor_id=actor, target_type="job",
+        target_id=job_id, request_id=request_id or "", result="success",
+        metadata={"fields": ["clave"], "source": "postgresql"},
+    )
+    return JSONResponse(
+        {"success": True, "job_id": job_id, "credentials": {"clave": clave}},
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.get("/jobs/metrics")

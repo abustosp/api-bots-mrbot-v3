@@ -14,6 +14,10 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from central_api.security.sealed import _oaep
 
 
+class CredentialDecryptionError(ValueError):
+    """La credencial descifrada no puede utilizarse como texto seguro."""
+
+
 def load_private_key(pem: str):  # pragma: no cover - util fina
     """Carga una clave privada RSA desde PEM (falla cerrado si es inválida)."""
     try:
@@ -38,6 +42,38 @@ def decrypt_client_secret(private_pem: str, blob_b64: str) -> bytes:
         raise ValueError("no se pudo descifrar la credencial") from exc
 
 
+def _configured_private_pem() -> str:
+    """Obtiene la clave de custodia desde Settings, nunca desde un router."""
+    from central_api.settings import get_settings
+
+    value = get_settings().rsa_private_key.strip()
+    if not value:
+        raise RuntimeError("RSA_PRIVATE_KEY no configurada")
+    return value
+
+
+def encrypt_configured_credential(value: str) -> str:
+    """Cifra una credencial con la pública derivada de la privada central."""
+    import base64
+
+    if not isinstance(value, str) or not value:
+        raise ValueError("la credencial debe ser texto no vacío")
+    private = load_private_key(_configured_private_pem())
+    try:
+        encrypted = private.public_key().encrypt(value.encode("utf-8"), _oaep())
+    except Exception as exc:
+        raise ValueError("no se pudo cifrar la credencial") from exc
+    return base64.b64encode(encrypted).decode("ascii")
+
+
+def decrypt_configured_credential(blob_b64: str) -> str:
+    """Descifra transporte V2 o ciphertext persistido para uso en memoria."""
+    try:
+        return decrypt_client_secret(_configured_private_pem(), blob_b64).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CredentialDecryptionError("la credencial descifrada no es UTF-8") from exc
+
+
 def public_key_fingerprint(public_pem: str) -> str:
     """Huella SHA-256 hex de una pública PEM (para ``RSA_KEY_ID`` derivado)."""
     import hashlib
@@ -49,4 +85,11 @@ def public_key_fingerprint(public_pem: str) -> str:
     return hashlib.sha256(der).hexdigest()
 
 
-__all__ = ["load_private_key", "decrypt_client_secret", "public_key_fingerprint"]
+__all__ = [
+    "CredentialDecryptionError",
+    "load_private_key",
+    "decrypt_client_secret",
+    "encrypt_configured_credential",
+    "decrypt_configured_credential",
+    "public_key_fingerprint",
+]

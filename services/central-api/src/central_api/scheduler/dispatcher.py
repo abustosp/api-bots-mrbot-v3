@@ -97,9 +97,9 @@ def build_envelope(
     """Arma el sobre de asignación, sellando lo sensible cuando se puede.
 
     La sección sensible (credenciales fiscales efímeras) viaja cifrada con la
-    RSA pública que el worker publicó en su registro. Sin pubkey conocida se
-    envía en claro con ``"sealed": False`` (modo desarrollo / worker previo
-    al sobre sellado): la bandera lo hace visible en vez de silencioso.
+    RSA pública que el worker publicó en su registro. Si un job tiene
+    credenciales y el worker no publicó una clave, se rechaza el despacho en
+    lugar de degradar a texto claro.
 
     Además del sobre histórico (``sealed``/``sealed_section``/``bot``), el
     worker exige admisión ``plugin`` + ``attempt`` + ``lease_id`` +
@@ -142,7 +142,10 @@ def build_envelope(
         )
         envelope["sealed"] = True
     else:
-        envelope["credentials"] = job.credentials or None
+        if job.credentials:
+            raise RuntimeError(
+                "worker sin clave pública para recibir credenciales selladas"
+            )
     private, _efimera = process_signing_key(settings.assignment_signing_key)
     envelope["assignment_signature"] = sign_assignment(
         private,

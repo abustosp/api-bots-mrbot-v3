@@ -299,6 +299,39 @@ _OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
 }
 
 
+# La API V2 recibía un objeto plano, no un envelope ``payload`` más
+# ``credentials``. Estos campos se mantienen en los aliases públicos para que
+# clientes existentes puedan reutilizar sus mismos JSON. El adaptador los
+# normaliza antes de persistir o enviar el job al worker.
+_V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
+    "cuit_representante": _string(pattern=CUIT),
+    "cuit_representado": _string(pattern=CUIT),
+    "cuit_inicio_sesion": _string(pattern=CUIT),
+    "clave": _string(max_length=4096),
+    "clave_representante": _string(max_length=4096),
+    "contrasena": _string(max_length=4096),
+    "clave_encriptada": _string(max_length=16384),
+    "desde": _string(pattern=DATE),
+    "hasta": _string(pattern=DATE),
+    "proxy_request": (dict[str, Any] | None, Field(default=None)),
+    "movimientos": _boolean(),
+    "pdf": _boolean(),
+    "descarga_emitidos": _boolean(),
+    "descarga_recibidos": _boolean(),
+    "descarga_csv_ventas": _boolean(),
+    "descarga_csv_compras": _boolean(),
+    "carga_minio": _boolean(),
+    "carga_json": _boolean(),
+    "minio_upload": _boolean(),
+    "eliminar_descargas": _boolean(),
+    "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
+    "usuario": _string(max_length=256),
+    "tipo_comprobante": _string(max_length=64),
+    "puntos_venta": _list(item=int),
+    "nombre_archivo": _string(max_length=512),
+}
+
+
 def _fields_for_operation(bot: str, operation: str) -> dict[str, tuple[Any, Any]]:
     fields = dict(_FAMILY_FIELDS.get(bot, {}))
     names = _OPERATION_FIELD_NAMES.get((bot, operation))
@@ -319,6 +352,18 @@ def public_bot_body_model(bot: str, operation: str) -> type[BaseModel]:
     return create_model(model_name, __base__=CompatBodyBase, **fields)
 
 
+@lru_cache(maxsize=None)
+def public_bot_compat_body_model(bot: str, operation: str) -> type[BaseModel]:
+    """Clase de borde con el cuerpo plano que aceptaban las rutas V2."""
+    fields = _fields_for_operation(bot, operation)
+    for name, descriptor in _V2_COMPAT_FIELDS.items():
+        fields.setdefault(name, descriptor)
+    model_name = "".join(
+        part.capitalize() for part in f"{bot}_{operation}_v2_compat".split("_")
+    ) + "Body"
+    return create_model(model_name, __base__=CompatBodyBase, **fields)
+
+
 def _example_value(field_name: str, bot: str, operation: str, default: Any) -> Any:
     """Valor representativo y seguro para cada propiedad pública."""
     if field_name == "credentials":
@@ -326,6 +371,28 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
             "cuit_representante": "20123456789",
             "clave": "REEMPLAZAR_CON_CREDENCIAL_SELLADA",
         }
+    if field_name in {"clave", "clave_representante", "contrasena"}:
+        return "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
+    if field_name == "clave_encriptada":
+        return "BASE64_RSA_OAEP_CIPHERTEXT"
+    if field_name in {"cuit_representante", "cuit_representado", "cuit_inicio_sesion"}:
+        return "20123456789"
+    if field_name in {"desde", "hasta"}:
+        return "01/08/2026"
+    if field_name in {"movimientos", "pdf", "descarga_emitidos", "descarga_recibidos"}:
+        return True
+    if field_name in {"carga_minio", "carga_json", "minio_upload"}:
+        return True
+    if field_name == "timeout_mc":
+        return 120
+    if field_name == "proxy_request":
+        return {"host": "proxy.ejemplo.invalid", "port": 8080}
+    if field_name == "puntos_venta":
+        return [1, 2]
+    if field_name == "tipo_comprobante":
+        return "FACTURA"
+    if field_name == "nombre_archivo":
+        return "archivo-ejemplo.txt"
     if field_name in {"cuit", "representado_cuit"}:
         return "20123456789"
     if field_name in {"cuits", "cuits_consulta"}:
@@ -405,9 +472,25 @@ def public_bot_payload_schema(bot: str, operation: str) -> dict[str, Any]:
     return schema
 
 
+@lru_cache(maxsize=None)
+def public_bot_compat_body_schema(bot: str, operation: str) -> dict[str, Any]:
+    """Schema inline plano V2, con ejemplos autocontenidos y seguros."""
+    model = public_bot_compat_body_model(bot, operation)
+    schema = model.model_json_schema()
+    schema["examples"] = [
+        {
+            name: _example_value(name, bot, operation, field.default)
+            for name, field in model.model_fields.items()
+        }
+    ]
+    return schema
+
+
 __all__ = [
     "CompatBodyBase",
     "public_bot_body_model",
+    "public_bot_compat_body_model",
     "public_bot_body_schema",
+    "public_bot_compat_body_schema",
     "public_bot_payload_schema",
 ]

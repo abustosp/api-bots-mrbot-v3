@@ -62,6 +62,9 @@ class Job(Base):
     request_payload: Mapped[object] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
     )
+    # Custodia opcional de la credencial fiscal. Contiene únicamente RSA
+    # ciphertext y nunca se incluye en request_payload, resultados ni auditoría.
+    credential_ciphertext: Mapped[str | None] = mapped_column(sa.Text)
     idempotency_key: Mapped[str | None] = mapped_column(sa.String(128))
     priority: Mapped[int] = mapped_column(
         sa.SmallInteger, nullable=False, server_default=sa.text("100")
@@ -113,6 +116,10 @@ class Job(Base):
         ),
         sa.CheckConstraint(
             "jsonb_typeof(request_payload) = 'object'", name="jobs_payload_object"
+        ),
+        sa.CheckConstraint(
+            "credential_ciphertext IS NULL OR btrim(credential_ciphertext) <> ''",
+            name="jobs_credential_ciphertext",
         ),
         sa.CheckConstraint(
             "priority BETWEEN 0 AND 1000", name="jobs_priority"

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from central_api.api.bot_payloads import (
     public_bot_body_schema,
@@ -29,6 +29,11 @@ from central_api.billing.entitlements import BOT_CREDIT_COST, PLANS, get_plan
 from central_api.billing.reservation import QuotaExhausted, reserve_for_job
 from central_api.db import db_configurado, nueva_sesion
 from central_api.security.principals import ApiPrincipal
+from central_api.security.credentials import (
+    CredentialInputError,
+    normalize_payload_and_credentials,
+    normalize_v2_payload,
+)
 from central_api.security.secret_redaction import public_error
 from central_api.store import JOBS, Job, new_job_id
 
@@ -37,7 +42,7 @@ router = APIRouter()
 
 async def _persistir_job_db(
     user_id: str, bot: str, operacion: str, payload: dict,
-    idempotency_key: str | None,
+    idempotency_key: str | None, credential_ciphertext: str | None = None,
 ) -> str | None:
     """Persiste el job en PostgreSQL; ``None`` si hay que usar memoria.
 
@@ -60,6 +65,7 @@ async def _persistir_job_db(
             fila = await repo.create(
                 user_id=uid, bot=bot, operation=operacion,
                 request_payload=dict(payload),
+                credential_ciphertext=credential_ciphertext,
                 idempotency_key=idempotency_key,
             )
             return str(fila.id)
@@ -68,10 +74,12 @@ async def _persistir_job_db(
 
 
 class CreateJobBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     payload: dict = Field(default_factory=dict)
     credentials: dict = Field(
         default_factory=dict,
-        description="Credenciales fiscales efímeras: solo memoria, viajan selladas al worker",
+        description="Compatibilidad V3: credenciales de borde, nunca en request_payload",
     )
 
 
@@ -262,7 +270,33 @@ async def submit_job(
             status_code=404, content=public_error("not_found", corr),
             headers={"X-Correlation-ID": corr},
         )
-    fingerprint = fingerprint_payload(bot, operacion, payload)
+    normalized_payload = normalize_v2_payload(bot, operacion, payload)
+    try:
+        (
+            normalized_payload,
+            worker_credentials,
+            credential_ciphertext,
+            credential_fingerprint,
+        ) = normalize_payload_and_credentials(
+            normalized_payload,
+            credentials,
+            require_encryption=db_configurado(),
+        )
+    except CredentialInputError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "error_code": "invalid_credentials",
+                    "message": str(exc),
+                }
+            },
+            headers={"X-Correlation-ID": corr},
+        )
+    fingerprint_payload_data = dict(normalized_payload)
+    if credential_fingerprint:
+        fingerprint_payload_data["_credential_fingerprint"] = credential_fingerprint
+    fingerprint = fingerprint_payload(bot, operacion, fingerprint_payload_data)
     if idempotency_key:
         hit = check_idempotency(principal.user_id, idempotency_key, fingerprint)
         if hit.conflict:
@@ -286,14 +320,25 @@ async def submit_job(
     job_id_pg: str | None = None
     if db_configurado():
         job_id_pg = await _persistir_job_db(
-            principal.user_id, bot, operacion, payload, idempotency_key
+            principal.user_id,
+            bot,
+            operacion,
+            normalized_payload,
+            idempotency_key,
+            credential_ciphertext,
         )
+        if credential_ciphertext and job_id_pg is None:
+            return JSONResponse(
+                status_code=503,
+                content=public_error("service_not_enabled", corr),
+                headers={"X-Correlation-ID": corr},
+            )
     job = Job(
         id=job_id_pg or new_job_id(),
         bot=bot,
         operation=operacion,
-        payload=payload,
-        credentials=credentials,
+        payload=normalized_payload,
+        credentials=worker_credentials,
     )
     try:
         reserve_for_job(principal.user_id, job.id, bot, operacion)
@@ -327,11 +372,18 @@ async def create_job(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     """Crea un job usando la superficie genérica normativa de V3."""
+    payload = dict(body.payload)
+    credentials = dict(body.credentials)
+    for name, value in (body.model_extra or {}).items():
+        if name in {"clave", "clave_representante", "contrasena", "clave_encriptada"}:
+            credentials[name] = value
+        elif name not in payload:
+            payload[name] = value
     return await submit_job(
         bot=bot,
         operacion=operacion,
-        payload=body.payload,
-        credentials=body.credentials,
+        payload=payload,
+        credentials=credentials,
         request=request,
         principal=principal,
         idempotency_key=idempotency_key,

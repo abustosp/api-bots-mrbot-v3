@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # despliegues previos; los workers nuevos sin entorno no lo usan.
     worker_service_token: str = Field(default="", alias="WORKER_TOKEN")
     admin_token: str = Field(default="", alias="ADMIN_TOKEN")
+    # Clave privada RSA de custodia: solo la central la lee desde secreto.
+    # También descifra ``clave_encriptada`` recibida por clientes V2 y
+    # desencripta el ciphertext persistido para el panel administrativo.
+    rsa_private_key: str = Field(default="", alias="RSA_PRIVATE_KEY")
     worker_protocol_version: int = 1  # espejo de mrbot_contracts.version.PROTOCOL_VERSION
     worker_heartbeat_interval_seconds: int = 10
     worker_degraded_after_seconds: int = 15

@@ -16,13 +16,20 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 
-from central_api.api.bot_payloads import public_bot_body_schema
+from central_api.api.bot_payloads import public_bot_compat_body_schema
 from central_api.api.bots import CreateJobResponse, OPERATIONS, submit_job
 from central_api.api.dependencies import require_api_principal
 from central_api.api.jobs import CancelBody, cancel_job, get_job
 from central_api.security.principals import ApiPrincipal
 
 router = APIRouter()
+
+_V2_SECRET_FIELDS = {
+    "clave",
+    "clave_representante",
+    "contrasena",
+    "clave_encriptada",
+}
 
 
 # V2 generated routes mapped to the canonical V3 bot and operation. The list
@@ -110,10 +117,15 @@ async def _decode_payload(request: Request) -> tuple[dict, dict] | JSONResponse:
             return _bad_payload("El cuerpo debe ser un objeto JSON válido.")
         if not isinstance(raw, dict):
             return _bad_payload("El cuerpo debe ser un objeto JSON.")
-        if isinstance(raw.get("payload"), dict):
-            credentials = raw.get("credentials")
-            return raw["payload"], credentials if isinstance(credentials, dict) else {}
-        return raw, {}
+        payload = dict(raw.get("payload")) if isinstance(raw.get("payload"), dict) else dict(raw)
+        credentials_value = raw.get("credentials")
+        credentials = dict(credentials_value) if isinstance(credentials_value, dict) else {}
+        payload.pop("credentials", None)
+        for field in _V2_SECRET_FIELDS:
+            if field in payload and field not in credentials:
+                credentials[field] = payload[field]
+            payload.pop(field, None)
+        return payload, credentials
 
     if "multipart/form-data" in content_type:
         try:
@@ -139,6 +151,8 @@ async def _decode_payload(request: Request) -> tuple[dict, dict] | JSONResponse:
                 if not isinstance(parsed, dict):
                     return _bad_payload("credentials debe ser un objeto JSON.")
                 credentials = parsed
+            elif key in _V2_SECRET_FIELDS:
+                credentials[key] = value
             else:
                 payload[key] = value
         return payload, credentials
@@ -220,7 +234,7 @@ def _register_routes() -> None:
                     "required": True,
                     "content": {
                         "application/json": {
-                            "schema": public_bot_body_schema(bot, operacion),
+                            "schema": public_bot_compat_body_schema(bot, operacion),
                         }
                     },
                 }
