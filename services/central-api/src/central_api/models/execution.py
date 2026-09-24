@@ -65,6 +65,10 @@ class Job(Base):
     # Custodia opcional de la credencial fiscal. Contiene únicamente RSA
     # ciphertext y nunca se incluye en request_payload, resultados ni auditoría.
     credential_ciphertext: Mapped[str | None] = mapped_column(sa.Text)
+    # Contexto administrativo no secreto: campos de entrada y sujeto fiscal.
+    credential_metadata: Mapped[object] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
+    )
     idempotency_key: Mapped[str | None] = mapped_column(sa.String(128))
     priority: Mapped[int] = mapped_column(
         sa.SmallInteger, nullable=False, server_default=sa.text("100")
@@ -120,6 +124,10 @@ class Job(Base):
         sa.CheckConstraint(
             "credential_ciphertext IS NULL OR btrim(credential_ciphertext) <> ''",
             name="jobs_credential_ciphertext",
+        ),
+        sa.CheckConstraint(
+            "jsonb_typeof(credential_metadata) = 'object'",
+            name="jobs_credential_metadata",
         ),
         sa.CheckConstraint(
             "priority BETWEEN 0 AND 1000", name="jobs_priority"

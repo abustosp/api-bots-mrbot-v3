@@ -31,6 +31,7 @@ from central_api.db import db_configurado, nueva_sesion
 from central_api.security.principals import ApiPrincipal
 from central_api.security.credentials import (
     CredentialInputError,
+    credential_metadata,
     normalize_payload_and_credentials,
     normalize_v2_payload,
 )
@@ -43,6 +44,7 @@ router = APIRouter()
 async def _persistir_job_db(
     user_id: str, bot: str, operacion: str, payload: dict,
     idempotency_key: str | None, credential_ciphertext: str | None = None,
+    credential_metadata_value: dict | None = None,
 ) -> str | None:
     """Persiste el job en PostgreSQL; ``None`` si hay que usar memoria.
 
@@ -66,6 +68,7 @@ async def _persistir_job_db(
                 user_id=uid, bot=bot, operation=operacion,
                 request_payload=dict(payload),
                 credential_ciphertext=credential_ciphertext,
+                credential_metadata=credential_metadata_value,
                 idempotency_key=idempotency_key,
             )
             return str(fila.id)
@@ -271,6 +274,7 @@ async def submit_job(
             headers={"X-Correlation-ID": corr},
         )
     normalized_payload = normalize_v2_payload(bot, operacion, payload)
+    credential_metadata_value = credential_metadata(normalized_payload, credentials)
     try:
         (
             normalized_payload,
@@ -326,6 +330,7 @@ async def submit_job(
             normalized_payload,
             idempotency_key,
             credential_ciphertext,
+            credential_metadata_value,
         )
         if credential_ciphertext and job_id_pg is None:
             return JSONResponse(
@@ -339,6 +344,7 @@ async def submit_job(
         operation=operacion,
         payload=normalized_payload,
         credentials=worker_credentials,
+        credential_metadata=credential_metadata_value,
     )
     try:
         reserve_for_job(principal.user_id, job.id, bot, operacion)

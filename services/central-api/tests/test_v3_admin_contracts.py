@@ -72,6 +72,7 @@ def test_documentacion_publica_y_admin_son_superficies_distintas(monkeypatch) ->
         admin_paths = set(admin.json()["paths"])
         assert "/internal/v1/workers/register" in admin_paths
         assert "/admin/executions" in admin_paths
+        assert "/admin/records" in admin_paths
         assert "/api/v3/bots/{bot}/{operacion}" in admin_paths
         assert admin.headers["cache-control"] == "private, no-store"
     finally:
@@ -169,6 +170,47 @@ def test_admin_registra_ejecuciones_y_revela_solo_con_auth(monkeypatch) -> None:
         assert revealed.status_code == 200
         assert revealed.json()["credentials"]["clave"] == "admin-secret"
         assert revealed.headers["cache-control"] == "private, no-store"
+    finally:
+        JOBS.clear()
+        get_settings.cache_clear()
+
+
+def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_TOKEN", "admin-table-token")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("RSA_PRIVATE_KEY", raising=False)
+    get_settings.cache_clear()
+    JOBS.clear()
+    try:
+        cliente = TestClient(create_app())
+        created = cliente.post(
+            "/api/v3/ccma/consulta",
+            headers={"Idempotency-Key": "admin-table-contract"},
+            json={
+                "cuit_representado": "20123456789",
+                "clave": "table-secret",
+            },
+        )
+        assert created.status_code == 202
+        job_id = created.json()["job_id"]
+        headers = {"Authorization": "Bearer admin-table-token"}
+        response = cliente.get("/admin/records?tabla=all", headers=headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body["tables"]) == {
+            "jobs",
+            "job_results",
+            "job_artifacts",
+            "job_events",
+        }
+        job_record = next(row for row in body["tables"]["jobs"] if row["id"] == job_id)
+        assert job_record["credentials"]["available"] is True
+        assert "clave" in job_record["credentials"]["fields"]
+        assert "credential_ciphertext" not in job_record
+        assert all("url" not in key.lower() for key in job_record)
+        assert cliente.get(
+            "/admin/records?tabla=invalid", headers=headers
+        ).status_code == 400
     finally:
         JOBS.clear()
         get_settings.cache_clear()

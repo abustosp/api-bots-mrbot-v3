@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
@@ -46,6 +47,7 @@ async def _jobs_db() -> list | None:
         from sqlalchemy import select
 
         from central_api.models.execution import Job
+        from central_api.models.identity import User
     except Exception:  # noqa: BLE001 - sin modelos, solo memoria
         return None
     try:
@@ -53,6 +55,14 @@ async def _jobs_db() -> list | None:
             filas = (await sesion.execute(
                 select(Job).order_by(Job.created_at.desc(), Job.id.desc()).limit(500)
             )).scalars().all()
+            user_emails = {
+                str(user_id): email
+                for user_id, email in (await sesion.execute(
+                    select(User.id, User.email).where(
+                        User.id.in_([fila.user_id for fila in filas])
+                    )
+                )).all()
+            } if filas else {}
     except Exception:  # noqa: BLE001 - sin base, solo memoria
         return None
     adaptados = []
@@ -61,9 +71,12 @@ async def _jobs_db() -> list | None:
             id=str(fila.id), status=str(fila.status), bot=fila.bot,
             operation=fila.operation,
             payload={"user_id": str(fila.user_id)},
+            user_email=user_emails.get(str(fila.user_id)),
             worker_node=str(fila.worker_id) if fila.worker_id else None,
             assignment_attempt=int(fila.attempts or 0),
             created_at=fila.created_at, result=None,
+            credential_metadata=dict(fila.credential_metadata or {}),
+            credentials_available=bool(fila.credential_ciphertext),
         ))
     return adaptados
 
@@ -106,6 +119,11 @@ def _registro_memoria(job) -> dict:
             "finalizado_en": None,
         },
         "request": redactar_metadata(dict(job.payload or {})),
+        "credentials": {
+            "available": bool(getattr(job, "credentials", None)),
+            "fields": list((getattr(job, "credential_metadata", {}) or {}).get("fields", [])),
+            "context": dict((getattr(job, "credential_metadata", {}) or {}).get("context", {})),
+        },
         "result": redactar_metadata(resultado) if resultado else None,
         "artifacts": [],
         "events": [],
@@ -123,6 +141,7 @@ async def _ejecuciones_db(
         from sqlalchemy import select
 
         from central_api.models.execution import Job, JobArtifact, JobEvent, JobResult
+        from central_api.models.identity import User
     except Exception:  # noqa: BLE001 - desarrollo sin SQLAlchemy
         return None
     try:
@@ -138,6 +157,14 @@ async def _ejecuciones_db(
             ids = [fila.id for fila in filas]
             if not ids:
                 return []
+            user_emails = {
+                str(user_id): email
+                for user_id, email in (await sesion.execute(
+                    select(User.id, User.email).where(
+                        User.id.in_([fila.user_id for fila in filas])
+                    )
+                )).all()
+            }
             resultados = {
                 str(fila.job_id): fila
                 for fila in (await sesion.execute(
@@ -165,6 +192,8 @@ async def _ejecuciones_db(
             "job": {
                 "id": key,
                 "user_id": str(fila.user_id),
+                "usuario": user_emails.get(str(fila.user_id)),
+                "usuario_email": user_emails.get(str(fila.user_id)),
                 "bot": fila.bot,
                 "operacion": fila.operation,
                 "estado": fila.status,
@@ -175,6 +204,15 @@ async def _ejecuciones_db(
                 "asignado_en": _iso(fila.assigned_at),
                 "iniciado_en": _iso(fila.started_at),
                 "finalizado_en": _iso(fila.finished_at),
+            },
+            "credentials": {
+                "available": bool(fila.credential_ciphertext),
+                "fields": list(
+                    (dict(fila.credential_metadata or {})).get("fields", [])
+                ),
+                "context": dict(
+                    (dict(fila.credential_metadata or {})).get("context", {})
+                ),
             },
             "request": redactar_metadata(dict(fila.request_payload or {})),
             "result": (
@@ -191,6 +229,7 @@ async def _ejecuciones_db(
                 {
                     "id": str(artifact.id),
                     "kind": artifact.kind,
+                    "name": artifact.filename,
                     "filename": artifact.filename,
                     "content_type": artifact.content_type,
                     "size_bytes": artifact.size_bytes,
@@ -214,6 +253,32 @@ async def _ejecuciones_db(
             "source": "postgresql",
         })
     return salida
+
+
+def _registros_por_tabla(registros: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Descompone el agregado en las tablas operativas que reemplazan V1/V2."""
+    tablas = {
+        "jobs": [],
+        "job_results": [],
+        "job_artifacts": [],
+        "job_events": [],
+    }
+    for registro in registros:
+        job = dict(registro.get("job") or {})
+        job_id = job.get("id")
+        tablas["jobs"].append({
+            **job,
+            "credentials": dict(registro.get("credentials") or {}),
+            "request": dict(registro.get("request") or {}),
+        })
+        resultado = registro.get("result")
+        if resultado is not None:
+            tablas["job_results"].append({"job_id": job_id, **dict(resultado)})
+        for artifact in registro.get("artifacts") or []:
+            tablas["job_artifacts"].append({"job_id": job_id, **dict(artifact)})
+        for event in registro.get("events") or []:
+            tablas["job_events"].append({"job_id": job_id, **dict(event)})
+    return tablas
 
 ESTADOS_TERMINALES = ("COMPLETO", "FALLIDO", "CANCELADO")
 ESTADOS_REINTENTABLES = ("FALLIDO",)
@@ -245,10 +310,20 @@ def _resumen_job(job) -> dict:
         "bot": job.bot,
         "operacion": job.operation,
         "usuario": (job.payload or {}).get("user_id"),
+        "usuario_email": getattr(job, "user_email", None),
         "worker": job.worker_node,
         "intento": job.assignment_attempt,
         "creado_en": job.created_at.isoformat() if job.created_at else None,
         "claves_payload": sorted((job.payload or {}).keys()),
+        "credenciales": {
+            "available": bool(
+                getattr(job, "credentials_available", False)
+                or getattr(job, "credentials", None)
+            ),
+            "fields": list(
+                (getattr(job, "credential_metadata", {}) or {}).get("fields", [])
+            ),
+        },
         "prioridad_admin": JOB_OVERRIDES.get(job.id, {}).get("prioridad"),
     }
 
@@ -330,6 +405,50 @@ async def ver_ejecucion_admin(
     return {"success": True, "record": registros[0]}
 
 
+@router.get("/records")
+async def listar_registros_tablas_admin(
+    authorization: str | None = Header(default=None),
+    tabla: str = "all",
+    job_id: str | None = None,
+    bot: str = "",
+    estado: str = "",
+    limit: int = 100,
+) -> dict:
+    """Lista cada tabla de ejecución con una forma compatible con V1/V2.
+
+    ``jobs``, ``job_results``, ``job_artifacts`` y ``job_events`` se mantienen
+    separados en ``tables``. Los artefactos exponen únicamente nombre y
+    metadatos, nunca URLs prefirmadas ni ``object_key``.
+    """
+    require_admin(authorization)
+    allowed = {"all", "jobs", "job_results", "job_artifacts", "job_events"}
+    if tabla not in allowed:
+        raise HTTPException(status_code=400, detail="tabla no válida")
+    registros = await _ejecuciones_db(
+        job_id=job_id, bot=bot, estado=estado, limit=limit
+    )
+    if registros is None:
+        registros = [
+            _registro_memoria(job)
+            for job in sorted(
+                JOBS.values(),
+                key=lambda item: (str(item.created_at), item.id),
+                reverse=True,
+            )
+            if (not bot or job.bot == bot) and (not estado or job.status == estado)
+        ][: max(1, min(limit, 500))]
+    tables = _registros_por_tabla(registros)
+    selected = registros if tabla == "all" else tables[tabla]
+    return {
+        "success": True,
+        "tabla": tabla,
+        "total": len(selected),
+        "records": selected,
+        "tables": tables,
+        "fuente": "postgresql" if db_configurado() else "memoria",
+    }
+
+
 @router.get("/jobs")
 async def listar_jobs_admin(
     authorization: str | None = Header(default=None),
@@ -387,6 +506,7 @@ async def revelar_credencial_admin(
     actor = require_admin(authorization)
     job_id = _validar_uuid(job_id)
     ciphertext: str | None = None
+    metadata: dict[str, Any] = {}
     if db_configurado():
         try:
             from sqlalchemy import select
@@ -400,6 +520,7 @@ async def revelar_credencial_admin(
             if fila is None:
                 raise HTTPException(status_code=404, detail="job no encontrado")
             ciphertext = fila.credential_ciphertext
+            metadata = dict(fila.credential_metadata or {})
         except HTTPException:
             raise
         except Exception:
@@ -409,6 +530,7 @@ async def revelar_credencial_admin(
         if job is None:
             raise HTTPException(status_code=404, detail="job no encontrado")
         credentials = dict(job.credentials or {})
+        metadata = dict(getattr(job, "credential_metadata", {}) or {})
         clave = credentials.get("clave")
         if not isinstance(clave, str) or not clave:
             raise HTTPException(status_code=404, detail="job sin credencial custodiada")
@@ -418,7 +540,12 @@ async def revelar_credencial_admin(
             metadata={"fields": ["clave"], "source": "memoria"},
         )
         return JSONResponse(
-            {"success": True, "job_id": job_id, "credentials": {"clave": clave}},
+            {
+                "success": True,
+                "job_id": job_id,
+                "credentials": {"clave": clave},
+                "credential_metadata": metadata,
+            },
             headers={"Cache-Control": "private, no-store"},
         )
     if not ciphertext:
@@ -433,7 +560,12 @@ async def revelar_credencial_admin(
         metadata={"fields": ["clave"], "source": "postgresql"},
     )
     return JSONResponse(
-        {"success": True, "job_id": job_id, "credentials": {"clave": clave}},
+        {
+            "success": True,
+            "job_id": job_id,
+            "credentials": {"clave": clave},
+            "credential_metadata": metadata,
+        },
         headers={"Cache-Control": "private, no-store"},
     )
 

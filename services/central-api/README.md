@@ -164,6 +164,15 @@ administrativo `GET /admin/jobs/{job_id}/credentials` requiere Bearer, deja
 auditoría y responde sin cachear. La clave privada se configura mediante
 `RSA_PRIVATE_KEY` o `RSA_PRIVATE_KEY_FILE` y nunca se monta en el worker.
 
+El panel también expone `GET /admin/records`, con las tablas normalizadas
+`jobs`, `job_results`, `job_artifacts` y `job_events`, filtros por bot, estado y
+job, y el email del usuario solicitante cuando está disponible. Cada ejecución
+indica los campos de credencial y su contexto fiscal sin incluir el secreto en
+la grilla. El botón de credenciales usa el endpoint autenticado y auditado
+`/admin/jobs/{job_id}/credentials`, que descifra la custodia únicamente para
+esa respuesta sin cachearla. Los artefactos muestran `name` y metadatos de
+archivo, nunca `object_key`, URLs prefirmadas ni enlaces de descarga.
+
 ## Planificador
 
 El planificador es lo que convierte a este servicio en balanceador de carga.

@@ -23,6 +23,7 @@ class Job:
     operation: str
     payload: dict
     credentials: dict = field(default_factory=dict)  # efímeras: nunca se persisten en PG
+    credential_metadata: dict = field(default_factory=dict)
     status: str = "PENDIENTE"
     worker_node: str | None = None
     assignment_attempt: int = 0

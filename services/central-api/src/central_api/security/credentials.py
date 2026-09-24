@@ -20,6 +20,41 @@ from central_api.security.rsa_credentials import (
 
 CREDENTIAL_FIELDS = ("clave", "clave_representante", "contrasena")
 CREDENTIAL_TRANSPORT_FIELDS = (*CREDENTIAL_FIELDS, "clave_encriptada")
+_CREDENTIAL_CONTEXT_FIELDS = (
+    "cuit_representante",
+    "cuit_inicio_sesion",
+    "cuit_login",
+    "cuit_representado",
+    "representado_cuit",
+    "usuario",
+)
+
+
+def credential_metadata(
+    payload: Mapping[str, Any], credentials: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Devuelve contexto no secreto para el registro administrativo.
+
+    El valor de la credencial nunca se incluye. Solo se conserva qué campo
+    llegó, por qué vía y qué identidad fiscal se estaba consultando, para que
+    el panel pueda explicar la ejecución sin leer el ciphertext.
+    """
+    supplied = {**dict(payload), **dict(credentials or {})}
+    fields = [
+        name
+        for name in CREDENTIAL_TRANSPORT_FIELDS
+        if supplied.get(name) not in (None, "")
+    ]
+    context = {
+        name: supplied[name]
+        for name in _CREDENTIAL_CONTEXT_FIELDS
+        if supplied.get(name) not in (None, "")
+        and isinstance(supplied[name], (str, int))
+    }
+    return {
+        "fields": fields,
+        "context": context,
+    }
 
 
 def normalize_v2_payload(
@@ -167,6 +202,7 @@ __all__ = [
     "CREDENTIAL_FIELDS",
     "CREDENTIAL_TRANSPORT_FIELDS",
     "CredentialInputError",
+    "credential_metadata",
     "normalize_v2_payload",
     "normalize_payload_and_credentials",
 ]

@@ -27,6 +27,7 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     for endpoint in (
         "/admin/users",
         "/admin/jobs",
+        "/admin/records",
         "/admin/jobs/metrics",
         "/admin/fleet",
         "/admin/audit",
@@ -35,6 +36,8 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "sessionStorage" in cuerpo
     assert "mrbot_admin_token" in cuerpo
     assert "valor_unica_vez" in cuerpo
+    assert "credential-detail" in cuerpo
+    assert "Artefactos MinIO" in cuerpo
 
 
 def test_panel_login_es_alias_html_y_admin_queda_fuera_de_openapi() -> None:
