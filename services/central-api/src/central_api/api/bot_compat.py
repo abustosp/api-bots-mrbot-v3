@@ -16,7 +16,8 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 
-from central_api.api.bots import OPERATIONS, submit_job
+from central_api.api.bot_payloads import public_bot_body_schema
+from central_api.api.bots import CreateJobResponse, OPERATIONS, submit_job
 from central_api.api.dependencies import require_api_principal
 from central_api.api.jobs import CancelBody, cancel_job, get_job
 from central_api.security.principals import ApiPrincipal
@@ -213,6 +214,17 @@ def _register_routes() -> None:
             _create_handler(bot, operacion),
             methods=["POST"],
             status_code=202,
+            response_model=CreateJobResponse,
+            openapi_extra={
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": public_bot_body_schema(bot, operacion),
+                        }
+                    },
+                }
+            },
             name=f"compat_{bot}_{operacion}_create",
             tags=["bots-compatibilidad"],
         )
@@ -220,6 +232,7 @@ def _register_routes() -> None:
             f"{route_path}/{{job_id}}",
             status_handler,
             methods=["GET"],
+            response_model=dict[str, Any],
             name=f"compat_{bot}_{operacion}_status",
             tags=["bots-compatibilidad"],
         )
@@ -227,6 +240,16 @@ def _register_routes() -> None:
             f"{route_path}/cancelar/{{job_id}}",
             cancel_handler,
             methods=["POST"],
+            response_model=dict[str, Any],
+            openapi_extra={
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": CancelBody.model_json_schema(),
+                        }
+                    }
+                }
+            },
             name=f"compat_{bot}_{operacion}_cancel",
             tags=["bots-compatibilidad"],
         )

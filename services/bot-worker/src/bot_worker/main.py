@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from bot_worker.bots.errors import ArtifactUploadError
 from bot_worker.bots.registry import get_plugin
@@ -102,6 +102,23 @@ def _valid_uuid(value: str) -> bool:
 
 
 class ArtifactSlotIn(BaseModel):
+    """Slot de artefacto que la central preasigna para una ejecución."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "artifact_id": "artifact-01",
+                    "name_hint": "constancia.pdf",
+                    "put_url": "https://storage.example.invalid/put",
+                    "object_key": "jobs/01/constancia.pdf",
+                    "max_bytes": 52428800,
+                    "content_types": ["application/pdf"],
+                }
+            ]
+        }
+    )
+
     artifact_id: str
     name_hint: str = ""
     put_url: str = ""
@@ -111,7 +128,32 @@ class ArtifactSlotIn(BaseModel):
 
 
 class JobEnvelope(BaseModel):
-    model_config = {"extra": "ignore"}
+    """Sobre firmada que la central entrega al worker para ejecutar un job."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "description": (
+                "Contrato interno central-worker. La firma, el job, la lease "
+                "y la versión de protocolo se validan antes de ejecutar."
+            ),
+            "examples": [
+                {
+                    "protocol_version": 1,
+                    "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10",
+                    "attempt": 1,
+                    "lease_id": "0190c2d4-7b4a-7b60-9f28-3efc1f7b1b10",
+                    "lease_expires_at": "2026-09-24T03:00:00Z",
+                    "bot": "ccma",
+                    "plugin": "ccma",
+                    "operation": "consultar",
+                    "payload": {"representado_cuit": "20123456789"},
+                    "assignment_signature": "base64-ed25519-signature",
+                    "assignment_expires_at": "2026-09-24T03:00:00Z",
+                }
+            ],
+        },
+    )
 
     protocol_version: int = PROTOCOL_VERSION
     # La central envía la bandera histórica ``sealed: bool`` más la sección
@@ -141,7 +183,28 @@ class JobEnvelope(BaseModel):
 
 
 class CancelIn(BaseModel):
-    model_config = {"extra": "ignore"}
+    """Solicitud firmada de cancelación cooperativa de una ejecución."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "description": (
+                "La central firma esta solicitud. El worker no cambia el "
+                "estado canónico, solo detiene cooperativamente el job."
+            ),
+            "examples": [
+                {
+                    "assignment_signature": "base64-ed25519-signature",
+                    "assignment_expires_at": "2026-09-24T03:00:00Z",
+                    "attempt": 1,
+                    "lease_id": "0190c2d4-7b4a-7b60-9f28-3efc1f7b1b10",
+                    "cancel_request_id": "0190c2d4-7b4a-7b61-9f28-3efc1f7b1b10",
+                    "reason": "cancelado_por_usuario",
+                    "requested_at": "2026-09-24T02:59:00Z",
+                }
+            ],
+        },
+    )
 
     assignment_signature: str = ""
     assignment_expires_at: str = ""

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from central_api.api.bot_payloads import public_bot_body_schema
 from central_api.api.dependencies import (
     check_idempotency,
     correlation_id,
@@ -183,6 +184,53 @@ def _operation_or_none(bot: str, operacion: str) -> dict | None:
     return OPERATIONS.get((bot, operacion))
 
 
+def _canonical_body_openapi() -> dict:
+    """Describe el envelope V3 y permite explorar cada payload de bot.
+
+    La ruta canónica recibe ``payload`` anidado. Los aliases V2 documentan el
+    payload directamente, mientras que este esquema conserva el envelope y
+    ofrece las 42 combinaciones bot/operación dentro de ``oneOf``.
+    """
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["payload"],
+                        "properties": {
+                            "payload": {
+                                "oneOf": [
+                                    public_bot_body_schema(bot, operation)
+                                    for bot, operation in OPERATIONS
+                                ],
+                                "description": (
+                                    "Payload específico del bot. Seleccione el "
+                                    "esquema correspondiente a bot/operacion."
+                                ),
+                            },
+                            "credentials": {
+                                "type": "object",
+                                "additionalProperties": True,
+                                "description": (
+                                    "Credenciales fiscales efímeras. Nunca se "
+                                    "persisten."
+                                ),
+                            },
+                        },
+                        "additionalProperties": False,
+                        "example": {
+                            "payload": {"representado_cuit": "20123456789"},
+                            "credentials": {},
+                        },
+                    }
+                }
+            },
+        }
+    }
+
+
 async def submit_job(
     *,
     bot: str,
@@ -258,7 +306,11 @@ async def submit_job(
     )
 
 
-@router.post("/bots/{bot}/{operacion}", status_code=202)
+@router.post(
+    "/bots/{bot}/{operacion}",
+    status_code=202,
+    openapi_extra=_canonical_body_openapi(),
+)
 async def create_job(
     bot: str,
     operacion: str,
