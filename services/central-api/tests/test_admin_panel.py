@@ -46,6 +46,10 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "bot-sections" in cuerpo
     assert "Ver request" in cuerpo
     assert "Ver response" in cuerpo
+    assert "executions-table-select" in cuerpo
+    assert "executions-previous" in cuerpo
+    assert "/admin/table-catalog" in cuerpo
+    assert "Solo se carga la selección actual" in cuerpo
 
 
 def test_panel_tables_es_alias_v2_y_abre_registros() -> None:

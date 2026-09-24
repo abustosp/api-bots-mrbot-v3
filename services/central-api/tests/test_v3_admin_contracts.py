@@ -86,6 +86,7 @@ def test_documentacion_publica_y_admin_son_superficies_distintas(monkeypatch) ->
         assert "/internal/v1/workers/register" in admin_paths
         assert "/admin/executions" in admin_paths
         assert "/admin/records" in admin_paths
+        assert "/admin/table-catalog" in admin_paths
         assert "/api/v3/bots/{bot}/{operacion}" in admin_paths
         assert admin.headers["cache-control"] == "private, no-store"
     finally:
@@ -251,6 +252,68 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         assert cliente.get(
             "/admin/records?tabla=invalid", headers=headers
         ).status_code == 400
+    finally:
+        JOBS.clear()
+        get_settings.cache_clear()
+
+
+def test_admin_table_catalogo_y_tabla_virtual_por_bot(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_TOKEN", "admin-table-catalog-token")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("RSA_PRIVATE_KEY", raising=False)
+    get_settings.cache_clear()
+    JOBS.clear()
+    try:
+        cliente = TestClient(create_app())
+        headers = {"Authorization": "Bearer admin-table-catalog-token"}
+        assert cliente.get("/admin/table-catalog").status_code == 401
+        catalog = cliente.get("/admin/table-catalog", headers=headers)
+        assert catalog.status_code == 200
+        body = catalog.json()
+        assert body["canonical_tables"] == [
+            "jobs", "job_results", "job_artifacts", "job_events"
+        ]
+        assert len(body["bot_tables"]) == len(CATALOGUE)
+        assert next(item for item in body["bot_tables"] if item["name"] == "bot:ccma")["legacy"] == [
+            "consulta_ccma_logs"
+        ]
+
+        for suffix in ("one", "two"):
+            created = cliente.post(
+                "/api/v3/ccma/consulta",
+                headers={"Idempotency-Key": f"admin-bot-table-{suffix}"},
+                json={"representado_cuit": "20123456789", "clave": "catalog-secret"},
+            )
+            assert created.status_code == 202
+
+        selected = cliente.get(
+            "/admin/records?tabla=bot:ccma&limit=1",
+            headers=headers,
+        )
+        assert selected.status_code == 200
+        selected_body = selected.json()
+        assert selected_body["tabla_resuelta"] == "bot:ccma"
+        assert selected_body["catalogo"]["kind"] == "bot"
+        assert selected_body["has_more"] is True
+        assert len(selected_body["bot_sections"]) == 1
+        assert selected_body["bot_sections"][0]["bot"] == "ccma"
+        assert len(selected_body["records"]) == 1
+        assert "request" in selected_body["records"][0]
+        assert "response" in selected_body["records"][0]
+
+        next_page = cliente.get(
+            "/admin/records?tabla=bot:ccma&limit=1&offset=1&operacion=consultar",
+            headers=headers,
+        )
+        assert next_page.status_code == 200
+        assert next_page.json()["has_more"] is False
+        assert len(next_page.json()["records"]) == 1
+        assert cliente.get(
+            "/admin/records?tabla=bot:ccma&bot=siper", headers=headers
+        ).status_code == 400
+        assert cliente.get(
+            "/admin/records?tabla=jobs&limit=1", headers=headers
+        ).json()["tabla_resuelta"] == "jobs"
     finally:
         JOBS.clear()
         get_settings.cache_clear()

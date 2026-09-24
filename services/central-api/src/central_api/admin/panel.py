@@ -197,12 +197,13 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="executions">
-        <div class="kicker">Historial unificado</div><h2>Registros de ejecuciones</h2><p class="subtle">Consulta request, resultado, artefactos y eventos de todos los bots desde una sola vista.</p>
-        <form id="executions-filter" class="toolbar"><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><button class="button primary" type="submit">Actualizar</button></form>
-        <div class="grid" id="execution-table-counts"><div class="empty">Cargando tablas...</div></div>
-        <div class="kicker" style="margin-top:24px">Tablas por bot</div><h3>Request y response por cada bot</h3><p class="subtle">Cada sección conserva las cuatro tablas canónicas de V3 y muestra los nombres históricos V1/V2 cuando existe una correspondencia directa.</p>
-        <div class="bot-sections" id="bot-sections"><div class="empty">Cargando secciones por bot...</div></div>
-        <div class="table-wrap"><table><thead><tr><th>Creado</th><th>Asignado</th><th>Iniciado</th><th>Finalizado</th><th>Usuario</th><th>Job</th><th>Bot / operación</th><th>Estado</th><th>Credenciales</th><th>Resultado</th><th>Artefactos MinIO</th></tr></thead><tbody id="executions-table"><tr><td colspan="11" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla detallada de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
+        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-select">Tabla</label><select id="executions-table-select" required><option value="">Cargando catálogo...</option></select></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option selected>50</option><option>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
+        <div class="form-actions"><button class="button secondary small" type="button" id="executions-previous">Anterior</button><button class="button secondary small" type="button" id="executions-next">Siguiente</button><span class="muted" id="execution-table-status">Selecciona una tabla.</span></div>
+        <div class="card table-description" id="table-description"><strong>Tablas por bot</strong><br><span class="muted">Request y response por cada bot, con credenciales protegidas, artefactos por nombre, eventos y timestamps Creado, Asignado, Iniciado y Finalizado.</span></div>
+        <div class="grid" id="execution-table-counts"><div class="empty">Cargando catálogo...</div></div>
+        <div class="bot-sections" id="bot-sections"><div class="empty">Selecciona una tabla para consultar.</div></div>
+        <div class="table-wrap"><table><thead id="executions-head"><tr><th>Tabla</th><th>Datos</th></tr></thead><tbody id="executions-table"><tr><td colspan="2" class="empty">Selecciona una tabla.</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="fleet">
@@ -224,7 +225,7 @@ details > .details-body { padding: 0 14px 14px; }
   "use strict";
   const TOKEN_KEY = "mrbot_admin_token";
   const initialView = window.location.pathname.endsWith("/tables") ? "executions" : "dashboard";
-  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView };
+  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOffset: 0, tableHasMore: false };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
@@ -256,22 +257,48 @@ details > .details-body { padding: 0 14px 14px; }
   }
   function renderBotSections(sections) {
     const node = $("#bot-sections");
-    if (!Array.isArray(sections) || !sections.length) { node.innerHTML = `<div class="empty">No hay bots en el catálogo.</div>`; return; }
-    node.innerHTML = sections.map((section) => {
-      const records = section.records || [];
-      const legacy = section.tablas_legacy || [];
-      const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
-      const tables = (section.tablas || []).map((table) => `<span class="pill">${esc(table)}</span>`).join(" ");
-      const legacyTables = legacy.length ? legacy.map((table) => `<span class="pill">${esc(table)}</span>`).join(" ") : `<span class="muted">sin tabla histórica directa</span>`;
-      const rows = records.length ? records.map((record) => {
-        const job = record.job || {};
-        const response = record.response ?? record.result;
-        const credentials = record.credentials || {};
-        const artifactNames = (record.artifacts || []).map((artifact) => artifact.name || artifact.filename).filter(Boolean);
-        return `<tr><td>${esc(date(job.creado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td><td>${payloadView(record.request, "Ver request")}</td><td>${payloadView(response, "Ver response")}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`;
-      }).join("") : `<tr><td colspan="8" class="empty">Sin ejecuciones para este bot.</td></tr>`;
-      return `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tablas V3:</strong> ${tables}<strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr><th>Creado</th><th>Operación</th><th>Usuario</th><th>Estado</th><th>Request</th><th>Response</th><th>Credenciales</th><th>Artefactos MinIO</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
-    }).join("");
+    $("#executions-head").closest(".table-wrap").classList.add("hidden");
+    if (!Array.isArray(sections) || !sections.length) { node.innerHTML = `<div class="empty">La tabla seleccionada no tiene registros.</div>`; return; }
+    const section = sections[0];
+    const records = section.records || [];
+    const legacy = section.tablas_legacy || [];
+    const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
+    const legacyTables = legacy.length ? legacy.map((table) => `<span class="pill">${esc(table)}</span>`).join(" ") : `<span class="muted">sin tabla histórica directa</span>`;
+    const rows = records.length ? records.map((record) => {
+      const job = record.job || {};
+      const response = record.response ?? record.result;
+      const credentials = record.credentials || {};
+      const artifactNames = (record.artifacts || []).map((artifact) => artifact.name || artifact.filename).filter(Boolean);
+      return `<tr><td><code>${esc(short(job.id, 22))}</code><br>${esc(date(job.creado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td><td>${payloadView(record.request, "Ver request")}</td><td>${payloadView(response, "Ver response")}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`;
+    }).join("") : `<tr><td colspan="8" class="empty">Sin ejecuciones para este bot.</td></tr>`;
+    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tablas V3:</strong> ${(section.tablas || []).map((table) => `<span class="pill">${esc(table)}</span>`).join(" ")}<strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr><th>Job / creado</th><th>Operación</th><th>Usuario</th><th>Estado</th><th>Request</th><th>Response</th><th>Credenciales</th><th>Artefactos MinIO</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+  }
+  function renderCanonicalTable(tableName, rows) {
+    const head = $("#executions-head");
+    const body = $("#executions-table");
+    head.closest(".table-wrap").classList.remove("hidden");
+    const keys = (state.tableCatalog.find((item) => item.name === tableName) || {}).columns || [];
+    head.innerHTML = `<tr>${keys.map((key) => `<th>${esc(key)}</th>`).join("")}</tr>`;
+    body.innerHTML = rows.length ? rows.map((row) => `<tr>${keys.map((key) => {
+      const value = row[key];
+      if (key === "credentials" && value && value.available) return `<td><button class="button secondary small" data-action="credential-detail" data-id="${esc(row.id || "")}">Ver credenciales</button></td>`;
+      return `<td>${payloadView(value, "Ver datos")}</td>`;
+    }).join("")}</tr>`).join("") : `<tr><td colspan="${Math.max(keys.length, 1)}" class="empty">La tabla no contiene registros para este filtro.</td></tr>`;
+    $("#bot-sections").innerHTML = `<div class="empty">Vista de tabla canónica: ${esc(tableName)}.</div>`;
+  }
+  function renderCatalog(catalog) {
+    state.tableCatalog = catalog || [];
+    const select = $("#executions-table-select");
+    const canonical = state.tableCatalog.filter((item) => item.kind === "canonical");
+    const bots = state.tableCatalog.filter((item) => item.kind === "bot");
+    select.innerHTML = `<option value="">Selecciona una tabla</option><optgroup label="Tablas PostgreSQL">${canonical.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}</option>`).join("")}</optgroup><optgroup label="Tablas detalladas por bot">${bots.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}${item.legacy?.length ? ` · ${esc(item.legacy.join(", "))}` : ""}</option>`).join("")}</optgroup>`;
+    select.value = canonical[0]?.name || bots[0]?.name || "";
+    $("#execution-table-counts").innerHTML = `<div class="card"><div class="metric"><span>Tablas PostgreSQL</span><strong>${canonical.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas por bot</span><strong>${bots.length}</strong></div></div>`;
+  }
+  async function loadTableCatalog() {
+    if (state.tableCatalog.length) return;
+    const data = await api("/admin/table-catalog");
+    renderCatalog(data.tables || []);
   }
   async function loadDashboard() {
     try {
@@ -302,8 +329,35 @@ details > .details-body { padding: 0 14px 14px; }
     try { const [data, metrics] = await Promise.all([api(`/admin/jobs?${params}`), api("/admin/jobs/metrics")]); const stateCards = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join(""); $("#jobs-metrics").innerHTML = stateCards || `<div class="card"><div class="metric"><span>Total</span><strong>${esc(data.total || 0)}</strong></div></div>`; const rows = data.jobs || []; $("#jobs-table").innerHTML = rows.length ? rows.map((job) => `<tr><td><code>${esc(short(job.job_id, 22))}</code></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td>${esc(short(job.usuario, 18))}</td><td>${esc(job.worker || "—")}</td><td>${esc(job.intento)}</td><td class="actions"><button class="button secondary small" data-action="job-detail" data-id="${esc(job.job_id)}">Detalle</button>${["PENDIENTE","ASIGNADO","CORRIENDO"].includes(job.estado) ? `<button class="button danger small" data-action="job-cancel" data-id="${esc(job.job_id)}">Cancelar</button>` : ""}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay jobs para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
   async function loadExecutions(event) {
-    if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100", tabla: "all" }); const bot = $("#executions-bot").value.trim(); const estado = $("#executions-state").value.trim(); if (bot) params.set("bot", bot); if (estado) params.set("estado", estado);
-    try { const data = await api(`/admin/records?${params}`); renderBotSections(data.bot_sections || []); const tables = data.tables || {}; $("#execution-table-counts").innerHTML = Object.entries(tables).map(([name, values]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(values.length)}</strong></div></div>`).join(""); const rows = data.records || []; $("#executions-table").innerHTML = rows.length ? rows.map((record) => { const job = record.job || {}; const result = record.result || {}; const credentials = record.credentials || {}; const artifacts = record.artifacts || []; const artifactNames = artifacts.map((artifact) => artifact.name || artifact.filename).filter(Boolean); return `<tr><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(date(job.finalizado_en))}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver (${esc((credentials.fields || []).join(", ") || "clave")})</button>` : "—"}</td><td>${esc(result.result || job.resultado || "—")}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`; }).join("") : `<tr><td colspan="11" class="empty">No hay ejecuciones para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+    if (event) event.preventDefault();
+    try {
+      await loadTableCatalog();
+      const tabla = $("#executions-table-select").value;
+      if (!tabla) { flash("Selecciona una tabla para consultar.", "error"); return; }
+      const params = new URLSearchParams({ limit: $("#executions-limit").value, offset: String(state.tableOffset), tabla });
+      const values = [["q", "#executions-query"], ["bot", "#executions-bot"], ["operacion", "#executions-operation"], ["estado", "#executions-state"], ["usuario", "#executions-user"]];
+      values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
+      const data = await api(`/admin/records?${params}`);
+      state.tableHasMore = Boolean(data.has_more);
+      $("#executions-previous").disabled = state.tableOffset <= 0;
+      $("#executions-next").disabled = !state.tableHasMore;
+      $("#execution-table-status").textContent = `${data.fuente || "—"} · ${data.total || 0} filas desde ${data.offset || 0}`;
+      $("#table-description").innerHTML = `<strong>${esc(data.catalogo?.label || data.tabla_resuelta || tabla)}</strong><br><span class="muted">${esc((data.catalogo?.legacy || []).join(", ") || "Tabla canónica V3")} · límite ${esc(data.limit)}</span>`;
+      if (data.catalogo?.kind === "bot") {
+        $("#executions-head").innerHTML = "<tr><th>Tabla detallada por bot</th></tr>";
+        $("#executions-table").innerHTML = `<tr><td class="empty">La tabla detallada se muestra arriba.</td></tr>`;
+        renderBotSections(data.bot_sections || []);
+      } else {
+        renderCanonicalTable(data.tabla_resuelta || tabla, data.records || []);
+      }
+    } catch (error) { flash(error.message, "error"); }
+  }
+  function resetExecutionOffset() { state.tableOffset = 0; }
+  function moveExecutionPage(direction) {
+    const pageSize = Number($("#executions-limit").value || 50);
+    if (direction < 0) state.tableOffset = Math.max(0, state.tableOffset - pageSize);
+    if (direction > 0 && state.tableHasMore) state.tableOffset += pageSize;
+    loadExecutions();
   }
   async function executionAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button || button.dataset.action !== "credential-detail") return;
@@ -321,7 +375,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction);
-  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
+  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", (event) => { resetExecutionOffset(); loadExecutions(event); }); $("#executions-table-select").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-limit").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-previous").addEventListener("click", () => moveExecutionPage(-1)); $("#executions-next").addEventListener("click", () => moveExecutionPage(1)); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();

@@ -33,6 +33,24 @@ router = APIRouter()
 
 EXECUTION_TABLES = ("jobs", "job_results", "job_artifacts", "job_events")
 
+TABLE_COLUMNS = {
+    "jobs": (
+        "id", "user_id", "usuario_email", "bot", "operacion", "estado",
+        "resultado", "intento", "worker_id", "creado_en", "asignado_en",
+        "iniciado_en", "finalizado_en", "request", "credentials",
+    ),
+    "job_results": (
+        "job_id", "attempt", "result", "payload", "summary", "received_at",
+    ),
+    "job_artifacts": (
+        "id", "job_id", "kind", "name", "content_type", "size_bytes",
+        "sha256", "created_at", "expires_at",
+    ),
+    "job_events": (
+        "id", "job_id", "attempt", "type", "key", "payload", "occurred_at",
+    ),
+}
+
 # Nombres de las tablas de logs que los administradores conocen de V1/V2. V3
 # conserva una fuente canónica normalizada, pero expone estos alias visuales
 # para que cada sección identifique la tabla histórica equivalente cuando la
@@ -171,13 +189,21 @@ def _registro_memoria(job) -> dict:
 
 
 async def _ejecuciones_db(
-    *, job_id: str | None = None, bot: str = "", estado: str = "", limit: int = 100
+    *,
+    job_id: str | None = None,
+    bot: str = "",
+    estado: str = "",
+    operacion: str = "",
+    usuario: str = "",
+    q: str = "",
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[dict] | None:
     """Lee el agregado completo de ejecución y sus tablas relacionadas."""
     if not db_configurado():
         return None
     try:
-        from sqlalchemy import select
+        from sqlalchemy import String, cast, or_, select
 
         from central_api.models.execution import Job, JobArtifact, JobEvent, JobResult
         from central_api.models.identity import User
@@ -186,13 +212,39 @@ async def _ejecuciones_db(
     try:
         async with nueva_sesion() as sesion:
             stmt = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+            needs_user_join = bool(usuario.strip() or q.strip())
+            if needs_user_join:
+                stmt = stmt.join(User, User.id == Job.user_id)
             if job_id:
                 stmt = stmt.where(Job.id == uuid.UUID(job_id))
             if bot:
                 stmt = stmt.where(Job.bot == bot)
             if estado:
                 stmt = stmt.where(Job.status == estado)
-            filas = list((await sesion.execute(stmt.limit(max(1, min(limit, 500))))).scalars())
+            if operacion:
+                stmt = stmt.where(Job.operation == operacion)
+            if usuario.strip():
+                usuario_filtro = usuario.strip()
+                try:
+                    usuario_uuid = uuid.UUID(usuario_filtro)
+                except ValueError:
+                    usuario_uuid = None
+                usuario_condiciones = [User.email.ilike(f"%{usuario_filtro}%")]
+                if usuario_uuid is not None:
+                    usuario_condiciones.append(Job.user_id == usuario_uuid)
+                stmt = stmt.where(or_(*usuario_condiciones))
+            if q.strip():
+                termino = f"%{q.strip()}%"
+                stmt = stmt.where(or_(
+                    Job.bot.ilike(termino),
+                    Job.operation.ilike(termino),
+                    Job.status.ilike(termino),
+                    cast(Job.id, String).ilike(termino),
+                    User.email.ilike(termino),
+                ))
+            filas = list((await sesion.execute(
+                stmt.offset(max(0, offset)).limit(max(1, min(limit, 200)))
+            )).scalars())
             ids = [fila.id for fila in filas]
             if not ids:
                 return []
@@ -379,6 +431,89 @@ def _bot_sections(
         })
     return sections
 
+
+def _table_catalog() -> list[dict[str, Any]]:
+    """Devuelve el catálogo visible del explorador sin reflejar tablas arbitrarias.
+
+    V2 permitía seleccionar cualquier tabla física. En V3 el catálogo es una
+    allowlist de tablas operativas y vistas virtuales por bot: así se consultan
+    datos reales de PostgreSQL sin permitir que el panel lea secretos, tablas
+    internas o columnas de infraestructura por reflexión.
+    """
+    from central_api.api.bots import CATALOGUE
+
+    entries = [
+        {
+            "name": name,
+            "label": name,
+            "kind": "canonical",
+            "bot": None,
+            "columns": list(TABLE_COLUMNS[name]),
+            "legacy": [],
+        }
+        for name in EXECUTION_TABLES
+    ]
+    for item in CATALOGUE:
+        bot = str(item["bot"])
+        entries.append({
+            "name": f"bot:{bot}",
+            "label": f"Bot {bot}",
+            "kind": "bot",
+            "bot": bot,
+            "columns": [
+                "job", "request", "response", "credentials", "artifacts", "events",
+            ],
+            "operations": list(item["operaciones"]),
+            "legacy": list(LEGACY_BOT_TABLES.get(bot, ())),
+        })
+    return entries
+
+
+def _table_entry(tabla: str) -> dict[str, Any] | None:
+    """Resuelve una tabla canónica, virtual por bot o alias V1/V2."""
+    normalized = tabla.strip()
+    entries = _table_catalog()
+    direct = next((entry for entry in entries if entry["name"] == normalized), None)
+    if direct is not None:
+        return direct
+    for entry in entries:
+        if normalized in entry.get("legacy", []):
+            return entry
+    return None
+
+
+def _job_matches(
+    job: Any,
+    *,
+    bot: str = "",
+    estado: str = "",
+    operacion: str = "",
+    usuario: str = "",
+    q: str = "",
+) -> bool:
+    """Aplica en memoria los mismos filtros públicos del explorador."""
+    values = {
+        "bot": str(getattr(job, "bot", "") or ""),
+        "estado": str(getattr(job, "status", "") or ""),
+        "operacion": str(getattr(job, "operation", "") or ""),
+        "usuario": str(
+            getattr(job, "user_email", None)
+            or (getattr(job, "payload", {}) or {}).get("user_id", "")
+        ),
+        "id": str(getattr(job, "id", "") or ""),
+    }
+    if bot and values["bot"] != bot:
+        return False
+    if estado and values["estado"] != estado:
+        return False
+    if operacion and values["operacion"] != operacion:
+        return False
+    if usuario and usuario.casefold() not in values["usuario"].casefold():
+        return False
+    if q and not any(q.casefold() in value.casefold() for value in values.values()):
+        return False
+    return True
+
 ESTADOS_TERMINALES = ("COMPLETO", "FALLIDO", "CANCELADO")
 ESTADOS_REINTENTABLES = ("FALLIDO",)
 
@@ -512,7 +647,11 @@ async def listar_registros_tablas_admin(
     job_id: str | None = None,
     bot: str = "",
     estado: str = "",
-    limit: int = 100,
+    operacion: str = "",
+    usuario: str = "",
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     """Lista cada tabla de ejecución con una forma compatible con V1/V2.
 
@@ -521,32 +660,94 @@ async def listar_registros_tablas_admin(
     metadatos, nunca URLs prefirmadas ni ``object_key``.
     """
     require_admin(authorization)
-    allowed = {"all", "jobs", "job_results", "job_artifacts", "job_events"}
-    if tabla not in allowed:
+    entry = _table_entry(tabla) if tabla != "all" else None
+    if tabla != "all" and entry is None:
         raise HTTPException(status_code=400, detail="tabla no válida")
-    registros = await _ejecuciones_db(
-        job_id=job_id, bot=bot, estado=estado, limit=limit
+    if entry and entry["kind"] == "bot":
+        table_bot = str(entry["bot"])
+        if bot and bot != table_bot:
+            raise HTTPException(status_code=400, detail="bot no coincide con la tabla")
+        bot = table_bot
+    page_size = max(1, min(limit, 100))
+    page_offset = max(0, offset)
+    registros_db = await _ejecuciones_db(
+        job_id=job_id,
+        bot=bot,
+        estado=estado,
+        operacion=operacion,
+        usuario=usuario,
+        q=q,
+        limit=page_size + 1,
+        offset=page_offset,
     )
-    if registros is None:
-        registros = [
+    if registros_db is None:
+        candidatos = [
             _registro_memoria(job)
             for job in sorted(
                 JOBS.values(),
                 key=lambda item: (str(item.created_at), item.id),
                 reverse=True,
             )
-            if (not bot or job.bot == bot) and (not estado or job.status == estado)
-        ][: max(1, min(limit, 500))]
+            if _job_matches(
+                job,
+                bot=bot,
+                estado=estado,
+                operacion=operacion,
+                usuario=usuario,
+                q=q,
+            )
+        ]
+        registros = candidatos[page_offset : page_offset + page_size + 1]
+        fuente = "memoria"
+    else:
+        registros = registros_db
+        fuente = "postgresql"
+    has_more = len(registros) > page_size
+    if has_more:
+        registros = registros[:page_size]
     tables = _registros_por_tabla(registros)
-    selected = registros if tabla == "all" else tables[tabla]
+    if tabla == "all" or (entry and entry["kind"] == "bot"):
+        selected = registros
+    else:
+        selected = tables[entry["name"]]
+    sections = (
+        _bot_sections(registros, bot_filter=bot)
+        if tabla == "all" or (entry and entry["kind"] == "bot")
+        else []
+    )
     return {
         "success": True,
         "tabla": tabla,
+        "tabla_resuelta": entry["name"] if entry else "all",
+        "catalogo": entry,
+        "filtros": {
+            "bot": bot,
+            "estado": estado,
+            "operacion": operacion,
+            "usuario": usuario,
+            "q": q,
+        },
+        "limit": page_size,
+        "offset": page_offset,
+        "has_more": has_more,
+        "next_offset": page_offset + page_size if has_more else None,
         "total": len(selected),
         "records": selected,
         "tables": tables,
-        "bot_sections": _bot_sections(registros, bot_filter=bot),
-        "fuente": "postgresql" if db_configurado() else "memoria",
+        "bot_sections": sections,
+        "fuente": fuente,
+    }
+
+
+@router.get("/table-catalog")
+def catalogo_tablas_admin(authorization: str | None = Header(default=None)) -> dict:
+    """Catálogo allowlistado para seleccionar una tabla sin renderizar todo."""
+    require_admin(authorization)
+    return {
+        "success": True,
+        "tables": _table_catalog(),
+        "canonical_tables": list(EXECUTION_TABLES),
+        "bot_tables": [entry for entry in _table_catalog() if entry["kind"] == "bot"],
     }
 
 
