@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
+from central_api.api.bots import CATALOGUE  # noqa: E402
 from central_api.main import create_app  # noqa: E402
 from central_api.security.credentials import (  # noqa: E402
     normalize_v2_payload,
@@ -225,12 +226,28 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         assert "clave" in job_record["credentials"]["fields"]
         assert "credential_ciphertext" not in job_record
         assert all("url" not in key.lower() for key in job_record)
+        sections = body["bot_sections"]
+        assert len(sections) == len(CATALOGUE)
+        assert sum(len(section["operaciones"]) for section in sections) == 42
+        ccma = next(section for section in sections if section["bot"] == "ccma")
+        assert ccma["tablas"] == ["jobs", "job_results", "job_artifacts", "job_events"]
+        assert "consulta_ccma_logs" in ccma["tablas_legacy"]
+        assert ccma["total"] == 1
+        ccma_record = ccma["records"][0]
+        assert "request" in ccma_record
+        assert "response" in ccma_record
+        assert "table-secret" not in response.text
         assert all(
             "url" not in key.lower()
             for row in body["tables"]["job_artifacts"]
             for key in row
         )
         _assert_no_storage_urls(body)
+        filtered = cliente.get("/admin/records?tabla=all&bot=ccma", headers=headers)
+        assert filtered.status_code == 200
+        filtered_sections = filtered.json()["bot_sections"]
+        assert len(filtered_sections) == 1
+        assert filtered_sections[0]["bot"] == "ccma"
         assert cliente.get(
             "/admin/records?tabla=invalid", headers=headers
         ).status_code == 400

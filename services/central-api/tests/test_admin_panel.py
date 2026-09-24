@@ -41,6 +41,11 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "Artefactos MinIO" in cuerpo
     assert "Asignado" in cuerpo
     assert "Finalizado" in cuerpo
+    assert "Tablas por bot" in cuerpo
+    assert "Request y response por cada bot" in cuerpo
+    assert "bot-sections" in cuerpo
+    assert "Ver request" in cuerpo
+    assert "Ver response" in cuerpo
 
 
 def test_panel_tables_es_alias_v2_y_abre_registros() -> None:

@@ -31,6 +31,44 @@ from central_api.store import JOBS, utcnow
 
 router = APIRouter()
 
+EXECUTION_TABLES = ("jobs", "job_results", "job_artifacts", "job_events")
+
+# Nombres de las tablas de logs que los administradores conocen de V1/V2. V3
+# conserva una fuente canónica normalizada, pero expone estos alias visuales
+# para que cada sección identifique la tabla histórica equivalente cuando la
+# operación tiene una correspondencia directa.
+LEGACY_BOT_TABLES = {
+    "aportes_en_linea": ("consulta_aportes_en_linea_logs",),
+    "ccma": ("consulta_ccma_logs",),
+    "certificado_mipyme": ("consulta_certificado_mipyme_logs",),
+    "controladores_fiscales": ("consulta_controladores_fiscales_logs",),
+    "declaracion_en_linea": ("consulta_declaracion_en_linea_logs",),
+    "facturometro": ("consulta_facturometro_logs",),
+    "hacienda": ("consulta_hacienda_logs",),
+    "libros_portal_iva": ("consulta_libros_iva_logs",),
+    "liquidacion_granos": ("consulta_liquidacion_granos_logs",),
+    "mis_comprobantes": ("consulta_mc_logs",),
+    "mis_facilidades": ("consulta_mis_facilidades_logs",),
+    "mis_retenciones": ("consulta_mis_retenciones_logs",),
+    "mis_retenciones_iva_simple": ("consulta_mis_retenciones_iva_simple_logs",),
+    "moa": ("consulta_moa_logs",),
+    "pago_devoluciones": ("consulta_pago_devoluciones_logs",),
+    "portal_iva": ("consulta_portal_iva_logs", "consulta_portal_iva_carga_logs"),
+    "rcel": ("consulta_rcel_logs",),
+    "retper_iibb_agip": (
+        "consulta_retenciones_percepciones_iibb_agip_logs",
+    ),
+    "retper_iibb_misiones": (
+        "consulta_retenciones_percepciones_iibb_misiones_logs",
+    ),
+    "sct": ("consulta_sct_logs", "consulta_sct_compensaciones_logs"),
+    "sifere": ("consulta_sifere_logs",),
+    "siper": ("consulta_siper_logs",),
+    "srt": ("consulta_srt_logs",),
+    "vep_archivo": ("consulta_vep_logs",),
+    "vep_ccma": ("consulta_vep_ccma_logs",),
+}
+
 
 async def _jobs_db() -> list | None:
     """Jobs desde PostgreSQL adaptados a la grilla; ``None`` sin base.
@@ -119,6 +157,7 @@ def _registro_memoria(job) -> dict:
             "finalizado_en": None,
         },
         "request": redactar_metadata(dict(job.payload or {})),
+        "response": redactar_metadata(resultado) if resultado else None,
         "credentials": {
             "available": bool(getattr(job, "credentials", None)),
             "fields": list((getattr(job, "credential_metadata", {}) or {}).get("fields", [])),
@@ -215,6 +254,16 @@ async def _ejecuciones_db(
                 ),
             },
             "request": redactar_metadata(dict(fila.request_payload or {})),
+            "response": (
+                {
+                    "attempt": resultado.attempt,
+                    "result": resultado.result,
+                    "payload": redactar_metadata(dict(resultado.payload or {})),
+                    "summary": redactar_metadata(dict(resultado.summary or {})),
+                    "received_at": _iso(resultado.received_at),
+                }
+                if resultado is not None else None
+            ),
             "result": (
                 {
                     "attempt": resultado.attempt,
@@ -279,6 +328,56 @@ def _registros_por_tabla(registros: list[dict[str, Any]]) -> dict[str, list[dict
         for event in registro.get("events") or []:
             tablas["job_events"].append({"job_id": job_id, **dict(event)})
     return tablas
+
+
+def _bot_sections(
+    registros: list[dict[str, Any]], *, bot_filter: str = ""
+) -> list[dict[str, Any]]:
+    """Agrupa registros por cada bot del catálogo, incluso si está vacío.
+
+    La sección conserva la separación histórica que ofrecían V1/V2, pero cada
+    fila sigue apuntando a las cuatro tablas canónicas de V3. El request y el
+    response son metadatos saneados, nunca contienen el ciphertext ni URLs de
+    almacenamiento.
+    """
+    from central_api.api.bots import CATALOGUE
+
+    by_bot: dict[str, list[dict[str, Any]]] = {}
+    for registro in registros:
+        bot = str((registro.get("job") or {}).get("bot") or "")
+        by_bot.setdefault(bot, []).append(registro)
+
+    sections = []
+    for item in CATALOGUE:
+        bot = str(item["bot"])
+        if bot_filter and bot != bot_filter:
+            continue
+        bot_records = by_bot.get(bot, [])
+        by_operation = {
+            operation: [
+                registro
+                for registro in bot_records
+                if (registro.get("job") or {}).get("operacion") == operation
+            ]
+            for operation in item["operaciones"]
+        }
+        sections.append({
+            "bot": bot,
+            "operaciones": list(item["operaciones"]),
+            "tablas": list(EXECUTION_TABLES),
+            "tablas_legacy": list(LEGACY_BOT_TABLES.get(bot, ())),
+            "total": len(bot_records),
+            "records": bot_records,
+            "por_operacion": [
+                {
+                    "operacion": operation,
+                    "total": len(operation_records),
+                    "records": operation_records,
+                }
+                for operation, operation_records in by_operation.items()
+            ],
+        })
+    return sections
 
 ESTADOS_TERMINALES = ("COMPLETO", "FALLIDO", "CANCELADO")
 ESTADOS_REINTENTABLES = ("FALLIDO",)
@@ -382,6 +481,7 @@ async def listar_ejecuciones_admin(
         "success": True,
         "total": len(registros),
         "records": registros,
+        "bot_sections": _bot_sections(registros, bot_filter=bot),
         "fuente": "postgresql" if db_configurado() else "memoria",
     }
 
@@ -445,6 +545,7 @@ async def listar_registros_tablas_admin(
         "total": len(selected),
         "records": selected,
         "tables": tables,
+        "bot_sections": _bot_sections(registros, bot_filter=bot),
         "fuente": "postgresql" if db_configurado() else "memoria",
     }
 

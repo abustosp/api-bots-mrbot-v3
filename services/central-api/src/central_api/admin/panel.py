@@ -121,6 +121,15 @@ th { color: var(--muted); font-size: 11px; letter-spacing: 1.2px; text-transform
 tr:last-child td { border-bottom: 0; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .code { display: block; padding: 10px; overflow-x: auto; border-radius: 10px; color: #fff; background: #332b28; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.bot-sections { display: grid; gap: 14px; margin-top: 18px; }
+.bot-section { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--panel-strong); }
+.bot-section > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: #fff8f1; }
+.bot-section-meta { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+.bot-section-body { padding: 0 14px 14px; }
+.bot-table { min-width: 1100px; }
+.payload details { min-width: 220px; max-width: 360px; }
+.payload summary { padding: 6px 8px; font-size: 12px; }
+.payload .code { max-height: 220px; overflow: auto; }
 details { margin-top: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,253,249,.55); }
 summary { padding: 12px 14px; cursor: pointer; font-weight: 700; }
 details > .details-body { padding: 0 14px 14px; }
@@ -191,6 +200,8 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="kicker">Historial unificado</div><h2>Registros de ejecuciones</h2><p class="subtle">Consulta request, resultado, artefactos y eventos de todos los bots desde una sola vista.</p>
         <form id="executions-filter" class="toolbar"><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><button class="button primary" type="submit">Actualizar</button></form>
         <div class="grid" id="execution-table-counts"><div class="empty">Cargando tablas...</div></div>
+        <div class="kicker" style="margin-top:24px">Tablas por bot</div><h3>Request y response por cada bot</h3><p class="subtle">Cada sección conserva las cuatro tablas canónicas de V3 y muestra los nombres históricos V1/V2 cuando existe una correspondencia directa.</p>
+        <div class="bot-sections" id="bot-sections"><div class="empty">Cargando secciones por bot...</div></div>
         <div class="table-wrap"><table><thead><tr><th>Creado</th><th>Asignado</th><th>Iniciado</th><th>Finalizado</th><th>Usuario</th><th>Job</th><th>Bot / operación</th><th>Estado</th><th>Credenciales</th><th>Resultado</th><th>Artefactos MinIO</th></tr></thead><tbody id="executions-table"><tr><td colspan="11" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
@@ -239,6 +250,29 @@ details > .details-body { padding: 0 14px 14px; }
   }
   function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; loaders[view](); }
   function renderEmpty(target, colspan, message = "Sin datos") { $(target).innerHTML = `<tr><td colspan="${colspan}" class="empty">${esc(message)}</td></tr>`; }
+  function payloadView(value, label) {
+    const empty = value === null || value === undefined || (typeof value === "object" && Object.keys(value).length === 0);
+    return empty ? "<span class=\"muted\">—</span>" : `<details class="payload"><summary>${esc(label)}</summary><pre class="code">${esc(json(value))}</pre></details>`;
+  }
+  function renderBotSections(sections) {
+    const node = $("#bot-sections");
+    if (!Array.isArray(sections) || !sections.length) { node.innerHTML = `<div class="empty">No hay bots en el catálogo.</div>`; return; }
+    node.innerHTML = sections.map((section) => {
+      const records = section.records || [];
+      const legacy = section.tablas_legacy || [];
+      const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
+      const tables = (section.tablas || []).map((table) => `<span class="pill">${esc(table)}</span>`).join(" ");
+      const legacyTables = legacy.length ? legacy.map((table) => `<span class="pill">${esc(table)}</span>`).join(" ") : `<span class="muted">sin tabla histórica directa</span>`;
+      const rows = records.length ? records.map((record) => {
+        const job = record.job || {};
+        const response = record.response ?? record.result;
+        const credentials = record.credentials || {};
+        const artifactNames = (record.artifacts || []).map((artifact) => artifact.name || artifact.filename).filter(Boolean);
+        return `<tr><td>${esc(date(job.creado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td><td>${payloadView(record.request, "Ver request")}</td><td>${payloadView(response, "Ver response")}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`;
+      }).join("") : `<tr><td colspan="8" class="empty">Sin ejecuciones para este bot.</td></tr>`;
+      return `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tablas V3:</strong> ${tables}<strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr><th>Creado</th><th>Operación</th><th>Usuario</th><th>Estado</th><th>Request</th><th>Response</th><th>Credenciales</th><th>Artefactos MinIO</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+    }).join("");
+  }
   async function loadDashboard() {
     try {
       const [metrics, fleet, audit] = await Promise.all([api("/admin/jobs/metrics"), api("/admin/fleet"), api("/admin/audit?limit=8")]);
@@ -269,7 +303,7 @@ details > .details-body { padding: 0 14px 14px; }
   }
   async function loadExecutions(event) {
     if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100", tabla: "all" }); const bot = $("#executions-bot").value.trim(); const estado = $("#executions-state").value.trim(); if (bot) params.set("bot", bot); if (estado) params.set("estado", estado);
-    try { const data = await api(`/admin/records?${params}`); const tables = data.tables || {}; $("#execution-table-counts").innerHTML = Object.entries(tables).map(([name, values]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(values.length)}</strong></div></div>`).join(""); const rows = data.records || []; $("#executions-table").innerHTML = rows.length ? rows.map((record) => { const job = record.job || {}; const result = record.result || {}; const credentials = record.credentials || {}; const artifacts = record.artifacts || []; const artifactNames = artifacts.map((artifact) => artifact.name || artifact.filename).filter(Boolean); return `<tr><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(date(job.finalizado_en))}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver (${esc((credentials.fields || []).join(", ") || "clave")})</button>` : "—"}</td><td>${esc(result.result || job.resultado || "—")}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`; }).join("") : `<tr><td colspan="11" class="empty">No hay ejecuciones para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+    try { const data = await api(`/admin/records?${params}`); renderBotSections(data.bot_sections || []); const tables = data.tables || {}; $("#execution-table-counts").innerHTML = Object.entries(tables).map(([name, values]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(values.length)}</strong></div></div>`).join(""); const rows = data.records || []; $("#executions-table").innerHTML = rows.length ? rows.map((record) => { const job = record.job || {}; const result = record.result || {}; const credentials = record.credentials || {}; const artifacts = record.artifacts || []; const artifactNames = artifacts.map((artifact) => artifact.name || artifact.filename).filter(Boolean); return `<tr><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(date(job.finalizado_en))}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver (${esc((credentials.fields || []).join(", ") || "clave")})</button>` : "—"}</td><td>${esc(result.result || job.resultado || "—")}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`; }).join("") : `<tr><td colspan="11" class="empty">No hay ejecuciones para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
   async function executionAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button || button.dataset.action !== "credential-detail") return;
@@ -287,7 +321,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction);
-  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table").addEventListener("click", executionAction);
+  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
