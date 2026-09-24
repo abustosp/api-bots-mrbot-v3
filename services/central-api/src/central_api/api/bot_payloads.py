@@ -8,6 +8,7 @@ validación de negocio definitiva continúa en el plugin del worker.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from functools import lru_cache
 from typing import Any, Literal
 
@@ -272,10 +273,44 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
 }
 
 
+_OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
+    # El worker usa modelos estrictos distintos para individual y masivo.
+    ("consulta_cuit", "consulta"): ("cuit",),
+    ("consulta_cuit", "consultar"): ("cuit",),
+    ("consulta_cuit", "consultar_masivo"): ("cuits",),
+    # solicitar no tiene opciones de salida porque solo inicia la consulta.
+    ("comprobantes", "solicitar"): (
+        "representado_cuit", "fecha_desde", "fecha_hasta", "representado_nombre",
+        "emitidos", "recibidos",
+    ),
+    ("mis_comprobantes", "solicitar"): (
+        "representado_cuit", "fecha_desde", "fecha_hasta", "representado_nombre",
+        "emitidos", "recibidos", "puntos_venta_emitidos", "puntos_venta_recibidos",
+    ),
+    # descargar no recibe el contenido TXT y importar no recibe flags de salida.
+    ("portal_iva", "descargar"): (
+        "periodo", "representado_cuit", "representado_nombre", "descarga_ventas",
+        "descarga_compras", "incluir_json", "subir_csv",
+    ),
+    ("portal_iva", "importar"): (
+        "periodo", "representado_cuit", "representado_nombre", "ventas_txt",
+        "compras_txt",
+    ),
+}
+
+
+def _fields_for_operation(bot: str, operation: str) -> dict[str, tuple[Any, Any]]:
+    fields = dict(_FAMILY_FIELDS.get(bot, {}))
+    names = _OPERATION_FIELD_NAMES.get((bot, operation))
+    if names is not None:
+        fields = {name: fields[name] for name in names if name in fields}
+    return fields
+
+
 @lru_cache(maxsize=None)
 def public_bot_body_model(bot: str, operation: str) -> type[BaseModel]:
     """Crea una clase Pydantic estable por pareja bot/operación para OpenAPI."""
-    fields = dict(_FAMILY_FIELDS.get(bot, {}))
+    fields = _fields_for_operation(bot, operation)
     fields["credentials"] = (
         dict[str, Any] | None,
         Field(default=None, description="Credenciales fiscales efímeras. Nunca se persisten."),
@@ -284,26 +319,67 @@ def public_bot_body_model(bot: str, operation: str) -> type[BaseModel]:
     return create_model(model_name, __base__=CompatBodyBase, **fields)
 
 
-def _example_value(field_name: str) -> Any:
-    """Valor seguro de ejemplo, nunca una credencial real."""
-    if "cuit" in field_name:
+def _example_value(field_name: str, bot: str, operation: str, default: Any) -> Any:
+    """Valor representativo y seguro para cada propiedad pública."""
+    if field_name == "credentials":
+        return {
+            "cuit_representante": "20123456789",
+            "clave": "REEMPLAZAR_CON_CREDENCIAL_SELLADA",
+        }
+    if field_name in {"cuit", "representado_cuit"}:
         return "20123456789"
+    if field_name in {"cuits", "cuits_consulta"}:
+        return ["20123456789", "27222222222"]
     if field_name.startswith("fecha_"):
         return "01/08/2026"
-    if field_name.startswith("periodo"):
-        return "202608"
-    if field_name in {"cuits", "cuits_consulta", "archivos", "despachos"}:
-        return ["20123456789"] if "cuit" in field_name else ["object-key-ejemplo"]
+    if field_name == "periodo_desde":
+        return "01/2026" if bot == "ccma" else "202608"
+    if field_name == "periodo_hasta":
+        return "02/2026" if bot == "ccma" else "202609"
+    if field_name == "periodo":
+        return "8" if bot == "consulta_pagos_vep" else "202608"
+    if field_name == "archivos":
+        return ["ventas-2026-08.csv", "compras-2026-08.csv"]
+    if field_name == "despachos":
+        return ["23-12345-1", "23-12346-8"]
     if field_name.startswith("puntos_venta"):
-        return [1]
+        return [1, 2]
     if field_name == "jurisdicciones":
-        return [901]
+        return [901, 902]
+    if field_name in {"situacion_excluyente"}:
+        return ["moroso"]
+    if field_name == "impuestos":
+        return ["217"] if bot == "mis_retenciones" else ["216", "217"]
+    if field_name == "tipos":
+        return ["Retencion", "Percepcion"]
+    if field_name == "secciones":
+        return ["vencimientos", "deudas"]
+    if field_name == "formatos":
+        return ["xlsx", "csv"]
+    if field_name == "medio_pago":
+        return "internet_banking"
+    if field_name == "metodo":
+        return "url"
+    if field_name in {"emitidos", "recibidos"}:
+        return True
+    if field_name in {"excel", "csv", "pdf"}:
+        return field_name == "excel"
+    if field_name in {"descarga_ventas", "descarga_compras"}:
+        return field_name == "descarga_ventas"
+    if field_name.endswith("_b64"):
+        if field_name == "archivo_b64" and bot == "vep_archivo":
+            return (
+                "MDEyMDEyMzQ1Njc4OTIwMDAxMDAxMDAwMDMwMDMwMDAxCjAyPFZFUCBucm9Gb3JtdWxhcmlvPSIyMDAwMSIgY29kVGlwb1BhZ289IjAyMCIgY29udHJpYnV5ZW50ZUNVSVQ9IjIwMTIzNDU2Nzg5IiBjb25jZXB0bz0iMDAzIiBzdWJDb25jZXB0bz0iMDAzIiBwZXJpb2RvRmlzY2FsPSIyMDI2MDgiIGltcG9ydGU9IjEwMC4wMCI+IDxPYmxpZ2FjaW9uIGltcHVlc3RvPSIwMDMiIGltcG9ydGU9IjEwMC4wMCIvPjwvVkVQPgo="
+            )
+        return "SGVsbG8gV29ybGQ="
+    if field_name in {"ventas_txt", "compras_txt"}:
+        return "contenido-de-archivo-de-ejemplo"
     if field_name in {"representado_nombre", "denominacion"}:
         return "Empresa de ejemplo"
-    if field_name.endswith("_b64"):
-        return "BASE64_DEL_ARCHIVO"
-    if field_name in {"impuestos", "tipos", "secciones", "formatos"}:
-        return ["ejemplo"]
+    if isinstance(default, bool):
+        return default
+    if field_name in {"name_hint", "archivo_nombre"}:
+        return "archivo-ejemplo.txt" if field_name == "archivo_nombre" else "constancia-ejemplo.pdf"
     return "valor-de-ejemplo"
 
 
@@ -313,11 +389,19 @@ def public_bot_body_schema(bot: str, operation: str) -> dict[str, Any]:
     model = public_bot_body_model(bot, operation)
     schema = model.model_json_schema()
     example = {
-        name: _example_value(name)
+        name: _example_value(name, bot, operation, field.default)
         for name, field in model.model_fields.items()
-        if field.is_required()
     }
     schema["examples"] = [example]
+    return schema
+
+
+@lru_cache(maxsize=None)
+def public_bot_payload_schema(bot: str, operation: str) -> dict[str, Any]:
+    """Schema del payload anidado, sin duplicar credentials del envelope."""
+    schema = deepcopy(public_bot_body_schema(bot, operation))
+    schema["properties"].pop("credentials", None)
+    schema["examples"][0].pop("credentials", None)
     return schema
 
 
@@ -325,4 +409,5 @@ __all__ = [
     "CompatBodyBase",
     "public_bot_body_model",
     "public_bot_body_schema",
+    "public_bot_payload_schema",
 ]

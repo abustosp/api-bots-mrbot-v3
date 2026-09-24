@@ -12,7 +12,10 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from central_api.api.bot_payloads import public_bot_body_schema
+from central_api.api.bot_payloads import (
+    public_bot_body_schema,
+    public_bot_payload_schema,
+)
 from central_api.api.dependencies import (
     check_idempotency,
     correlation_id,
@@ -191,6 +194,10 @@ def _canonical_body_openapi() -> dict:
     payload directamente, mientras que este esquema conserva el envelope y
     ofrece las 42 combinaciones bot/operación dentro de ``oneOf``.
     """
+    payload_example = dict(
+        public_bot_body_schema("ccma", "consultar")["examples"][0]
+    )
+    credentials_example = payload_example.pop("credentials", {})
     return {
         "requestBody": {
             "required": True,
@@ -202,7 +209,7 @@ def _canonical_body_openapi() -> dict:
                         "properties": {
                             "payload": {
                                 "oneOf": [
-                                    public_bot_body_schema(bot, operation)
+                                    public_bot_payload_schema(bot, operation)
                                     for bot, operation in OPERATIONS
                                 ],
                                 "description": (
@@ -221,8 +228,8 @@ def _canonical_body_openapi() -> dict:
                         },
                         "additionalProperties": False,
                         "example": {
-                            "payload": {"representado_cuit": "20123456789"},
-                            "credentials": {},
+                            "payload": payload_example,
+                            "credentials": credentials_example,
                         },
                     }
                 }

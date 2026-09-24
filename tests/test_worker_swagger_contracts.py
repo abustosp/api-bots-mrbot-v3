@@ -27,6 +27,7 @@ def test_worker_documenta_envelope_firmado_y_cancelacion() -> None:
     assert "Contrato interno central-worker" in envelope["description"]
     assert envelope["examples"][0]["protocol_version"] == 1
     assert envelope["examples"][0]["payload"]["representado_cuit"] == "20123456789"
+    assert set(envelope["properties"]) == set(envelope["examples"][0])
 
     cancel = schema["paths"]["/internal/v1/jobs/{job_id}/cancel"]["post"]
     assert cancel["requestBody"]["content"]["application/json"]["schema"] == {
@@ -35,3 +36,4 @@ def test_worker_documenta_envelope_firmado_y_cancelacion() -> None:
     cancel_schema = schema["components"]["schemas"]["CancelIn"]
     assert "La central firma" in cancel_schema["description"]
     assert cancel_schema["examples"][0]["reason"] == "cancelado_por_usuario"
+    assert set(cancel_schema["properties"]) == set(cancel_schema["examples"][0])

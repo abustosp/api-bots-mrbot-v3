@@ -24,6 +24,7 @@ def test_todos_los_aliases_documentan_body_json_y_ejemplo() -> None:
         body_schema = request_body["content"]["application/json"]["schema"]
         assert body_schema["type"] == "object"
         assert body_schema["examples"]
+        assert set(body_schema["properties"]) == set(body_schema["examples"][0])
         assert "credentials" in body_schema["properties"]
 
 
@@ -68,3 +69,8 @@ def test_ruta_canonica_muestra_el_envelope_y_los_payloads_de_bots() -> None:
     assert body["required"] == ["payload"]
     assert len(body["properties"]["payload"]["oneOf"]) == 42
     assert body["example"]["payload"]["representado_cuit"] == "20123456789"
+    assert body["example"]["credentials"]["clave"] == "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
+    for payload_schema in body["properties"]["payload"]["oneOf"]:
+        assert set(payload_schema["properties"]) == set(payload_schema["examples"][0])
+        assert "credentials" not in payload_schema["properties"]
+        assert "credentials" not in payload_schema["examples"][0]

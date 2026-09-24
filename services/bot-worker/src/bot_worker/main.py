@@ -140,16 +140,50 @@ class JobEnvelope(BaseModel):
             "examples": [
                 {
                     "protocol_version": 1,
+                    "sealed": {
+                        "alg": "RSA-OAEP-SHA256+Fernet",
+                        "enc_key_b64": "BASE64_SEALED_KEY",
+                        "blob_b64": "BASE64_SEALED_PAYLOAD",
+                    },
+                    "sealed_section": {
+                        "alg": "RSA-OAEP-SHA256+Fernet",
+                        "enc_key_b64": "BASE64_SEALED_KEY",
+                        "blob_b64": "BASE64_SEALED_PAYLOAD",
+                    },
                     "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10",
                     "attempt": 1,
                     "lease_id": "0190c2d4-7b4a-7b60-9f28-3efc1f7b1b10",
                     "lease_expires_at": "2026-09-24T03:00:00Z",
+                    "assignment_token": "issued-in-memory-by-central",
                     "bot": "ccma",
                     "plugin": "ccma",
+                    "plugin_version": "3.0.0",
                     "operation": "consultar",
+                    "deadline_at": "2026-09-24T03:05:00Z",
+                    "idempotency_key": "job-0190c2d4-attempt-1",
                     "payload": {"representado_cuit": "20123456789"},
+                    "credentials": {
+                        "cuit_representante": "20123456789",
+                        "clave": "REEMPLAZAR_CON_CREDENCIAL_SELLADA",
+                    },
+                    "proxy_profile": {"mode": "direct", "country": "ar"},
+                    "artifact_uploads": [
+                        {
+                            "artifact_id": "artifact-01",
+                            "name_hint": "constancia.pdf",
+                            "put_url": "https://storage.example.invalid/put",
+                            "object_key": "jobs/0190c2d4/constancia.pdf",
+                            "max_bytes": 52428800,
+                            "content_types": ["application/pdf"],
+                        }
+                    ],
+                    "callback": {
+                        "events_url": "https://central-api.mrbot.com.ar/internal/v1/jobs/events"
+                    },
                     "assignment_signature": "base64-ed25519-signature",
                     "assignment_expires_at": "2026-09-24T03:00:00Z",
+                    "captcha_profile": {"provider": "disabled"},
+                    "service_profile": {"name": "development"},
                 }
             ],
         },
