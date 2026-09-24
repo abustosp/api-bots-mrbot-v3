@@ -180,24 +180,36 @@ async def dispatch_claimed(
 async def scheduler_round() -> dict:
     """Una vuelta de claims hasta ``scheduler_batch_size`` (con cesión)."""
     settings = get_settings()
-    outcome = {"asignados": 0, "vacíos": 0}
-    empty_rounds = 0
+    outcome = {"asignados": 0, "vacíos": 0, "sin_claim": 0}
+    #: Rondas consecutivas sin progreso. Solo una entrega confirmada la
+    #: reinicia: un claim exitoso no es progreso, porque puede morir en la
+    #: reserva (sin worker con cupo o con PostgreSQL caído).
+    sin_progreso = 0
     for _ in range(settings.scheduler_batch_size):
         job = claim_next_job()
         if job is None:
             if not has_schedulable_work():
                 break  # cola realmente vacía: dormir
-            empty_rounds += 1
+            sin_progreso += 1
             outcome["vacíos"] += 1
-            if empty_rounds >= settings.scheduler_max_empty_rounds:
+            if sin_progreso >= settings.scheduler_max_empty_rounds:
                 break  # contención sostenida: ceder el turno
             continue
-        empty_rounds = 0
         worker, token, lease_id, expira = await claim_and_reserve(job)
         if worker is None:
+            # Sin worker con cupo (o con el claim PostgreSQL caído) el job no se
+            # puede entregar: devolverlo a PENDIENTE y ceder el turno. Si se
+            # reintentara sin límite, cada iteración repetiría el mismo claim
+            # fallido y una caída de base costaría ``scheduler_batch_size``
+            # round-trips por vuelta; con el tope se duerme y se reintenta.
             job.status = "PENDIENTE"
             job.worker_node = None
+            sin_progreso += 1
+            outcome["sin_claim"] += 1
+            if sin_progreso >= settings.scheduler_max_empty_rounds:
+                break
             continue
+        sin_progreso = 0
         await dispatch_claimed(job, worker, token, lease_id, expira)
         outcome["asignados"] += 1
     return outcome
