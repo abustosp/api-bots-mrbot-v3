@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import sys
 from pathlib import Path
 
@@ -253,6 +254,18 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         assert cliente.get(
             "/admin/records?tabla=invalid", headers=headers
         ).status_code == 400
+        # Un filtro mal formado no puede devolver una página sin filtrar como si
+        # fuera válida: el identificador se valida antes de tocar la base.
+        mal_formado = cliente.get(
+            "/admin/records?tabla=all&job_id=no-es-uuid", headers=headers
+        )
+        assert mal_formado.status_code == 400
+        assert mal_formado.json()["detail"] == "job_id con formato inválido"
+        valido = cliente.get(
+            f"/admin/records?tabla=all&job_id={job_id}", headers=headers
+        )
+        assert valido.status_code == 200
+        assert [row["id"] for row in valido.json()["tables"]["jobs"]] == [job_id]
     finally:
         JOBS.clear()
         get_settings.cache_clear()
@@ -443,7 +456,10 @@ def test_admin_records_consulta_tabla_fisica_por_bot_con_filtros_y_redaccion(mon
         assert row["request_payload"]["representado_cuit"] == "20123456789"
         assert row["request_payload"]["password"] == "[REDACTED]"
         assert row["response_payload"]["items"][0]["token"] == "[REDACTED]"
-        assert row["credential_metadata"] == "[REDACTED]"
+        # La metadata de credencial se abre a los nombres de campo usados: son
+        # los que ya expone la vista canónica, nunca el material sellado.
+        assert row["credential_metadata"] == {"fields": ["password"]}
+        assert "never-select-this-column" not in json.dumps(body)
         _assert_no_storage_urls(body)
         assert "plain-table-secret" not in response.text
         assert "plain-response-secret" not in response.text

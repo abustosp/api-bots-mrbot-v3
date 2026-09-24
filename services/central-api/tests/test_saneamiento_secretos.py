@@ -148,6 +148,65 @@ def test_redactar_metadata_aplica_clave_y_valor() -> None:
     assert "no debe salir" not in str(salida)
 
 
+def test_vista_de_tabla_muestra_metadatos_de_credencial_sin_valores() -> None:
+    """El panel enseña qué credencial se usó, nunca el material ni una URL."""
+    from central_api.admin.jobs import _sanear_valor_tabla
+
+    salida = _sanear_valor_tabla(
+        {
+            "job_id": "01a0d380-a8b3-7b78-a8b9-eb69a7c24512",
+            "credential_metadata": {
+                "fields": ["clave"],
+                "context": {"representado_cuit": "20111111112", "clave": "no debe salir"},
+                "blob": "tampoco",
+            },
+            "credential_ciphertext": "QUJD",
+            "object_key": "jobs/x/1/salida.pdf",
+            "referencia_descarga": "https://minio.interno/x?sig=1",
+            "request_payload": {"notas": "usuario=prueba password=secreta123"},
+        }
+    )
+    assert salida["job_id"] == "01a0d380-a8b3-7b78-a8b9-eb69a7c24512"
+    assert salida["credential_metadata"] == {
+        "fields": ["clave"],
+        "context": {"representado_cuit": "20111111112", "clave": "[REDACTED]"},
+    }
+    assert salida["credential_ciphertext"] == "[REDACTED]"
+    assert salida["request_payload"] == {
+        "notas": f"usuario=prueba password={MARCA_SECRETO}"
+    }
+    crudo = str(salida)
+    for prohibido in ("QUJD", "no debe salir", "tampoco", "object_key", "minio.interno"):
+        assert prohibido not in crudo
+
+    # La tabla física sanea columna por columna: ``credential_metadata`` es la
+    # única clave sensible que se abre a subcampos seguros.
+    from central_api.admin.jobs import _sanear_campo
+
+    assert _sanear_campo(
+        "credential_metadata",
+        {
+            "fields": ["clave"],
+            "context": {"representado_cuit": "20111111112", "clave": "no debe salir"},
+            "blob": "tampoco",
+        },
+    ) == {
+        "fields": ["clave"],
+        "context": {"representado_cuit": "20111111112", "clave": "[REDACTED]"},
+    }
+    for nombre_tapado in (
+        "credential_ciphertext",
+        "credential_metadata_ciphertext",
+        "authorization",
+        "password",
+    ):
+        assert _sanear_campo(nombre_tapado, {"fields": ["clave"], "context": {}}) == "[REDACTED]"
+    assert _sanear_campo("credential_metadata", "no debe salir") == "[REDACTED]"
+    assert _sanear_campo("credenciales", {"available": True, "ciphertext": "QUJD"}) == {
+        "available": True
+    }
+
+
 def test_submit_job_rechaza_payload_con_secreto_con_422(entorno_limpio) -> None:
     """Material sensible del cliente es defecto de entrada, no caída de servicio."""
     cliente = TestClient(create_app())

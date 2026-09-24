@@ -63,13 +63,65 @@ def _bot_physical_table(bot: str) -> str | None:
     return f"bot_jobs_{bot}"
 
 
+#: Subcampos no secretos que el panel puede mostrar de una credencial.
+SUBCAMPOS_DE_CREDENCIAL = ("available", "fields", "context")
+
+
+def _es_contenedor_de_credenciales(normalizado: str) -> bool:
+    """Indica si la clave describe credenciales sin contener valores.
+
+    La credencial viaja sellada; lo que el panel puede mostrar de ella son los
+    nombres de campo usados y el contexto no secreto. ``credential_metadata``
+    lo calcula la central (nunca el cliente), así que se filtra a los mismos
+    subcampos seguros en vez de taparlo entero, que dejaría al operador sin
+    saber qué credencial consumió el job.
+    """
+    return normalizado in {
+        "credentials",
+        "credenciales",
+        "credentialmetadata",
+        "credencialmetadata",
+        "credentialmeta",
+    }
+
+
+def _sanear_contenedor_credencial(anidado: dict) -> dict:
+    """Conserva solo los subcampos seguros, saneando cada uno de nuevo."""
+    return {
+        nombre_seguro: _sanear_valor_tabla(anidado.get(nombre_seguro))
+        for nombre_seguro in SUBCAMPOS_DE_CREDENCIAL
+        if nombre_seguro in anidado
+    }
+
+
+def _normalizar_nombre(nombre: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(nombre).lower())
+
+
+def _sanear_campo(nombre: object, valor: Any) -> Any:
+    """Sanea el valor de una columna con nombre conocido.
+
+    Una credencial (o su metadata) se filtra a los subcampos seguros cuando es
+    un objeto; el resto de los nombres sensibles se tapan completos.
+    """
+    if _es_contenedor_de_credenciales(_normalizar_nombre(nombre)):
+        return (
+            _sanear_contenedor_credencial(valor)
+            if isinstance(valor, dict)
+            else "[REDACTED]"
+        )
+    if es_clave_sensible(str(nombre)):
+        return "[REDACTED]"
+    return _sanear_valor_tabla(valor)
+
+
 def _sanear_valor_tabla(valor: Any) -> Any:
     """Redacta secretos y omite claves/valores de almacenamiento o URL."""
     if isinstance(valor, dict):
         salida = {}
         for clave, anidado in valor.items():
             nombre = str(clave)
-            normalizado = re.sub(r"[^a-z0-9]", "", nombre.lower())
+            normalizado = _normalizar_nombre(nombre)
             if (
                 "objectkey" in normalizado
                 or "url" in normalizado
@@ -78,12 +130,8 @@ def _sanear_valor_tabla(valor: Any) -> Any:
                 or normalizado.endswith("uri")
             ):
                 continue
-            if normalizado in {"credentials", "credenciales"} and isinstance(anidado, dict):
-                salida[clave] = {
-                    nombre_seguro: _sanear_valor_tabla(anidado.get(nombre_seguro))
-                    for nombre_seguro in ("available", "fields", "context")
-                    if nombre_seguro in anidado
-                }
+            if _es_contenedor_de_credenciales(normalizado) and isinstance(anidado, dict):
+                salida[clave] = _sanear_contenedor_credencial(anidado)
                 continue
             if es_clave_sensible(nombre):
                 salida[clave] = "[REDACTED]"
@@ -539,8 +587,7 @@ async def _bot_table_records_db(
 
     records = [
         {
-            name: "[REDACTED]" if es_clave_sensible(name)
-            else _sanear_valor_tabla(row.get(name))
+            name: _sanear_campo(name, row.get(name))
             for name in columns
         } | {"usuario_email": _sanear_valor_tabla(row.get("usuario_email"))}
         for row in rows
@@ -858,6 +905,13 @@ async def listar_registros_tablas_admin(
     metadatos, nunca URLs prefirmadas ni ``object_key``.
     """
     require_admin(authorization)
+    if job_id:
+        # Se valida en la entrada para que TODO camino (tabla física, canónica o
+        # respaldo en memoria) rechace el filtro mal formado. Si se dejara pasar,
+        # la consulta canónica lanzaría ValueError y el ``except`` amplio de
+        # ``_ejecuciones_db`` devolvería una página sin filtrar como si fuera
+        # válida, engañando al operador.
+        job_id = _validar_uuid(job_id)
     entry = _table_entry(tabla) if tabla != "all" else None
     if tabla != "all" and entry is None:
         raise HTTPException(status_code=400, detail="tabla no válida")
