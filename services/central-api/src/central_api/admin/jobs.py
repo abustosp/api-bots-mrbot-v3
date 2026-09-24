@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -19,7 +20,12 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from central_api.admin._common import redactar_metadata, require_admin, validar_motivo
+from central_api.admin._common import (
+    es_clave_sensible,
+    redactar_metadata,
+    require_admin,
+    validar_motivo,
+)
 from central_api.admin.audit import log_event
 from central_api.db import db_configurado, nueva_sesion
 from central_api.security.rsa_credentials import (
@@ -32,6 +38,64 @@ from central_api.store import JOBS, utcnow
 router = APIRouter()
 
 EXECUTION_TABLES = ("jobs", "job_results", "job_artifacts", "job_events")
+
+# Contrato de las tablas físicas por bot. Solo estas columnas se seleccionan y
+# se exponen aunque una tabla futura agregue datos internos o credenciales.
+BOT_TABLE_COLUMNS = (
+    "job_id", "user_id", "worker_id", "bot", "operation", "status",
+    "result", "priority", "attempts", "max_attempts", "app_version",
+    "protocol_version", "cancel_reason", "cancelled_by", "error_code",
+    "request_payload", "response_payload", "response_summary",
+    "response_received_at", "credential_metadata", "created_at",
+    "assigned_at", "started_at", "finished_at", "updated_at",
+    "artifact_names", "artifact_metadata",
+)
+
+_URL_VALUE = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*://[^\s\"'<>]+|www\.[^\s\"'<>]+)")
+
+
+def _bot_physical_table(bot: str) -> str | None:
+    """Resuelve únicamente códigos de bot del catálogo a un identificador fijo."""
+    from central_api.api.bots import CATALOGUE
+
+    known_bots = {str(item["bot"]) for item in CATALOGUE}
+    if bot not in known_bots or not re.fullmatch(r"[a-z][a-z0-9_]*", bot):
+        return None
+    return f"bot_jobs_{bot}"
+
+
+def _sanear_valor_tabla(valor: Any) -> Any:
+    """Redacta secretos y omite claves/valores de almacenamiento o URL."""
+    if isinstance(valor, dict):
+        salida = {}
+        for clave, anidado in valor.items():
+            nombre = str(clave)
+            normalizado = re.sub(r"[^a-z0-9]", "", nombre.lower())
+            if (
+                "objectkey" in normalizado
+                or "url" in normalizado
+                or "href" in normalizado
+                or normalizado == "uri"
+                or normalizado.endswith("uri")
+            ):
+                continue
+            if normalizado in {"credentials", "credenciales"} and isinstance(anidado, dict):
+                salida[clave] = {
+                    nombre_seguro: _sanear_valor_tabla(anidado.get(nombre_seguro))
+                    for nombre_seguro in ("available", "fields", "context")
+                    if nombre_seguro in anidado
+                }
+                continue
+            if es_clave_sensible(nombre):
+                salida[clave] = "[REDACTED]"
+            else:
+                salida[clave] = _sanear_valor_tabla(anidado)
+        return salida
+    if isinstance(valor, (list, tuple)):
+        return [_sanear_valor_tabla(item) for item in valor]
+    if isinstance(valor, str):
+        return _URL_VALUE.sub("[URL OCULTA]", valor)
+    return valor
 
 TABLE_COLUMNS = {
     "jobs": (
@@ -356,6 +420,141 @@ async def _ejecuciones_db(
     return salida
 
 
+async def _bot_table_records_db(
+    *,
+    bot: str,
+    job_id: str | None = None,
+    estado: str = "",
+    operacion: str = "",
+    usuario: str = "",
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any] | None:
+    """Consulta la tabla física allowlistada de un bot sin reflejar columnas secretas.
+
+    El nombre se genera desde el catálogo canónico. Se consultan las columnas
+    visibles conocidas, verificadas contra ``information_schema`` para tolerar
+    despliegues graduales sin leer columnas internas agregadas en el futuro.
+    ``None`` indica que la tabla aún no existe y permite el fallback V3.
+    """
+    table_name = _bot_physical_table(bot)
+    if not table_name or not db_configurado():
+        return None
+    try:
+        from sqlalchemy import text
+    except Exception:  # noqa: BLE001 - desarrollo sin SQLAlchemy
+        return None
+
+    try:
+        async with nueva_sesion() as sesion:
+            available = (await sesion.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = :table_name "
+                    "ORDER BY ordinal_position"
+                ),
+                {"table_name": table_name},
+            )).scalars().all()
+            available_set = set(available)
+            if not available_set:
+                return None
+            columns = [name for name in BOT_TABLE_COLUMNS if name in available_set]
+            required_columns = {
+                "job_id", "user_id", "bot", "operation", "status",
+                "request_payload", "response_payload", "created_at",
+            }
+            if not required_columns.issubset(columns):
+                raise HTTPException(
+                    status_code=503,
+                    detail="La tabla física del bot no tiene el esquema esperado",
+                )
+
+            conditions: list[str] = []
+            params: dict[str, Any] = {}
+            conditions.append("t.bot = :bot")
+            params["bot"] = bot
+            if job_id:
+                try:
+                    params["job_id"] = str(uuid.UUID(job_id))
+                except (ValueError, AttributeError, TypeError) as exc:
+                    raise HTTPException(status_code=400, detail="job_id con formato inválido") from exc
+                conditions.append("t.job_id = CAST(:job_id AS UUID)")
+            if estado.strip() and "status" in columns:
+                conditions.append("t.status = :estado")
+                params["estado"] = estado.strip()
+            if operacion.strip() and "operation" in columns:
+                conditions.append("t.operation = :operacion")
+                params["operacion"] = operacion.strip()
+            if usuario.strip():
+                user_value = usuario.strip()
+                conditions.append(
+                    "(CAST(t.user_id AS TEXT) = :usuario_uuid "
+                    "OR u.email ILIKE :usuario_email)"
+                )
+                params["usuario_uuid"] = user_value
+                params["usuario_email"] = f"%{user_value}%"
+            if q.strip():
+                searchable = [
+                    "CAST(t.job_id AS TEXT)",
+                    "CAST(t.user_id AS TEXT)",
+                    "u.email",
+                ]
+                searchable.extend(
+                    f"CAST(t.{name} AS TEXT)"
+                    for name in ("bot", "operation", "status")
+                    if name in columns
+                )
+                conditions.append("(" + " OR ".join(
+                    f"{expression} ILIKE :q" for expression in searchable
+                ) + ")")
+                params["q"] = f"%{q.strip()}%"
+            where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+            from_sql = (
+                f'FROM public."{table_name}" AS t '
+                "LEFT JOIN public.users AS u ON u.id = t.user_id"
+            )
+            total = int((await sesion.execute(
+                text(f"SELECT COUNT(*) {from_sql}{where_sql}"), params
+            )).scalar_one())
+
+            # Los nombres interpolados provienen exclusivamente de la constante
+            # BOT_TABLE_COLUMNS y del catálogo, no de parámetros HTTP.
+            select_sql = ", ".join(f't."{name}"' for name in columns)
+            select_sql += ', u.email AS "usuario_email"'
+            query = (
+                f"SELECT {select_sql} {from_sql}{where_sql} "
+                "ORDER BY t.created_at DESC NULLS LAST, t.job_id DESC "
+                "LIMIT :limit OFFSET :offset"
+            )
+            params["limit"] = max(1, min(int(limit), 100))
+            params["offset"] = max(0, int(offset))
+            rows = (await sesion.execute(text(query), params)).mappings().all()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - no ocultar fallas reales de PostgreSQL
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo consultar la tabla física del bot",
+        ) from exc
+
+    records = [
+        {
+            name: "[REDACTED]" if es_clave_sensible(name)
+            else _sanear_valor_tabla(row.get(name))
+            for name in columns
+        } | {"usuario_email": _sanear_valor_tabla(row.get("usuario_email"))}
+        for row in rows
+    ]
+    return {
+        "table": table_name,
+        "columns": columns,
+        "display_columns": [*columns, "usuario_email"],
+        "records": records,
+        "total": total,
+    }
+
+
 def _registros_por_tabla(registros: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Descompone el agregado en las tablas operativas que reemplazan V1/V2."""
     tablas = {
@@ -460,9 +659,9 @@ def _table_catalog() -> list[dict[str, Any]]:
             "label": f"Bot {bot}",
             "kind": "bot",
             "bot": bot,
-            "columns": [
-                "job", "request", "response", "credentials", "artifacts", "events",
-            ],
+            "physical_name": _bot_physical_table(bot),
+            "physical": True,
+            "columns": list(BOT_TABLE_COLUMNS),
             "operations": list(item["operaciones"]),
             "legacy": list(LEGACY_BOT_TABLES.get(bot, ())),
         })
@@ -670,6 +869,61 @@ async def listar_registros_tablas_admin(
         bot = table_bot
     page_size = max(1, min(limit, 100))
     page_offset = max(0, offset)
+
+    if entry and entry["kind"] == "bot":
+        physical = await _bot_table_records_db(
+            bot=bot,
+            job_id=job_id,
+            estado=estado,
+            operacion=operacion,
+            usuario=usuario,
+            q=q,
+            limit=page_size,
+            offset=page_offset,
+        )
+        if physical is not None:
+            records = physical["records"]
+            total = physical["total"]
+            has_more = page_offset + len(records) < total
+            tables = _registros_por_tabla([])
+            tables[physical["table"]] = records
+            section = {
+                "bot": bot,
+                "operaciones": list(entry.get("operations", [])),
+                "tablas": [physical["table"]],
+                "tablas_legacy": list(entry.get("legacy", [])),
+                "total": total,
+                "records": records,
+                "columns": physical["columns"],
+                "display_columns": physical["display_columns"],
+                "physical_table": True,
+            }
+            return {
+                "success": True,
+                "tabla": tabla,
+                "tabla_resuelta": entry["name"],
+                "catalogo": entry,
+                "filtros": {
+                    "bot": bot,
+                    "estado": estado,
+                    "operacion": operacion,
+                    "usuario": usuario,
+                    "q": q,
+                },
+                "limit": page_size,
+                "offset": page_offset,
+                "has_more": has_more,
+                "next_offset": page_offset + page_size if has_more else None,
+                "total": total,
+                "records": records,
+                "tables": tables,
+                "bot_sections": [section],
+                "physical_table": True,
+                "columns": physical["columns"],
+                "display_columns": physical["display_columns"],
+                "fuente": "postgresql",
+            }
+
     registros_db = await _ejecuciones_db(
         job_id=job_id,
         bot=bot,
@@ -702,6 +956,10 @@ async def listar_registros_tablas_admin(
     else:
         registros = registros_db
         fuente = "postgresql"
+    if entry and entry["kind"] == "bot":
+        # Antes de desplegar la migración, el panel conserva el fallback V3;
+        # aplicar la misma política estricta evita que esa ruta filtre URLs.
+        registros = [_sanear_valor_tabla(registro) for registro in registros]
     has_more = len(registros) > page_size
     if has_more:
         registros = registros[:page_size]

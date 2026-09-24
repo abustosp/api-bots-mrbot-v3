@@ -197,7 +197,7 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="executions">
-        <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla detallada de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
+        <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla física de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
         <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-select">Tabla</label><select id="executions-table-select" required><option value="">Cargando catálogo...</option></select></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option selected>50</option><option>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
         <div class="form-actions"><button class="button secondary small" type="button" id="executions-previous">Anterior</button><button class="button secondary small" type="button" id="executions-next">Siguiente</button><span class="muted" id="execution-table-status">Selecciona una tabla.</span></div>
         <div class="card table-description" id="table-description"><strong>Tablas por bot</strong><br><span class="muted">Request y response por cada bot, con credenciales protegidas, artefactos por nombre, eventos y timestamps Creado, Asignado, Iniciado y Finalizado.</span></div>
@@ -273,6 +273,29 @@ details > .details-body { padding: 0 14px 14px; }
     }).join("") : `<tr><td colspan="8" class="empty">Sin ejecuciones para este bot.</td></tr>`;
     node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tablas V3:</strong> ${(section.tablas || []).map((table) => `<span class="pill">${esc(table)}</span>`).join(" ")}<strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr><th>Job / creado</th><th>Operación</th><th>Usuario</th><th>Estado</th><th>Request</th><th>Response</th><th>Credenciales</th><th>Artefactos MinIO</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
+  function renderPhysicalBotSection(section) {
+    const node = $("#bot-sections");
+    $("#executions-head").closest(".table-wrap").classList.add("hidden");
+    const columns = Array.isArray(section.display_columns)
+      ? section.display_columns
+      : (Array.isArray(section.columns) ? section.columns : []);
+    const records = Array.isArray(section.records) ? section.records : [];
+    if (!columns.length) { node.innerHTML = `<div class="empty">No hay columnas visibles para la tabla física.</div>`; return; }
+    const cells = (record) => columns.map((column) => {
+      const value = record[column];
+      if (["request_payload", "response_payload", "artifact_metadata"].includes(column)) {
+        const label = column === "request_payload" ? "Ver request" : column === "response_payload" ? "Ver response" : "Ver metadatos";
+        return `<td>${payloadView(value, label)}</td>`;
+      }
+      if (value && typeof value === "object") return `<td>${payloadView(value, "Ver datos")}</td>`;
+      return `<td>${esc(value ?? "—")}</td>`;
+    }).join("");
+    const rows = records.length
+      ? records.map((record) => `<tr>${cells(record)}</tr>`).join("")
+      : `<tr><td colspan="${Math.max(columns.length, 1)}" class="empty">Sin registros para este bot y filtro.</td></tr>`;
+    const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
+    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tabla física:</strong> <code>${esc(section.tablas?.[0] || "")}</code><strong>Campos sensibles:</strong> secretos, object_key y URLs ocultos</div><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+  }
   function renderCanonicalTable(tableName, rows) {
     const head = $("#executions-head");
     const body = $("#executions-table");
@@ -292,7 +315,7 @@ details > .details-body { padding: 0 14px 14px; }
     const canonical = state.tableCatalog.filter((item) => item.kind === "canonical");
     const bots = state.tableCatalog.filter((item) => item.kind === "bot");
     select.innerHTML = `<option value="">Selecciona una tabla</option><optgroup label="Tablas PostgreSQL">${canonical.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}</option>`).join("")}</optgroup><optgroup label="Tablas detalladas por bot">${bots.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}${item.legacy?.length ? ` · ${esc(item.legacy.join(", "))}` : ""}</option>`).join("")}</optgroup>`;
-    select.value = canonical[0]?.name || bots[0]?.name || "";
+    select.value = bots[0]?.name || canonical[0]?.name || "";
     $("#execution-table-counts").innerHTML = `<div class="card"><div class="metric"><span>Tablas PostgreSQL</span><strong>${canonical.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas por bot</span><strong>${bots.length}</strong></div></div>`;
   }
   async function loadTableCatalog() {
@@ -346,7 +369,8 @@ details > .details-body { padding: 0 14px 14px; }
       if (data.catalogo?.kind === "bot") {
         $("#executions-head").innerHTML = "<tr><th>Tabla detallada por bot</th></tr>";
         $("#executions-table").innerHTML = `<tr><td class="empty">La tabla detallada se muestra arriba.</td></tr>`;
-        renderBotSections(data.bot_sections || []);
+        if (data.physical_table) renderPhysicalBotSection(data.bot_sections?.[0] || {});
+        else renderBotSections(data.bot_sections || []);
       } else {
         renderCanonicalTable(data.tabla_resuelta || tabla, data.records || []);
       }

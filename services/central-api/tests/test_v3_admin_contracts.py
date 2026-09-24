@@ -14,6 +14,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from central_api.api.bots import CATALOGUE  # noqa: E402
+from central_api.admin import jobs as admin_jobs  # noqa: E402
 from central_api.main import create_app  # noqa: E402
 from central_api.security.credentials import (  # noqa: E402
     normalize_v2_payload,
@@ -277,6 +278,11 @@ def test_admin_table_catalogo_y_tabla_virtual_por_bot(monkeypatch) -> None:
         assert next(item for item in body["bot_tables"] if item["name"] == "bot:ccma")["legacy"] == [
             "consulta_ccma_logs"
         ]
+        ccma_table = next(item for item in body["bot_tables"] if item["name"] == "bot:ccma")
+        assert ccma_table["physical_name"] == "bot_jobs_ccma"
+        assert "request_payload" in ccma_table["columns"]
+        assert "response_payload" in ccma_table["columns"]
+        assert "credential_ciphertext" not in ccma_table["columns"]
 
         for suffix in ("one", "two"):
             created = cliente.post(
@@ -285,6 +291,13 @@ def test_admin_table_catalogo_y_tabla_virtual_por_bot(monkeypatch) -> None:
                 json={"representado_cuit": "20123456789", "clave": "catalog-secret"},
             )
             assert created.status_code == 202
+        for job in JOBS.values():
+            job.result = {
+                "download_url": "https://storage.example/fallback?token=secret",
+                "object_key": "private/fallback/object",
+                "api_token": "fallback-plaintext-secret",
+                "message": "Archivo en s3://bucket/private/file.pdf",
+            }
 
         selected = cliente.get(
             "/admin/records?tabla=bot:ccma&limit=1",
@@ -300,6 +313,10 @@ def test_admin_table_catalogo_y_tabla_virtual_por_bot(monkeypatch) -> None:
         assert len(selected_body["records"]) == 1
         assert "request" in selected_body["records"][0]
         assert "response" in selected_body["records"][0]
+        assert "https://" not in selected.text
+        assert "s3://" not in selected.text
+        assert "object_key" not in selected.text
+        assert "fallback-plaintext-secret" not in selected.text
 
         next_page = cliente.get(
             "/admin/records?tabla=bot:ccma&limit=1&offset=1&operacion=consultar",
@@ -316,4 +333,134 @@ def test_admin_table_catalogo_y_tabla_virtual_por_bot(monkeypatch) -> None:
         ).json()["tabla_resuelta"] == "jobs"
     finally:
         JOBS.clear()
+        get_settings.cache_clear()
+
+
+def test_admin_records_consulta_tabla_fisica_por_bot_con_filtros_y_redaccion(monkeypatch) -> None:
+    """El endpoint usa el nombre allowlistado y no devuelve secretos ni URLs."""
+    monkeypatch.setenv("ADMIN_TOKEN", "admin-physical-table-token")
+    get_settings.cache_clear()
+    column_names = [*admin_jobs.BOT_TABLE_COLUMNS, "credential_ciphertext"]
+    query_log = []
+
+    class FakeResult:
+        def __init__(self, *, scalar_rows=None, row_mappings=None, scalar=None):
+            self._scalar_rows = scalar_rows
+            self._row_mappings = row_mappings
+            self._scalar = scalar
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._scalar_rows if self._scalar_rows is not None else self._row_mappings
+
+        def scalar_one(self):
+            return self._scalar
+
+        def mappings(self):
+            return self
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, statement, params=None):
+            sql = str(statement)
+            query_log.append((sql, dict(params or {})))
+            if "information_schema.columns" in sql:
+                return FakeResult(scalar_rows=column_names)
+            if "COUNT(*)" in sql:
+                return FakeResult(scalar=3)
+            return FakeResult(row_mappings=[{
+                "job_id": "87cbd2c2-6995-47ca-ae70-cd40b72307a8",
+                "user_id": "daaaaf72-7cee-4ce8-9ef4-7c47a5f173cb",
+                "usuario_email": "cliente@example.com",
+                "worker_id": "worker-test",
+                "bot": "ccma",
+                "operation": "consultar",
+                "status": "COMPLETO",
+                "result": "ok",
+                "priority": 5,
+                "attempts": 1,
+                "max_attempts": 3,
+                "app_version": "test",
+                "protocol_version": "v3",
+                "cancel_reason": None,
+                "cancelled_by": None,
+                "error_code": None,
+                "request_payload": {
+                    "representado_cuit": "20123456789",
+                    "password": "plain-table-secret",
+                },
+                "response_payload": {
+                    "items": [{"token": "plain-response-secret", "total": 1}],
+                },
+                "response_summary": {"count": 1},
+                "response_received_at": "2026-09-24T00:00:00+00:00",
+                "credential_metadata": {"fields": ["password"]},
+                "created_at": "2026-09-24T00:00:00+00:00",
+                "assigned_at": None,
+                "started_at": None,
+                "finished_at": None,
+                "updated_at": "2026-09-24T00:00:00+00:00",
+                "artifact_names": ["respuesta.pdf"],
+                "artifact_metadata": [{
+                    "filename": "respuesta.pdf",
+                    "object_key": "private/jobs/respuesta.pdf",
+                    "download_url": "https://storage.example/signed?token=secret",
+                    "nota": "Ver s3://storage.example/private/descarga",
+                }],
+                "credential_ciphertext": "never-select-this-column",
+            }])
+
+    monkeypatch.setattr(admin_jobs, "db_configurado", lambda: True)
+    monkeypatch.setattr(admin_jobs, "nueva_sesion", lambda: FakeSession())
+    try:
+        cliente = TestClient(create_app())
+        response = cliente.get(
+            "/admin/records?tabla=bot:ccma&limit=1&offset=1"
+            "&operacion=consultar&estado=COMPLETO&usuario=cliente%40example.com"
+            "&q=needle",
+            headers={"Authorization": "Bearer admin-physical-table-token"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["physical_table"] is True
+        assert body["fuente"] == "postgresql"
+        assert body["tabla_resuelta"] == "bot:ccma"
+        assert body["total"] == 3
+        assert body["has_more"] is True
+        assert body["next_offset"] == 2
+        assert len(body["records"]) == 1
+        assert body["columns"] == list(admin_jobs.BOT_TABLE_COLUMNS)
+        assert body["display_columns"] == [*admin_jobs.BOT_TABLE_COLUMNS, "usuario_email"]
+        row = body["records"][0]
+        assert row["usuario_email"] == "cliente@example.com"
+        assert row["request_payload"]["representado_cuit"] == "20123456789"
+        assert row["request_payload"]["password"] == "[REDACTED]"
+        assert row["response_payload"]["items"][0]["token"] == "[REDACTED]"
+        assert row["credential_metadata"] == "[REDACTED]"
+        _assert_no_storage_urls(body)
+        assert "plain-table-secret" not in response.text
+        assert "plain-response-secret" not in response.text
+        assert "never-select-this-column" not in response.text
+        assert "https://" not in response.text
+        assert "s3://" not in response.text
+        assert "object_key" not in response.text
+
+        physical_sql = [sql for sql, _ in query_log]
+        assert any('public."bot_jobs_ccma"' in sql for sql in physical_sql)
+        assert all("credential_ciphertext" not in sql for sql in physical_sql)
+        data_queries = [(sql, params) for sql, params in query_log if "COUNT(*)" in sql or "LIMIT :limit" in sql]
+        assert data_queries
+        assert all(params.get("operacion") == "consultar" for _, params in data_queries)
+        assert all(params.get("estado") == "COMPLETO" for _, params in data_queries)
+        assert all(params.get("q") == "%needle%" for _, params in data_queries)
+        assert all(params.get("bot") == "ccma" for _, params in data_queries)
+        assert all(params.get("offset") == 1 for sql, params in data_queries if "LIMIT :limit" in sql)
+    finally:
         get_settings.cache_clear()
