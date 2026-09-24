@@ -256,6 +256,7 @@ DECLARE
     item record;
     normalized_key text;
     cleaned jsonb;
+    texto text;
 BEGIN
     IF p_value IS NULL THEN
         RETURN NULL;
@@ -282,29 +283,31 @@ BEGIN
             FROM jsonb_array_elements(p_value) AS item_row(element);
             RETURN cleaned;
         WHEN 'string' THEN
-            cleaned := p_value #>> '{{}}';
-            IF cleaned ~* '{_URL_VALUE_PATTERN}' THEN
+            -- ``#>>`` devuelve text: asignarlo a la variable jsonb forzaría un
+            -- cast implícito y jsonb intentaría parsear el valor como JSON.
+            texto := p_value #>> '{{}}';
+            IF texto ~* '{_URL_VALUE_PATTERN}' THEN
                 RETURN '"[REDACTED_URL]"'::jsonb;
             END IF;
-            cleaned := regexp_replace(
-                cleaned,
+            texto := regexp_replace(
+                texto,
                 '{_AUTHORIZATION_VALUE_PATTERN}',
                 '{_SECRET_REPLACEMENT}',
                 'gi'
             );
-            cleaned := regexp_replace(
-                cleaned,
+            texto := regexp_replace(
+                texto,
                 '{_INLINE_SECRET_PATTERN}',
                 '{_SECRET_REPLACEMENT}',
                 'gi'
             );
-            cleaned := regexp_replace(
-                cleaned,
+            texto := regexp_replace(
+                texto,
                 '{_BEARER_VALUE_PATTERN}',
                 '{_SECRET_REPLACEMENT}',
                 'gi'
             );
-            RETURN to_jsonb(cleaned);
+            RETURN to_jsonb(texto);
         ELSE
             RETURN p_value;
     END CASE;
