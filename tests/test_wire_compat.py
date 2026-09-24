@@ -116,13 +116,36 @@ def _cliente_worker(clave_publica=None) -> TestClient:
 
 
 def _rutas(app) -> set[str]:
-    """Devuelve el conjunto de rutas del esquema OpenAPI de la app.
+    """Devuelve el conjunto de rutas reales, internas incluidas.
 
-    Se usa el esquema y no ``app.routes`` porque los agregadores
-    (``include_router`` anidado) se materializan diferidos en la
-    versión instalada de FastAPI.
+    No sirve ``app.openapi()``: las rutas internas se registran con
+    ``include_in_schema=False`` y por eso no aparecen en el esquema. Tampoco
+    sirve mirar ``app.routes`` sin más: desde la versión instalada de FastAPI
+    ``include_router`` guarda un ``_IncludedRouter`` diferido que expone el
+    router original junto al prefijo del include, así que el recorrido baja por
+    ``original_router`` agregando ese prefijo.
     """
-    return set(app.openapi()["paths"])
+    salida: set[str] = set()
+
+    def visitar(nodos, prefijo: str) -> None:
+        for nodo in nodos:
+            anidado = getattr(nodo, "original_router", None)
+            if anidado is not None:
+                contexto = getattr(nodo, "include_context", None)
+                sub_prefijo = str(getattr(contexto, "prefix", "") or "")
+                visitar(anidado.routes, prefijo + sub_prefijo)
+                continue
+            camino = getattr(nodo, "path", None)
+            if isinstance(camino, str) and camino:
+                salida.add(prefijo + camino)
+                continue
+            hijos = getattr(nodo, "routes", None)
+            if hijos:
+                visitar(hijos, prefijo)
+
+    visitar(app.routes, "")
+    salida |= set(app.openapi()["paths"])
+    return salida
 
 
 def _bloque_worker_compose() -> str:
@@ -488,7 +511,7 @@ def test_sobre_sellado_falla_cerrado_sin_fugar_secreto():
 
 
 def test_despacho_sella_lo_sensible_y_marca_bandera_visible():
-    """Con pubkey lo sensible va sellado; sin pubkey la bandera lo declara."""
+    """Con pubkey lo sensible va sellado; sin pubkey y con credenciales, se rechaza."""
     from central_api.scheduler.dispatcher import build_envelope
     from central_api.store import Job, WorkerEntry
 
@@ -508,9 +531,25 @@ def test_despacho_sella_lo_sensible_y_marca_bandera_visible():
     assert sobre["sealed"] is True
     assert set(sobre["sealed_section"]) == set(CLAVES_SOBRE_SELLADO)
     assert sobre["credentials"] is None
+
+    # Sin clave pública del worker no se degrada a texto claro: el despacho
+    # falla cerrado y el error no repite el secreto.
     sin_clave = WorkerEntry(node="192.0.2.22:8080")
-    abierto = build_envelope(trabajo, sin_clave, "tok-ficticio")
-    assert abierto["sealed"] is False
+    with pytest.raises(RuntimeError) as exc:
+        build_envelope(trabajo, sin_clave, "tok-ficticio")
+    assert "clave pública" in str(exc.value)
+    assert "ficticia" not in str(exc.value)
+
+    # Un job sin credenciales sí puede viajar abierto (la bandera lo declara).
+    sin_secretos = Job(
+        id=str(uuid.uuid4()),
+        bot="consulta_cuit",
+        operation="consulta",
+        payload={"cuit": "20111111112"},
+        credentials={},
+    )
+    abierto = build_envelope(sin_secretos, sin_clave, "tok-ficticio")
+    assert abierto["sealed"] is False and abierto["sealed_section"] is None
 
 
 def test_worker_abre_sobre_y_no_lo_reserializa():
@@ -664,7 +703,10 @@ def test_flujo_vivo_evento_resultado_y_acuse():
     finally:
         JOBS.pop(trabajo_id, None)
         WORKERS.pop(nodo, None)
-        SEEN_EVENTS.discard(evento_id)
+        # El registro de idempotencia de eventos está indexado por
+        # (job, intento, event_id) desde que los eventos se persisten de forma
+        # duradera.
+        SEEN_EVENTS.pop((trabajo_id, 1, evento_id), None)
 
 
 # ----------------------------------------------------- topes y sellado ---
