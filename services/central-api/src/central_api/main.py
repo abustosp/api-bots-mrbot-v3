@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from central_api.admin import router as admin_router
 from central_api.admin._common import require_admin
+from central_api.api.bot_payloads import install_v1_openapi_patch
 from central_api.api.router import router as public_router
 from central_api.db import cerrar_motor, db_configurado
 from central_api.internal.router import router as internal_router
@@ -57,7 +58,7 @@ def _documentation_app(*, include_private: bool) -> FastAPI:
 
         docs.include_router(internal_router, prefix="/internal/v1")
         docs.include_router(admin_router, prefix="/admin")
-    return docs
+    return install_v1_openapi_patch(docs)
 
 
 def _admin_docs_html() -> HTMLResponse:
@@ -210,7 +211,7 @@ def create_app() -> FastAPI:
     app.include_router(internal_router, prefix="/internal/v1", include_in_schema=False)
     # Panel privado: fuera del esquema OpenAPI público, nunca con API keys de cliente.
     app.include_router(admin_router, prefix="/admin", include_in_schema=False)
-    return app
+    return install_v1_openapi_patch(app)
 
 
 app = create_app()

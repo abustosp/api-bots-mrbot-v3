@@ -234,7 +234,11 @@ def _register_routes() -> None:
                     "required": True,
                     "content": {
                         "application/json": {
-                            "schema": public_bot_compat_body_schema(bot, operacion),
+                            "schema": public_bot_compat_body_schema(
+                                bot,
+                                operacion,
+                                route_path=route_path,
+                            ),
                         }
                     },
                 }

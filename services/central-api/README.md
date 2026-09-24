@@ -148,6 +148,14 @@ Se conservan nombres como `clave`, `clave_representante`, `contrasena`,
 `cuit_representado`, `desde`, `hasta`, `movimientos`, `pdf` y
 `clave_encriptada`. La central normaliza esos campos al contrato del worker.
 
+El body documentado de cada uno de los 36 aliases se toma del snapshot
+`src/central_api/api/v1_request_schemas.json`, generado desde los modelos de
+`/home/abp/Desktop/Proyectos Python/Scripts/Mr bot/api/api-bots-mrbot`. El
+snapshot conserva el orden de propiedades, nombres, campos requeridos,
+defaults, descripciones y ejemplos de Pydantic V1. La API canónica
+`POST /api/v3/bots/{bot}/{operacion}` mantiene deliberadamente su envelope V3
+con `payload` y `credentials`.
+
 Una clave puede llegar en texto plano o como `clave_encriptada` RSA-OAEP-
 SHA256. La central descifra el segundo formato, elimina el secreto del
 payload, cifra la credencial para custodia en `jobs.credential_ciphertext` y

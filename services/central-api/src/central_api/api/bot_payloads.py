@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from functools import lru_cache
+import json
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -332,6 +334,62 @@ _V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
 }
 
 
+# El checkout de V1 no existe en el contenedor de la central. Este snapshot se
+# generó desde ``/home/abp/Desktop/Proyectos Python/Scripts/Mr bot/api/api-bots-mrbot``
+# y se versiona junto con la central para que el contrato OpenAPI no dependa de
+# una ruta del host de desarrollo.
+_V1_SCHEMA_SNAPSHOT = Path(__file__).with_name("v1_request_schemas.json")
+
+
+@lru_cache(maxsize=1)
+def _v1_request_schemas() -> dict[str, dict[str, Any]]:
+    with _V1_SCHEMA_SNAPSHOT.open(encoding="utf-8") as stream:
+        return json.load(stream)
+
+
+# Una pareja bot/operación V3 puede tener más de un body histórico V1. La ruta
+# del alias es parte de la clave a propósito: ``portal_iva/consulta`` y
+# ``portal_iva/carga`` no compartían el mismo modelo en V1.
+V1_SCHEMA_BY_ALIAS: dict[str, str] = {
+    "/mis_comprobantes/consulta": "mis_comprobantes.MCRequest",
+    "/mis_comprobantes/solicitar_consulta": "mis_comprobantes.MCConsultaRequest",
+    "/mis_comprobantes/historial": "mis_comprobantes.MCHistorialRequest",
+    "/ccma/consulta": "ccma.ConsultaCCMARequest",
+    "/siper/consulta": "siper.ConsultaSIPERRequest",
+    "/sct/consulta": "sct.ConsultaSCTRequest",
+    "/sct/compensaciones/consulta": "sct.ConsultaSCTCompensacionesRequest",
+    "/portal_iva/consulta": "portal_iva.ConsultaPortalIvaRequest",
+    "/portal_iva/carga": "carga_portal_iva.CargaPortalIvaRequest",
+    "/rcel/consulta": "rcel.ConsultaRCELRequest",
+    "/hacienda/consulta": "hacienda.ConsultaHaciendaRequest",
+    "/sifere/consulta": "sifere.ConsultaSIFERERequest",
+    "/aportes-en-linea/consulta": "aportes_en_linea.ConsultaAportesEnLineaRequest",
+    "/declaracion-en-linea/consulta": "declaracion_en_linea.ConsultaDeclaracionEnLineaRequest",
+    "/mis_facilidades/consulta": "mis_facilidades.ConsultaMisFacilidadesRequest",
+    "/mis_retenciones/consulta": "mis_retenciones.ConsultaMisRetencionesRequest",
+    "/mis_retenciones_iva_simple/consulta": "mis_retenciones_iva_simple.ConsultaMisRetencionesIvaSimpleRequest",
+    "/retenciones_percepciones_iibb/misiones/consulta": "retper_iibb_misiones.ConsultaRetPerIIBBMisionesRequest",
+    "/retenciones_percepciones_iibb/agip/consulta": "retper_iibb_agip.ConsultaRetPerIIBBAGIPRequest",
+    "/retenciones_percepciones_iibb/arba/consulta": "retper_iibb_arba.ConsultaRetPerIIBBARBARequest",
+    "/arba/consulta": "retper_iibb_arba.ConsultaRetPerIIBBARBARequest",
+    "/pago_devoluciones/consulta": "pago_devoluciones.ConsultaPagoDevolucionesRequest",
+    "/moa/consulta": "moa.ConsultaMOARequest",
+    "/libros_iva/consulta": "libros_portal_iva.ConsultaLibrosIvaRequest",
+    "/libros_iva/ddjj": "libros_portal_iva.ConsultaLibrosIvaRequest",
+    "/facturometro/consulta": "facturometro.ConsultaFacturometroRequest",
+    "/controladores-fiscales/carga": "controladores_fiscales.ConsultaControladoresFiscalesRequest",
+    "/certificado-mipyme/consulta": "certificado_mipyme.CertificadoMipymeRequest",
+    "/srt/alicuotas/consulta": "srt.ConsultaSRTAlicuotasRequest",
+    "/vep/carga": "vep.VEPArchivoRequest",
+    "/vep_archivo/carga": "vep.VEPArchivoRequest",
+    "/vep-ccma/generar": "vep_ccma.VEPCCMARequest",
+    "/vep/consulta-pagos": "vep.ConsultaPagosVEPRequest",
+    "/liquidacion_granos/consulta": "liquidacion_granos.ConsultaLiquidacionGranosRequest",
+    "/consulta_cuit/individual": "consulta_cuits.ConsultaCUITIndividualRequest",
+    "/consulta_cuit/masivo": "consulta_cuits.ConsultaCUITMasivoRequest",
+}
+
+
 def _fields_for_operation(bot: str, operation: str) -> dict[str, tuple[Any, Any]]:
     fields = dict(_FAMILY_FIELDS.get(bot, {}))
     names = _OPERATION_FIELD_NAMES.get((bot, operation))
@@ -473,8 +531,26 @@ def public_bot_payload_schema(bot: str, operation: str) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=None)
-def public_bot_compat_body_schema(bot: str, operation: str) -> dict[str, Any]:
-    """Schema inline plano V2, con ejemplos autocontenidos y seguros."""
+def public_bot_compat_body_schema(
+    bot: str,
+    operation: str,
+    route_path: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve el schema V1 exacto para un alias, cuando existe.
+
+    La copia conserva el orden JSON de ``properties``, los campos requeridos,
+    defaults, descripciones y ejemplos que generaba Pydantic en V1. Para una
+    operación sin ruta histórica conocida se mantiene el schema V3 anterior,
+    evitando inventar un contrato V1.
+    """
+    if route_path is not None:
+        schema_name = V1_SCHEMA_BY_ALIAS.get(route_path)
+        if schema_name is not None:
+            snapshot = _v1_request_schemas().get(schema_name)
+            if snapshot is None:
+                raise RuntimeError(f"schema V1 ausente en snapshot: {schema_name}")
+            return deepcopy(snapshot["schema"])
+
     model = public_bot_compat_body_model(bot, operation)
     schema = model.model_json_schema()
     schema["examples"] = [
@@ -486,6 +562,35 @@ def public_bot_compat_body_schema(bot: str, operation: str) -> dict[str, Any]:
     return schema
 
 
+def install_v1_openapi_patch(app: Any) -> Any:
+    """Hace que ``app.openapi()`` publique los schemas V1 sin normalización.
+
+    FastAPI elimina algunos ``default: null`` al fusionar ``openapi_extra``.
+    El contrato V1 se restaura después de construir el documento para mantener
+    incluso esos detalles de serialización.
+    """
+    original_openapi = app.openapi
+
+    def openapi_with_v1_contract() -> dict[str, Any]:
+        document = original_openapi()
+        for route_path, schema_name in V1_SCHEMA_BY_ALIAS.items():
+            operation = document.get("paths", {}).get(f"/api/v3{route_path}", {}).get("post")
+            if operation is None:
+                continue
+            body = operation.get("requestBody", {})
+            content = body.get("content", {})
+            application_json = content.get("application/json")
+            if application_json is None:
+                continue
+            application_json["schema"] = deepcopy(
+                _v1_request_schemas()[schema_name]["schema"]
+            )
+        return document
+
+    app.openapi = openapi_with_v1_contract
+    return app
+
+
 __all__ = [
     "CompatBodyBase",
     "public_bot_body_model",
@@ -493,4 +598,6 @@ __all__ = [
     "public_bot_body_schema",
     "public_bot_compat_body_schema",
     "public_bot_payload_schema",
+    "V1_SCHEMA_BY_ALIAS",
+    "install_v1_openapi_patch",
 ]

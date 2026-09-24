@@ -1,0 +1,3695 @@
+{
+  "aportes_en_linea.ConsultaAportesEnLineaRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_login",
+      "clave",
+      "cuit_representado",
+      "archivo_historico_minio",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Aportes en Línea.\n\n- ``cuit_login``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``clave``: clave fiscal asociada al ``cuit_login``.\n- ``cuit_representado``: CUIT/CUIL del contribuyente cuyos datos se desean consultar.\n  Si no se especifica, se usa el CUIT del representante.\n- ``archivo_historico_minio``: indica si se desea subir el archivo histórico a MinIO y recibir la URL.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_login": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Login",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "archivo_historico_minio": {
+          "default": true,
+          "description": "Indica si quiere subir el archivo histórico a MinIO y recibir la URL",
+          "example": true,
+          "title": "Archivo Historico Minio",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_login",
+        "clave"
+      ],
+      "title": "ConsultaAportesEnLineaRequest",
+      "type": "object"
+    }
+  },
+  "carga_portal_iva.CargaPortalIvaRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "denominacion",
+      "periodo",
+      "operaciones_ng_o_e",
+      "prorrateo_global",
+      "prorrateo_asignacion_directa",
+      "prorrateo_ambos",
+      "importacion_definitiva_bienes",
+      "importacion_servicios",
+      "regimen_turiva",
+      "bienes_usados",
+      "ninguna_anteriores",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la carga exclusiva de TXTs + CSVs en Portal IVA.\n\nLos archivos (TXTs y CSVs) se adjuntan como multipart/form-data mediante\nlos parámetros UploadFile en la ruta (no están incluidos en este modelo):\n  - liv_cbte / liv_alicuota: TXT de comprobantes y alícuotas de ventas\n  - lic_cbte / lic_alicuota: TXT de comprobantes y alícuotas de compras\n  - csv_cf / csv_cf_restitucion: CSV de apertura Crédito Fiscal\n  - csv_df / csv_df_restitucion: CSV de apertura Débito Fiscal",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente al que se le cargan los libros. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "denominacion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Denominación del contribuyente",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion"
+        },
+        "periodo": {
+          "description": "Período de Portal IVA. Ejemplos: 202401, 01/2024 o 2024-01",
+          "example": "202401",
+          "title": "Periodo",
+          "type": "string"
+        },
+        "operaciones_ng_o_e": {
+          "default": false,
+          "description": "Marca operaciones no gravadas o exentas",
+          "title": "Operaciones Ng O E",
+          "type": "boolean"
+        },
+        "prorrateo_global": {
+          "default": false,
+          "description": "Selecciona prorrateo global cuando corresponda",
+          "title": "Prorrateo Global",
+          "type": "boolean"
+        },
+        "prorrateo_asignacion_directa": {
+          "default": false,
+          "description": "Selecciona prorrateo por asignación directa cuando corresponda",
+          "title": "Prorrateo Asignacion Directa",
+          "type": "boolean"
+        },
+        "prorrateo_ambos": {
+          "default": false,
+          "description": "Selecciona prorrateo por asignación directa y global cuando corresponda",
+          "title": "Prorrateo Ambos",
+          "type": "boolean"
+        },
+        "importacion_definitiva_bienes": {
+          "default": false,
+          "title": "Importacion Definitiva Bienes",
+          "type": "boolean"
+        },
+        "importacion_servicios": {
+          "default": false,
+          "title": "Importacion Servicios",
+          "type": "boolean"
+        },
+        "regimen_turiva": {
+          "default": false,
+          "title": "Regimen Turiva",
+          "type": "boolean"
+        },
+        "bienes_usados": {
+          "default": false,
+          "title": "Bienes Usados",
+          "type": "boolean"
+        },
+        "ninguna_anteriores": {
+          "default": true,
+          "title": "Ninguna Anteriores",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "periodo"
+      ],
+      "title": "CargaPortalIvaRequest",
+      "type": "object"
+    }
+  },
+  "ccma.ConsultaCCMARequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "proxy_request",
+      "movimientos",
+      "pdf"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta CCMA.\n\n- ``cuit_representante``: CUIT/CUIL del representante que se\n  autentica en ARCA.\n- ``clave``: clave fiscal asociada al ``cuit_representante``.\n- ``cuit_representado``: CUIT/CUIL del contribuyente cuyos datos CCMA\n  se desean consultar.\n- ``proxy_request``: Indica si se debe usar un proxy para la solicitud.\n- ``movimientos``: Indica si se deben incluir los movimientos en la\n  respuesta.\n- ``pdf``: Indica si se debe generar el PDF y devolver la URL de MinIO.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT/CUIL del contribuyente a consultar",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "movimientos": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se deben incluir los movimientos en la respuesta",
+          "example": false,
+          "title": "Movimientos"
+        },
+        "pdf": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe generar el PDF y devolver la URL de MinIO",
+          "example": false,
+          "title": "Pdf"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "cuit_representado"
+      ],
+      "title": "ConsultaCCMARequest",
+      "type": "object"
+    }
+  },
+  "certificado_mipyme.CertificadoMipymeRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave",
+      "cuit_representado",
+      "proxy_request"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "example": "20123456780",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave": {
+          "example": "mi_contraseña_secreta",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "example": "30711456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave",
+        "cuit_representado"
+      ],
+      "title": "CertificadoMipymeRequest",
+      "type": "object"
+    }
+  },
+  "consulta_cuits.ConsultaCUITIndividualRequest": {
+    "fields": [
+      "cuit"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de un CUIT individual en el servicio de consulta de Constancia de CUIT.\n\n- ``cuit``: CUIT/CUIL de la persona a consultar.",
+      "properties": {
+        "cuit": {
+          "description": "CUIT/CUIL de la persona a consultar en el servicio de Consulta de Constancias de CUIT",
+          "example": "20123456789",
+          "title": "Cuit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cuit"
+      ],
+      "title": "ConsultaCUITIndividualRequest",
+      "type": "object"
+    }
+  },
+  "consulta_cuits.ConsultaCUITMasivoRequest": {
+    "fields": [
+      "cuits"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta masiva de CUITs en el servicio de consulta de Constancia de CUIT.",
+      "properties": {
+        "cuits": {
+          "description": "Lista de CUITs/CUILs a consultar en el servicio de Consulta de Constancias de CUIT",
+          "example": [
+            "20123456789",
+            "20374730429",
+            "20147130202"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Cuits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cuits"
+      ],
+      "title": "ConsultaCUITMasivoRequest",
+      "type": "object"
+    }
+  },
+  "controladores_fiscales.ConsultaControladoresFiscalesRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave",
+      "proxy_request",
+      "minio_upload"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Usar proxy para la solicitud",
+          "title": "Proxy Request"
+        },
+        "minio_upload": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Subir constancias PDF a MinIO",
+          "title": "Minio Upload"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave"
+      ],
+      "title": "ConsultaControladoresFiscalesRequest",
+      "type": "object"
+    }
+  },
+  "declaracion_en_linea.ConsultaDeclaracionEnLineaRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "representado_nombre",
+      "periodo_desde",
+      "periodo_hasta",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Declaracion en Linea.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "representado_nombre": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Denominacion del contribuyente (opcional)",
+          "example": "Empresa Ejemplo SA",
+          "title": "Representado Nombre"
+        },
+        "periodo_desde": {
+          "description": "Periodo desde en formato AAAAMM",
+          "example": "202401",
+          "title": "Periodo Desde",
+          "type": "string"
+        },
+        "periodo_hasta": {
+          "description": "Periodo hasta en formato AAAAMM",
+          "example": "202412",
+          "title": "Periodo Hasta",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir los archivos a MinIO y devolver los links",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "periodo_desde",
+        "periodo_hasta"
+      ],
+      "title": "ConsultaDeclaracionEnLineaRequest",
+      "type": "object"
+    }
+  },
+  "facturometro.ConsultaFacturometroRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_login",
+      "clave",
+      "cuit_representado",
+      "proxy_request"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_login": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Login",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT del contribuyente representado",
+          "example": "20234567890",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_login",
+        "clave",
+        "cuit_representado"
+      ],
+      "title": "ConsultaFacturometroRequest",
+      "type": "object"
+    }
+  },
+  "hacienda.ConsultaHaciendaRequest": {
+    "fields": [
+      "clave_encriptada",
+      "desde",
+      "hasta",
+      "cuit_representante",
+      "denominacion",
+      "representado_cuit",
+      "clave",
+      "minio_upload",
+      "proxy_request"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "desde": {
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "example": "31/12/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "cuit_representante": {
+          "example": "20123456780",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "denominacion": {
+          "description": "Nombre exacto del representado en ARCA/AFIP para operar en Hacienda y Carne",
+          "example": "Empresa Ejemplo S.A.",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "representado_cuit": {
+          "example": "30876543210",
+          "title": "Representado Cuit",
+          "type": "string"
+        },
+        "clave": {
+          "example": "mi_contraseña_secreta",
+          "title": "Clave",
+          "type": "string"
+        },
+        "minio_upload": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "example": true,
+          "title": "Minio Upload"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "desde",
+        "hasta",
+        "cuit_representante",
+        "denominacion",
+        "representado_cuit",
+        "clave"
+      ],
+      "title": "ConsultaHaciendaRequest",
+      "type": "object"
+    }
+  },
+  "libros_portal_iva.ConsultaLibrosIvaRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave",
+      "cuit_representado",
+      "denominacion",
+      "periodo_desde",
+      "periodo_hasta",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Libros IVA.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "denominacion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Denominacion del contribuyente",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion"
+        },
+        "periodo_desde": {
+          "description": "Periodo desde en formato AAAAMM (inclusive)",
+          "example": "202401",
+          "title": "Periodo Desde",
+          "type": "string"
+        },
+        "periodo_hasta": {
+          "description": "Periodo hasta en formato AAAAMM (inclusive)",
+          "example": "202403",
+          "title": "Periodo Hasta",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave",
+        "periodo_desde",
+        "periodo_hasta"
+      ],
+      "title": "ConsultaLibrosIvaRequest",
+      "type": "object"
+    }
+  },
+  "liquidacion_granos.ConsultaLiquidacionGranosRequest": {
+    "fields": [
+      "clave_encriptada",
+      "desde",
+      "hasta",
+      "cuit_representante",
+      "clave",
+      "denominacion",
+      "cuit_representado",
+      "minio_upload",
+      "proxy_request"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "desde": {
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "example": "31/12/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "cuit_representante": {
+          "example": "20123456780",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave": {
+          "example": "mi_contraseña_secreta",
+          "title": "Clave",
+          "type": "string"
+        },
+        "denominacion": {
+          "description": "Nombre exacto del representado en ARCA/AFIP para operar en Liquidación de Granos",
+          "example": "Empresa Ejemplo S.A.",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT del representado (opcional, para trazabilidad de logs)",
+          "example": "30876543210",
+          "title": "Cuit Representado"
+        },
+        "minio_upload": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "example": true,
+          "title": "Minio Upload"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "desde",
+        "hasta",
+        "cuit_representante",
+        "clave",
+        "denominacion"
+      ],
+      "title": "ConsultaLiquidacionGranosRequest",
+      "type": "object"
+    }
+  },
+  "mis_comprobantes.MCRequest": {
+    "fields": [
+      "clave_encriptada",
+      "desde",
+      "hasta",
+      "cuit_inicio_sesion",
+      "representado_nombre",
+      "representado_cuit",
+      "contrasena",
+      "descarga_emitidos",
+      "descarga_recibidos",
+      "puntos_venta_emitidos",
+      "puntos_venta_recibidos",
+      "carga_minio",
+      "carga_json",
+      "timeout_mc",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Mis Comprobantes\n\n- ``desde``: fecha de inicio del período a consultar en formato DD/MM/AAAA.\n- ``hasta``: fecha de fin del período a consultar en formato DD/MM/AAAA.\n- ``cuit_inicio_sesion``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``representado_nombre``: nombre del contribuyente cuyos datos se desean consultar.\n- ``representado_cuit``: CUIT/CUIL del contribuyente cuyos datos se desean consultar.\n- ``contrasena``: clave fiscal asociada al ``cuit_inicio_sesion``.\n- ``descarga_emitidos``: indica si se desean descargar los comprobantes emitidos.\n- ``descarga_recibidos``: indica si se desean descargar los comprobantes recibidos.\n- ``puntos_venta_emitidos``: lista opcional de puntos de venta para filtrar comprobantes emitidos.\n- ``puntos_venta_recibidos``: lista opcional de puntos de venta para filtrar comprobantes recibidos.\n- ``carga_minio``: indica si se desean subir los archivos a MinIO y recibir las URLs.\n- ``carga_json``: indica si se desean recibir los datos en formato JSON.\n- ``timeout_mc``: tiempo máximo de espera para la descarga de Mis Comprobantes en segundos.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "desde": {
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "example": "31/12/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "cuit_inicio_sesion": {
+          "example": "20123456780",
+          "title": "Cuit Inicio Sesion",
+          "type": "string"
+        },
+        "representado_nombre": {
+          "example": "Empresa Ejemplo S.A.",
+          "title": "Representado Nombre",
+          "type": "string"
+        },
+        "representado_cuit": {
+          "example": "30876543210",
+          "title": "Representado Cuit",
+          "type": "string"
+        },
+        "contrasena": {
+          "example": "mi_contraseña_secreta",
+          "title": "Contrasena",
+          "type": "string"
+        },
+        "descarga_emitidos": {
+          "example": true,
+          "title": "Descarga Emitidos",
+          "type": "boolean"
+        },
+        "descarga_recibidos": {
+          "example": false,
+          "title": "Descarga Recibidos",
+          "type": "boolean"
+        },
+        "puntos_venta_emitidos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de puntos de venta para filtrar comprobantes emitidos",
+          "example": [
+            "1",
+            "002",
+            "00003"
+          ],
+          "title": "Puntos Venta Emitidos"
+        },
+        "puntos_venta_recibidos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de puntos de venta para filtrar comprobantes recibidos",
+          "example": [
+            "1",
+            "002",
+            "00003"
+          ],
+          "title": "Puntos Venta Recibidos"
+        },
+        "carga_minio": {
+          "default": false,
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        },
+        "carga_json": {
+          "default": false,
+          "example": false,
+          "title": "Carga Json",
+          "type": "boolean"
+        },
+        "timeout_mc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tiempo máximo de espera para la descarga de Mis Comprobantes en segundos",
+          "example": 30,
+          "title": "Timeout Mc"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "desde",
+        "hasta",
+        "cuit_inicio_sesion",
+        "representado_nombre",
+        "representado_cuit",
+        "contrasena",
+        "descarga_emitidos",
+        "descarga_recibidos"
+      ],
+      "title": "MCRequest",
+      "type": "object"
+    }
+  },
+  "mis_comprobantes.MCConsultaRequest": {
+    "fields": [
+      "clave_encriptada",
+      "desde",
+      "hasta",
+      "cuit_inicio_sesion",
+      "representado_nombre",
+      "representado_cuit",
+      "contrasena",
+      "emitidos",
+      "recibidos",
+      "puntos_venta_emitidos",
+      "puntos_venta_recibidos",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Mis Comprobantes\n\n- ``desde``: fecha de inicio del período a consultar en formato DD/MM/AAAA.\n- ``hasta``: fecha de fin del período a consultar en formato DD/MM/AAAA.\n- ``cuit_inicio_sesion``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``representado_nombre``: nombre del contribuyente cuyos datos se desean consultar.\n- ``representado_cuit``: CUIT/CUIL del contribuyente cuyos datos se desean consultar.\n- ``contrasena``: clave fiscal asociada al ``cuit_inicio_sesion``.\n- ``emitidos``: indica si se desean descargar los comprobantes emitidos.\n- ``recibidos``: indica si se desean descargar los comprobantes recibidos.\n- ``puntos_venta_emitidos``: lista opcional de puntos de venta para filtrar comprobantes emitidos.\n- ``puntos_venta_recibidos``: lista opcional de puntos de venta para filtrar comprobantes recibidos.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "desde": {
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "example": "31/12/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "cuit_inicio_sesion": {
+          "example": "20123456780",
+          "title": "Cuit Inicio Sesion",
+          "type": "string"
+        },
+        "representado_nombre": {
+          "example": "Empresa Ejemplo S.A.",
+          "title": "Representado Nombre",
+          "type": "string"
+        },
+        "representado_cuit": {
+          "example": "30876543210",
+          "title": "Representado Cuit",
+          "type": "string"
+        },
+        "contrasena": {
+          "example": "mi_contraseña_secreta",
+          "title": "Contrasena",
+          "type": "string"
+        },
+        "emitidos": {
+          "example": true,
+          "title": "Emitidos",
+          "type": "boolean"
+        },
+        "recibidos": {
+          "example": false,
+          "title": "Recibidos",
+          "type": "boolean"
+        },
+        "puntos_venta_emitidos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de puntos de venta para filtrar comprobantes emitidos",
+          "example": [
+            "1",
+            "002",
+            "00003"
+          ],
+          "title": "Puntos Venta Emitidos"
+        },
+        "puntos_venta_recibidos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de puntos de venta para filtrar comprobantes recibidos",
+          "example": [
+            "1",
+            "002",
+            "00003"
+          ],
+          "title": "Puntos Venta Recibidos"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "desde",
+        "hasta",
+        "cuit_inicio_sesion",
+        "representado_nombre",
+        "representado_cuit",
+        "contrasena",
+        "emitidos",
+        "recibidos"
+      ],
+      "title": "MCConsultaRequest",
+      "type": "object"
+    }
+  },
+  "mis_comprobantes.MCHistorialRequest": {
+    "fields": [
+      "clave_encriptada",
+      "desde",
+      "hasta",
+      "cuit_inicio_sesion",
+      "representado_nombre",
+      "representado_cuit",
+      "contrasena",
+      "descarga_emitidos",
+      "descarga_recibidos",
+      "carga_minio",
+      "carga_json",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la descarga de consultas históricas de Mis Comprobantes\n\n- ``desde``: fecha de inicio del período consultado en formato DD/MM/AAAA.\n- ``hasta``: fecha de fin del período consultado en formato DD/MM/AAAA.\n- ``cuit_inicio_sesion``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``representado_nombre``: nombre del contribuyente cuyos datos fueron consultados.\n- ``representado_cuit``: CUIT/CUIL del contribuyente cuyos datos fueron consultados.\n- ``contrasena``: clave fiscal asociada al ``cuit_inicio_sesion``.\n- ``descarga_emitidos``: indica si se desean descargar los comprobantes emitidos del historial.\n- ``descarga_recibidos``: indica si se desean descargar los comprobantes recibidos del historial.\n- ``carga_minio``: indica si se desean subir los archivos a MinIO y recibir las URLs.\n- ``carga_json``: indica si se desean recibir los datos en formato JSON.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "desde": {
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "example": "31/12/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "cuit_inicio_sesion": {
+          "example": "20123456780",
+          "title": "Cuit Inicio Sesion",
+          "type": "string"
+        },
+        "representado_nombre": {
+          "example": "Empresa Ejemplo S.A.",
+          "title": "Representado Nombre",
+          "type": "string"
+        },
+        "representado_cuit": {
+          "example": "30876543210",
+          "title": "Representado Cuit",
+          "type": "string"
+        },
+        "contrasena": {
+          "example": "mi_contraseña_secreta",
+          "title": "Contrasena",
+          "type": "string"
+        },
+        "descarga_emitidos": {
+          "example": true,
+          "title": "Descarga Emitidos",
+          "type": "boolean"
+        },
+        "descarga_recibidos": {
+          "example": false,
+          "title": "Descarga Recibidos",
+          "type": "boolean"
+        },
+        "carga_minio": {
+          "default": true,
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        },
+        "carga_json": {
+          "default": false,
+          "example": false,
+          "title": "Carga Json",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "desde",
+        "hasta",
+        "cuit_inicio_sesion",
+        "representado_nombre",
+        "representado_cuit",
+        "contrasena",
+        "descarga_emitidos",
+        "descarga_recibidos"
+      ],
+      "title": "MCHistorialRequest",
+      "type": "object"
+    }
+  },
+  "mis_facilidades.ConsultaMisFacilidadesRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_login",
+      "clave",
+      "cuit_representado",
+      "denominacion",
+      "lista_exclusion_situacion",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta Mis Facilidades.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_login": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Login",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "denominacion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Denominacion del contribuyente (opcional)",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion"
+        },
+        "lista_exclusion_situacion": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de elementos a excluir según su situación (opcional)",
+          "example": [
+            "Vigente",
+            "Plan Cancelado",
+            "Plan Caduco",
+            "Refinanciado Ley 27743",
+            "Reformulado"
+          ],
+          "title": "Lista Exclusion Situacion"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir los archivos a MinIO y devolver los links",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_login",
+        "clave"
+      ],
+      "title": "ConsultaMisFacilidadesRequest",
+      "type": "object"
+    }
+  },
+  "mis_retenciones.ConsultaMisRetencionesRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "denominacion",
+      "desde",
+      "hasta",
+      "impuestos",
+      "exportar_para_aplicativo",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Mis Retenciones.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "denominacion": {
+          "description": "Denominacion del contribuyente",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "desde": {
+          "description": "Fecha desde en formato DD/MM/AAAA",
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "description": "Fecha hasta en formato DD/MM/AAAA",
+          "example": "31/01/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "impuestos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de códigos de impuestos a consultar (opcional). Si se usa exportar_para_aplicativo=true, solamente se procesan 216, 217, 219, 767 y 353; los demás códigos no se seleccionan.",
+          "example": [
+            "216",
+            "217",
+            "219",
+            "353",
+            "767",
+            "787"
+          ],
+          "title": "Impuestos"
+        },
+        "exportar_para_aplicativo": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Si es true, selecciona Exportar para SIAP y procesa los impuestos 216, 217, 219, 767 y 353.",
+          "example": false,
+          "title": "Exportar Para Aplicativo"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir los archivos a MinIO y devolver los links",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "denominacion",
+        "desde",
+        "hasta"
+      ],
+      "title": "ConsultaMisRetencionesRequest",
+      "type": "object"
+    }
+  },
+  "mis_retenciones_iva_simple.ConsultaMisRetencionesIvaSimpleRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "denominacion",
+      "desde",
+      "hasta",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "denominacion": {
+          "description": "Denominación del contribuyente",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "desde": {
+          "description": "Fecha desde en formato DD/MM/AAAA",
+          "example": "01/01/2026",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "description": "Fecha hasta en formato DD/MM/AAAA. No puede superar el último día del mes siguiente a la fecha desde.",
+          "example": "28/02/2026",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir los archivos a MinIO y devolver los links",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "denominacion",
+        "desde",
+        "hasta"
+      ],
+      "title": "ConsultaMisRetencionesIvaSimpleRequest",
+      "type": "object"
+    }
+  },
+  "moa.ConsultaMOARequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave",
+      "cuit_representado",
+      "despachos",
+      "tipo_agente",
+      "rol",
+      "minio_upload",
+      "proxy_request"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT del representado a consultar",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "despachos": {
+          "description": "Lista de numeros de despacho a procesar",
+          "example": [
+            "25046EC03000042E"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Despachos",
+          "type": "array"
+        },
+        "tipo_agente": {
+          "default": "IMEX-IMEX-IMPORTADOR/EXPORT.",
+          "description": "Tipo de agente MOA",
+          "title": "Tipo Agente",
+          "type": "string"
+        },
+        "rol": {
+          "default": "IMEX-Rol Importador Exportador",
+          "description": "Rol MOA",
+          "title": "Rol",
+          "type": "string"
+        },
+        "minio_upload": {
+          "default": true,
+          "description": "Subir JSON/CSV de resultados a MinIO",
+          "title": "Minio Upload",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Usar proxy para la solicitud",
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave",
+        "cuit_representado",
+        "despachos"
+      ],
+      "title": "ConsultaMOARequest",
+      "type": "object"
+    }
+  },
+  "pago_devoluciones.ConsultaPagoDevolucionesRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Pago Devoluciones.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se debe subir el archivo a MinIO y devolver la URL",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante"
+      ],
+      "title": "ConsultaPagoDevolucionesRequest",
+      "type": "object"
+    }
+  },
+  "portal_iva.ConsultaPortalIvaRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "denominacion",
+      "periodo",
+      "operaciones_ng_o_e",
+      "prorrateo_global",
+      "prorrateo_asignacion_directa",
+      "prorrateo_ambos",
+      "importacion_definitiva_bienes",
+      "importacion_servicios",
+      "regimen_turiva",
+      "bienes_usados",
+      "ninguna_anteriores",
+      "descarga_csv_ventas",
+      "descarga_csv_compras",
+      "carga_minio",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Portal IVA.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
+          "example": "20123456789",
+          "title": "Cuit Representado"
+        },
+        "denominacion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Denominacion del contribuyente para nombrar los archivos descargados",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion"
+        },
+        "periodo": {
+          "description": "Periodo de Portal IVA. Ejemplos: 202401, 01/2024 o 2024-01",
+          "example": "202401",
+          "title": "Periodo",
+          "type": "string"
+        },
+        "operaciones_ng_o_e": {
+          "default": false,
+          "description": "Marca operaciones no gravadas o exentas",
+          "example": false,
+          "title": "Operaciones Ng O E",
+          "type": "boolean"
+        },
+        "prorrateo_global": {
+          "default": false,
+          "description": "Selecciona prorrateo global cuando corresponda",
+          "example": false,
+          "title": "Prorrateo Global",
+          "type": "boolean"
+        },
+        "prorrateo_asignacion_directa": {
+          "default": false,
+          "description": "Selecciona prorrateo por asignacion directa cuando corresponda",
+          "example": false,
+          "title": "Prorrateo Asignacion Directa",
+          "type": "boolean"
+        },
+        "prorrateo_ambos": {
+          "default": false,
+          "description": "Selecciona prorrateo por asignacion directa y global cuando corresponda",
+          "example": false,
+          "title": "Prorrateo Ambos",
+          "type": "boolean"
+        },
+        "importacion_definitiva_bienes": {
+          "default": false,
+          "example": false,
+          "title": "Importacion Definitiva Bienes",
+          "type": "boolean"
+        },
+        "importacion_servicios": {
+          "default": false,
+          "example": false,
+          "title": "Importacion Servicios",
+          "type": "boolean"
+        },
+        "regimen_turiva": {
+          "default": false,
+          "example": false,
+          "title": "Regimen Turiva",
+          "type": "boolean"
+        },
+        "bienes_usados": {
+          "default": false,
+          "example": false,
+          "title": "Bienes Usados",
+          "type": "boolean"
+        },
+        "ninguna_anteriores": {
+          "default": true,
+          "example": true,
+          "title": "Ninguna Anteriores",
+          "type": "boolean"
+        },
+        "descarga_csv_ventas": {
+          "default": false,
+          "description": "Indica si se debe descargar el CSV del libro ventas",
+          "example": true,
+          "title": "Descarga Csv Ventas",
+          "type": "boolean"
+        },
+        "descarga_csv_compras": {
+          "default": false,
+          "description": "Indica si se debe descargar el CSV del libro compras",
+          "example": true,
+          "title": "Descarga Csv Compras",
+          "type": "boolean"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir los CSV descargados a MinIO y devolver las URLs",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "periodo"
+      ],
+      "title": "ConsultaPortalIvaRequest",
+      "type": "object"
+    }
+  },
+  "rcel.ConsultaRCELRequest": {
+    "fields": [
+      "clave_encriptada",
+      "desde",
+      "hasta",
+      "cuit_representante",
+      "nombre_rcel",
+      "representado_cuit",
+      "clave",
+      "minio_upload",
+      "proxy_request"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "desde": {
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "example": "31/12/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "cuit_representante": {
+          "example": "20123456780",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "nombre_rcel": {
+          "description": "Nombre del Contribuyente que se quiere consultar, debe coincidr EXACTAMENTE",
+          "example": "Empresa Ejemplo S.A.",
+          "title": "Nombre Rcel",
+          "type": "string"
+        },
+        "representado_cuit": {
+          "example": "30876543210",
+          "title": "Representado Cuit",
+          "type": "string"
+        },
+        "clave": {
+          "example": "mi_contraseña_secreta",
+          "title": "Clave",
+          "type": "string"
+        },
+        "minio_upload": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "example": true,
+          "title": "Minio Upload"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "desde",
+        "hasta",
+        "cuit_representante",
+        "nombre_rcel",
+        "representado_cuit",
+        "clave"
+      ],
+      "title": "ConsultaRCELRequest",
+      "type": "object"
+    }
+  },
+  "retper_iibb_agip.ConsultaRetPerIIBBAGIPRequest": {
+    "fields": [
+      "clave_encriptada",
+      "usuario",
+      "clave",
+      "cuit_representado",
+      "denominacion",
+      "desde",
+      "hasta",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "usuario": {
+          "description": "Email del usuario para autenticarse en AGIP",
+          "example": "usuario@ejemplo.com",
+          "title": "Usuario",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Contrasena del usuario para autenticarse en AGIP",
+          "example": "mi_clave",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT del contribuyente representado",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "denominacion": {
+          "description": "Denominacion del contribuyente",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "desde": {
+          "description": "Periodo desde en formato AAAAMM",
+          "example": "202401",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "description": "Periodo hasta en formato AAAAMM",
+          "example": "202412",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir archivos a MinIO y devolver links",
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "usuario",
+        "clave",
+        "cuit_representado",
+        "denominacion",
+        "desde",
+        "hasta"
+      ],
+      "title": "ConsultaRetPerIIBBAGIPRequest",
+      "type": "object"
+    }
+  },
+  "retper_iibb_arba.ConsultaRetPerIIBBARBARequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit",
+      "clave",
+      "periodo",
+      "denominacion",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit": {
+          "description": "CUIT para autenticarse en ARBA",
+          "example": "27249279191",
+          "title": "Cuit",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave de ARBA",
+          "example": "mi_clave",
+          "title": "Clave",
+          "type": "string"
+        },
+        "periodo": {
+          "description": "Periodo en formato AAAAMM",
+          "example": "202601",
+          "title": "Periodo",
+          "type": "string"
+        },
+        "denominacion": {
+          "description": "Denominacion del contribuyente",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir archivos a MinIO y devolver links",
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit",
+        "clave",
+        "periodo",
+        "denominacion"
+      ],
+      "title": "ConsultaRetPerIIBBARBARequest",
+      "type": "object"
+    }
+  },
+  "retper_iibb_misiones.ConsultaRetPerIIBBMisionesRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "desde",
+      "hasta",
+      "denominacion",
+      "proxy_request",
+      "carga_minio"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para consulta Ret/Per IIBB Misiones.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en Misiones",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en Misiones",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "desde": {
+          "description": "Periodo desde en formato AAAAMM",
+          "example": "202401",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "description": "Periodo hasta en formato AAAAMM",
+          "example": "202412",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "denominacion": {
+          "description": "Denominacion del contribuyente",
+          "example": "Empresa Ejemplo SA",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir archivos a MinIO y devolver links",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "desde",
+        "hasta",
+        "denominacion"
+      ],
+      "title": "ConsultaRetPerIIBBMisionesRequest",
+      "type": "object"
+    }
+  },
+  "sct.ConsultaSCTRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_login",
+      "clave",
+      "cuit_representado",
+      "proxy_request",
+      "vencimientos_excel_minio",
+      "vencimientos_csv_minio",
+      "vencimientos_pdf_minio",
+      "deudas_excel_minio",
+      "deudas_csv_minio",
+      "deudas_pdf_minio",
+      "ddjj_pendientes_excel_minio",
+      "ddjj_pendientes_csv_minio",
+      "ddjj_pendientes_pdf_minio"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta SCT.\n\n- ``cuit_representante``: CUIT/CUIL del representante que se\n  autentica en ARCA.\n- ``clave``: clave fiscal asociada al ``cuit_representante``.\n- ``cuit_representado``: CUIT/CUIL del contribuyente cuyos datos SCT\n  se desean consultar.\n- ``excel_minio``: indica si se desea subir el archivo de Excel a MinIO y recibir la URL.\n- ``csv_minio``: indica si se desea subir el archivo de CSV a MinIO y recibir la URL.\n- ``pdf_minio``: indica si se desea subir el archivo de PDF a MinIO y recibir la URL.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_login": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Login",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT/CUIL del contribuyente a consultar",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "vencimientos_excel_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo XLSX a MinIO y recibir la URL",
+          "example": true,
+          "title": "Vencimientos Excel Minio",
+          "type": "boolean"
+        },
+        "vencimientos_csv_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo CSV a MinIO y recibir la URL",
+          "example": true,
+          "title": "Vencimientos Csv Minio",
+          "type": "boolean"
+        },
+        "vencimientos_pdf_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo PDF a MinIO y recibir la URL",
+          "example": true,
+          "title": "Vencimientos Pdf Minio",
+          "type": "boolean"
+        },
+        "deudas_excel_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo XLSX a MinIO y recibir la URL",
+          "example": true,
+          "title": "Deudas Excel Minio",
+          "type": "boolean"
+        },
+        "deudas_csv_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo CSV a MinIO y recibir la URL",
+          "example": true,
+          "title": "Deudas Csv Minio",
+          "type": "boolean"
+        },
+        "deudas_pdf_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo PDF a MinIO y recibir la URL",
+          "example": true,
+          "title": "Deudas Pdf Minio",
+          "type": "boolean"
+        },
+        "ddjj_pendientes_excel_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo XLSX a MinIO y recibir la URL",
+          "example": true,
+          "title": "Ddjj Pendientes Excel Minio",
+          "type": "boolean"
+        },
+        "ddjj_pendientes_csv_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo CSV a MinIO y recibir la URL",
+          "example": true,
+          "title": "Ddjj Pendientes Csv Minio",
+          "type": "boolean"
+        },
+        "ddjj_pendientes_pdf_minio": {
+          "default": false,
+          "description": "Indica si quiere subir el archivo PDF a MinIO y recibir la URL",
+          "example": true,
+          "title": "Ddjj Pendientes Pdf Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_login",
+        "clave",
+        "cuit_representado"
+      ],
+      "title": "ConsultaSCTRequest",
+      "type": "object"
+    }
+  },
+  "sct.ConsultaSCTCompensacionesRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_login",
+      "clave",
+      "cuit_representado",
+      "desde",
+      "hasta",
+      "excel",
+      "csv",
+      "pdf",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de Compensaciones dentro de SCT.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_login": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Login",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT/CUIL del contribuyente a consultar",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "desde": {
+          "description": "Fecha desde en formato YYYYMMDD",
+          "example": "20240101",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "description": "Fecha hasta en formato YYYYMMDD",
+          "example": "20241231",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "excel": {
+          "default": false,
+          "description": "Indica si se debe generar y subir a MinIO el archivo Excel",
+          "example": true,
+          "title": "Excel",
+          "type": "boolean"
+        },
+        "csv": {
+          "default": false,
+          "description": "Indica si se debe generar y subir a MinIO el archivo CSV",
+          "example": true,
+          "title": "Csv",
+          "type": "boolean"
+        },
+        "pdf": {
+          "default": false,
+          "description": "Indica si se debe generar y subir a MinIO el archivo PDF",
+          "example": true,
+          "title": "Pdf",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_login",
+        "clave",
+        "cuit_representado",
+        "desde",
+        "hasta"
+      ],
+      "title": "ConsultaSCTCompensacionesRequest",
+      "type": "object"
+    }
+  },
+  "sifere.ConsultaSIFERERequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "periodo",
+      "representado_nombre",
+      "proxy_request",
+      "jurisdicciones",
+      "carga_minio"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta SIFERE.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT/CUIL del contribuyente a consultar",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "periodo": {
+          "description": "Periodo en formato AAAAMM",
+          "example": "202401",
+          "title": "Periodo",
+          "type": "string"
+        },
+        "representado_nombre": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre del contribuyente (opcional)",
+          "example": "Empresa Ejemplo SA",
+          "title": "Representado Nombre"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "jurisdicciones": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de códigos de jurisdicciones a consultar (901-924). Si no se especifica, se consultan todas.",
+          "example": [
+            901,
+            902,
+            903
+          ],
+          "title": "Jurisdicciones"
+        },
+        "carga_minio": {
+          "default": true,
+          "description": "Indica si se deben subir los archivos a MinIO y devolver los links",
+          "example": true,
+          "title": "Carga Minio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "cuit_representado",
+        "periodo"
+      ],
+      "title": "ConsultaSIFERERequest",
+      "type": "object"
+    }
+  },
+  "siper.ConsultaSIPERRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave",
+      "cuit_representado",
+      "detalle_minio",
+      "categorias_minio",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta SIPER.\n\n- ``usuario``: usuario AFIP para autenticarse en SIPER.\n- ``clave``: clave fiscal asociada al ``usuario``.\n- ``cuit_representado``: CUIT del representado (solo numérico, ej: 20147130202). Opcional si solo se consulta el propio CUIT.\n- ``detalle_minio``: indica si se quiere el detalle SIPER en MinIO.\n- ``categorias_minio``: indica si se quiere el histórico SIPER en MinIO.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en SIPER",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del usuario AFIP para autenticarse en SIPER",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT del representado (solo numérico, sin guiones)",
+          "example": "20147130202",
+          "title": "Cuit Representado"
+        },
+        "detalle_minio": {
+          "default": false,
+          "description": "Indica si quiere descargar el detalle SIPER en MinIO",
+          "example": true,
+          "title": "Detalle Minio",
+          "type": "boolean"
+        },
+        "categorias_minio": {
+          "default": false,
+          "description": "Indica si quiere descargar el detalle SIPER en MinIO",
+          "example": true,
+          "title": "Categorias Minio",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave"
+      ],
+      "title": "ConsultaSIPERRequest",
+      "type": "object"
+    }
+  },
+  "srt.ConsultaSRTAlicuotasRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_login",
+      "clave",
+      "cuits_consulta",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la consulta de alícuotas ART en SRT.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_login": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Login",
+          "type": "string"
+        },
+        "clave": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave",
+          "type": "string"
+        },
+        "cuits_consulta": {
+          "description": "Lista de CUITs/CUILs a consultar en SRT",
+          "example": [
+            "30123456789",
+            "20987654321"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Cuits Consulta",
+          "type": "array"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_login",
+        "clave",
+        "cuits_consulta"
+      ],
+      "title": "ConsultaSRTAlicuotasRequest",
+      "type": "object"
+    }
+  },
+  "vep.VEPArchivoRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_inicio_sesion",
+      "medio_pago",
+      "contrasena",
+      "minio_upload",
+      "eliminar_descargas",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la carga de VEP desde archivo.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_inicio_sesion": {
+          "example": "20123456780",
+          "title": "Cuit Inicio Sesion",
+          "type": "string"
+        },
+        "medio_pago": {
+          "example": "link",
+          "title": "Medio Pago",
+          "type": "string"
+        },
+        "contrasena": {
+          "example": "mi_contrasena_secreta",
+          "title": "Contrasena",
+          "type": "string"
+        },
+        "minio_upload": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "example": true,
+          "title": "Minio Upload"
+        },
+        "eliminar_descargas": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "example": true,
+          "title": "Eliminar Descargas"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_inicio_sesion",
+        "medio_pago",
+        "contrasena"
+      ],
+      "title": "VEPArchivoRequest",
+      "type": "object"
+    }
+  },
+  "vep.ConsultaPagosVEPRequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "periodo",
+      "minio_upload",
+      "proxy_request"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para consultar pagos realizados mediante VEP.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT/CUIL del contribuyente cuyos pagos se consultan",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "periodo": {
+          "default": "72",
+          "description": "Periodo o frecuencia de pagos que se solicita en SETI",
+          "example": "72",
+          "title": "Periodo",
+          "type": "string"
+        },
+        "minio_upload": {
+          "default": true,
+          "description": "Subir el CSV exportado a MinIO y devolver su URL",
+          "example": true,
+          "title": "Minio Upload",
+          "type": "boolean"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "cuit_representado"
+      ],
+      "title": "ConsultaPagosVEPRequest",
+      "type": "object"
+    }
+  },
+  "vep.VEPTxtIndividualRequest": {
+    "fields": [
+      "header",
+      "registros",
+      "fecha"
+    ],
+    "schema": {
+      "$defs": {
+        "VEPHeaderPayload": {
+          "properties": {
+            "cuit": {
+              "example": "30717036685",
+              "title": "Cuit",
+              "type": "string"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "0100",
+              "title": "Version"
+            },
+            "nro_formulario": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "20001",
+              "title": "Nro Formulario"
+            },
+            "impuesto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "003",
+              "title": "Impuesto"
+            },
+            "concepto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "003",
+              "title": "Concepto"
+            },
+            "tipo_registro": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "01",
+              "title": "Tipo Registro"
+            }
+          },
+          "required": [
+            "cuit"
+          ],
+          "title": "VEPHeaderPayload",
+          "type": "object"
+        },
+        "VEPRegistroPayload": {
+          "properties": {
+            "nro_form": {
+              "example": "20001",
+              "title": "Nro Form",
+              "type": "string"
+            },
+            "cod_tipo_pago": {
+              "example": "1",
+              "title": "Cod Tipo Pago",
+              "type": "string"
+            },
+            "contribuyente_cuit": {
+              "example": "20123456789",
+              "title": "Contribuyente Cuit",
+              "type": "string"
+            },
+            "concepto": {
+              "example": "019",
+              "title": "Concepto",
+              "type": "string"
+            },
+            "sub_concepto": {
+              "example": "001",
+              "title": "Sub Concepto",
+              "type": "string"
+            },
+            "periodo_fiscal": {
+              "example": "202501",
+              "title": "Periodo Fiscal",
+              "type": "string"
+            },
+            "obligacion_impuesto": {
+              "example": "011",
+              "title": "Obligacion Impuesto",
+              "type": "string"
+            },
+            "importe": {
+              "example": 1234.56,
+              "title": "Importe",
+              "type": "number"
+            }
+          },
+          "required": [
+            "nro_form",
+            "cod_tipo_pago",
+            "contribuyente_cuit",
+            "concepto",
+            "sub_concepto",
+            "periodo_fiscal",
+            "obligacion_impuesto",
+            "importe"
+          ],
+          "title": "VEPRegistroPayload",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "header": {
+          "$ref": "#/$defs/VEPHeaderPayload"
+        },
+        "registros": {
+          "items": {
+            "$ref": "#/$defs/VEPRegistroPayload"
+          },
+          "title": "Registros",
+          "type": "array"
+        },
+        "fecha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fecha para el nombre del archivo en formato YYYYMMDD.",
+          "example": "20250131",
+          "title": "Fecha"
+        }
+      },
+      "required": [
+        "header",
+        "registros"
+      ],
+      "title": "VEPTxtIndividualRequest",
+      "type": "object"
+    }
+  },
+  "vep_ccma.VEPCCMARequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "medio_pago",
+      "filtro_impuestos",
+      "filtro_intereses",
+      "seleccionar_impuestos",
+      "seleccionar_intereses",
+      "minio_upload",
+      "proxy_request",
+      "generar_volante"
+    ],
+    "schema": {
+      "$defs": {
+        "FiltroImpuesto": {
+          "description": "Filtro para filas de capital (impuestos) en el volante de pago.",
+          "properties": {
+            "periodo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "04/2024",
+              "title": "Periodo"
+            },
+            "impuesto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "011",
+              "title": "Impuesto"
+            },
+            "concepto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "019",
+              "title": "Concepto"
+            },
+            "subconcepto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "001",
+              "title": "Subconcepto"
+            },
+            "categoria": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "A",
+              "title": "Categoria"
+            }
+          },
+          "title": "FiltroImpuesto",
+          "type": "object"
+        },
+        "FiltroInteres": {
+          "description": "Filtro para filas de intereses en el volante de pago.",
+          "properties": {
+            "periodo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "04/2024",
+              "title": "Periodo"
+            },
+            "impuesto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "011",
+              "title": "Impuesto"
+            },
+            "concepto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "019",
+              "title": "Concepto"
+            },
+            "subconcepto": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "example": "001",
+              "title": "Subconcepto"
+            }
+          },
+          "title": "FiltroInteres",
+          "type": "object"
+        }
+      },
+      "description": "Modelo de entrada para generar un VEP desde CCMA.\n\n- ``cuit_representante``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``clave_representante``: clave fiscal asociada al ``cuit_representante``.\n- ``cuit_representado``: CUIT/CUIL del contribuyente a generar el VEP.\n- ``medio_pago``: medio de pago ('link', 'pago_mis_cuentas',\n  'internet_banking', 'xn_group', 'qr').\n- ``filtro_impuestos``: lista de filtros para capital (opcional).\n- ``filtro_intereses``: lista de filtros para intereses (opcional).\n- ``seleccionar_impuestos``: si se deben seleccionar impuestos (default True).\n- ``seleccionar_intereses``: si se deben seleccionar intereses (default True).\n- ``minio_upload``: si se suben artefactos a MinIO (default True).\n- ``proxy_request``: si se usa proxy (opcional).\n- ``generar_volante``: si se genera el VEP final (default True). Si False,\n  solo devuelve el volante scrapeado sin generar el VEP.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT/CUIL del contribuyente a generar VEP",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "medio_pago": {
+          "default": "internet_banking",
+          "description": "Medio de pago: link, pago_mis_cuentas, internet_banking, xn_group, qr",
+          "example": "link",
+          "title": "Medio Pago",
+          "type": "string"
+        },
+        "filtro_impuestos": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FiltroImpuesto"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filtros para filas de capital",
+          "title": "Filtro Impuestos"
+        },
+        "filtro_intereses": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FiltroInteres"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filtros para filas de intereses",
+          "title": "Filtro Intereses"
+        },
+        "seleccionar_impuestos": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Seleccionar impuestos (capital)",
+          "example": true,
+          "title": "Seleccionar Impuestos"
+        },
+        "seleccionar_intereses": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Seleccionar intereses",
+          "example": true,
+          "title": "Seleccionar Intereses"
+        },
+        "minio_upload": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Subir artefactos a MinIO",
+          "example": true,
+          "title": "Minio Upload"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Usar proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "generar_volante": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Generar VEP final. Si False, solo devuelve el volante scrapeado",
+          "example": true,
+          "title": "Generar Volante"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "cuit_representado"
+      ],
+      "title": "VEPCCMARequest",
+      "type": "object"
+    }
+  }
+}

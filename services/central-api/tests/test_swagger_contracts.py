@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -11,10 +12,17 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from central_api.api.bot_compat import BOT_ROUTE_ALIASES  # noqa: E402
+from central_api.api.bot_payloads import V1_SCHEMA_BY_ALIAS  # noqa: E402
 from central_api.main import create_app  # noqa: E402
 
+V1_SNAPSHOT = json.loads(
+    (SRC / "central_api" / "api" / "v1_request_schemas.json").read_text(
+        encoding="utf-8"
+    )
+)
 
-def test_todos_los_aliases_documentan_body_json_y_ejemplo() -> None:
+
+def test_todos_los_aliases_reproducen_exactamente_los_schemas_v1() -> None:
     schema = create_app().openapi()
 
     for route_path, _bot, _operation in BOT_ROUTE_ALIASES:
@@ -22,12 +30,11 @@ def test_todos_los_aliases_documentan_body_json_y_ejemplo() -> None:
         request_body = operation["requestBody"]
         assert request_body["required"] is True
         body_schema = request_body["content"]["application/json"]["schema"]
-        assert body_schema["type"] == "object"
-        assert body_schema["examples"]
-        assert set(body_schema["properties"]) == set(body_schema["examples"][0])
-        assert "credentials" not in body_schema["properties"]
-        assert "clave" in body_schema["properties"]
-        assert "clave_encriptada" in body_schema["properties"]
+        expected = V1_SNAPSHOT[V1_SCHEMA_BY_ALIAS[route_path]]["schema"]
+        assert body_schema == expected
+        assert list(body_schema["properties"]) == V1_SNAPSHOT[
+            V1_SCHEMA_BY_ALIAS[route_path]
+        ]["fields"]
 
 
 def test_ccma_muestra_campos_requeridos_y_cancelacion() -> None:
@@ -35,9 +42,17 @@ def test_ccma_muestra_campos_requeridos_y_cancelacion() -> None:
 
     create_schema = schema["paths"]["/api/v3/ccma/consulta"]["post"]
     body_schema = create_schema["requestBody"]["content"]["application/json"]["schema"]
-    assert "representado_cuit" in body_schema["required"]
-    assert body_schema["properties"]["representado_cuit"]["pattern"] == r"^\d{11}$"
-    assert body_schema["examples"][0]["representado_cuit"] == "20123456789"
+    assert "cuit_representado" in body_schema["required"]
+    assert body_schema["properties"]["cuit_representado"]["example"] == "20123456789"
+    assert list(body_schema["properties"]) == [
+        "clave_encriptada",
+        "cuit_representante",
+        "clave_representante",
+        "cuit_representado",
+        "proxy_request",
+        "movimientos",
+        "pdf",
+    ]
 
     cancel_schema = schema["paths"]["/api/v3/ccma/consulta/cancelar/{job_id}"]["post"]
     cancel_body = cancel_schema["requestBody"]["content"]["application/json"]["schema"]
