@@ -25,6 +25,18 @@ from central_api.settings import get_settings  # noqa: E402
 from central_api.store import JOBS  # noqa: E402
 
 
+def _assert_no_storage_urls(value) -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            lowered = str(key).lower()
+            assert "url" not in lowered
+            assert "object_key" not in lowered
+            _assert_no_storage_urls(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _assert_no_storage_urls(nested)
+
+
 def _private_pem() -> str:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     return key.private_bytes(
@@ -194,6 +206,11 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         assert created.status_code == 202
         job_id = created.json()["job_id"]
         headers = {"Authorization": "Bearer admin-table-token"}
+        assert cliente.get("/admin/records?tabla=all").status_code == 401
+        assert cliente.get(
+            "/admin/records?tabla=all",
+            headers={"Authorization": "Bearer incorrecto"},
+        ).status_code == 403
         response = cliente.get("/admin/records?tabla=all", headers=headers)
         assert response.status_code == 200
         body = response.json()
@@ -208,6 +225,12 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         assert "clave" in job_record["credentials"]["fields"]
         assert "credential_ciphertext" not in job_record
         assert all("url" not in key.lower() for key in job_record)
+        assert all(
+            "url" not in key.lower()
+            for row in body["tables"]["job_artifacts"]
+            for key in row
+        )
+        _assert_no_storage_urls(body)
         assert cliente.get(
             "/admin/records?tabla=invalid", headers=headers
         ).status_code == 400

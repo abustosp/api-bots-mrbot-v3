@@ -144,7 +144,7 @@ details > .details-body { padding: 0 14px 14px; }
       <button type="button" data-view="dashboard">Resumen</button>
       <button type="button" data-view="users">Usuarios</button>
       <button type="button" data-view="jobs">Jobs</button>
-      <button type="button" data-view="executions">Registros</button>
+      <button type="button" data-view="executions">Tablas / registros</button><a class="button secondary" href="/admin/tables">Abrir tablas</a>
       <button type="button" data-view="fleet">Flota</button>
       <button type="button" data-view="audit">Auditoría</button>
     </nav>
@@ -191,7 +191,7 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="kicker">Historial unificado</div><h2>Registros de ejecuciones</h2><p class="subtle">Consulta request, resultado, artefactos y eventos de todos los bots desde una sola vista.</p>
         <form id="executions-filter" class="toolbar"><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><button class="button primary" type="submit">Actualizar</button></form>
         <div class="grid" id="execution-table-counts"><div class="empty">Cargando tablas...</div></div>
-        <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Job</th><th>Bot / operación</th><th>Estado</th><th>Credenciales</th><th>Resultado</th><th>Artefactos MinIO</th></tr></thead><tbody id="executions-table"><tr><td colspan="8" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Creado</th><th>Asignado</th><th>Iniciado</th><th>Finalizado</th><th>Usuario</th><th>Job</th><th>Bot / operación</th><th>Estado</th><th>Credenciales</th><th>Resultado</th><th>Artefactos MinIO</th></tr></thead><tbody id="executions-table"><tr><td colspan="11" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="fleet">
@@ -212,7 +212,8 @@ details > .details-body { padding: 0 14px 14px; }
 (() => {
   "use strict";
   const TOKEN_KEY = "mrbot_admin_token";
-  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: "dashboard" };
+  const initialView = window.location.pathname.endsWith("/tables") ? "executions" : "dashboard";
+  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
@@ -268,7 +269,7 @@ details > .details-body { padding: 0 14px 14px; }
   }
   async function loadExecutions(event) {
     if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100", tabla: "all" }); const bot = $("#executions-bot").value.trim(); const estado = $("#executions-state").value.trim(); if (bot) params.set("bot", bot); if (estado) params.set("estado", estado);
-    try { const data = await api(`/admin/records?${params}`); const tables = data.tables || {}; $("#execution-table-counts").innerHTML = Object.entries(tables).map(([name, values]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(values.length)}</strong></div></div>`).join(""); const rows = data.records || []; $("#executions-table").innerHTML = rows.length ? rows.map((record) => { const job = record.job || {}; const result = record.result || {}; const credentials = record.credentials || {}; const artifacts = record.artifacts || []; const artifactNames = artifacts.map((artifact) => artifact.name || artifact.filename).filter(Boolean); return `<tr><td>${esc(date(job.creado_en))}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver (${esc((credentials.fields || []).join(", ") || "clave")})</button>` : "—"}</td><td>${esc(result.result || job.resultado || "—")}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`; }).join("") : `<tr><td colspan="8" class="empty">No hay ejecuciones para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+    try { const data = await api(`/admin/records?${params}`); const tables = data.tables || {}; $("#execution-table-counts").innerHTML = Object.entries(tables).map(([name, values]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(values.length)}</strong></div></div>`).join(""); const rows = data.records || []; $("#executions-table").innerHTML = rows.length ? rows.map((record) => { const job = record.job || {}; const result = record.result || {}; const credentials = record.credentials || {}; const artifacts = record.artifacts || []; const artifactNames = artifacts.map((artifact) => artifact.name || artifact.filename).filter(Boolean); return `<tr><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(date(job.finalizado_en))}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver (${esc((credentials.fields || []).join(", ") || "clave")})</button>` : "—"}</td><td>${esc(result.result || job.resultado || "—")}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`; }).join("") : `<tr><td colspan="11" class="empty">No hay ejecuciones para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
   async function executionAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button || button.dataset.action !== "credential-detail") return;
@@ -282,13 +283,13 @@ details > .details-body { padding: 0 14px 14px; }
   async function loadFleet() { try { const data = await api("/admin/fleet"); const rows = data.flota || []; $("#fleet-table").innerHTML = rows.length ? rows.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay workers registrados.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
   async function evaluateFleet() { try { const data = await api("/admin/fleet/evaluate", { method: "POST" }); flash(`Evaluación completada: ${data.activas?.length || 0} alertas activas.`); await loadFleet(); } catch (error) { flash(error.message, "error"); } }
   async function loadAudit(event) { if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const action = $("#audit-action").value.trim(); const actor = $("#audit-actor").value.trim(); if (action) params.set("accion", action); if (actor) params.set("actor", actor); try { const data = await api(`/admin/audit?${params}`); const rows = data.eventos || []; $("#audit-table").innerHTML = rows.length ? rows.slice().reverse().map((item) => `<tr><td>${esc(date(item.occurred_at))}</td><td><strong>${esc(item.action)}</strong></td><td>${esc(item.actor_id)}</td><td>${esc(item.target_type)}<br><span class="muted">${esc(short(item.target_id, 22))}</span></td><td><span class="status ${item.result === "success" ? "status-good" : "status-bad"}">${esc(item.result)}</span></td><td>${esc(item.reason || "—")}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No hay eventos para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
-  $("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); state.token = $("#admin-token").value.trim(); if (!state.token) return; try { await api("/admin/users?limit=1"); sessionStorage.setItem(TOKEN_KEY, state.token); loginError(""); showLoggedIn(true); setView("dashboard"); } catch (_) { state.token = ""; loginError("No se pudo validar el token de administración."); } });
+  $("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); state.token = $("#admin-token").value.trim(); if (!state.token) return; try { await api("/admin/users?limit=1"); sessionStorage.setItem(TOKEN_KEY, state.token); loginError(""); showLoggedIn(true); setView(state.view); } catch (_) { state.token = ""; loginError("No se pudo validar el token de administración."); } });
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction);
   $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#audit-filter").addEventListener("submit", loadAudit);
-  if (state.token) { showLoggedIn(true); setView("dashboard"); } else { showLoggedIn(false); }
+  if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>
 </body>
@@ -304,4 +305,10 @@ def portada_admin() -> str:
 @router.get("/login", response_class=HTMLResponse)
 def login_admin() -> str:
     """Mantiene una URL de login explícita, compatible con la navegación V2."""
+    return ADMIN_PANEL_HTML
+
+
+@router.get("/tables", response_class=HTMLResponse)
+def tables_admin() -> str:
+    """Alias compatible con V1/V2 para abrir directamente los registros."""
     return ADMIN_PANEL_HTML
