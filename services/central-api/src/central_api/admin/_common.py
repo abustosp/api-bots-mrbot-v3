@@ -8,6 +8,7 @@ configurado es 403, sin cabecera es 401 y con token distinto es 403.
 from __future__ import annotations
 
 import hmac
+import re
 
 from fastapi import HTTPException
 
@@ -66,8 +67,47 @@ def es_clave_sensible(nombre: str) -> bool:
     return any(k in minus for k in _CLAVES_SENSIBLES)
 
 
+#: Cualquier valor que parezca una URL se oculta completo: una query prefirmada
+#: lleva firma, bucket y host, y el panel no debe exhibir capacidades.
+_URL_EN_VALOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://|www[.]")
+#: ``authorization: Bearer x`` / ``api_key=...`` dentro de un texto libre.
+_SECRETO_ASIGNADO_EN_VALOR = re.compile(
+    r"((?:^|[^A-Za-z0-9_])"
+    r"(?:authorization|password|passwd|passphrase|secret|token|credential|"
+    r"credencial|clave|api[_ -]?key|access[_ -]?key|client[_ -]?secret|"
+    r"private[_ -]?key)"
+    r"\s*[:=]\s*)(?:bearer\s+|basic\s+)?([^\s,;]+)",
+    re.IGNORECASE,
+)
+#: ``Bearer <token>`` suelto, sin clave a la izquierda.
+_ESQUEMA_AUTH_EN_VALOR = re.compile(
+    r"((?:^|[^A-Za-z0-9_])(?:bearer|basic)\s+)([A-Za-z0-9._~+/=-]{6,})",
+    re.IGNORECASE,
+)
+
+MARCA_URL_OCULTA = "[REDACTED_URL]"
+MARCA_SECRETO = "[REDACTED_SECRET]"
+
+
+def sanear_valor_texto(texto: str) -> str:
+    """Enmascara URLs y credenciales embebidas en un valor de texto.
+
+    Espeja el saneamiento SQL de la migración 0015: ocultar la clave no basta
+    cuando el secreto viaja dentro del valor (``{"notas": "Bearer eyJ..."}``).
+    """
+    if _URL_EN_VALOR.search(texto):
+        return MARCA_URL_OCULTA
+    limpio = _ESQUEMA_AUTH_EN_VALOR.sub(r"\1" + MARCA_SECRETO, texto)
+    return _SECRETO_ASIGNADO_EN_VALOR.sub(r"\1" + MARCA_SECRETO, limpio)
+
+
 def redactar_metadata(valor: object) -> object:
-    """Enmascara recursivamente valores sensibles de un JSON de auditoría."""
+    """Enmascara recursivamente valores sensibles de un JSON de auditoría.
+
+    Aplica las dos capas del saneamiento: la clave decide (``token``,
+    ``clave_fiscal``) y, cuando la clave es inocua (``notas``, ``destino``),
+    el valor todavía se revisa por si lleva URL o credencial embebida.
+    """
     if isinstance(valor, dict):
         salida: dict = {}
         for clave, item in valor.items():
@@ -78,6 +118,8 @@ def redactar_metadata(valor: object) -> object:
         return salida
     if isinstance(valor, list):
         return [redactar_metadata(item) for item in valor]
+    if isinstance(valor, str):
+        return sanear_valor_texto(valor)
     return valor
 
 

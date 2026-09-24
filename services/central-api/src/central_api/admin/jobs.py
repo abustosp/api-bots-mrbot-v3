@@ -24,6 +24,7 @@ from central_api.admin._common import (
     es_clave_sensible,
     redactar_metadata,
     require_admin,
+    sanear_valor_texto,
     validar_motivo,
 )
 from central_api.admin.audit import log_event
@@ -50,8 +51,6 @@ BOT_TABLE_COLUMNS = (
     "assigned_at", "started_at", "finished_at", "updated_at",
     "artifact_names", "artifact_metadata",
 )
-
-_URL_VALUE = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*://[^\s\"'<>]+|www\.[^\s\"'<>]+)")
 
 
 def _bot_physical_table(bot: str) -> str | None:
@@ -94,7 +93,7 @@ def _sanear_valor_tabla(valor: Any) -> Any:
     if isinstance(valor, (list, tuple)):
         return [_sanear_valor_tabla(item) for item in valor]
     if isinstance(valor, str):
-        return _URL_VALUE.sub("[URL OCULTA]", valor)
+        return sanear_valor_texto(valor)
     return valor
 
 TABLE_COLUMNS = {

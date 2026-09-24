@@ -6,6 +6,7 @@ internos; nunca conoce headers ni modelos Pydantic publicos.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection, Mapping
 from typing import Any
 
@@ -47,6 +48,97 @@ class NotFoundError(RepositoryError):
     """La entidad solicitada no existe o escapa al ambito del principal."""
 
 
+def _normalizar_clave(clave: object) -> str:
+    """Reduce el nombre de una clave a letras y digitos en minusculas.
+
+    ``apiKey``, ``API-KEY`` y ``api key`` comparten forma normalizada, de modo
+    que una misma frontera cubre camelCase, guiones y espacios.
+    """
+    return re.sub(r"[^a-z0-9]", "", str(clave).strip().casefold())
+
+
+_FORBIDDEN_NORMALIZADAS = frozenset(
+    _normalizar_clave(clave) for clave in _FORBIDDEN_PAYLOAD_KEYS
+)
+
+#: Prefijos que delatan cabeceras, capacidades o sobres sellados.
+_FORBIDDEN_PREFIJOS = (
+    "authorization",
+    "bearer",
+    "cookie",
+    "urlprefirmada",
+    "presignedurl",
+    "uploadurl",
+    "downloadurl",
+    "sealed",
+)
+
+#: Sufijos que delatan material sensible aunque la clave lleve contexto.
+_FORBIDDEN_SUFIJOS = (
+    "apikey",
+    "apisecret",
+    "clientsecret",
+    "privatekey",
+    "secretkey",
+    "accesstoken",
+    "refreshtoken",
+    "bearertoken",
+    "tokenproveedor",
+    "password",
+    "passwd",
+    "passphrase",
+    "credentials",
+    "credential",
+    "token",
+    "secret",
+)
+
+#: Marcas inequívocas que se rechazan en cualquier posición del nombre
+#: (``usar_api_key_v2``). Son deliberadamente pocas: palabras débiles como
+#: ``token`` o ``clave`` solo se juzgan al final del nombre para no rechazar
+#: compuestos legítimos del dominio (``incluir_token_fiscal``, ``sin_clave``);
+#: las vistas de lectura las ocultan igual porque filtran por subcadena.
+_FORBIDDEN_CONTENIDOS = (
+    "apikey",
+    "apisecret",
+    "clientsecret",
+    "privatekey",
+    "secretkey",
+    "password",
+    "passwd",
+    "passphrase",
+    "authorization",
+    "presignedurl",
+    "urlprefirmada",
+    "sealed",
+    "ciphertext",
+)
+
+
+def _clave_prohibida(clave: object) -> str | None:
+    """Devuelve la marca que prohibe la clave, o ``None`` si es inocua.
+
+    ``clave`` se compara solo por igualdad (no por sufijo) porque en el dominio
+    fiscal aparece en nombres legítimos compuestos; el resto de las marcas
+    tolera prefijos y sufijos (``authorization_header``, ``usar_api_key_v2``).
+    """
+    nombre = _normalizar_clave(clave)
+    if not nombre:
+        return None
+    if nombre in _FORBIDDEN_NORMALIZADAS:
+        return nombre
+    for marca in _FORBIDDEN_CONTENIDOS:
+        if marca in nombre:
+            return marca
+    for prefijo in _FORBIDDEN_PREFIJOS:
+        if nombre.startswith(prefijo):
+            return prefijo
+    for sufijo in _FORBIDDEN_SUFIJOS:
+        if nombre.endswith(sufijo):
+            return sufijo
+    return None
+
+
 def assert_no_secretos(payload: Mapping[str, Any] | None, etiqueta: str) -> None:
     """Rechaza payloads que intenten persistir material sensible en claro.
 
@@ -62,10 +154,10 @@ def assert_no_secretos(payload: Mapping[str, Any] | None, etiqueta: str) -> None
         valor = pendientes.pop()
         if isinstance(valor, Mapping):
             for clave, anidado in valor.items():
-                nombre = str(clave).strip().casefold().replace("-", "_").replace(" ", "_")
-                if nombre in _FORBIDDEN_PAYLOAD_KEYS:
+                marca = _clave_prohibida(clave)
+                if marca is not None:
                     raise RepositoryError(
-                        f"{etiqueta} contiene {nombre!r}: use el sobre sellado"
+                        f"{etiqueta} contiene {marca!r}: use el sobre sellado"
                     )
                 pendientes.append(anidado)
         elif isinstance(valor, (list, tuple)):

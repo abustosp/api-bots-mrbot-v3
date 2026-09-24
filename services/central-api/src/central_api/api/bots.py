@@ -362,7 +362,21 @@ async def submit_job(
                     "Location": f"/api/v3/jobs/{job.id}",
                 },
             )
+    from central_api.repositories.base import RepositoryError, assert_no_secretos
     from central_api.repositories.jobs import IdempotencyConflict
+
+    try:
+        # La frontera de persistencia rechaza payloads con material sensible:
+        # las credenciales viajan solo en el sobre sellado. Es un defecto del
+        # cliente, no una caída del servicio, así que se responde 422 en vez de
+        # un 503 reintentable que dejaría al cliente en bucle.
+        assert_no_secretos(normalized_payload, "request_payload")
+    except RepositoryError:
+        return JSONResponse(
+            status_code=422,
+            content=public_error("validation", corr),
+            headers={"X-Correlation-ID": corr},
+        )
 
     job_id = new_job_id()
     reserved_job_id = job_id
