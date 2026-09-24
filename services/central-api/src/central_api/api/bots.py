@@ -183,15 +183,23 @@ def _operation_or_none(bot: str, operacion: str) -> dict | None:
     return OPERATIONS.get((bot, operacion))
 
 
-@router.post("/bots/{bot}/{operacion}", status_code=202)
-async def create_job(
+async def submit_job(
+    *,
     bot: str,
     operacion: str,
-    body: CreateJobBody,
+    payload: dict,
+    credentials: dict,
     request: Request,
-    principal: ApiPrincipal = Depends(require_api_principal),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    principal: ApiPrincipal,
+    idempotency_key: str | None,
 ) -> JSONResponse:
+    """Admite un job desde cualquier adaptador público de bots.
+
+    El adaptador genérico V3 y los aliases compatibles con las rutas V2 pasan
+    por esta misma función. Así se conserva una sola frontera de autenticación,
+    idempotencia, cuota, persistencia y encolado, sin que un router invoque un
+    plugin ni al worker directamente.
+    """
     corr = correlation_id(request)
     definition = _operation_or_none(bot, operacion)
     if definition is None:
@@ -199,7 +207,7 @@ async def create_job(
             status_code=404, content=public_error("not_found", corr),
             headers={"X-Correlation-ID": corr},
         )
-    fingerprint = fingerprint_payload(bot, operacion, body.payload)
+    fingerprint = fingerprint_payload(bot, operacion, payload)
     if idempotency_key:
         hit = check_idempotency(principal.user_id, idempotency_key, fingerprint)
         if hit.conflict:
@@ -223,14 +231,14 @@ async def create_job(
     job_id_pg: str | None = None
     if db_configurado():
         job_id_pg = await _persistir_job_db(
-            principal.user_id, bot, operacion, body.payload, idempotency_key
+            principal.user_id, bot, operacion, payload, idempotency_key
         )
     job = Job(
         id=job_id_pg or new_job_id(),
         bot=bot,
         operation=operacion,
-        payload=body.payload,
-        credentials=body.credentials,
+        payload=payload,
+        credentials=credentials,
     )
     try:
         reserve_for_job(principal.user_id, job.id, bot, operacion)
@@ -247,6 +255,27 @@ async def create_job(
         status_code=202,
         content={"success": True, "job_id": job.id, "status": job.status},
         headers={"X-Correlation-ID": corr, "Location": f"/api/v3/jobs/{job.id}"},
+    )
+
+
+@router.post("/bots/{bot}/{operacion}", status_code=202)
+async def create_job(
+    bot: str,
+    operacion: str,
+    body: CreateJobBody,
+    request: Request,
+    principal: ApiPrincipal = Depends(require_api_principal),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> JSONResponse:
+    """Crea un job usando la superficie genérica normativa de V3."""
+    return await submit_job(
+        bot=bot,
+        operacion=operacion,
+        payload=body.payload,
+        credentials=body.credentials,
+        request=request,
+        principal=principal,
+        idempotency_key=idempotency_key,
     )
 
 

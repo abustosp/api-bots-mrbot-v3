@@ -2,7 +2,7 @@
 
 Servicio central de la V3. Es el **plano de control** completo del sistema.
 
-> **Estado: sin implementar.** Diseño en
+> **Estado: operativo en desarrollo.** Diseño y límites en
 > [`../../plans/02-central-api/plan.md`](../../plans/02-central-api/plan.md).
 
 ---
@@ -44,6 +44,53 @@ Servicio central de la V3. Es el **plano de control** completo del sistema.
 | `GET` | `/bots/{bot}` | Detalle, operaciones y esquema de entrada |
 | `GET` | `/mi/cuenta` | Plan, consumo del período y saldo de créditos |
 
+### Middleware de bots y compatibilidad V2
+
+La ruta normativa es `POST /api/v3/bots/{bot}/{operacion}`. La central valida la
+clave API, ownership, cuota e idempotencia, persiste el job en PostgreSQL y el
+planificador lo asigna al worker sano que tenga capacidad. La central no importa
+plugins de bots ni expone al worker directamente.
+
+Para facilitar la migración de clientes V2, el router de compatibilidad publica
+los 36 endpoints históricos de ejecución como aliases bajo `/api/v3`:
+
+```text
+/mis_comprobantes/consulta
+/mis_comprobantes/solicitar_consulta
+/mis_comprobantes/historial
+/ccma/consulta                         /siper/consulta
+/sct/consulta                          /sct/compensaciones/consulta
+/portal_iva/consulta                    /portal_iva/carga
+/rcel/consulta                          /hacienda/consulta
+/sifere/consulta                        /aportes-en-linea/consulta
+/declaracion-en-linea/consulta          /mis_facilidades/consulta
+/mis_retenciones/consulta               /mis_retenciones_iva_simple/consulta
+/retenciones_percepciones_iibb/misiones/consulta
+/retenciones_percepciones_iibb/agip/consulta
+/retenciones_percepciones_iibb/arba/consulta
+/arba/consulta                           /pago_devoluciones/consulta
+/moa/consulta                            /libros_iva/consulta
+/facturometro/consulta                   /controladores-fiscales/carga
+/certificado-mipyme/consulta             /srt/alicuotas/consulta
+/vep/carga                               /vep_archivo/carga
+/vep-ccma/generar                        /vep/consulta-pagos
+/liquidacion_granos/consulta              /consulta_cuit/individual
+/consulta_cuit/masivo
+```
+
+Cada alias `POST` devuelve un `job_id` y comparte las rutas de estado y
+cancelación con el formato `/{job_id}` y `/cancelar/{job_id}`. También se
+mantiene `GET /api/v3/apoc/consulta/{cuit}` como adaptador idempotente. Por lo
+tanto, los clientes V2 conservan el flujo asíncrono, pero la ejecución pasa por
+la misma central, cola, cuota, auditoría y despacho que la API V3.
+
+Los endpoints V2 que devolvían logs sin un job se reemplazan por `GET /jobs`
+con filtros `bot`, `operacion` y `status`, y por `GET /jobs/{job_id}` para el
+detalle. Las operaciones que recibían archivos no se proxifican como multipart:
+se solicita primero un ticket con `POST /api/v3/uploads` y se envía el
+`object_key` en el payload del job. Esta decisión evita almacenar archivos
+temporales en la central y es parte del contrato V3.
+
 ### API interna para workers, `/internal/v1`
 
 | Método | Ruta | Descripción |
@@ -63,6 +110,26 @@ Esta superficie no se expone a internet.
 | `GET` | `/health` | Vivacidad del proceso. No consulta dependencias |
 | `GET` | `/ready` | Disponibilidad real: base de datos y versión de esquema |
 | `GET` | `/admin/*` | Panel de administración |
+
+### Panel web administrativo V3
+
+`GET /admin/` y `GET /admin/login` sirven una consola HTML inspirada en la
+navegación y el lenguaje visual del panel V2, sin copiar su acceso directo a
+tablas ni exponer credenciales. Incluye estas vistas:
+
+- **Resumen:** métricas de jobs, estado de la flota y últimas acciones.
+- **Usuarios:** búsqueda, alta, habilitación/deshabilitación y emisión de
+  claves API, cuyo valor se muestra una sola vez.
+- **Jobs:** filtros, métricas, detalle y cancelación de ejecuciones.
+- **Flota:** estado de workers, capacidad, protocolo y evaluación de alertas.
+- **Auditoría:** consulta de eventos append-only con filtros básicos.
+
+La consola valida el `ADMIN_TOKEN` contra los endpoints JSON privados y lo
+conserva únicamente en `sessionStorage` durante la sesión del navegador. Los
+endpoints `/admin/*` JSON mantienen su autorización `Bearer` independiente,
+por lo que agregar la interfaz no cambia el contrato de clientes ni workers.
+La sesión persistente, MFA, CSRF y administración de sesiones del diseño
+completo de `plans/05-admin-panel` quedan como una siguiente fase.
 
 ## Planificador
 
@@ -172,11 +239,9 @@ Inventario completo en
 
 ## Cómo correrlo
 
-> Pendiente de la fase F0.
-
 ```bash
-# previsto
 docker compose -f ../../infra/compose/docker-compose.yml up central-api
+# abrir luego https://central-api.mrbot.com.ar/admin/
 ```
 
 ## Documentos relacionados
