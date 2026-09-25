@@ -79,7 +79,7 @@ class CaptchaSolver:
         profile = profile if isinstance(profile, dict) else {}
         raw = profile.get(f"{provider}_key") or profile.get("api_key") or ""
         key = str(raw).strip() or None
-        if key in ("sin-configurar", "placeholder"):
+        if key in ("sin-configurar", "placeholder", "dev-placeholder"):
             key = None
         enabled = _profile_bool(profile.get("enabled"), False) and bool(key)
         threshold = profile.get("threshold")

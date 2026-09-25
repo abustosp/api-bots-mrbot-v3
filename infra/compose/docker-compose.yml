@@ -192,7 +192,10 @@ services:
       # futuro y el overlay docker-compose.mtls.yml. Sin secretos de la
       # central ni de otros servicios (W-1/SEC-3).
       - ../certs:/certs:ro
-    networks: [edge, control]
+    # Storage solo transporta URLs prefirmadas de un solo uso. El worker no
+    # recibe credenciales S3, pero sí necesita alcanzar MinIO para subir los
+    # artefactos de sus jobs.
+    networks: [edge, control, storage]
     depends_on:
       central-api:
         condition: service_healthy
@@ -339,7 +342,8 @@ networks:
   control:
     internal: true
   storage:
-    internal: true
+    # No internal: MinIO local publica 9000/9001 solo en 127.0.0.1 y el host
+    # necesita seguir las URLs GET prefirmadas para descargar artefactos.
 
 volumes:
   postgres_data:

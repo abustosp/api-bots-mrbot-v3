@@ -28,7 +28,7 @@ def worker_base_url(node: str) -> str:
 def _limpio(valor: str) -> str | None:
     """Normaliza secretos: vacíos y placeholders de desarrollo dan None."""
     texto = (valor or "").strip()
-    if not texto or texto in ("sin-configurar", "placeholder"):
+    if not texto or texto in ("sin-configurar", "placeholder", "dev-placeholder"):
         return None
     return texto
 

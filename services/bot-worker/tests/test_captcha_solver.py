@@ -60,6 +60,15 @@ def test_from_profile_redacts_key_and_bounds_values() -> None:
     assert "provider-test-key" not in repr(solver)
 
 
+def test_dev_placeholder_never_enables_paid_captcha_solver() -> None:
+    solver = CaptchaSolver.from_profile(
+        "arca", {"enabled": True, "arca_key": "dev-placeholder"}
+    )
+
+    assert solver.enabled is False
+    assert solver._api_key is None
+
+
 def test_solver_create_poll_response_without_real_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
