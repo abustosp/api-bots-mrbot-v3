@@ -35,14 +35,21 @@ def select_worker(
     workers: list[WorkerEntry],
     allowed_nodes: list[str] | None = None,
     degraded_after_seconds: int = 15,
+    force: bool = False,
 ) -> WorkerEntry | None:
+    """Elige worker SANO con latido fresco.
+
+    Con ``force`` (forzado del panel) se omite el tope de capacidad: es la
+    única vía que puede superar el cupo. Salud, frescura, protocolo e
+    inventario se siguen exigiendo.
+    """
     now = utcnow()
     candidates = [
         w
         for w in workers
         if (allowed_nodes is None or w.node in allowed_nodes)
         and w.status == "SANO"
-        and w.running_jobs + w.reserved_slots < w.capacity
+        and (force or w.running_jobs + w.reserved_slots < w.capacity)
         and w.last_heartbeat_at is not None
         and w.last_heartbeat_at >= now - timedelta(seconds=degraded_after_seconds)
         and (not job.bot or not w.capabilities or f"{job.bot}/{job.operation}" in w.capabilities)

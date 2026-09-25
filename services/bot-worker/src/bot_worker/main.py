@@ -47,6 +47,7 @@ from bot_worker.runtime.sealed import (
     generate_sealed_keypair,
 )
 from bot_worker.security.assignments import (
+    ASSIGNMENT_SCOPE_ASSIGN_FORCE,
     AssignmentDenied,
     load_verify_key,
     verify_assignment,
@@ -184,6 +185,7 @@ class JobEnvelope(BaseModel):
                     "assignment_expires_at": "2026-09-24T03:00:00Z",
                     "captcha_profile": {"provider": "disabled"},
                     "service_profile": {"name": "development"},
+                    "force": False,
                 }
             ],
         },
@@ -214,6 +216,7 @@ class JobEnvelope(BaseModel):
     assignment_expires_at: str = ""
     captcha_profile: dict[str, Any] | None = None
     service_profile: dict[str, Any] | None = None
+    force: bool = False
 
 
 class CancelIn(BaseModel):
@@ -343,8 +346,12 @@ def verify_envelope_signature(request: Request, env: "JobEnvelope", *, scope: st
     """Gate de ejecución: verifica firma, vigencia y ligadura al sellado.
 
     Sin clave de central fijada (registro pendiente), sin firma, vencida o
-    adulterada, devuelve el rechazo 403 sin ejecutar nada.
+    adulterada, devuelve el rechazo 403 sin ejecutar nada. Un sobre con
+    ``force`` solo verifica bajo el alcance ``assign-force``: es la única
+    vía que puede superar el cupo, y viene firmada por la central.
     """
+    if env.force:
+        scope = ASSIGNMENT_SCOPE_ASSIGN_FORCE
     key = getattr(request.app.state, "central_verify_key", None)
     sealed_for_signature = env.sealed_section
     if sealed_for_signature is None and isinstance(env.sealed, dict):
@@ -571,7 +578,7 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
             deadline_at=env.deadline_at,
         )
         try:
-            acceptance = await supervisor.accept(job, body)
+            acceptance = await supervisor.accept(job, body, force=bool(env.force))
         except WorkerDraining:
             return JSONResponse(
                 status_code=409,

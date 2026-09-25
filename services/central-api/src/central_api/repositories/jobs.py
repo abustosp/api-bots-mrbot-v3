@@ -104,6 +104,40 @@ RETURNING j.attempts
 """
 )
 
+#: Variante del claim para ejecución forzada desde el panel: exige worker
+#: SANO con latido fresco y job PENDIENTE, pero omite el tope
+#: ``running_jobs < capacity``. Sigue sumando el slot (la superación queda
+#: visible en la flota) y es la única vía que puede exceder el cupo.
+ASSIGN_JOB_FORCE_SQL = text(
+    """
+WITH eligible_job AS (
+    SELECT id
+    FROM jobs
+    WHERE id = :job_id AND status = 'PENDIENTE'
+    FOR UPDATE
+), reserved_worker AS (
+    UPDATE workers
+    SET running_jobs = running_jobs + 1
+    WHERE id = :worker_id
+      AND status = 'SANO'
+      AND last_heartbeat_at >= CURRENT_TIMESTAMP - INTERVAL '30 seconds'
+      AND EXISTS (SELECT 1 FROM eligible_job)
+    RETURNING id, app_version
+)
+UPDATE jobs AS j
+SET status = 'ASIGNADO',
+    worker_id = rw.id,
+    assigned_at = CURRENT_TIMESTAMP,
+    lease_expires_at = CURRENT_TIMESTAMP + make_interval(secs => :lease_seconds),
+    attempts = j.attempts + 1,
+    app_version = rw.app_version
+FROM eligible_job AS ej
+JOIN reserved_worker AS rw ON true
+WHERE j.id = ej.id
+RETURNING j.attempts
+"""
+)
+
 RELEASE_ASSIGNMENT_SQL = text(
     """
 WITH released AS (
@@ -301,6 +335,29 @@ class JobRepository:
         row = (
             await self._session.execute(
                 ASSIGN_JOB_SQL,
+                {
+                    "job_id": str(job_id),
+                    "worker_id": str(worker_id),
+                    "lease_seconds": lease_seconds,
+                },
+            )
+        ).first()
+        return int(row[0]) if row is not None else None
+
+    async def assign_for_dispatch_force(
+        self,
+        *,
+        job_id: UUID,
+        worker_id: UUID,
+        lease_seconds: int = 90,
+    ) -> int | None:
+        """Claim forzado del panel: omite el tope de capacidad del worker.
+
+        Única vía que puede superar el cupo (ver ``ASSIGN_JOB_FORCE_SQL``).
+        """
+        row = (
+            await self._session.execute(
+                ASSIGN_JOB_FORCE_SQL,
                 {
                     "job_id": str(job_id),
                     "worker_id": str(worker_id),

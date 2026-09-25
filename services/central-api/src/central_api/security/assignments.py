@@ -38,6 +38,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 log = logging.getLogger("central_api.assignments")
 
 ASSIGNMENT_SCOPE_ASSIGN = "assign"
+ASSIGNMENT_SCOPE_ASSIGN_FORCE = "assign-force"
 ASSIGNMENT_SCOPE_CANCEL = "cancel"
 CLOCK_SKEW_SECONDS = 60
 
@@ -173,6 +174,7 @@ def verify_with_public_key(
 
 __all__ = [
     "ASSIGNMENT_SCOPE_ASSIGN",
+    "ASSIGNMENT_SCOPE_ASSIGN_FORCE",
     "ASSIGNMENT_SCOPE_CANCEL",
     "CLOCK_SKEW_SECONDS",
     "AssignmentSignError",

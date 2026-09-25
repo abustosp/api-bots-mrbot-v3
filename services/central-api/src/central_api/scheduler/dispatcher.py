@@ -93,6 +93,7 @@ def build_envelope(
     assignment_token: str,
     lease_id: str = "",
     lease_expires_at: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Arma el sobre de asignación, sellando lo sensible cuando se puede.
 
@@ -105,9 +106,13 @@ def build_envelope(
     worker exige admisión ``plugin`` + ``attempt`` + ``lease_id`` +
     ``lease_expires_at`` + verbo de operación de su manifiesto: viajan como
     campos adicionales del mismo sobre.
+
+    Con ``force`` el sobre se firma bajo el alcance ``assign-force``: el
+    worker solo lo admite por esa vía para superar el cupo.
     """
     from central_api.security.assignments import (
         ASSIGNMENT_SCOPE_ASSIGN,
+        ASSIGNMENT_SCOPE_ASSIGN_FORCE,
         default_expiry,
         process_signing_key,
         sealed_hash_of,
@@ -133,6 +138,7 @@ def build_envelope(
         "sealed": False,
         "sealed_section": None,
         "credentials": None,
+        "force": bool(force),
         "assignment_expires_at": expires_at,
         "assignment_signature": "",
     }
@@ -149,7 +155,7 @@ def build_envelope(
     private, _efimera = process_signing_key(settings.assignment_signing_key)
     envelope["assignment_signature"] = sign_assignment(
         private,
-        scope=ASSIGNMENT_SCOPE_ASSIGN,
+        scope=ASSIGNMENT_SCOPE_ASSIGN_FORCE if force else ASSIGNMENT_SCOPE_ASSIGN,
         job_id=job.id,
         attempt=job.assignment_attempt,
         lease_id=lease_id,
@@ -165,9 +171,10 @@ async def dispatch_to_worker(
     assignment_token: str,
     lease_id: str = "",
     lease_expires_at: str | None = None,
+    force: bool = False,
 ) -> bool:
     """Asigna el job al worker por HTTP. ``True`` si el worker aceptó (2xx)."""
-    envelope = build_envelope(job, worker, assignment_token, lease_id, lease_expires_at)
+    envelope = build_envelope(job, worker, assignment_token, lease_id, lease_expires_at, force=force)
     # Sin Bearer [REDACTED]: la ejecución se autoriza con la firma Ed25519
     # del sobre (el worker solo corre lo firmado por esta central).
     async with httpx.AsyncClient(timeout=WORKER_TIMEOUT_SECONDS) as client:

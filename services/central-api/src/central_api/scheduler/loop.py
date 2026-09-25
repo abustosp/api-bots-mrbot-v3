@@ -104,7 +104,14 @@ async def claim_and_reserve(job: Job):
 
             from central_api.repositories.jobs import JobRepository
 
-            worker_uuid = uuid_mod.UUID(str(worker.worker_id))
+            try:
+                worker_uuid = uuid_mod.UUID(str(worker.worker_id))
+            except (ValueError, AttributeError, TypeError):
+                log.warning(
+                    "worker %s sin worker_id válido; se omite hasta sanar",
+                    worker.node,
+                )
+                return None, "", "", None
             async with nueva_sesion() as session:
                 repo = JobRepository(session)  # type: ignore[arg-type]
                 attempt = await repo.assign_for_dispatch(
@@ -161,7 +168,7 @@ async def handle_dispatch_result(job: Job, worker_node: str, ok: bool) -> str:
 
 async def dispatch_claimed(
     job: Job, worker, token: str, lease_id: str = "",
-    lease_expires_at: object = None,
+    lease_expires_at: object = None, force: bool = False,
 ) -> str:
     """Despacha el sobre sellado fuera de la unidad de claim y lo interpreta."""
     expira_txt = None
@@ -169,7 +176,7 @@ async def dispatch_claimed(
         expira_txt = lease_expires_at.isoformat().replace("+00:00", "Z")
     try:
         ok = await dispatcher.dispatch_to_worker(
-            job, worker, token, lease_id, expira_txt
+            job, worker, token, lease_id, expira_txt, force=force
         )
     except Exception:
         ok = False  # timeout/ambiguo: se resuelve por ack lease, no reencola ya

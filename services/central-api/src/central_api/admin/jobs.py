@@ -34,7 +34,7 @@ from central_api.security.rsa_credentials import (
     decrypt_configured_credential,
 )
 from central_api.settings import get_settings
-from central_api.store import JOBS, utcnow
+from central_api.store import JOBS, Job, utcnow
 
 router = APIRouter()
 
@@ -61,6 +61,48 @@ def _bot_physical_table(bot: str) -> str | None:
     if bot not in known_bots or not re.fullmatch(r"[a-z][a-z0-9_]*", bot):
         return None
     return f"bot_jobs_{bot}"
+
+
+#: Columnas V2 por vista ``consulta_*_logs`` (copia congelada de la revisión
+#: 0016, mismo orden del modelo V2 sin secretos ni infraestructura). El panel
+#: agrega al final las extras de depuración de la vista.
+LEGACY_VIEW_V2_COLUMNS: dict[str, tuple[str, ...]] = {
+    "consulta_aportes_en_linea_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_ccma_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "response_ccma", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_certificado_mipyme_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "opciones_encontradas", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_controladores_fiscales_logs": ("id", "user_id", "timestamp", "cuit_representante", "cantidad_archivos", "response_data", "resultados", "archivos", "job_id", "status", "error_message"),
+    "consulta_declaracion_en_linea_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "representado_nombre", "periodo_desde", "periodo_hasta", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_facturometro_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "monto_facturado", "tope_facturacion", "categoria", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_hacienda_logs": ("id", "user_id", "timestamp", "desde", "hasta", "cuit_representante", "cuit_representado", "nombre_representado", "cbtes", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_libros_iva_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "denominacion", "periodo_desde", "periodo_hasta", "periodos_descargados", "periodos_error", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_liquidacion_granos_logs": ("id", "user_id", "timestamp", "desde", "hasta", "cuit_representante", "cuit_representado", "nombre_representado", "cbtes", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_mc_logs": ("id", "user_id", "timestamp", "desde", "hasta", "cuit_representante", "cuit_representado", "nombre_representado", "emitidos", "recibidos", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_mis_facilidades_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "denominacion", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_mis_retenciones_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "denominacion", "periodo_desde", "periodo_hasta", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_mis_retenciones_iva_simple_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "denominacion", "periodo_desde", "periodo_hasta", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_moa_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "despachos", "despachos_procesados", "despachos_exitosos", "despachos_con_error", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_pago_devoluciones_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "archivo_nombre", "errores_por_seccion", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_portal_iva_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "denominacion", "periodo", "descarga_csv_ventas", "descarga_csv_compras", "importar_txt_ventas", "importar_txt_compras", "archivos", "response_data", "importaciones", "job_id", "status", "error_message"),
+    "consulta_portal_iva_carga_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "denominacion", "periodo", "operaciones_ng_o_e", "prorrateo_global", "prorrateo_asignacion_directa", "prorrateo_ambos", "resultados_ventas", "resultados_compras", "resultados_aperturas", "archivos_recibidos", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_rcel_logs": ("id", "user_id", "timestamp", "desde", "hasta", "cuit_representante", "cuit_representado", "nombre_representado", "cbtes", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_retenciones_percepciones_iibb_agip_logs": ("id", "user_id", "timestamp", "usuario", "cuit_representado", "denominacion", "periodo_desde", "periodo_hasta", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_retenciones_percepciones_iibb_arba_logs": ("id", "user_id", "timestamp", "cuit", "denominacion", "periodo", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_retenciones_percepciones_iibb_misiones_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "denominacion", "periodo_desde", "periodo_hasta", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_sct_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_sct_compensaciones_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "desde", "hasta", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_sifere_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "periodo", "representado_nombre", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_siper_logs": ("id", "user_id", "timestamp", "cuit_representante", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_srt_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuits_consultados", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_vep_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "medio_pago", "archivo_nombre", "response_nombre_archivo", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_vep_ccma_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "medio_pago", "response_volante_data", "response_total_seleccionado", "response_nombre_archivo", "response_nombre_qr", "archivos", "response_data", "job_id", "status", "error_message"),
+}
+
+#: Extras de depuración que cada vista agrega tras las columnas V2.
+LEGACY_VIEW_EXTRA_COLUMNS = ("bot", "operation", "resultado", "request_payload", "response_payload", "created_at")
+
+
+def _vista_legacy_columnas(vista: str) -> tuple[str, ...]:
+    return (*LEGACY_VIEW_V2_COLUMNS[vista], *LEGACY_VIEW_EXTRA_COLUMNS)
 
 
 #: Subcampos no secretos que el panel puede mostrar de una credencial.
@@ -168,6 +210,7 @@ TABLE_COLUMNS = {
 # operación tiene una correspondencia directa.
 LEGACY_BOT_TABLES = {
     "aportes_en_linea": ("consulta_aportes_en_linea_logs",),
+    "arba": ("consulta_retenciones_percepciones_iibb_arba_logs",),
     "ccma": ("consulta_ccma_logs",),
     "certificado_mipyme": ("consulta_certificado_mipyme_logs",),
     "controladores_fiscales": ("consulta_controladores_fiscales_logs",),
@@ -477,15 +520,19 @@ async def _bot_table_records_db(
     q: str = "",
     limit: int = 50,
     offset: int = 0,
+    table_name: str | None = None,
+    allowed_columns: tuple[str, ...] = BOT_TABLE_COLUMNS,
 ) -> dict[str, Any] | None:
     """Consulta la tabla física allowlistada de un bot sin reflejar columnas secretas.
 
-    El nombre se genera desde el catálogo canónico. Se consultan las columnas
-    visibles conocidas, verificadas contra ``information_schema`` para tolerar
-    despliegues graduales sin leer columnas internas agregadas en el futuro.
-    ``None`` indica que la tabla aún no existe y permite el fallback V3.
+    El nombre se genera desde el catálogo canónico, o es la vista
+    ``consulta_*_logs`` de la revisión 0016 cuando se explora por nombre V1/V2.
+    Se consultan las columnas visibles conocidas, verificadas contra
+    ``information_schema`` para tolerar despliegues graduales sin leer
+    columnas internas agregadas en el futuro. ``None`` indica que la tabla aún
+    no existe y permite el fallback V3.
     """
-    table_name = _bot_physical_table(bot)
+    table_name = table_name or _bot_physical_table(bot)
     if not table_name or not db_configurado():
         return None
     try:
@@ -506,7 +553,7 @@ async def _bot_table_records_db(
             available_set = set(available)
             if not available_set:
                 return None
-            columns = [name for name in BOT_TABLE_COLUMNS if name in available_set]
+            columns = [name for name in allowed_columns if name in available_set]
             required_columns = {
                 "job_id", "user_id", "bot", "operation", "status",
                 "request_payload", "response_payload", "created_at",
@@ -565,8 +612,9 @@ async def _bot_table_records_db(
                 text(f"SELECT COUNT(*) {from_sql}{where_sql}"), params
             )).scalar_one())
 
-            # Los nombres interpolados provienen exclusivamente de la constante
-            # BOT_TABLE_COLUMNS y del catálogo, no de parámetros HTTP.
+            # Los nombres interpolados provienen exclusivamente de la allowlist
+            # (BOT_TABLE_COLUMNS o columnas de la vista legacy) y del catálogo,
+            # no de parámetros HTTP.
             select_sql = ", ".join(f't."{name}"' for name in columns)
             select_sql += ', u.email AS "usuario_email"'
             query = (
@@ -710,6 +758,26 @@ def _table_catalog() -> list[dict[str, Any]]:
             "columns": list(BOT_TABLE_COLUMNS),
             "operations": list(item["operaciones"]),
             "legacy": list(LEGACY_BOT_TABLES.get(bot, ())),
+        })
+    bot_por_legacy: dict[str, str] = {}
+    for bot_code, vistas in LEGACY_BOT_TABLES.items():
+        for vista in vistas:
+            bot_por_legacy.setdefault(vista, bot_code)
+    operaciones_por_bot = {
+        str(item["bot"]): list(item["operaciones"]) for item in CATALOGUE
+    }
+    for vista in sorted(bot_por_legacy):
+        bot_code = bot_por_legacy[vista]
+        entries.append({
+            "name": vista,
+            "label": f"{vista} (V1/V2)",
+            "kind": "legacy",
+            "bot": bot_code,
+            "physical_name": vista,
+            "physical": True,
+            "columns": list(_vista_legacy_columnas(vista)),
+            "operations": list(operaciones_por_bot.get(bot_code, [])),
+            "legacy": [],
         })
     return entries
 
@@ -915,7 +983,7 @@ async def listar_registros_tablas_admin(
     entry = _table_entry(tabla) if tabla != "all" else None
     if tabla != "all" and entry is None:
         raise HTTPException(status_code=400, detail="tabla no válida")
-    if entry and entry["kind"] == "bot":
+    if entry and entry["kind"] in ("bot", "legacy"):
         table_bot = str(entry["bot"])
         if bot and bot != table_bot:
             raise HTTPException(status_code=400, detail="bot no coincide con la tabla")
@@ -923,7 +991,13 @@ async def listar_registros_tablas_admin(
     page_size = max(1, min(limit, 100))
     page_offset = max(0, offset)
 
-    if entry and entry["kind"] == "bot":
+    if entry and entry["kind"] in ("bot", "legacy"):
+        if entry["kind"] == "legacy":
+            tabla_fisica: str | None = str(entry.get("physical_name") or "")
+            columnas_permitidas = _vista_legacy_columnas(entry["name"])
+        else:
+            tabla_fisica = None
+            columnas_permitidas = BOT_TABLE_COLUMNS
         physical = await _bot_table_records_db(
             bot=bot,
             job_id=job_id,
@@ -933,6 +1007,8 @@ async def listar_registros_tablas_admin(
             q=q,
             limit=page_size,
             offset=page_offset,
+            table_name=tabla_fisica,
+            allowed_columns=tuple(columnas_permitidas),
         )
         if physical is not None:
             records = physical["records"]
@@ -944,7 +1020,10 @@ async def listar_registros_tablas_admin(
                 "bot": bot,
                 "operaciones": list(entry.get("operations", [])),
                 "tablas": [physical["table"]],
-                "tablas_legacy": list(entry.get("legacy", [])),
+                "tablas_legacy": (
+                    list(entry.get("legacy", []))
+                    or ([entry["name"]] if entry["kind"] == "legacy" else [])
+                ),
                 "total": total,
                 "records": records,
                 "columns": physical["columns"],
@@ -1009,7 +1088,7 @@ async def listar_registros_tablas_admin(
     else:
         registros = registros_db
         fuente = "postgresql"
-    if entry and entry["kind"] == "bot":
+    if entry and entry["kind"] in ("bot", "legacy"):
         # Antes de desplegar la migración, el panel conserva el fallback V3;
         # aplicar la misma política estricta evita que esa ruta filtre URLs.
         registros = [_sanear_valor_tabla(registro) for registro in registros]
@@ -1017,13 +1096,13 @@ async def listar_registros_tablas_admin(
     if has_more:
         registros = registros[:page_size]
     tables = _registros_por_tabla(registros)
-    if tabla == "all" or (entry and entry["kind"] == "bot"):
+    if tabla == "all" or (entry and entry["kind"] in ("bot", "legacy")):
         selected = registros
     else:
         selected = tables[entry["name"]]
     sections = (
         _bot_sections(registros, bot_filter=bot)
-        if tabla == "all" or (entry and entry["kind"] == "bot")
+        if tabla == "all" or (entry and entry["kind"] in ("bot", "legacy"))
         else []
     )
     return {
@@ -1297,6 +1376,179 @@ def reencolar_job(
         metadata={"intento": job.assignment_attempt, "consumo": "reservado, sin duplicar"},
     )
     return {"success": True, "job": _resumen_job(job)}
+
+
+class ForzarBody(BaseModel):
+    worker: str = Field(default="", description="Nodo ip:port destino; vacío = mejor SANO")
+    motivo: str = ""
+
+
+async def _hidratar_job_memoria(job_id: str) -> Job:
+    """Trae un job de PostgreSQL a memoria cuando el restart la vació.
+
+    Sin la fila en memoria el scheduler no lo ve y ninguna acción del panel
+    lo alcanza (404). La credencial se recupera del ciphertext custodiado
+    para el despacho, igual que en el flujo normal de creación.
+    """
+    job = JOBS.get(job_id)
+    if job is not None:
+        return job
+    if not db_configurado():
+        raise HTTPException(status_code=404, detail="job no encontrado")
+    from sqlalchemy import select
+
+    from central_api.models.execution import Job as FilaJob
+
+    try:
+        async with nueva_sesion() as sesion:
+            fila = (await sesion.execute(
+                select(FilaJob).where(FilaJob.id == uuid.UUID(job_id))
+            )).scalar_one_or_none()
+    except Exception:
+        raise HTTPException(status_code=503, detail="registro no disponible") from None
+    if fila is None:
+        raise HTTPException(status_code=404, detail="job no encontrado")
+    credenciales: dict = {}
+    if fila.credential_ciphertext:
+        try:
+            credenciales = {"clave": decrypt_configured_credential(fila.credential_ciphertext)}
+        except (CredentialDecryptionError, RuntimeError, ValueError):
+            raise HTTPException(status_code=503, detail="credencial no disponible") from None
+    job = Job(
+        id=str(fila.id),
+        bot=str(fila.bot),
+        operation=str(fila.operation),
+        payload=dict(fila.request_payload or {}),
+        credentials=credenciales,
+        credential_metadata=dict(fila.credential_metadata or {}),
+        status=str(fila.status),
+        assignment_attempt=int(fila.attempts or 0),
+        created_at=fila.created_at,
+    )
+    JOBS[job.id] = job
+    return job
+
+
+@router.post("/jobs/{job_id}/force", status_code=202)
+async def forzar_job(
+    job_id: str,
+    body: ForzarBody,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    """Fuerza la ejecución inmediata de un job, aunque supere el cupo.
+
+    Es la única vía que puede exceder el máximo de workers: el claim durable
+    omite el tope de capacidad y el sobre viaja firmado bajo el alcance
+    ``assign-force``. Salud, latido fresco, protocolo e inventario se siguen
+    exigiendo en ambos lados. Solo admite PENDIENTE/ASIGNADO con motivo
+    auditado.
+    """
+    from central_api.scheduler import reaper as reaper_mod
+    from central_api.scheduler.loop import dispatch_claimed
+    from central_api.scheduler.selector import select_worker
+    from central_api.store import ADMIN_NODES, WORKERS
+    from central_api.worker_nodes import merge_nodes, node_from_url
+
+    actor = require_admin(authorization)
+    motivo = validar_motivo(body.motivo)
+    job_id = _validar_uuid(job_id)
+    job = await _hidratar_job_memoria(job_id)
+    if job.status in ESTADOS_TERMINALES:
+        raise HTTPException(status_code=409, detail="job ya terminal, no forzable")
+    if job.status == "CORRIENDO":
+        raise HTTPException(status_code=409, detail="job en vuelo; use cancelar")
+    pendientes_cancel = [
+        c for c in JOB_COMMANDS.get(job.id, []) if c.tipo == "cancelar"
+    ]
+    if pendientes_cancel:
+        raise HTTPException(status_code=409, detail="job con cancelación pedida")
+    settings = get_settings()
+    permitido = merge_nodes(settings.worker_node_list, ADMIN_NODES)
+    if body.worker.strip():
+        try:
+            nodo = node_from_url(body.worker.strip())
+        except ValueError:
+            nodo = body.worker.strip()
+        worker = WORKERS.get(nodo)
+        if worker is None or (permitido and nodo not in permitido):
+            raise HTTPException(status_code=404, detail="worker no inventariado")
+        if worker.status != "SANO":
+            raise HTTPException(status_code=409, detail="worker no sano")
+    else:
+        candidatos = [w for w in WORKERS.values() if not permitido or w.node in permitido]
+        worker = select_worker(
+            job, candidatos,
+            allowed_nodes=permitido or None,
+            degraded_after_seconds=settings.worker_degraded_after_seconds,
+            force=True,
+        )
+        if worker is None:
+            raise HTTPException(status_code=409, detail="sin worker SANO con latido fresco")
+        nodo = worker.node
+    try:
+        worker_uuid = uuid.UUID(str(worker.worker_id))
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(
+            status_code=503,
+            detail="worker sin identidad UUID; espere su re-registro",
+        ) from None
+    if db_configurado():
+        from central_api.repositories.jobs import JobRepository
+
+        try:
+            async with nueva_sesion() as sesion:
+                repo = JobRepository(sesion)  # type: ignore[arg-type]
+                try:
+                    await repo.transition(
+                        uuid.UUID(job.id),
+                        expect=("PENDIENTE", "ASIGNADO"),
+                        status="PENDIENTE",
+                        worker_id=None,
+                    )
+                except Exception:
+                    pass
+                intento = await repo.assign_for_dispatch_force(
+                    job_id=uuid.UUID(job.id),
+                    worker_id=worker_uuid,
+                    lease_seconds=settings.worker_ack_lease_seconds,
+                )
+        except Exception:
+            raise HTTPException(status_code=503, detail="claim forzado no disponible") from None
+        if intento is None:
+            raise HTTPException(status_code=409, detail="claim forzado rechazado")
+        job.assignment_attempt = intento
+    else:
+        job.assignment_attempt += 1
+    job.status = "PENDIENTE"
+    job.worker_node = None
+    from central_api.store import new_job_id
+
+    token = f"tok-{uuid.uuid4().hex}"
+    lease_id = new_job_id()
+    expira = reaper_mod.grant_lease(job.id, nodo, token, job.assignment_attempt)
+    reaper_mod.LEASES[job.id]["lease_id"] = lease_id
+    job.status = "ASIGNADO"
+    job.worker_node = nodo
+    estado_final = await dispatch_claimed(job, worker, token, lease_id, expira, force=True)
+    despachado = estado_final == "ASIGNADO"
+    log_event(
+        "job.force.requested" if despachado else "job.force.rejected",
+        actor_id=actor, target_type="job", target_id=job.id,
+        request_id=request_id or "", result="success" if despachado else "rejected",
+        reason=motivo,
+        metadata={"worker": nodo, "forzado": True, "intento": job.assignment_attempt},
+    )
+    return {
+        "success": despachado,
+        "estado": estado_final,
+        "worker": nodo,
+        "forzado": True,
+        "advertencia": (
+            "La ejecución forzada supera el cupo del worker; "
+            "es la única vía que puede hacerlo."
+        ),
+    }
 
 
 @router.post("/jobs/{job_id}/priority")

@@ -21,14 +21,14 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert respuesta.status_code == 200
     assert respuesta.headers["content-type"].startswith("text/html")
     cuerpo = respuesta.text
-    for vista in ("dashboard", "users", "jobs", "executions", "fleet", "audit"):
+    for vista in ("dashboard", "users", "keys", "jobs", "executions", "fleet", "audit"):
         assert f'data-view="{vista}"' in cuerpo
         assert f'data-panel="{vista}"' in cuerpo
     for endpoint in (
         "/admin/users",
+        "/admin/api-keys",
         "/admin/jobs",
         "/admin/records",
-        "/admin/tables",
         "/admin/jobs/metrics",
         "/admin/fleet",
         "/admin/audit",
@@ -55,14 +55,18 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "response_payload" in cuerpo
 
 
-def test_panel_tables_es_alias_v2_y_abre_registros() -> None:
+def test_panel_sin_abrir_tablas_y_con_buscador_de_tablas() -> None:
     cliente = TestClient(create_app())
-    respuesta = cliente.get("/admin/tables")
+    respuesta = cliente.get("/admin/")
 
     assert respuesta.status_code == 200
-    assert respuesta.headers["content-type"].startswith("text/html")
-    assert "Tablas / registros" in respuesta.text
-    assert 'window.location.pathname.endsWith("/tables")' in respuesta.text
+    cuerpo = respuesta.text
+    assert "Abrir tablas" not in cuerpo
+    assert "Tablas / registros" in cuerpo
+    assert "executions-table-search" in cuerpo
+    assert "filterTableOptions" in cuerpo
+
+    assert cliente.get("/admin/tables").status_code == 404
 
 
 def test_panel_login_es_alias_html_y_admin_queda_fuera_de_openapi() -> None:

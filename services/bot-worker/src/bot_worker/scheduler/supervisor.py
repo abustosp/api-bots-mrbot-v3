@@ -92,9 +92,15 @@ class JobSupervisor:
         return max(0, self.capacity - len(self._running))
 
     async def accept(
-        self, job: LocalJob, acceptance_body: dict[str, Any]
+        self, job: LocalJob, acceptance_body: dict[str, Any],
+        force: bool = False,
     ) -> Acceptance:
-        """Admision atomica: deduplica, valida lease y reserva capacidad."""
+        """Admision atomica: deduplica, valida lease y reserva capacidad.
+
+        Con ``force`` (asignación firmada ``assign-force`` del panel) se
+        admite aunque se supere el cupo: es la única vía que puede exceder
+        ``capacity``. Drenaje y conflicto de lease se siguen respetando.
+        """
         async with self._admission_lock:
             if self.draining:
                 raise WorkerDraining()
@@ -106,7 +112,7 @@ class JobSupervisor:
             for (jid, att), known in self._running.items():
                 if jid == job.job_id and att == job.attempt:
                     raise LeaseConflict()
-            if len(self._running) >= self.capacity + self.queue_limit:
+            if not force and len(self._running) >= self.capacity + self.queue_limit:
                 raise WorkerSaturated()
             self._running[job.key] = job
             self._acceptance_cache[(job.job_id, job.attempt, job.lease_id)] = (

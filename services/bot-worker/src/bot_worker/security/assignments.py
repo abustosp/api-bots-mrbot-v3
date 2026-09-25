@@ -24,6 +24,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 CLOCK_SKEW_SECONDS = 60
 
+#: Alcance de una asignación forzada desde el panel: la única vía que puede
+#: superar el cupo del worker. Viaja firmado dentro del mensaje canónico.
+ASSIGNMENT_SCOPE_ASSIGN_FORCE = "assign-force"
+
 
 class AssignmentDenied(ValueError):
     """La asignación no es ejecutable. Sin detalle del porqué hacia afuera."""
@@ -99,6 +103,7 @@ def verify_assignment(
 
 __all__ = [
     "CLOCK_SKEW_SECONDS",
+    "ASSIGNMENT_SCOPE_ASSIGN_FORCE",
     "AssignmentDenied",
     "sealed_hash_of",
     "load_verify_key",

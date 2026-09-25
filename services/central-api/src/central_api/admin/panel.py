@@ -152,8 +152,9 @@ details > .details-body { padding: 0 14px 14px; }
     <nav class="nav hidden" id="main-nav" aria-label="Navegación administrativa">
       <button type="button" data-view="dashboard">Resumen</button>
       <button type="button" data-view="users">Usuarios</button>
+      <button type="button" data-view="keys">Claves API</button>
       <button type="button" data-view="jobs">Jobs</button>
-      <button type="button" data-view="executions">Tablas / registros</button><a class="button secondary" href="/admin/tables">Abrir tablas</a>
+      <button type="button" data-view="executions">Tablas / registros</button>
       <button type="button" data-view="fleet">Flota</button>
       <button type="button" data-view="audit">Auditoría</button>
     </nav>
@@ -183,10 +184,16 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="users">
-        <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3.</p>
-        <form id="users-filter" class="toolbar"><div class="field wide"><label for="users-email">Buscar por email</label><input id="users-email" name="email" type="search" placeholder="cliente@example.com"></div><div class="field"><label for="users-state">Estado</label><select id="users-state"><option value="">Todos</option><option value="habilitado">Habilitado</option><option value="deshabilitado">Deshabilitado</option></select></div><button class="button primary" type="submit">Buscar</button></form>
-        <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email</label><input id="new-email" type="email" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-plan">Plan</label><select id="new-plan"><option>free</option><option>basico</option><option>pro</option><option>empresa</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" required></div></div><button class="button primary" type="submit">Crear usuario</button></form></div></details>
-        <div class="table-wrap"><table><thead><tr><th>Email</th><th>Nombre</th><th>Plan</th><th>Estado</th><th>Créditos</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="6" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3. Para depuración se admite un nombre sin mail (p. ej. abp).</p>
+        <form id="users-filter" class="toolbar"><div class="field wide"><label for="users-email">Buscar por email o usuario</label><input id="users-email" name="email" type="search" placeholder="cliente@example.com o abp"></div><div class="field"><label for="users-state">Estado</label><select id="users-state"><option value="">Todos</option><option value="habilitado">Habilitado</option><option value="deshabilitado">Deshabilitado</option></select></div><button class="button primary" type="submit">Buscar</button></form>
+        <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-plan">Plan</label><select id="new-plan"><option>free</option><option>basico</option><option>pro</option><option>empresa</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" required></div></div><button class="button primary" type="submit">Crear usuario</button></form></div></details>
+        <div class="table-wrap"><table><thead><tr><th>Email / usuario</th><th>Nombre</th><th>Plan</th><th>Estado</th><th>Créditos</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="6" class="empty">Cargando...</td></tr></tbody></table></div>
+      </section>
+
+      <section class="view hidden" data-panel="keys">
+        <div class="kicker">Credenciales de clientes</div><h2>Claves API</h2><p class="subtle">Solo metadatos: prefijo, scopes, expiración y estado. El valor se muestra una única vez al emitir.</p>
+        <form id="keys-filter" class="toolbar"><div class="field wide"><label for="keys-q">Buscar</label><input id="keys-q" type="search" placeholder="prefijo, email o scope"></div><div class="field"><label for="keys-state">Estado</label><select id="keys-state"><option value="">Todas</option><option value="activa">Activa</option><option value="revocada">Revocada</option></select></div><button class="button primary" type="submit">Buscar</button></form>
+        <div class="table-wrap"><table><thead><tr><th>Prefijo</th><th>Usuario</th><th>Scopes</th><th>Expira</th><th>Estado</th><th>Emitida</th><th>Acciones</th></tr></thead><tbody id="keys-table"><tr><td colspan="7" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="jobs">
@@ -198,7 +205,7 @@ details > .details-body { padding: 0 14px 14px; }
 
       <section class="view hidden" data-panel="executions">
         <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla física de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
-        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-select">Tabla</label><select id="executions-table-select" required><option value="">Cargando catálogo...</option></select></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option selected>50</option><option>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
+        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Buscar tabla</label><input id="executions-table-search" type="search" placeholder="filtrar por nombre..." autocomplete="off"></div><div class="field wide"><label for="executions-table-select">Tabla</label><select id="executions-table-select" required><option value="">Cargando catálogo...</option></select></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option selected>50</option><option>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
         <div class="form-actions"><button class="button secondary small" type="button" id="executions-previous">Anterior</button><button class="button secondary small" type="button" id="executions-next">Siguiente</button><span class="muted" id="execution-table-status">Selecciona una tabla.</span></div>
         <div class="card table-description" id="table-description"><strong>Tablas por bot</strong><br><span class="muted">Request y response por cada bot, con credenciales protegidas, artefactos por nombre, eventos y timestamps Creado, Asignado, Iniciado y Finalizado.</span></div>
         <div class="grid" id="execution-table-counts"><div class="empty">Cargando catálogo...</div></div>
@@ -207,9 +214,10 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="fleet">
-        <div class="kicker">Operación de workers</div><h2>Flota</h2><p class="subtle">Estado derivado, capacidad, protocolo y alertas del plano de ejecución.</p>
+        <div class="kicker">Operación de workers</div><h2>Flota</h2><p class="subtle">Estado derivado, capacidad, protocolo y alertas del plano de ejecución. Agrega nodos al inventario en caliente sin tocar WORKER_NODES.</p>
         <div class="form-actions"><button class="button primary" type="button" id="fleet-refresh">Actualizar</button><button class="button secondary" type="button" id="fleet-evaluate">Evaluar alertas</button><a class="button secondary" href="/admin/workers/panel" target="_blank" rel="noreferrer">Vista clásica</a></div>
-        <div class="table-wrap"><table><thead><tr><th>Nodo</th><th>Estado</th><th>Ejecución</th><th>Protocolo</th><th>Bots</th><th>Error</th><th>Alertas</th></tr></thead><tbody id="fleet-table"><tr><td colspan="7" class="empty">Cargando...</td></tr></tbody></table></div>
+        <form id="add-worker-form" class="toolbar"><div class="field wide"><label for="new-worker-node">Agregar worker (ip:puerto)</label><input id="new-worker-node" type="text" placeholder="10.0.0.13:8080 o bot-worker:8080" required></div><button class="button primary" type="submit">Agregar</button><span class="muted">Se sondea best-effort; igual se registra aunque aún no responda.</span></form>
+        <div class="table-wrap"><table><thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Ejecución</th><th>Protocolo</th><th>Bots</th><th>Error</th><th>Alertas</th><th>Acciones</th></tr></thead><tbody id="fleet-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="audit">
@@ -224,7 +232,7 @@ details > .details-body { padding: 0 14px 14px; }
 (() => {
   "use strict";
   const TOKEN_KEY = "mrbot_admin_token";
-  const initialView = window.location.pathname.endsWith("/tables") ? "executions" : "dashboard";
+  const initialView = "dashboard";
   const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOffset: 0, tableHasMore: false };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -249,7 +257,13 @@ details > .details-body { padding: 0 14px 14px; }
     if (!response.ok) throw new Error(data.detail || data.message || `HTTP ${response.status}`);
     return data;
   }
-  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; loaders[view](); }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, keys: loadKeys, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; (loaders[view] || loadDashboard)(); }
+  function cellValue(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "object") return payloadView(value, "Ver datos");
+    const text = String(value);
+    return text.length > 60 ? `<code>${esc(short(text, 60))}</code>` : esc(text);
+  }
   function renderEmpty(target, colspan, message = "Sin datos") { $(target).innerHTML = `<tr><td colspan="${colspan}" class="empty">${esc(message)}</td></tr>`; }
   function payloadView(value, label) {
     const empty = value === null || value === undefined || (typeof value === "object" && Object.keys(value).length === 0);
@@ -288,13 +302,15 @@ details > .details-body { padding: 0 14px 14px; }
         return `<td>${payloadView(value, label)}</td>`;
       }
       if (value && typeof value === "object") return `<td>${payloadView(value, "Ver datos")}</td>`;
+      if (column === "job_id") return `<td><code>${esc(short(value, 22))}</code></td>`;
+      if (column === "status") return `<td><span class="status ${statusClass(value)}">${esc(value || "—")}</span></td>`;
       return `<td>${esc(value ?? "—")}</td>`;
-    }).join("");
+    }).join("") + `<td><button class="button secondary small" data-action="credential-detail" data-id="${esc(record.job_id || "")}">Ver credenciales</button></td>`;
     const rows = records.length
       ? records.map((record) => `<tr>${cells(record)}</tr>`).join("")
-      : `<tr><td colspan="${Math.max(columns.length, 1)}" class="empty">Sin registros para este bot y filtro.</td></tr>`;
+      : `<tr><td colspan="${Math.max(columns.length + 1, 1)}" class="empty">Sin registros para este bot y filtro.</td></tr>`;
     const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
-    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tabla física:</strong> <code>${esc(section.tablas?.[0] || "")}</code><strong>Campos sensibles:</strong> secretos, object_key y URLs ocultos</div><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tabla física:</strong> <code>${esc(section.tablas?.[0] || "")}</code><strong>Campos sensibles:</strong> secretos, object_key y URLs ocultos. Usa Ver credenciales para descifrar la clave custodiada.</div><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column)}</th>`).join("")}<th>Credenciales</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
   function renderCanonicalTable(tableName, rows) {
     const head = $("#executions-head");
@@ -304,19 +320,37 @@ details > .details-body { padding: 0 14px 14px; }
     head.innerHTML = `<tr>${keys.map((key) => `<th>${esc(key)}</th>`).join("")}</tr>`;
     body.innerHTML = rows.length ? rows.map((row) => `<tr>${keys.map((key) => {
       const value = row[key];
-      if (key === "credentials" && value && value.available) return `<td><button class="button secondary small" data-action="credential-detail" data-id="${esc(row.id || "")}">Ver credenciales</button></td>`;
-      return `<td>${payloadView(value, "Ver datos")}</td>`;
+      if (key === "credentials" && value && value.available) return `<td><button class="button secondary small" data-action="credential-detail" data-id="${esc(row.id || row.job_id || "")}">Ver credenciales</button></td>`;
+      if (key === "credentials") return `<td><span class="muted">—</span></td>`;
+      if (["estado", "resultado", "result"].includes(key) && typeof value === "string") return `<td><span class="status ${statusClass(value)}">${esc(value)}</span></td>`;
+      return `<td>${cellValue(value)}</td>`;
     }).join("")}</tr>`).join("") : `<tr><td colspan="${Math.max(keys.length, 1)}" class="empty">La tabla no contiene registros para este filtro.</td></tr>`;
     $("#bot-sections").innerHTML = `<div class="empty">Vista de tabla canónica: ${esc(tableName)}.</div>`;
+  }
+  function filterTableOptions(query) {
+    const needle = (query || "").trim().toLowerCase();
+    const select = $("#executions-table-select");
+    if (!select) return;
+    Array.from(select.querySelectorAll("optgroup")).forEach((group) => {
+      let visible = 0;
+      Array.from(group.querySelectorAll("option")).forEach((option) => {
+        const match = !needle || option.textContent.toLowerCase().includes(needle);
+        option.hidden = !match;
+        if (match) visible += 1;
+      });
+      group.hidden = visible === 0;
+    });
   }
   function renderCatalog(catalog) {
     state.tableCatalog = catalog || [];
     const select = $("#executions-table-select");
     const canonical = state.tableCatalog.filter((item) => item.kind === "canonical");
     const bots = state.tableCatalog.filter((item) => item.kind === "bot");
-    select.innerHTML = `<option value="">Selecciona una tabla</option><optgroup label="Tablas PostgreSQL">${canonical.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}</option>`).join("")}</optgroup><optgroup label="Tablas detalladas por bot">${bots.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}${item.legacy?.length ? ` · ${esc(item.legacy.join(", "))}` : ""}</option>`).join("")}</optgroup>`;
+    const legacy = state.tableCatalog.filter((item) => item.kind === "legacy");
+    select.innerHTML = `<option value="">Selecciona una tabla</option><optgroup label="Tablas PostgreSQL">${canonical.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}</option>`).join("")}</optgroup><optgroup label="Tablas detalladas por bot">${bots.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}${item.legacy?.length ? ` · ${esc(item.legacy.join(", "))}` : ""}</option>`).join("")}</optgroup><optgroup label="Tablas V1/V2 por bot (consulta_*_logs)">${legacy.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}</option>`).join("")}</optgroup>`;
     select.value = bots[0]?.name || canonical[0]?.name || "";
-    $("#execution-table-counts").innerHTML = `<div class="card"><div class="metric"><span>Tablas PostgreSQL</span><strong>${canonical.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas por bot</span><strong>${bots.length}</strong></div></div>`;
+    $("#execution-table-counts").innerHTML = `<div class="card"><div class="metric"><span>Tablas PostgreSQL</span><strong>${canonical.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas por bot</span><strong>${bots.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas V1/V2</span><strong>${legacy.length}</strong></div></div>`;
+    filterTableOptions($("#executions-table-search")?.value || "");
   }
   async function loadTableCatalog() {
     if (state.tableCatalog.length) return;
@@ -343,13 +377,42 @@ details > .details-body { padding: 0 14px 14px; }
   }
   async function userAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const userId = button.dataset.id;
-    if (button.dataset.action === "issue-key") { const motivo = window.prompt("Motivo para emitir la clave:", "emisión desde panel V3"); if (!motivo) return; try { const data = await api(`/admin/users/${encodeURIComponent(userId)}/api-keys`, { method: "POST", body: JSON.stringify({ scopes: [], motivo }) }); flash("La clave se muestra una sola vez. Cópiala ahora.", "ok"); window.alert(`Clave API de una sola vez:\n\n${data.valor_unica_vez}`); } catch (error) { flash(error.message, "error"); } return; }
+    if (button.dataset.action === "issue-key") { const motivo = window.prompt("Motivo para emitir la clave:", "emisión desde panel V3"); if (!motivo) return; const valor_fijo = window.prompt("Valor fijo opcional (vacío = aleatorio; p. ej. testing para debug):", ""); try { const data = await api(`/admin/users/${encodeURIComponent(userId)}/api-keys`, { method: "POST", body: JSON.stringify({ scopes: [], motivo, valor_fijo: (valor_fijo || "").trim() }) }); flash("La clave se muestra una sola vez. Cópiala ahora.", "ok"); window.alert(`Clave API de una sola vez:\n\n${data.valor_unica_vez}`); } catch (error) { flash(error.message, "error"); } return; }
     const enabled = button.dataset.enabled === "true"; const motivo = window.prompt(`Motivo para ${enabled ? "deshabilitar" : "habilitar"} el usuario:`, "cambio desde panel V3"); if (!motivo) return;
     try { await api(`/admin/users/${encodeURIComponent(userId)}/${enabled ? "disable" : "enable"}`, { method: "POST", body: JSON.stringify({ motivo }) }); flash("Estado de usuario actualizado."); await loadUsers(); } catch (error) { flash(error.message, "error"); }
   }
+  async function loadKeys(event) {
+    if (event) event.preventDefault();
+    const params = new URLSearchParams({ limit: "100" }); const q = $("#keys-q").value.trim(); const estado = $("#keys-state").value; if (q) params.set("q", q); if (estado) params.set("estado", estado);
+    try { const data = await api(`/admin/api-keys?${params}`); const rows = data.claves || []; $("#keys-table").innerHTML = rows.length ? rows.map((key) => `<tr><td><code>${esc(key.prefijo)}</code></td><td>${esc(key.usuario_email || "—")}</td><td>${esc((key.scopes || []).join(", ") || "—")}</td><td>${esc(key.expira_en || "—")}</td><td><span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${esc(key.estado)}</span></td><td>${esc(date(key.emitida_en))}</td><td class="actions"><button class="button secondary small" data-action="key-edit" data-id="${esc(key.id)}">Editar</button>${key.estado === "activa" ? `<button class="button danger small" data-action="key-revoke" data-id="${esc(key.id)}">Revocar</button>` : `<button class="button secondary small" data-action="key-restore" data-id="${esc(key.id)}">Restaurar</button>`}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay claves para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+  }
+  async function keyAction(event) {
+    const button = event.target.closest("button[data-action]"); if (!button) return; const keyId = button.dataset.id;
+    const motivo = window.prompt("Motivo del cambio (10-500 caracteres):", "cambio desde panel V3"); if (!motivo) return;
+    try {
+      if (button.dataset.action === "key-edit") {
+        const scopesRaw = window.prompt("Scopes separados por coma (vacío = sin cambios de scopes):", "");
+        if (scopesRaw === null) return;
+        const expira = window.prompt("Expiración ISO (vacío = sin cambios):", "");
+        if (expira === null) return;
+        const body = { motivo };
+        if (scopesRaw.trim()) body.scopes = scopesRaw.split(",").map((s) => s.trim()).filter(Boolean);
+        if (expira.trim()) body.expira_en = expira.trim();
+        await api(`/admin/api-keys/${encodeURIComponent(keyId)}`, { method: "PATCH", body: JSON.stringify(body) });
+        flash("Clave actualizada.");
+      } else if (button.dataset.action === "key-revoke") {
+        await api(`/admin/api-keys/${encodeURIComponent(keyId)}/revoke`, { method: "POST", body: JSON.stringify({ motivo }) });
+        flash("Clave revocada.");
+      } else if (button.dataset.action === "key-restore") {
+        await api(`/admin/api-keys/${encodeURIComponent(keyId)}/restore`, { method: "POST", body: JSON.stringify({ motivo }) });
+        flash("Clave restaurada.");
+      } else return;
+      await loadKeys();
+    } catch (error) { flash(error.message, "error"); }
+  }
   async function loadJobs(event) {
     if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const values = [["estado", "#jobs-state"], ["bot", "#jobs-bot"], ["usuario", "#jobs-user"]]; values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
-    try { const [data, metrics] = await Promise.all([api(`/admin/jobs?${params}`), api("/admin/jobs/metrics")]); const stateCards = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join(""); $("#jobs-metrics").innerHTML = stateCards || `<div class="card"><div class="metric"><span>Total</span><strong>${esc(data.total || 0)}</strong></div></div>`; const rows = data.jobs || []; $("#jobs-table").innerHTML = rows.length ? rows.map((job) => `<tr><td><code>${esc(short(job.job_id, 22))}</code></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td>${esc(short(job.usuario, 18))}</td><td>${esc(job.worker || "—")}</td><td>${esc(job.intento)}</td><td class="actions"><button class="button secondary small" data-action="job-detail" data-id="${esc(job.job_id)}">Detalle</button>${["PENDIENTE","ASIGNADO","CORRIENDO"].includes(job.estado) ? `<button class="button danger small" data-action="job-cancel" data-id="${esc(job.job_id)}">Cancelar</button>` : ""}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay jobs para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+    try { const [data, metrics] = await Promise.all([api(`/admin/jobs?${params}`), api("/admin/jobs/metrics")]); const stateCards = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join(""); $("#jobs-metrics").innerHTML = stateCards || `<div class="card"><div class="metric"><span>Total</span><strong>${esc(data.total || 0)}</strong></div></div>`; const rows = data.jobs || []; $("#jobs-table").innerHTML = rows.length ? rows.map((job) => `<tr><td><code>${esc(short(job.job_id, 22))}</code></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td>${esc(short(job.usuario, 18))}</td><td>${esc(job.worker || "—")}</td><td>${esc(job.intento)}</td><td class="actions"><button class="button secondary small" data-action="job-detail" data-id="${esc(job.job_id)}">Detalle</button>${["PENDIENTE","ASIGNADO"].includes(job.estado) ? `<button class="button primary small" data-action="job-force" data-id="${esc(job.job_id)}">Forzar</button>` : ""}${["PENDIENTE","ASIGNADO","CORRIENDO"].includes(job.estado) ? `<button class="button danger small" data-action="job-cancel" data-id="${esc(job.job_id)}">Cancelar</button>` : ""}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay jobs para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
   async function loadExecutions(event) {
     if (event) event.preventDefault();
@@ -358,7 +421,7 @@ details > .details-body { padding: 0 14px 14px; }
       const tabla = $("#executions-table-select").value;
       if (!tabla) { flash("Selecciona una tabla para consultar.", "error"); return; }
       const params = new URLSearchParams({ limit: $("#executions-limit").value, offset: String(state.tableOffset), tabla });
-      const values = [["q", "#executions-query"], ["bot", "#executions-bot"], ["operacion", "#executions-operation"], ["estado", "#executions-state"], ["usuario", "#executions-user"]];
+      const values = [["q", "#executions-query"], ["job_id", "#executions-job"], ["bot", "#executions-bot"], ["operacion", "#executions-operation"], ["estado", "#executions-state"], ["usuario", "#executions-user"]];
       values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
       const data = await api(`/admin/records?${params}`);
       state.tableHasMore = Boolean(data.has_more);
@@ -366,7 +429,7 @@ details > .details-body { padding: 0 14px 14px; }
       $("#executions-next").disabled = !state.tableHasMore;
       $("#execution-table-status").textContent = `${data.fuente || "—"} · ${data.total || 0} filas desde ${data.offset || 0}`;
       $("#table-description").innerHTML = `<strong>${esc(data.catalogo?.label || data.tabla_resuelta || tabla)}</strong><br><span class="muted">${esc((data.catalogo?.legacy || []).join(", ") || "Tabla canónica V3")} · límite ${esc(data.limit)}</span>`;
-      if (data.catalogo?.kind === "bot") {
+      if (data.catalogo?.kind === "bot" || data.catalogo?.kind === "legacy") {
         $("#executions-head").innerHTML = "<tr><th>Tabla detallada por bot</th></tr>";
         $("#executions-table").innerHTML = `<tr><td class="empty">La tabla detallada se muestra arriba.</td></tr>`;
         if (data.physical_table) renderPhysicalBotSection(data.bot_sections?.[0] || {});
@@ -390,17 +453,32 @@ details > .details-body { padding: 0 14px 14px; }
   async function jobAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const jobId = button.dataset.id;
     if (button.dataset.action === "job-detail") { try { const data = await api(`/admin/jobs/${encodeURIComponent(jobId)}`); window.alert(json(data)); } catch (error) { flash(error.message, "error"); } return; }
+    if (button.dataset.action === "job-force") {
+      if (!window.confirm("Forzar la ejecución inmediata aunque supere el cupo del worker. Es la única vía que puede excederlo. ¿Continuar?")) return;
+      const worker = window.prompt("Worker destino (vacío = mejor SANO disponible):", "") || "";
+      const motivo = window.prompt("Motivo del forzado (10-500 caracteres):", "forzado desde panel V3"); if (!motivo) return;
+      try { const data = await api(`/admin/jobs/${encodeURIComponent(jobId)}/force`, { method: "POST", body: JSON.stringify({ worker: worker.trim(), motivo }) }); flash(data.success ? `Job forzado en ${data.worker}. ${data.advertencia || ""}` : `Forzado no despachado: ${data.estado}`); await loadJobs(); } catch (error) { flash(error.message, "error"); } return;
+    }
     const motivo = window.prompt("Motivo de cancelación:", "cancelación desde panel V3"); if (!motivo) return; try { await api(`/admin/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: JSON.stringify({ motivo }) }); flash("Comando de cancelación registrado."); await loadJobs(); } catch (error) { flash(error.message, "error"); }
   }
-  async function loadFleet() { try { const data = await api("/admin/fleet"); const rows = data.flota || []; $("#fleet-table").innerHTML = rows.length ? rows.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay workers registrados.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
+  async function loadFleet() { try { const data = await api("/admin/fleet"); const rows = data.flota || []; $("#fleet-table").innerHTML = rows.length ? rows.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></td></tr>`).join("") : `<tr><td colspan="9" class="empty">No hay workers inventariados. Agrega uno arriba.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
   async function evaluateFleet() { try { const data = await api("/admin/fleet/evaluate", { method: "POST" }); flash(`Evaluación completada: ${data.activas?.length || 0} alertas activas.`); await loadFleet(); } catch (error) { flash(error.message, "error"); } }
+  async function addWorker(event) {
+    event.preventDefault(); const node = $("#new-worker-node").value.trim(); if (!node) return;
+    try { const data = await api("/admin/workers", { method: "POST", body: JSON.stringify({ node }) }); $("#new-worker-node").value = ""; flash(data.alcanzable ? `Worker ${data.node} agregado y alcanzable.` : `Worker ${data.node} agregado (aún no responde: ${data.detalle || "sin sonda"}).`); await loadFleet(); } catch (error) { flash(error.message, "error"); }
+  }
+  async function fleetAction(event) {
+    const button = event.target.closest("button[data-action]"); if (!button || button.dataset.action !== "worker-remove") return;
+    if (!window.confirm(`Dar de baja ${button.dataset.id}? El scheduler dejará de asignarle jobs.`)) return;
+    try { await api(`/admin/workers/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" }); flash("Worker dado de baja."); await loadFleet(); } catch (error) { flash(error.message, "error"); }
+  }
   async function loadAudit(event) { if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const action = $("#audit-action").value.trim(); const actor = $("#audit-actor").value.trim(); if (action) params.set("accion", action); if (actor) params.set("actor", actor); try { const data = await api(`/admin/audit?${params}`); const rows = data.eventos || []; $("#audit-table").innerHTML = rows.length ? rows.slice().reverse().map((item) => `<tr><td>${esc(date(item.occurred_at))}</td><td><strong>${esc(item.action)}</strong></td><td>${esc(item.actor_id)}</td><td>${esc(item.target_type)}<br><span class="muted">${esc(short(item.target_id, 22))}</span></td><td><span class="status ${item.result === "success" ? "status-good" : "status-bad"}">${esc(item.result)}</span></td><td>${esc(item.reason || "—")}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No hay eventos para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
   $("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); state.token = $("#admin-token").value.trim(); if (!state.token) return; try { await api("/admin/users?limit=1"); sessionStorage.setItem(TOKEN_KEY, state.token); loginError(""); showLoggedIn(true); setView(state.view); } catch (_) { state.token = ""; loginError("No se pudo validar el token de administración."); } });
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
-  $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction);
-  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", (event) => { resetExecutionOffset(); loadExecutions(event); }); $("#executions-table-select").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-limit").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-previous").addEventListener("click", () => moveExecutionPage(-1)); $("#executions-next").addEventListener("click", () => moveExecutionPage(1)); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
-  $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#audit-filter").addEventListener("submit", loadAudit);
+  $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction); $("#keys-filter").addEventListener("submit", loadKeys); $("#keys-table").addEventListener("click", keyAction);
+  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", (event) => { resetExecutionOffset(); loadExecutions(event); }); $("#executions-table-select").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-table-search").addEventListener("input", (event) => filterTableOptions(event.target.value)); $("#executions-limit").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-previous").addEventListener("click", () => moveExecutionPage(-1)); $("#executions-next").addEventListener("click", () => moveExecutionPage(1)); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
+  $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>
@@ -420,7 +498,4 @@ def login_admin() -> str:
     return ADMIN_PANEL_HTML
 
 
-@router.get("/tables", response_class=HTMLResponse)
-def tables_admin() -> str:
-    """Alias compatible con V1/V2 para abrir directamente los registros."""
-    return ADMIN_PANEL_HTML
+
