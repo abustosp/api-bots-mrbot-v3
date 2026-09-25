@@ -102,6 +102,21 @@ h3 { margin: 0 0 7px; font-size: 17px; }
 .toolbar { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
 .toolbar .field { min-width: 150px; flex: 1 1 170px; }
 .toolbar .field.wide { flex-basis: 280px; }
+.table-combobox { position: relative; }
+.table-combobox input { padding-right: 40px; }
+.table-combobox input[aria-expanded="true"] { border-color: var(--accent); border-radius: 11px 11px 0 0; }
+.table-combobox-listbox {
+  position: absolute; z-index: 20; top: 100%; left: 0; right: 0; max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--accent); border-top: 0; border-radius: 0 0 11px 11px;
+  background: var(--panel-strong); box-shadow: var(--shadow);
+}
+.table-combobox-listbox[hidden] { display: none; }
+.table-combobox-group { padding: 9px 12px 5px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }
+.table-combobox-option { padding: 9px 12px; cursor: pointer; }
+.table-combobox-option:hover, .table-combobox-option.active { color: var(--accent-strong); background: #fff1e6; }
+.table-combobox-option[aria-selected="true"] { font-weight: 700; }
+.table-combobox-empty { padding: 12px; color: var(--muted); }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
 .card { padding: 17px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel-strong); }
 .metric { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
@@ -205,7 +220,7 @@ details > .details-body { padding: 0 14px 14px; }
 
       <section class="view hidden" data-panel="executions">
         <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla física de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
-        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Buscar tabla</label><input id="executions-table-search" type="search" placeholder="filtrar por nombre..." autocomplete="off"></div><div class="field wide"><label for="executions-table-select">Tabla</label><select id="executions-table-select" required><option value="">Cargando catálogo...</option></select></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option selected>50</option><option>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
+        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Tabla</label><div class="table-combobox" id="executions-table-combobox"><input id="executions-table-search" type="text" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="executions-table-listbox" aria-describedby="executions-table-help" placeholder="Buscar tablas..." autocomplete="off" required><span id="executions-table-help" class="visually-hidden">Escribe para filtrar. Usa las flechas para recorrer, Enter para seleccionar y Escape para cerrar.</span><div id="executions-table-listbox" class="table-combobox-listbox" role="listbox" aria-label="Tablas disponibles" hidden></div><select id="executions-table-select" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Cargando catálogo...</option></select></div></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option selected>50</option><option>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
         <div class="form-actions"><button class="button secondary small" type="button" id="executions-previous">Anterior</button><button class="button secondary small" type="button" id="executions-next">Siguiente</button><span class="muted" id="execution-table-status">Selecciona una tabla.</span></div>
         <div class="card table-description" id="table-description"><strong>Tablas por bot</strong><br><span class="muted">Request y response por cada bot, con credenciales protegidas, artefactos por nombre, eventos y timestamps Creado, Asignado, Iniciado y Finalizado.</span></div>
         <div class="grid" id="execution-table-counts"><div class="empty">Cargando catálogo...</div></div>
@@ -233,7 +248,7 @@ details > .details-body { padding: 0 14px 14px; }
   "use strict";
   const TOKEN_KEY = "mrbot_admin_token";
   const initialView = "dashboard";
-  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOffset: 0, tableHasMore: false };
+  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOffset: 0, tableHasMore: false, tableOptions: [], activeTableOption: -1 };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
@@ -328,18 +343,94 @@ details > .details-body { padding: 0 14px 14px; }
     $("#bot-sections").innerHTML = `<div class="empty">Vista de tabla canónica: ${esc(tableName)}.</div>`;
   }
   function filterTableOptions(query) {
-    const needle = (query || "").trim().toLowerCase();
+    const needle = String(query || "").trim().toLocaleLowerCase();
     const select = $("#executions-table-select");
-    if (!select) return;
-    Array.from(select.querySelectorAll("optgroup")).forEach((group) => {
-      let visible = 0;
-      Array.from(group.querySelectorAll("option")).forEach((option) => {
-        const match = !needle || option.textContent.toLowerCase().includes(needle);
-        option.hidden = !match;
-        if (match) visible += 1;
-      });
-      group.hidden = visible === 0;
+    const listbox = $("#executions-table-listbox");
+    if (!select || !listbox) return;
+    state.tableOptions = [];
+    const groups = Array.from(select.children).filter((node) => node.tagName === "OPTGROUP");
+    groups.forEach((group) => {
+      const matches = Array.from(group.querySelectorAll("option"))
+        .filter((option) => option.value && option.textContent.toLocaleLowerCase().includes(needle));
+      if (!matches.length) return;
+      state.tableOptions.push(...matches);
     });
+    state.activeTableOption = state.tableOptions.length ? 0 : -1;
+    listbox.innerHTML = state.tableOptions.length
+      ? groups.map((group) => {
+        const options = state.tableOptions.filter((option) => option.parentElement === group);
+        if (!options.length) return "";
+        const heading = `<div class="table-combobox-group" role="presentation">${esc(group.label)}</div>`;
+        const items = options.map((option) => {
+          const index = state.tableOptions.indexOf(option);
+          const selected = option.value === select.value;
+          return `<div id="executions-table-option-${index}" class="table-combobox-option${index === state.activeTableOption ? " active" : ""}" role="option" aria-selected="${selected}" data-option-index="${index}" data-value="${esc(option.value)}">${esc(option.textContent)}</div>`;
+        }).join("");
+        return heading + items;
+      }).join("")
+      : `<div class="table-combobox-empty" role="presentation">No hay tablas que coincidan.</div>`;
+    listbox.hidden = !$("#executions-table-search").dataset.open;
+    $("#executions-table-search").setAttribute("aria-expanded", String(!listbox.hidden));
+    if (listbox.hidden || state.activeTableOption < 0) $("#executions-table-search").removeAttribute("aria-activedescendant");
+    else $("#executions-table-search").setAttribute("aria-activedescendant", `executions-table-option-${state.activeTableOption}`);
+  }
+  function openTableOptions(query = "") {
+    const input = $("#executions-table-search");
+    input.dataset.open = "true";
+    filterTableOptions(query);
+  }
+  function closeTableOptions(restoreSelection = false) {
+    const input = $("#executions-table-search");
+    input.dataset.open = "";
+    $("#executions-table-listbox").hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+    if (restoreSelection) {
+      const selected = $("#executions-table-select").selectedOptions[0];
+      input.value = selected?.value ? selected.textContent : "";
+    }
+  }
+  function activateTableOption(index) {
+    if (!state.tableOptions.length) return;
+    state.activeTableOption = Math.max(0, Math.min(index, state.tableOptions.length - 1));
+    const input = $("#executions-table-search");
+    const activeId = `executions-table-option-${state.activeTableOption}`;
+    input.setAttribute("aria-activedescendant", activeId);
+    $$("#executions-table-listbox [role=option]").forEach((option) => option.classList.toggle("active", option.id === activeId));
+    document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
+  }
+  function chooseTableOption(value) {
+    const select = $("#executions-table-select");
+    const option = Array.from(select.options).find((item) => item.value === value);
+    if (!option) return;
+    select.value = option.value;
+    $("#executions-table-search").value = option.textContent;
+    closeTableOptions();
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function handleTableComboboxKeydown(event) {
+    const input = event.currentTarget;
+    const isOpen = input.dataset.open === "true";
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      if (!isOpen) {
+        openTableOptions(input.value);
+        activateTableOption(direction > 0 ? 0 : state.tableOptions.length - 1);
+        return;
+      }
+      const current = state.activeTableOption;
+      activateTableOption(current < 0 ? (direction > 0 ? 0 : state.tableOptions.length - 1) : current + direction);
+    } else if (event.key === "Enter" && isOpen) {
+      event.preventDefault();
+      const option = state.tableOptions[state.activeTableOption];
+      if (option) chooseTableOption(option.value);
+    } else if (event.key === "Escape" && isOpen) {
+      event.preventDefault();
+      closeTableOptions(true);
+    } else if (event.key === "Tab") {
+      closeTableOptions(true);
+    }
   }
   function renderCatalog(catalog) {
     state.tableCatalog = catalog || [];
@@ -349,8 +440,11 @@ details > .details-body { padding: 0 14px 14px; }
     const legacy = state.tableCatalog.filter((item) => item.kind === "legacy");
     select.innerHTML = `<option value="">Selecciona una tabla</option><optgroup label="Tablas PostgreSQL">${canonical.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}</option>`).join("")}</optgroup><optgroup label="Tablas detalladas por bot">${bots.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}${item.legacy?.length ? ` · ${esc(item.legacy.join(", "))}` : ""}</option>`).join("")}</optgroup><optgroup label="Tablas V1/V2 por bot (consulta_*_logs)">${legacy.map((item) => `<option value="${esc(item.name)}">${esc(item.label)}</option>`).join("")}</optgroup>`;
     select.value = bots[0]?.name || canonical[0]?.name || "";
+    const selected = select.selectedOptions[0];
+    $("#executions-table-search").value = selected?.value ? selected.textContent : "";
     $("#execution-table-counts").innerHTML = `<div class="card"><div class="metric"><span>Tablas PostgreSQL</span><strong>${canonical.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas por bot</span><strong>${bots.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas V1/V2</span><strong>${legacy.length}</strong></div></div>`;
-    filterTableOptions($("#executions-table-search")?.value || "");
+    closeTableOptions();
+    filterTableOptions("");
   }
   async function loadTableCatalog() {
     if (state.tableCatalog.length) return;
@@ -477,7 +571,15 @@ details > .details-body { padding: 0 14px 14px; }
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction); $("#keys-filter").addEventListener("submit", loadKeys); $("#keys-table").addEventListener("click", keyAction);
-  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", (event) => { resetExecutionOffset(); loadExecutions(event); }); $("#executions-table-select").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-table-search").addEventListener("input", (event) => filterTableOptions(event.target.value)); $("#executions-limit").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-previous").addEventListener("click", () => moveExecutionPage(-1)); $("#executions-next").addEventListener("click", () => moveExecutionPage(1)); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
+  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", (event) => { resetExecutionOffset(); loadExecutions(event); }); $("#executions-table-select").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); });
+  $("#executions-table-search").addEventListener("focus", () => { $("#executions-table-search").select(); openTableOptions(); });
+  $("#executions-table-search").addEventListener("input", (event) => { $("#executions-table-select").value = ""; openTableOptions(event.target.value); });
+  $("#executions-table-search").addEventListener("keydown", handleTableComboboxKeydown);
+  $("#executions-table-listbox").addEventListener("pointerdown", (event) => { if (event.target.closest("[role=option]")) event.preventDefault(); });
+  $("#executions-table-listbox").addEventListener("click", (event) => { const option = event.target.closest("[role=option]"); if (option) chooseTableOption(option.dataset.value); });
+  document.addEventListener("click", (event) => { if (!$("#executions-table-combobox").contains(event.target)) closeTableOptions(true); });
+  $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
+  $("#executions-limit").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-previous").addEventListener("click", () => moveExecutionPage(-1)); $("#executions-next").addEventListener("click", () => moveExecutionPage(1)); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
@@ -496,6 +598,3 @@ def portada_admin() -> str:
 def login_admin() -> str:
     """Mantiene una URL de login explícita, compatible con la navegación V2."""
     return ADMIN_PANEL_HTML
-
-
-

@@ -69,6 +69,49 @@ def test_panel_sin_abrir_tablas_y_con_buscador_de_tablas() -> None:
     assert cliente.get("/admin/tables").status_code == 404
 
 
+def test_panel_selector_tablas_es_combobox_accesible_con_teclado() -> None:
+    cliente = TestClient(create_app())
+    respuesta = cliente.get("/admin/")
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.text
+    assert 'id="executions-table-search" type="text" role="combobox"' in cuerpo
+    assert 'aria-autocomplete="list"' in cuerpo
+    assert 'aria-controls="executions-table-listbox"' in cuerpo
+    assert 'aria-describedby="executions-table-help"' in cuerpo
+    assert 'id="executions-table-listbox"' in cuerpo
+    assert 'role="listbox"' in cuerpo
+    assert 'role="option"' in cuerpo
+    assert 'id="executions-table-select" class="visually-hidden"' in cuerpo
+    for tecla in ('"ArrowDown"', '"ArrowUp"', '"Enter"', '"Escape"'):
+        assert tecla in cuerpo
+    assert 'addEventListener("input"' in cuerpo
+    assert 'select.dispatchEvent(new Event("change", { bubbles: true }))' in cuerpo
+    assert "No hay tablas que coincidan." in cuerpo
+
+    # La selección continúa en la vista integrada y no introduce ruta alternativa.
+    assert 'data-view="executions">Tablas / registros</button>' in cuerpo
+    assert "/admin/records?" in cuerpo
+    assert 'data-panel="executions"' in cuerpo
+    assert cliente.get("/admin/tables").status_code == 404
+
+
+def test_panel_explorador_conserva_detalle_de_tablas_legacy_y_fisicas() -> None:
+    cliente = TestClient(create_app())
+    respuesta = cliente.get("/admin/")
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.text
+    assert "Tablas V1/V2 por bot (consulta_*_logs)" in cuerpo
+    assert "renderBotSections" in cuerpo
+    assert "renderPhysicalBotSection" in cuerpo
+    assert '"request_payload", "response_payload", "artifact_metadata"' in cuerpo
+    assert '"status"' in cuerpo
+    assert "Artefactos MinIO" in cuerpo
+    assert "Ver request" in cuerpo
+    assert "Ver response" in cuerpo
+
+
 def test_panel_login_es_alias_html_y_admin_queda_fuera_de_openapi() -> None:
     cliente = TestClient(create_app())
 

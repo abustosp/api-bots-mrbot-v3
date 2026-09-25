@@ -72,6 +72,10 @@ from bot_worker.scheduler.supervisor import (
 
 log = logging.getLogger("bot_worker.api")
 
+# Reintentos de registro durante el arranque para fallos de red temporales.
+# Cinco intentos en total, con una espera creciente entre ellos.
+REGISTER_RETRY_DELAYS_SECONDS = (1.0, 2.0, 5.0, 10.0)
+
 
 def _now_z() -> str:
     return (
@@ -407,34 +411,62 @@ async def _register_once(
     except ValueError as exc:
         log.warning("advertised_url inválida (%s): sin registro", exc)
         return None, "", ""
-    try:
-        resp = await client.post(
-            f"{settings.central_url.rstrip('/')}/internal/v1/workers/register",
-            json={
-                "protocol_version": PROTOCOL_VERSION,
-                "instance_nonce": instance_nonce,
-                "advertised_url": settings.advertised_url,
-                "capacity": settings.worker_concurrency,
-                "capabilities": [],
-                "build_version": settings.image_version,
-                "sealed_pubkey_pem": pubkey_pem,
-            },
-            timeout=5.0,
-        )
-        if resp.status_code >= 500:
+    url = f"{settings.central_url.rstrip('/')}/internal/v1/workers/register"
+    body = {
+        "protocol_version": PROTOCOL_VERSION,
+        "instance_nonce": instance_nonce,
+        "advertised_url": settings.advertised_url,
+        "capacity": settings.worker_concurrency,
+        "capabilities": [],
+        "build_version": settings.image_version,
+        "sealed_pubkey_pem": pubkey_pem,
+    }
+    for intento in range(len(REGISTER_RETRY_DELAYS_SECONDS) + 1):
+        try:
+            resp = await client.post(url, json=body, timeout=5.0)
+        except httpx.TransportError as exc:
+            if intento < len(REGISTER_RETRY_DELAYS_SECONDS):
+                espera = REGISTER_RETRY_DELAYS_SECONDS[intento]
+                log.warning(
+                    "registro con error transitorio (%s), reintento %s/%s en %ss",
+                    type(exc).__name__, intento + 1,
+                    len(REGISTER_RETRY_DELAYS_SECONDS), espera,
+                )
+                await asyncio.sleep(espera)
+                continue
+            log.warning("registro fallido tras reintentos: %s", type(exc).__name__)
+            return None, "", ""
+
+        if 500 <= resp.status_code < 600:
+            if intento < len(REGISTER_RETRY_DELAYS_SECONDS):
+                espera = REGISTER_RETRY_DELAYS_SECONDS[intento]
+                log.warning(
+                    "registro con HTTP %s, reintento %s/%s en %ss",
+                    resp.status_code, intento + 1,
+                    len(REGISTER_RETRY_DELAYS_SECONDS), espera,
+                )
+                await asyncio.sleep(espera)
+                continue
+            log.warning("registro fallido tras reintentos: HTTP %s", resp.status_code)
+            return None, "", ""
+
+        if not 200 <= resp.status_code < 300:
             log.warning("registro rechazado: HTTP %s", resp.status_code)
             return None, "", ""
-        data = resp.json() if resp.status_code < 400 else {}
-        if not isinstance(data, dict):
-            data = {}
+        try:
+            data = resp.json()
+        except (TypeError, ValueError):
+            log.warning("registro rechazado: respuesta JSON inválida")
+            return None, "", ""
+        if not isinstance(data, dict) or data.get("accepted") is not True:
+            log.warning("registro rechazado: respuesta sin accepted=true")
+            return None, "", ""
         return (
             node,
             str(data.get("service_token") or ""),
             str(data.get("assignment_verify_key_pem") or ""),
         )
-    except Exception as exc:  # transporte: se reintenta vía latidos
-        log.warning("registro fallido: %s", type(exc).__name__)
-        return None, "", ""
+    return None, "", ""  # pragma: no cover - bucle termina en éxito o retorno
 
 
 def create_app(settings: WorkerConfig | None = None) -> FastAPI:

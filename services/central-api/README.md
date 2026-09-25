@@ -114,17 +114,20 @@ Esta superficie no se expone a internet.
 ### Panel web administrativo V3
 
 `GET /admin/` y `GET /admin/login` sirven una consola HTML inspirada en la
-navegación y el lenguaje visual del panel V2. El explorador `/admin/tables`
-consulta una tabla por vez con filtros y paginación, sin reflejar tablas
-arbitrarias ni exponer secretos. Incluye estas vistas:
+navegación y el lenguaje visual del panel V2. La vista **Tablas / registros**
+está dentro de `/admin/`: carga el catálogo desde `/admin/table-catalog` y
+consulta una tabla por vez mediante `/admin/records`, con filtros y paginación.
+No existe una sección ni una ruta independiente `/admin/tables`. El explorador
+no refleja tablas arbitrarias ni expone secretos. La consola incluye estas vistas:
 
 - **Resumen:** métricas de jobs, estado de la flota y últimas acciones.
 - **Usuarios:** búsqueda, alta, habilitación/deshabilitación y emisión de
   claves API, cuyo valor se muestra una sola vez.
 - **Jobs:** filtros, métricas, detalle y cancelación de ejecuciones.
-- **Registros y tablas:** selección de tablas PostgreSQL canónicas y una tabla
-  física detallada por bot, con request, response, usuario, estado, fechas y
-  nombres de artefactos. Se filtran y paginan sin cargar todas a la vez.
+- **Tablas / registros:** selección de tablas PostgreSQL canónicas, tablas
+  físicas por bot y vistas históricas V1/V2. Conserva request, response,
+  usuario, estado, fechas y nombres de artefactos/archivos. Se filtran y
+  paginan sin cargar todas a la vez.
 - **Flota:** estado de workers, capacidad, protocolo y evaluación de alertas.
 - **Auditoría:** consulta de eventos append-only con filtros básicos.
 
