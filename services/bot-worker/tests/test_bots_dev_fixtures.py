@@ -16,10 +16,33 @@ from bot_worker.bots.registry import REGISTRY
 
 BOTS_DEV = Path(__file__).parents[1] / "src" / "bot_worker" / "bots_dev"
 
+# Legacy projects audited as not having a production-equivalent V3 plugin.
+# A future migration must remove each name only with its own contract and tests.
+UNMIGRATED_LEGACY_PROJECTS = {
+    "beneficios_mipyme",
+    "carga_931",
+    "carga_libro_iva",
+    "cartilla_medica_union_personal",
+    "efectores_pami",
+    "habilitar_servicio",
+    "portal_iva_ddjj_y_libros",
+    "tucuman",
+    "xubio_sueldos",
+}
+
 
 def test_bots_dev_directories_match_registered_plugins() -> None:
     fixture_bots = {path.name for path in BOTS_DEV.iterdir() if path.is_dir()}
     assert fixture_bots == set(REGISTRY)
+
+
+def test_unmigrated_legacy_projects_are_not_registered_as_production_plugins() -> None:
+    accidentally_registered = UNMIGRATED_LEGACY_PROJECTS & set(REGISTRY)
+    assert not accidentally_registered, (
+        "Un plugin legacy no debe exponerse como funcional solo por registrarlo. "
+        "Migre su contrato y agregue pruebas específicas antes de actualizar "
+        f"UNMIGRATED_LEGACY_PROJECTS: {sorted(accidentally_registered)}"
+    )
 
 
 @pytest.mark.parametrize("bot_name", sorted(REGISTRY))
