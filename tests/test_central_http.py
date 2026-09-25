@@ -6,6 +6,8 @@ ausentes): la app central levanta, ``GET /health`` responde y
 """
 from __future__ import annotations
 
+import uuid
+
 from fastapi.testclient import TestClient
 
 from central_api.main import create_app
@@ -34,6 +36,14 @@ def test_ready_sin_bd_informa_motivo():
     cuerpo = respuesta.json()
     assert cuerpo["ready"] is False
     assert "reason" in cuerpo
+
+
+def test_principal_dev_es_uuid_persistible():
+    """El usuario estable de desarrollo puede ser FK UUID en PostgreSQL."""
+    from central_api.security.principals import ANONYMOUS_USER_ID
+
+    valor = uuid.UUID(ANONYMOUS_USER_ID)
+    assert valor.version == 4
 
 
 def test_lista_bots_en_modo_desarrollo():

@@ -27,6 +27,8 @@ class ApiPrincipal:
         return scope in self.scopes
 
 
-ANONYMOUS_USER_ID = "dev-local-user"
+# UUIDv4 estable para el principal de desarrollo. PostgreSQL lo usa como
+# ``users.id`` al persistir jobs sin una API key configurada.
+ANONYMOUS_USER_ID = "00000000-0000-4000-8000-000000000001"
 
 __all__ = ["ApiPrincipal", "ANONYMOUS_USER_ID"]
