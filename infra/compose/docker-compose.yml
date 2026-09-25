@@ -264,10 +264,17 @@ services:
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
-    # La imagen minio/minio no trae `mc`: el chequeo usa el endpoint
-    # de liveness del propio servidor (API S3 en :9000).
+    # La imagen MinIO es mínima y no trae curl/wget ni cliente Python. El
+    # healthcheck comprueba el listener S3 con shell builtins; `minio-init`
+    # valida aparte el acceso S3 autenticado y crea el bucket.
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          while IFS=' ' read -r slot local_addr remote_addr state rest; do
+            case "$$local_addr:$$state" in *:2328:0A) exit 0;; esac;
+          done < /proc/net/tcp;
+          exit 1
       interval: 15s
       timeout: 5s
       retries: 6

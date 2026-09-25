@@ -92,7 +92,9 @@ def presign_put_url(
     if content_type:
         parametros["X-Amz-SignedHeaders"] = "content-type;host"
     canon_query = "&".join(
-        f"{quote(k, safe='')}={quote(v, safe='-_.~/')}"
+        # RFC 3986/AWS SigV4: `/` separa segmentos del path, pero en valores
+        # de query (en particular X-Amz-Credential) debe codificarse como %2F.
+        f"{quote(k, safe='')}={quote(v, safe='-_.~')}"
         for k, v in sorted(parametros.items())
     )
     cabeceras = f"host:{anfitrion}\n"
@@ -103,7 +105,10 @@ def presign_put_url(
         f"{method}\n{uri}\n{canon_query}\n{cabeceras}\n{firmados}\n"
         f"{_UNSIGNED_PAYLOAD}"
     )
-    ambito = f"{amz_fecha}\n{alcance}\n{hashlib.sha256(canonica.encode('utf-8')).hexdigest()}"
+    ambito = (
+        f"AWS4-HMAC-SHA256\n{amz_fecha}\n{alcance}\n"
+        f"{hashlib.sha256(canonica.encode('utf-8')).hexdigest()}"
+    )
     firma = hmac.new(
         _firmar_clave(secret_key, dia, region),
         ambito.encode("utf-8"),

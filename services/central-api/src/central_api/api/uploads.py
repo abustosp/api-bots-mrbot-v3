@@ -77,7 +77,10 @@ def request_upload(
         object_key=object_key,
         content_type=body.content_type,
         ttl_seconds=UPLOAD_TTL_SECONDS,
-        endpoint=ajustes.object_storage_endpoint,
+        endpoint=(
+            ajustes.object_storage_public_endpoint
+            or ajustes.object_storage_endpoint
+        ),
         region=ajustes.object_storage_region,
         bucket=ajustes.object_storage_bucket,
         access_key=ajustes.object_storage_access_key,

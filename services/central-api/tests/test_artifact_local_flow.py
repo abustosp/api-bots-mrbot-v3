@@ -31,7 +31,8 @@ def test_upload_route_emite_put_sigv4_con_content_type(monkeypatch):
         uploads_api,
         "get_settings",
         lambda: SimpleNamespace(
-            object_storage_endpoint="http://127.0.0.1:9000",
+            object_storage_endpoint="http://minio:9000",
+            object_storage_public_endpoint="http://127.0.0.1:9000",
             object_storage_region="us-east-1",
             object_storage_bucket="mrbot",
             object_storage_access_key="test-access",
@@ -59,6 +60,8 @@ def test_upload_route_emite_put_sigv4_con_content_type(monkeypatch):
     assert body["required_headers"] == {"Content-Type": "text/plain"}
     assert "X-Amz-Signature=" in body["upload_url"]
     assert "X-Amz-SignedHeaders=content-type%3Bhost" in body["upload_url"]
+    assert body["upload_url"].startswith("http://127.0.0.1:9000/")
+    assert "http://minio:9000/" not in body["upload_url"]
     assert "not-a-real-secret" not in body["upload_url"]
 
 
@@ -75,6 +78,14 @@ def test_presigned_get_y_put_tienen_firmas_distintas():
     put_url = presign_put_url(**common)
     get_url = presign_get_url(**common)
     assert put_url != get_url
+    assert (
+        "X-Amz-Credential=test-access%2F20260101%2Fus-east-1%2Fs3%2Faws4_request"
+        in put_url
+    )
+    assert (
+        "X-Amz-Signature=166fd0b1f72a52331dcda80129706e041c703637ab06b6ee6264b93aa751c3d3"
+        in put_url
+    )
     assert "/mrbot/jobs/one/1/out.txt?" in get_url
     assert "X-Amz-Signature=" in get_url
 
