@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from bot_worker.bots.errors import ArtifactUploadError
+from bot_worker.bots.errors import ArtifactUploadError, ErrorDeBot
 from bot_worker.bots.registry import get_plugin
 from bot_worker.config import PROTOCOL_VERSION, WorkerConfig, WorkerSettings, parse_args
 from bot_worker.reporting.central import (
@@ -387,6 +387,19 @@ def _node_from_advertised_url(url: str) -> str:
     if not host_port or ":" not in host_port:
         raise ValueError("advertised_url debe incluir ip:port")
     return host_port
+
+
+def _resultado_error_de_bot(exc: ErrorDeBot) -> tuple[str, dict[str, Any]]:
+    """Conserva la categoría pública de un error esperado de plugin.
+
+    El diagnóstico del error puede contener detalles del sitio externo. Solo
+    se conserva el nombre de clase para diagnóstico interno, nunca el mensaje.
+    """
+    return exc.categoria, {
+        "result": "ERROR",
+        "data": {},
+        "internal": type(exc).__name__,
+    }
 
 
 async def _register_once(
@@ -1139,6 +1152,8 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                     "result": "ERROR",
                     "data": {},
                 }
+            except ErrorDeBot as exc:
+                category, bot_result = _resultado_error_de_bot(exc)
             except Exception as exc:  # borde: sin texto crudo ni stack
                 log.exception("falla interna de plugin (redactada)")
                 category, bot_result = "INTERNAL", {

@@ -174,6 +174,57 @@ def test_records_resuelve_tabla_legacy_sin_db(admin) -> None:
         JOBS.pop(trabajo.id, None)
 
 
+def test_records_legacy_proyecta_request_response_estado_y_archivos(admin, monkeypatch) -> None:
+    """La selección de una tabla V1/V2 devuelve la proyección física completa."""
+    artifact = {
+        "kind": "ARCHIVO",
+        "filename": "comprobantes-2026-08.csv",
+        "content_type": "text/csv",
+        "size_bytes": 91,
+        "sha256": "a" * 64,
+    }
+    record = {
+        "job_id": "018f0000-0000-7000-8000-000000000002",
+        "status": "COMPLETO",
+        "request_payload": {"fecha_desde": "01/08/2026", "emitidos": True},
+        "response_payload": {"resultado": "descargado", "archivos": [artifact["filename"]]},
+        "artifact_names": [artifact["filename"]],
+        "artifact_metadata": [artifact],
+    }
+    consulta: dict = {}
+
+    async def fake_bot_table_records(**kwargs):
+        consulta.update(kwargs)
+        return {
+            "table": "consulta_mc_logs",
+            "records": [record],
+            "total": 1,
+            "columns": list(record),
+            "display_columns": list(record),
+        }
+
+    monkeypatch.setattr(admin_jobs, "_bot_table_records_db", fake_bot_table_records)
+    cliente = TestClient(create_app())
+    respuesta = cliente.get(
+        "/admin/records?tabla=consulta_mc_logs",
+        headers={"Authorization": "Bearer admin-tablas-token"},
+    )
+
+    assert respuesta.status_code == 200, respuesta.text
+    cuerpo = respuesta.json()
+    assert consulta["table_name"] == "consulta_mc_logs"
+    assert cuerpo["tabla_resuelta"] == "consulta_mc_logs"
+    assert cuerpo["catalogo"]["kind"] == "legacy"
+    assert cuerpo["fuente"] == "postgresql"
+    assert cuerpo["total"] == 1
+    fila = cuerpo["records"][0]
+    assert fila["status"] == "COMPLETO"
+    assert fila["request_payload"] == record["request_payload"]
+    assert fila["response_payload"] == record["response_payload"]
+    assert fila["artifact_names"] == [artifact["filename"]]
+    assert fila["artifact_metadata"] == [artifact]
+
+
 def test_panel_lista_tablas_v2(admin) -> None:
     cliente = TestClient(create_app())
     respuesta = cliente.get("/admin/")
