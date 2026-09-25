@@ -71,6 +71,17 @@ class TargetUnavailableError(ErrorDeBot):
     categoria = Categoria.TARGET_UNAVAILABLE
     reintentable = True
 
+    def __init__(
+        self,
+        diagnostico: str,
+        *,
+        diagnostic_code: str = "target_unavailable_unclassified",
+    ) -> None:
+        super().__init__(diagnostico)
+        # Código fijo de diagnóstico interno. Nunca sustituirlo por el texto
+        # libre de una excepción, respuesta HTML, URL o credencial.
+        self.diagnostic_code = diagnostic_code
+
 
 class BrowserCrashedError(ErrorDeBot):
     """El driver cerro el contexto o el proceso Chromium se perdio."""

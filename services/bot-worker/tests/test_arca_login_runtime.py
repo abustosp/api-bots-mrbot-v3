@@ -99,6 +99,7 @@ class FakePage:
         self.visits: list[str] = []
         self.clicks: list[str] = []
         self.popup_page: FakePage | None = None
+        self.password_submitted = False
 
     def _exists(self, selector: str) -> bool:
         if "captcha" in selector.lower():
@@ -106,7 +107,7 @@ class FakePage:
         if "F1\\:login" in selector or "type='number'" in selector:
             return True
         if "F1\\:password" in selector or "type='password'" in selector:
-            return True
+            return not self.password_submitted
         if "Siguiente" in selector or "Ingresar" in selector:
             return True
         if "Cambiar" in selector:
@@ -119,6 +120,8 @@ class FakePage:
 
     def _click(self, selector: str) -> None:
         self.clicks.append(selector)
+        if "Ingresar" in selector or "btnIngresar" in selector:
+            self.password_submitted = True
 
     def _fill(self, selector: str, value: str) -> None:
         self.fills[selector] = value

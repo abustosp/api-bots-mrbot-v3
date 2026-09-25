@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import pytest
 
 from bot_worker.bots.errors import CaptchaUnsolvableError, TargetUnavailableError
-from bot_worker.runtime.arca_login import ArcaServicePage, ArcaSession
+from bot_worker.runtime.arca_login import ArcaLoginError, ArcaServicePage, ArcaSession
 from bot_worker.runtime.browser import PlaywrightBrowserFactory
 from bot_worker.runtime.captcha import CaptchaUnsolvableError as SolverError
 from bot_worker.runtime.context import FiscalCredentials
@@ -24,14 +24,29 @@ class _Locator:
 
     async def fill(self, value: str, **_: object) -> None:
         self.page.filled[self.selector] = value
+        if "captcha" in self.selector.lower():
+            self.page.captcha = False
 
     async def click(self, **_: object) -> None:
         self.page.clicked.append(self.selector)
+        if self.selector in {
+            "button:has-text('Ingresar')",
+            "input#F1\\:btnIngresar",
+            "input[type='submit']",
+        }:
+            self.page.password_submitted = True
 
     async def press(self, key: str) -> None:
         self.page.pressed.append((self.selector, key))
 
     async def is_visible(self) -> bool:
+        if self.selector in {
+            "input#F1\\:password",
+            "input[name='F1:password']",
+            "input[type='password']",
+            "#F1\\:password",
+        }:
+            return self.exists and not self.page.password_submitted
         return self.exists
 
     async def get_attribute(self, name: str) -> str | None:
@@ -62,6 +77,8 @@ class _Page:
         self.pressed: list[tuple[str, str]] = []
         self.attributes: dict[tuple[str, str], str] = {}
         self.messages: dict[str, str] = {}
+        self.password_submitted = False
+        self.frames: list[object] = []
 
     def locator(self, selector: str) -> _Locator:
         exists = selector in {
@@ -113,6 +130,52 @@ class _ModernLoginPage(_Page):
             "#F1\\:password",
         }
         return _Locator(self, selector, exists=selector in modern_selectors)
+
+
+class _CatalogFrame(_Page):
+    """Frame de portal con el servicio mientras la página principal no lo tiene."""
+
+    def get_by_role(self, role: str, *, name: object = None) -> _Locator:
+        matches = role == "link" and bool(
+            hasattr(name, "search") and name.search("MIS COMPROBANTES")
+        )
+        return _Locator(self, f"role:{role}:{name}", exists=matches)
+
+    def locator(self, selector: str) -> _Locator:
+        return _Locator(
+            self,
+            selector,
+            exists=selector == "button, [role='button'], a",
+        )
+
+
+class _PageWithServiceFrame(_Page):
+    def __init__(self) -> None:
+        super().__init__()
+        self.frames = [_CatalogFrame()]
+
+    def get_by_role(self, role: str, *, name: object = None) -> _Locator:
+        return _Locator(self, f"role:{role}:{name}", exists=False)
+
+    def locator(self, selector: str) -> _Locator:
+        if selector == "button, [role='button'], a":
+            return _Locator(self, selector, exists=False)
+        return super().locator(selector)
+
+
+class _RejectedLoginPage(_Page):
+    @property
+    def password_submitted(self) -> bool:
+        return False
+
+    @password_submitted.setter
+    def password_submitted(self, _: bool) -> None:
+        pass
+
+
+class _BrokenLoginPage(_Page):
+    async def goto(self, url: str, **_: object) -> None:
+        raise TimeoutError("private page details must not escape")
 
 
 class _NoPopup:
@@ -169,6 +232,48 @@ def test_login_admite_ids_y_submit_actuales_de_arca() -> None:
     assert "input#F1\\:btnIngresar" in page.clicked
 
 
+def test_error_de_navegacion_expone_codigo_seguro_sin_detalle_crudo() -> None:
+    session = ArcaSession(
+        FiscalCredentials("20123456789", "clave-ficticia"),
+        page=_BrokenLoginPage(),
+    )
+
+    with pytest.raises(TargetUnavailableError) as caught:
+        asyncio.run(session.login())
+
+    assert caught.value.diagnostic_code == "arca_login_navigation_failed"
+    assert "private page details" not in str(caught.value)
+
+
+def test_login_no_acepta_formulario_de_clave_que_sigue_visible() -> None:
+    session = ArcaSession(
+        FiscalCredentials("20123456789", "clave-ficticia"),
+        page=_RejectedLoginPage(),
+    )
+
+    with pytest.raises(ArcaLoginError) as caught:
+        asyncio.run(session.login())
+
+    assert caught.value.diagnostic_code == "arca_login_not_completed"
+    assert "clave-ficticia" not in str(caught.value)
+
+
+def test_busca_servicio_en_iframes_del_portal_arca() -> None:
+    page = _PageWithServiceFrame()
+    session = ArcaSession(FiscalCredentials("20123456789", "clave-ficticia"), page=page)
+
+    async def run() -> ArcaServicePage:
+        await session.login()
+        return await session.open_service("MIS COMPROBANTES")
+
+    service = asyncio.run(run())
+
+    assert isinstance(service, ArcaServicePage)
+    frame = page.frames[0]
+    assert len(frame.clicked) == 1
+    assert frame.clicked[0].startswith("role:link:")
+
+
 def test_captcha_usa_solver_inyectado_y_no_entorno() -> None:
     page = _Page(captcha=True)
     solver = _Solver()
@@ -209,8 +314,9 @@ def test_open_service_rechaza_url_fuera_del_dominio_fiscal() -> None:
         await session.login()
         await session.open_service("https://example.org/callback")
 
-    with pytest.raises(TargetUnavailableError, match="URL de servicio ARCA no permitida"):
+    with pytest.raises(TargetUnavailableError, match="URL de servicio ARCA no permitida") as caught:
         asyncio.run(run())
+    assert caught.value.diagnostic_code == "arca_service_url_rejected"
     assert page.visited == ["https://auth.afip.gob.ar/contribuyente_/login.xhtml"]
 
 

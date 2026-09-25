@@ -28,6 +28,15 @@ class ArcaLoginError(CredentialsRejectedError):
 
     category = "CREDENTIALS_REJECTED"
 
+    def __init__(
+        self,
+        diagnostico: str,
+        *,
+        diagnostic_code: str = "arca_login_rejected",
+    ) -> None:
+        super().__init__(diagnostico)
+        self.diagnostic_code = diagnostic_code
+
 
 class ArcaServicePage:
     """Adaptador de página para los bots heredados de Mis Comprobantes."""
@@ -41,7 +50,10 @@ class ArcaServicePage:
     async def seleccionar_representado(self, cuit: str) -> None:
         digits = re.sub(r"\D", "", str(cuit))
         if len(digits) != 11:
-            raise TargetUnavailableError("CUIT representado inválido")
+            raise TargetUnavailableError(
+                "CUIT representado inválido",
+                diagnostic_code="represented_cuit_invalid",
+            )
         formatted = f"{digits[:2]}-{digits[2:10]}-{digits[10]}"
         for selector in (
             f"small.pull-right:has-text('{formatted}')",
@@ -67,7 +79,10 @@ class ArcaServicePage:
                     return
             except Exception:
                 continue
-        raise TargetUnavailableError("no se pudo seleccionar el CUIT representado")
+        raise TargetUnavailableError(
+            "no se pudo seleccionar el CUIT representado",
+            diagnostic_code="represented_cuit_not_selectable",
+        )
 
 
 class ArcaSession:
@@ -92,7 +107,10 @@ class ArcaSession:
     @property
     def page(self) -> Any:
         if self._page is None:
-            raise TargetUnavailableError("página ARCA no disponible")
+            raise TargetUnavailableError(
+                "página ARCA no disponible",
+                diagnostic_code="arca_page_missing",
+            )
         return self._page
 
     @staticmethod
@@ -203,6 +221,42 @@ class ArcaSession:
         except Exception:
             pass
 
+    def _page_contexts(self) -> tuple[Any, ...]:
+        """Devuelve la página y sus frames, sin duplicar el frame principal."""
+        contexts = [self.page]
+        try:
+            frames = self.page.frames
+        except Exception:
+            frames = ()
+        for frame in frames or ():
+            if all(frame is not existing for existing in contexts):
+                contexts.append(frame)
+        return tuple(contexts)
+
+    async def _login_form_visible(self) -> bool:
+        """Comprueba si ARCA aún muestra el campo de clave tras enviar el login."""
+        for selector in (
+            "input#F1\\:password",
+            "input[name='F1:password']",
+            "input[type='password']",
+            "#F1\\:password",
+        ):
+            try:
+                locator = self.page.locator(selector)
+                if await locator.count() and await locator.first.is_visible():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def _click_first_in_contexts(
+        self, selectors: tuple[str, ...]
+    ) -> bool:
+        for context in self._page_contexts():
+            if await self._click_first(context, selectors):
+                return True
+        return False
+
     async def login(self) -> None:
         """Inicia sesión una sola vez con errores tipados y sin secretos."""
         if self._logged_in:
@@ -211,14 +265,23 @@ class ArcaSession:
             try:
                 self._page = await self._context.new_page()
             except Exception as exc:
-                raise TargetUnavailableError("no se pudo abrir una página ARCA") from exc
+                raise TargetUnavailableError(
+                    "no se pudo abrir una página ARCA",
+                    diagnostic_code="arca_page_create_failed",
+                ) from exc
         if self._page is None or self._credentials is None:
-            raise TargetUnavailableError("contexto de navegador ARCA no disponible")
+            raise TargetUnavailableError(
+                "contexto de navegador ARCA no disponible",
+                diagnostic_code="arca_browser_context_missing",
+            )
         try:
             await self.page.goto(ARCA_LOGIN_URL, timeout=45_000)
             await self._wait_ready()
         except Exception as exc:
-            raise TargetUnavailableError("no se pudo abrir el login de ARCA") from exc
+            raise TargetUnavailableError(
+                "no se pudo abrir el login de ARCA",
+                diagnostic_code="arca_login_navigation_failed",
+            ) from exc
 
         if not await self._fill_first(
             self.page,
@@ -260,7 +323,10 @@ class ArcaSession:
                 except Exception:
                     continue
             if not advanced:
-                raise TargetUnavailableError("no se pudo avanzar en el login de ARCA")
+                raise TargetUnavailableError(
+                    "no se pudo avanzar en el login de ARCA",
+                    diagnostic_code="arca_username_submit_failed",
+                )
         await self._wait_ready()
 
         if await self._captcha_present():
@@ -288,44 +354,70 @@ class ArcaSession:
             try:
                 await self.page.locator("input[type='password']").press("Enter")
             except Exception as exc:
-                raise TargetUnavailableError("no se pudo enviar el login de ARCA") from exc
+                raise TargetUnavailableError(
+                    "no se pudo enviar el login de ARCA",
+                    diagnostic_code="arca_password_submit_failed",
+                ) from exc
         await self._wait_ready()
 
         feedback = (await self._feedback()).lower()
         if re.search(r"captcha\s+ingresado\s+es\s+incorrecto", feedback):
             raise BotCaptchaUnsolvableError("ARCA rechazó el CAPTCHA")
+        if await self._captcha_present():
+            await self._solve_captcha()
+            if await self._login_form_visible():
+                raise BotCaptchaUnsolvableError(
+                    "ARCA requiere resolver un CAPTCHA antes de continuar"
+                )
         if re.search(r"clave\s+o\s+usuario\s+incorrecto|clave incorrecta", feedback):
-            raise ArcaLoginError("ARCA rechazó las credenciales fiscales")
+            raise ArcaLoginError(
+                "ARCA rechazó las credenciales fiscales",
+                diagnostic_code="arca_login_credentials_rejected",
+            )
         if feedback:
-            raise ArcaLoginError("ARCA rechazó el inicio de sesión")
+            raise ArcaLoginError(
+                "ARCA rechazó el inicio de sesión",
+                diagnostic_code="arca_login_feedback_rejected",
+            )
         try:
             if await self.page.locator("text=/Cambiar\\s+Clave\\s+Fiscal/i").count():
-                raise ArcaLoginError("ARCA requiere cambiar la clave fiscal")
+                raise ArcaLoginError(
+                    "ARCA requiere cambiar la clave fiscal",
+                    diagnostic_code="arca_password_change_required",
+                )
         except ArcaLoginError:
             raise
         except Exception:
             pass
+        if await self._login_form_visible():
+            raise ArcaLoginError(
+                "ARCA no completó el inicio de sesión",
+                diagnostic_code="arca_login_not_completed",
+            )
         self._logged_in = True
 
     async def _find_service(self, service: str) -> Any | None:
         matcher = re.compile(re.escape(service), re.I)
-        candidates = (
-            self.page.get_by_role("button", name=matcher),
-            self.page.get_by_role("link", name=matcher),
-            self.page.locator("button, [role='button'], a").filter(has_text=matcher),
-        )
-        for group in candidates:
-            try:
-                count = await group.count()
-            except Exception:
-                continue
-            for index in range(min(count, 10)):
-                candidate = group.nth(index)
+        for context in self._page_contexts():
+            candidates = (
+                context.get_by_role("button", name=matcher),
+                context.get_by_role("link", name=matcher),
+                context.locator("button, [role='button'], a").filter(
+                    has_text=matcher
+                ),
+            )
+            for group in candidates:
                 try:
-                    if await candidate.is_visible():
-                        return candidate
+                    count = await group.count()
                 except Exception:
                     continue
+                for index in range(min(count, 10)):
+                    candidate = group.nth(index)
+                    try:
+                        if await candidate.is_visible():
+                            return candidate
+                    except Exception:
+                        continue
         return None
 
     async def open_service(self, service: str) -> Any:
@@ -334,7 +426,10 @@ class ArcaSession:
             await self.login()
         value = str(service or "").strip()
         if not value:
-            raise TargetUnavailableError("nombre de servicio ARCA vacío")
+            raise TargetUnavailableError(
+                "nombre de servicio ARCA vacío",
+                diagnostic_code="arca_service_name_missing",
+            )
         parsed = urlparse(value)
         if parsed.scheme:
             host = (parsed.hostname or "").lower().rstrip(".")
@@ -346,19 +441,24 @@ class ArcaSession:
                 or parsed.username
                 or parsed.password
             ):
-                raise TargetUnavailableError("URL de servicio ARCA no permitida")
+                raise TargetUnavailableError(
+                    "URL de servicio ARCA no permitida",
+                    diagnostic_code="arca_service_url_rejected",
+                )
             try:
                 await self.page.goto(value, timeout=45_000)
                 await self._wait_ready()
                 return ArcaServicePage(self.page)
             except Exception as exc:
-                raise TargetUnavailableError("no se pudo abrir el servicio ARCA") from exc
+                raise TargetUnavailableError(
+                    "no se pudo abrir el servicio ARCA",
+                    diagnostic_code="arca_service_navigation_failed",
+                ) from exc
 
         service_locator = await self._find_service(value)
         if service_locator is None:
             # El portal oculta el catálogo completo tras "Ver todos".
-            await self._click_first(
-                self.page,
+            await self._click_first_in_contexts(
                 (
                     "a:has-text('Ver todos')",
                     "button:has-text('Ver todos')",
@@ -368,7 +468,10 @@ class ArcaSession:
             await self._wait_ready()
             service_locator = await self._find_service(value)
         if service_locator is None:
-            raise TargetUnavailableError("servicio ARCA no habilitado o no visible")
+            raise TargetUnavailableError(
+                "servicio ARCA no habilitado o no visible",
+                diagnostic_code="arca_service_not_visible",
+            )
 
         before_url = getattr(self.page, "url", "")
         try:
@@ -382,7 +485,10 @@ class ArcaSession:
                 "TimeoutError",
                 "PlaywrightTimeoutError",
             }:
-                raise TargetUnavailableError("no se pudo abrir el servicio ARCA") from exc
+                raise TargetUnavailableError(
+                    "no se pudo abrir el servicio ARCA",
+                    diagnostic_code="arca_service_open_failed",
+                ) from exc
         try:
             await service_page.wait_for_load_state("domcontentloaded", timeout=12_000)
         except Exception:

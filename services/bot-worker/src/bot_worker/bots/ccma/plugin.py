@@ -63,13 +63,19 @@ def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     if isinstance(exc, ErrorDeBot):
         return exc
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
-        return TargetUnavailableError("timeout del sitio del organismo")
+        return TargetUnavailableError(
+            "timeout del sitio del organismo",
+            diagnostic_code="ccma_site_timeout",
+        )
     texto = sin_secretos(f"{type(exc).__name__}", secretos)
     if "captcha" in type(exc).__name__.lower():
         return CaptchaUnsolvableError(f"desafio no resoluble: {texto}")
     if "browser" in type(exc).__name__.lower() or "playwright" in type(exc).__name__.lower():
         return BrowserCrashedError(f"navegador caido: {texto}")
-    return TargetUnavailableError(f"falla del organismo: {texto}")
+    return TargetUnavailableError(
+        f"falla del organismo: {texto}",
+        diagnostic_code="ccma_unclassified_exception",
+    )
 
 
 class CcmaPlugin:
