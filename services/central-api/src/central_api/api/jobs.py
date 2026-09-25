@@ -46,6 +46,9 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
     try:
         import uuid
 
+        from sqlalchemy import select
+
+        from central_api.models.execution import JobArtifact, JobResult
         from central_api.repositories.jobs import JobRepository
     except Exception:  # noqa: BLE001 - sin repos, fallback de desarrollo
         return None
@@ -57,12 +60,53 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
         async with nueva_sesion() as sesion:
             repo = JobRepository(sesion)  # type: ignore[arg-type]
             fila = await repo.get_scoped(jid, uid)
+            resultado = (
+                await sesion.execute(
+                    select(JobResult).where(JobResult.job_id == jid)
+                )
+            ).scalar_one_or_none()
+            artefactos = (
+                await sesion.execute(
+                    select(JobArtifact)
+                    .where(JobArtifact.job_id == jid)
+                    .order_by(JobArtifact.created_at, JobArtifact.id)
+                )
+            ).scalars().all()
     except Exception:  # noqa: BLE001 - fuera de ámbito o sin fila: 404
         return None
     creado = fila.created_at.isoformat() if fila.created_at else None
+    ahora = utcnow()
+    files = [
+        {
+            "artifact_id": str(item.id),
+            "filename": item.filename,
+            "content_type": item.content_type,
+            "size_bytes": item.size_bytes,
+            "sha256": item.sha256,
+            "download_url": (
+                f"/api/v3/jobs/{jid}/artifacts/{item.id}/download"
+            ),
+        }
+        for item in artefactos
+        if item.expires_at is None or item.expires_at > ahora
+    ]
+    payload = resultado.payload if resultado is not None else {}
+    summary = resultado.summary if resultado is not None else {}
+    result = {
+        "result": resultado.result if resultado is not None else None,
+        "error": (summary or {}).get("error"),
+    }
     return SimpleNamespace(
-        id=str(fila.id), status=str(fila.status), result={},
+        id=str(fila.id), status=str(fila.status), result=result,
         bot=fila.bot, operation=fila.operation, created_at=fila.created_at,
+        started_at=fila.started_at, finished_at=fila.finished_at,
+        _meta={
+            "started_at": fila.started_at.isoformat() if fila.started_at else None,
+            "finished_at": fila.finished_at.isoformat() if fila.finished_at else None,
+            "files": files,
+            "data": {"schema_version": 1, **(payload or {})},
+            "error": (summary or {}).get("error"),
+        },
         _creado=creado,
     )
 
@@ -96,7 +140,10 @@ async def get_job(
         job = await _visible_job_db(job_id, principal)
     if job is None:
         return JSONResponse(status_code=404, content=public_error("not_found"))
-    return JSONResponse(status_code=200, content=project_job(job))
+    return JSONResponse(
+        status_code=200,
+        content=project_job(job, getattr(job, "_meta", None)),
+    )
 
 
 @router.post("/jobs/{job_id}/cancelar")

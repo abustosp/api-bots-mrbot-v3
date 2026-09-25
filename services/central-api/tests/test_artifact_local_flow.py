@@ -83,22 +83,76 @@ def test_get_job_recupera_job_persistido_fuera_de_memoria(monkeypatch):
     app = create_app()
     app.dependency_overrides[api_dependencies.require_api_principal] = lambda: PRINCIPAL
     job_id = str(uuid.uuid4())
+    artifact_id = uuid.uuid4()
     persisted = SimpleNamespace(
         id=job_id,
         status="COMPLETO",
-        result={"result": "ok"},
+        result="OK",
         bot="apoc",
         operation="consultar",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    persisted_result = SimpleNamespace(
+        result="OK",
+        payload={"resumen": "persistido"},
+        summary={"error": {}},
+    )
+    persisted_artifact = SimpleNamespace(
+        id=artifact_id,
+        filename="comprobantes.csv",
+        content_type="text/csv",
+        size_bytes=123,
+        sha256="a" * 64,
+        expires_at=None,
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     monkeypatch.setattr(jobs_api, "db_configurado", lambda: True)
 
-    async def visible_db(requested_id, principal):
-        assert requested_id == job_id
-        assert principal.user_id == USER_ID
-        return persisted
+    class FakeResult:
+        def __init__(self, scalar=None, items=None):
+            self._scalar = scalar
+            self._items = items or []
 
-    monkeypatch.setattr(jobs_api, "_visible_job_db", visible_db)
+        def scalar_one_or_none(self):
+            return self._scalar
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._items
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, statement):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeResult(scalar=persisted_result)
+            return FakeResult(items=[persisted_artifact])
+
+    class FakeRepository:
+        def __init__(self, session):
+            pass
+
+        async def get_scoped(self, requested_id, requested_user):
+            assert requested_id == uuid.UUID(job_id)
+            assert requested_user == uuid.UUID(USER_ID)
+            return persisted
+
+    monkeypatch.setattr(jobs_api, "nueva_sesion", lambda: FakeSession())
+    monkeypatch.setattr(
+        "central_api.repositories.jobs.JobRepository", FakeRepository
+    )
     try:
         response = TestClient(app).get(f"/api/v3/jobs/{job_id}")
     finally:
@@ -107,6 +161,12 @@ def test_get_job_recupera_job_persistido_fuera_de_memoria(monkeypatch):
     assert response.status_code == 200
     assert response.json()["job_id"] == job_id
     assert response.json()["status"] == "COMPLETO"
+    assert response.json()["result"] == "OK"
+    assert response.json()["data"]["resumen"] == "persistido"
+    assert response.json()["files"][0]["artifact_id"] == str(artifact_id)
+    assert response.json()["files"][0]["download_url"].endswith(
+        f"/artifacts/{artifact_id}/download"
+    )
 
 
 def test_download_artifact_solo_firma_tras_scoping_del_job(monkeypatch):
