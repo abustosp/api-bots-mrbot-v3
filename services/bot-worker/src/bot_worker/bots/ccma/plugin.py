@@ -95,7 +95,11 @@ class CcmaPlugin:
         costo_creditos_sugerido=2,
         idempotency_class="LECTURA",
         browser_instances_max=1,
-        hosts_permitidos=("www.afip.gob.ar", "servicios2.afip.gob.ar"),
+        hosts_permitidos=(
+            "auth.afip.gob.ar",
+            "www.afip.gob.ar",
+            "servicios2.afip.gob.ar",
+        ),
     )
 
     def __init__(self, servicio: str | None = None) -> None:

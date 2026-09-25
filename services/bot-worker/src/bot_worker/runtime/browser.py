@@ -150,8 +150,11 @@ class PlaywrightBrowserFactory:
         async def _open() -> AsyncIterator[Any]:
             from bot_worker.runtime.arca_login import ArcaSession
 
-            async with factory.new_context():
-                session = ArcaSession(credentials, captcha)
+            async with factory.new_context() as (_, context):
+                page = await context.new_page()
+                session = ArcaSession(
+                    credentials, captcha, page=page, context=context
+                )
                 try:
                     await session.login()
                     yield session

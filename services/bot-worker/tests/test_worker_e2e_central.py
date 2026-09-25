@@ -272,8 +272,11 @@ def test_result_identifica_nodo_para_la_central():
     assert cabeceras == {"X-Worker-Node": "192.0.2.9:8080"}
 
 
-def test_fabrica_navegador_stub_en_dev_y_sesion_falsa():
-    """Sin Playwright hay stub dev; con él, real (camino Dockerfile)."""
+def test_fabrica_navegador_stub_en_dev_y_sesion_falsa(monkeypatch):
+    """El modo dev no abre red; la sesión ARCA stub deja servicios indisponibles."""
+    import bot_worker.runtime.browser as browser_module
+
+    monkeypatch.setattr(browser_module, "_hay_playwright", lambda: False)
     fabrica = build_browser_factory()
     assert fabrica._headless is True
 
@@ -288,13 +291,13 @@ def test_fabrica_navegador_stub_en_dev_y_sesion_falsa():
     assert visitas == ["https://ejemplo.local/"]
 
     async def _apertura() -> None:
-        """Abre la sesión falsa y pide un servicio aún sin portar (F3)."""
+        """Abre la sesión falsa y pide un servicio no simulado en modo dev."""
         async with fabrica.arca_session(object()) as sesion:
             await sesion.open_service("SIPER")
 
     try:
         asyncio.run(_apertura())
-        raise AssertionError("open_service debería fallar como la real")
+        raise AssertionError("open_service no se simula en modo dev")
     except NotImplementedError:
         pass
     assert fabrica.launch_count >= 2

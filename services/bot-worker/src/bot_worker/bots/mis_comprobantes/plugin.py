@@ -155,6 +155,7 @@ class MisComprobantesPlugin:
         idempotency_class="CONTINUACION",
         browser_instances_max=1,
         hosts_permitidos=(
+            "auth.afip.gob.ar",
             "www.afip.gob.ar",
             "portalcf.cloud.afip.gob.ar",
             "api.capmonster.cloud",
