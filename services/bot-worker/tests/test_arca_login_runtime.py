@@ -122,6 +122,7 @@ class FakePage:
         self.clicks.append(selector)
         if "Ingresar" in selector or "btnIngresar" in selector:
             self.password_submitted = True
+            self.url = "https://portal.afip.gob.ar/contribuyente_/inicio"
 
     def _fill(self, selector: str, value: str) -> None:
         self.fills[selector] = value

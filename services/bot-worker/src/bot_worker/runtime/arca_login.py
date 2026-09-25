@@ -228,7 +228,13 @@ class ArcaSession:
             frames = self.page.frames
         except Exception:
             frames = ()
+        try:
+            main_frame = self.page.main_frame
+        except Exception:
+            main_frame = None
         for frame in frames or ():
+            if frame is main_frame:
+                continue
             if all(frame is not existing for existing in contexts):
                 contexts.append(frame)
         return tuple(contexts)
@@ -380,6 +386,18 @@ class ArcaSession:
                 diagnostic_code="arca_login_feedback_rejected",
             )
         try:
+            login_url = urlparse(str(self.page.url))
+        except Exception:
+            login_url = urlparse("")
+        if (
+            login_url.hostname == "auth.afip.gob.ar"
+            and login_url.path.rstrip("/").endswith("/contribuyente_/login.xhtml")
+        ):
+            raise ArcaLoginError(
+                "ARCA no abandonó la pantalla de inicio de sesión",
+                diagnostic_code="arca_login_still_on_auth_page",
+            )
+        try:
             if await self.page.locator("text=/Cambiar\\s+Clave\\s+Fiscal/i").count():
                 raise ArcaLoginError(
                     "ARCA requiere cambiar la clave fiscal",
@@ -399,15 +417,17 @@ class ArcaSession:
     async def _find_service(self, service: str) -> Any | None:
         matcher = re.compile(re.escape(service), re.I)
         for context in self._page_contexts():
-            candidates = (
-                context.get_by_role("button", name=matcher),
-                context.get_by_role("link", name=matcher),
-                context.locator("button, [role='button'], a").filter(
-                    has_text=matcher
-                ),
+            candidate_factories = (
+                lambda: context.get_by_role("button", name=matcher),
+                lambda: context.get_by_role("link", name=matcher),
+                lambda: context.get_by_text(matcher, exact=False),
+                lambda: context.locator(
+                    "button, [role='button'], a, [onclick]"
+                ).filter(has_text=matcher),
             )
-            for group in candidates:
+            for create_group in candidate_factories:
                 try:
+                    group = create_group()
                     count = await group.count()
                 except Exception:
                     continue
@@ -463,6 +483,7 @@ class ArcaSession:
                     "a:has-text('Ver todos')",
                     "button:has-text('Ver todos')",
                     "[role='link']:has-text('Ver todos')",
+                    r"text=/Ver\s+todos/i",
                 ),
             )
             await self._wait_ready()

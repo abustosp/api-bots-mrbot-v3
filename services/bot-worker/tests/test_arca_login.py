@@ -107,6 +107,9 @@ class _Page:
     def get_by_role(self, role: str, *, name: object = None) -> _Locator:
         return _Locator(self, f"role:{role}:{name}", exists=True)
 
+    def get_by_text(self, *_: object, **__: object) -> _Locator:
+        return _Locator(self, "text:service", exists=False)
+
     async def goto(self, url: str, **_: object) -> None:
         self.visited.append(url)
 
@@ -140,6 +143,9 @@ class _CatalogFrame(_Page):
             hasattr(name, "search") and name.search("MIS COMPROBANTES")
         )
         return _Locator(self, f"role:{role}:{name}", exists=matches)
+
+    def get_by_text(self, *_: object, **__: object) -> _Locator:
+        return _Locator(self, "text:service", exists=False)
 
     def locator(self, selector: str) -> _Locator:
         return _Locator(
@@ -255,6 +261,22 @@ def test_login_no_acepta_formulario_de_clave_que_sigue_visible() -> None:
         asyncio.run(session.login())
 
     assert caught.value.diagnostic_code == "arca_login_not_completed"
+    assert "clave-ficticia" not in str(caught.value)
+
+
+def test_login_rechaza_pantalla_auth_sin_redireccion_a_portal() -> None:
+    class _StuckLoginPage(_Page):
+        url = "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
+
+    session = ArcaSession(
+        FiscalCredentials("20123456789", "clave-ficticia"),
+        page=_StuckLoginPage(),
+    )
+
+    with pytest.raises(ArcaLoginError) as caught:
+        asyncio.run(session.login())
+
+    assert caught.value.diagnostic_code == "arca_login_still_on_auth_page"
     assert "clave-ficticia" not in str(caught.value)
 
 
