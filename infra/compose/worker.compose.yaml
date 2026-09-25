@@ -1,0 +1,55 @@
+# Despliegue rápido del worker (sección worker).
+# Uso (host dedicado, sin central ni db locales):
+#   cp worker.env.example .env.worker
+#   # completar CENTRAL_URL (https de la central) y WORKER_TOKEN
+#   docker compose -f worker.compose.yaml --env-file .env.worker up -d
+#   docker compose -f worker.compose.yaml --env-file .env.worker \
+#     exec bot-worker python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health', timeout=2).read()[:60])"
+#
+# Invariantes (igual que el stack completo):
+#   W-1/SEC-3: sin secretos de la central ni DATABASE_URL/RSA/MinIO.
+#   W-2: concurrencia máxima 5 (tope duro).
+#   W-3: sin puertos publicados; todo entra por `command:` y asignación sellada.
+
+name: mrbot-v3-worker
+
+services:
+  bot-worker:
+    image: ${WORKER_IMAGE:-mrbot-bot-worker:dev}
+    init: true
+    # Sin `env_file` ni `environment` a propósito: el worker no lee entorno.
+    command:
+      - python
+      - -u
+      - -m
+      - bot_worker
+      - --central-url
+      - ${CENTRAL_URL:?fijar URL de la central (http://central:8000 o https://central.ejemplo.com)}
+      - --advertised-url
+      - ${WORKER_ADVERTISED_URL:?fijar URL propia http(s)://IP:8080}
+      - --concurrency
+      - ${WORKER_CONCURRENCY:-5}
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.5"
+          memory: 3G
+          pids: 512
+        reservations:
+          memory: 2G
+    stop_grace_period: 150s
+    shm_size: "2gb"
+    tmpfs:
+      - /dev/shm:rw,nosuid,nodev,size=2g,uid=10001,gid=10001,mode=1777
+      - /work:rw,nosuid,nodev,size=4g,uid=10001,gid=10001,mode=1777
+      - /tmp:rw,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=1777
+    read_only: true
+    restart: unless-stopped

@@ -1,0 +1,65 @@
+# Despliegue rápido de la central (sección central).
+# Uso:
+#   cp central.env.example .env.central
+#   # apuntar DATABASE_URL al host de db (ver db.compose.yaml):
+#   # DATABASE_URL=postgresql+psycopg://mrbot_app:<clave>@<host-db>:5432/mrbot
+#   docker compose -f central.compose.yaml --env-file .env.central up -d
+#   docker compose -f central.compose.yaml --env-file .env.central \
+#     --profile migrate run --rm migrate
+#   curl -f http://127.0.0.1:${CENTRAL_PORT:-8000}/health
+#   curl -f http://127.0.0.1:${CENTRAL_PORT:-8000}/ready
+#
+# Solo plano de control: central-api + migrate one-off. No incluye postgres
+# ni workers (ver db.compose.yaml y worker.compose.yaml). Para producción,
+# usar el stack completo con digests y Docker secrets
+# (docker-compose.yml + docker-compose.prod.yml).
+
+name: mrbot-v3-central
+
+services:
+  migrate:
+    image: ${CENTRAL_IMAGE:-mrbot-central-api:dev}
+    profiles: [migrate]
+    env_file:
+      - path: .env.central
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+    command: ["python", "-m", "central_api.migrate"]
+    restart: "no"
+
+  central-api:
+    image: ${CENTRAL_IMAGE:-mrbot-central-api:dev}
+    init: true
+    env_file:
+      - path: .env.central
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      WORKER_NODES: ${WORKER_NODES:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      API_KEY_HMAC_SECRET: ${API_KEY_HMAC_SECRET:-}
+      RSA_PRIVATE_KEY: ${RSA_PRIVATE_KEY:-}
+      ASSIGNMENT_SIGNING_KEY: ${ASSIGNMENT_SIGNING_KEY:-}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+    ports:
+      - "127.0.0.1:${CENTRAL_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 512M
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    restart: unless-stopped

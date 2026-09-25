@@ -213,9 +213,12 @@ services:
     shm_size: "2gb"
     # uid/gid 10001 (mrbot) + mode 1777: el tmpfs nace root y taparía el
     # chown del Dockerfile, dejando al worker sin escritura en /work.
+    # /tmp también tmpfs: playwright crea artefactos con mkdtemp y sin él
+    # chromium no lanza (EROFS) con el rootfs de solo lectura.
     tmpfs:
       - /dev/shm:rw,nosuid,nodev,size=2g,uid=10001,gid=10001,mode=1777
       - /work:rw,nosuid,nodev,size=4g,uid=10001,gid=10001,mode=1777
+      - /tmp:rw,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=1777
     read_only: true
     restart: unless-stopped
 
