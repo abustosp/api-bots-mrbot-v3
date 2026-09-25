@@ -13,7 +13,6 @@ worker S7 (`manifest` + `validate` + `execute` + `configure`).
   → total de crédito fiscal computable desde el CSV de CF.
 - Sin `SessionLocal`, sin entorno, sin MinIO directo, errores por
   categoría con diagnóstico redactado.
-- `payload_ejemplo.json`: operación `cargar` (reemplazar los `<base64…>`
-  por contenido real antes de enviar).
+- `payload_ejemplo.json`: operación `cargar`, con base64 sintácticamente válido para pruebas de esquema. Los bytes son ilustrativos, no documentos ARCA válidos; reemplazarlos por los archivos reales antes de una carga.
 - Stub dev: `validate` y `calcular_total_cf_csv` son probables offline;
   el flujo con navegador requiere sobre sellado de la central.

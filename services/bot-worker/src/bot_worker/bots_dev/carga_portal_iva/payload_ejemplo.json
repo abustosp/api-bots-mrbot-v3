@@ -4,7 +4,7 @@
   "periodo": "202501",
   "denominacion": "EJEMPLO SRL",
   "ninguna_anteriores": true,
-  "liv_cbte_b64": "<base64 TXT comprobantes ventas>",
-  "liv_alicuota_b64": "<base64 TXT alicuotas ventas>",
-  "csv_cf_b64": "<base64 CSV apertura CF>"
+  "liv_cbte_b64": "Y29tcHJvYmFudGVzIGRlIGVqZW1wbG8K",
+  "liv_alicuota_b64": "YWxpY3VvdGFzIGRlIGVqZW1wbG8K",
+  "csv_cf_b64": "Q3JlZGl0byBGaXNjYWwgQ29tcHV0YWJsZQoxMDAsMDAK"
 }

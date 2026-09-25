@@ -1,0 +1,11 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456786",
+  "representado_nombre": "EJEMPLO SRL",
+  "fecha_desde": "01/01/2025",
+  "fecha_hasta": "31/12/2025",
+  "emitidos": true,
+  "recibidos": true,
+  "incluir_json": true,
+  "subir_csv": true
+}
