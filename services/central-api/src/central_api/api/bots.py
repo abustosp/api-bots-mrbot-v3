@@ -9,6 +9,7 @@ bots aquí: la operación se resuelve contra el manifiesto registrado.
 from __future__ import annotations
 
 import hashlib
+import uuid
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
@@ -51,6 +52,23 @@ class JobPersistenceUnavailable(RuntimeError):
     """La base está configurada, pero no se pudo confirmar el job canónico."""
 
 
+def _email_debug(user_id: str, uid: uuid.UUID) -> str:
+    """Resuelve el email para autoaprovisionar la fila ``users`` de un debug.
+
+    Usa la identidad del panel cuando existe (p. ej. ``abp``); si no, un
+    sintético estable derivado del UUID.
+    """
+    try:
+        from central_api.admin.users import USERS as _USUARIOS_MEMORIA
+
+        memoria = _USUARIOS_MEMORIA.get(str(user_id))
+        if memoria is not None and memoria.email:
+            return memoria.email
+    except Exception:  # noqa: BLE001 - fallback sin tienda admin
+        pass
+    return f"debug-{uid.hex[:12]}"
+
+
 async def _persistir_job_db(
     user_id: str, bot: str, operacion: str, payload: dict,
     idempotency_key: str | None, credential_ciphertext: str | None = None,
@@ -64,8 +82,6 @@ async def _persistir_job_db(
     INSERT canónico de ``jobs``. ``None`` nunca se usa para degradar a memoria
     cuando ``DATABASE_URL`` está configurada.
     """
-    import uuid
-
     from central_api.repositories.base import RepositoryError
     from central_api.repositories.jobs import IdempotencyConflict, JobRepository
 
@@ -76,6 +92,18 @@ async def _persistir_job_db(
         raise JobPersistenceUnavailable("principal o job sin UUID válido") from exc
     try:
         async with nueva_sesion() as sesion:
+            # Los usuarios de depuración del panel (p. ej. ``abp``) viven en
+            # el store en memoria pero la FK ``jobs.user_id`` exige fila en
+            # ``users``: se autoaprovisiona idempotente para no 503.
+            from sqlalchemy import text as _texto
+
+            await sesion.execute(
+                _texto(
+                    "INSERT INTO users (id, email) VALUES (:id, :email) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {"id": str(uid), "email": _email_debug(user_id, uid)},
+            )
             repo = JobRepository(sesion)  # type: ignore[arg-type]
             fila, creado = await repo.create_idempotently(
                 user_id=uid, bot=bot, operation=operacion,
@@ -239,6 +267,44 @@ CATALOGUE = [
 
 def _operation_or_none(bot: str, operacion: str) -> dict | None:
     return OPERATIONS.get((bot, operacion))
+
+
+def _effect_class(bot: str, operacion: str) -> str:
+    """Clasifica la operación para el catálogo persistido.
+
+    Solo lectura (``consultar*``, ``consulta``, ``historial*``) es
+    ``CONSULTA``; el resto (descargas que generan archivos, cargas,
+    solicitudes, importes) es ``EFECTO`` por defecto seguro.
+    """
+    operacion = (operacion or "").lower()
+    if operacion.startswith(("consultar", "consulta")) or operacion.startswith("historial"):
+        return "CONSULTA"
+    return "EFECTO"
+
+
+def catalog_seed_rows() -> list[dict]:
+    """Filas para sembrar ``bots``/``bot_operations`` desde el código.
+
+    El esquema lo crean las migraciones pero nadie insertaba el dato: sin
+    estas filas la FK ``fk_jobs_operation`` rechaza toda creación (503).
+    Idempotente por ``code``/(``bot_code``, ``code``) vía upsert.
+    """
+    bots_vistos: dict[str, str] = {}
+    for item in CATALOGUE:
+        bot = str(item["bot"])
+        bots_vistos.setdefault(bot, bot.replace("_", " ").capitalize())
+    filas = []
+    for (bot, operacion), meta in OPERATIONS.items():
+        bots_vistos.setdefault(bot, bot.replace("_", " ").capitalize())
+        filas.append({
+            "bot": bot,
+            "display_name": bots_vistos[bot],
+            "operation": operacion,
+            "unit_cost": int(meta.get("costo_creditos", 1) or 1),
+            "effect_class": _effect_class(bot, operacion),
+        })
+    filas.sort(key=lambda f: (f["bot"], f["operation"]))
+    return filas
 
 
 def _canonical_body_openapi() -> dict:

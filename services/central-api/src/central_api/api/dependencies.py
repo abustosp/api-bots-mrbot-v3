@@ -110,41 +110,74 @@ async def _principal_desde_pg(
         return ApiPrincipal(user_id=str(fila.user_id), key_id=key_id)
 
 
+def _principal_desde_memoria(presented: str | None) -> ApiPrincipal | None:
+    """Verifica la clave contra el store en memoria del panel admin.
+
+    Cubre usuarios de depuración (p. ej. ``abp``/``testing``) y claves
+    ``mrk_*`` emitidas sin PostgreSQL. Solo usa verificador HMAC + estado;
+    nunca expone el valor.
+    """
+    if not presented:
+        return None
+    try:
+        from central_api.admin.users import API_KEYS, USERS, _firmar_clave
+    except Exception:  # noqa: BLE001 - sin store admin, sin fallback
+        return None
+    import hmac as _hmac
+
+    verificador = _firmar_clave(presented)
+    for meta in API_KEYS.values():
+        if meta.revocada:
+            continue
+        if not _hmac.compare_digest(meta.verificador_hmac, verificador):
+            continue
+        usuario = USERS.get(meta.user_id)
+        if usuario is None or usuario.estado != "habilitado":
+            continue
+        scopes = frozenset(meta.scopes) if meta.scopes else ApiPrincipal(
+            user_id=usuario.id, key_id=meta.id
+        ).scopes
+        return ApiPrincipal(user_id=usuario.id, key_id=meta.id, scopes=scopes)
+    return None
+
+
 async def require_api_principal(
     request: Request, x_api_key: str | None = Header(default=None, alias="X-API-Key")
 ) -> ApiPrincipal:
     """Autentica la API key del cliente y construye el principal.
 
-    Con ``DATABASE_URL`` verifica contra ``api_keys`` + ``users``; sin
+    Orden: PostgreSQL (``mbk_*``) cuando hay secreto + base; fallback en
+    memoria del panel (depuración ``abp``/``testing`` y ``mrk_*``); sin
     secreto configurado devuelve el principal estable de desarrollo; con
-    secreto pero sin base falla cerrado (401); con base caída responde 503
-    sanitizado (sin exponer el motivo interno).
+    secreto pero sin coincidencia falla cerrado (401); con base caída
+    responde 503 sanitizado (sin exponer el motivo interno).
     """
     from central_api.db import db_configurado
 
     settings = get_settings()
     if not settings.api_key_hmac_secret:
+        memoria = _principal_desde_memoria(x_api_key)
+        if memoria is not None:
+            return memoria
         return ApiPrincipal(user_id=current_user_id(), key_id="dev")
     parsed = parse_api_key(x_api_key)
-    if parsed is None:
-        raise _no_autorizado()
-    key_id, secret = parsed
-    if not db_configurado():
-        # Secreto exigido pero sin base que verificar: fail-closed.
-        raise _no_autorizado()
-    try:
-        principal = await _principal_desde_pg(
-            settings.api_key_hmac_secret, key_id, secret
-        )
-    except Exception:  # noqa: BLE001 - base caída: 503 sin detalle interno
-        raise HTTPException(
-            status_code=503,
-            detail=public_error("service_not_enabled")["detail"],
-        ) from None
-    if principal is None:
-        raise _no_autorizado()
-    _ = request  # el request aporta correlación/auditoría, no identidad
-    return principal
+    if parsed is not None and db_configurado():
+        key_id, secret = parsed
+        try:
+            principal = await _principal_desde_pg(
+                settings.api_key_hmac_secret, key_id, secret
+            )
+        except Exception:  # noqa: BLE001 - base caída: 503 sin detalle interno
+            raise HTTPException(
+                status_code=503,
+                detail=public_error("service_not_enabled")["detail"],
+            ) from None
+        if principal is not None:
+            return principal
+    memoria = _principal_desde_memoria(x_api_key)
+    if memoria is not None:
+        return memoria
+    raise _no_autorizado()
 
 
 @dataclass

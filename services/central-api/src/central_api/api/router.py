@@ -7,6 +7,7 @@ from central_api.api.billing import router as billing_router
 from central_api.api.bot_compat import router as bot_compat_router
 from central_api.api.bots import router as bots_router
 from central_api.api.jobs import router as jobs_router
+from central_api.api.security import router as security_router
 from central_api.api.uploads import router as uploads_router
 from central_api.api.utilities import router as utilities_router
 
@@ -18,3 +19,4 @@ router.include_router(account_router, tags=["cuenta"])
 router.include_router(uploads_router, tags=["uploads"])
 router.include_router(utilities_router, tags=["utilidades"])
 router.include_router(billing_router, tags=["facturacion"])
+router.include_router(security_router, tags=["seguridad"])

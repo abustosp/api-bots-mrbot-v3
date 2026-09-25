@@ -264,6 +264,39 @@ async def register_worker(body: RegisterBody) -> dict:
     }
 
 
+async def _sanar_worker_id(entry: WorkerEntry, node: str, capacity: int) -> None:
+    """Recupera el UUID de la entrada en memoria cuando se perdió.
+
+    Tras un reinicio de la central el latido reincorpora la entrada sin
+    identidad y ningún claim durable puede despachar (falla cerrada). Si el
+    nodo está inventariado se intenta el registro idempotente; si no, se
+    conserva la entrada sin UUID y el despacho sigue bloqueado con aviso.
+    Nunca rompe el latido.
+    """
+    if entry.worker_id or not db_configurado():
+        return
+    try:
+        from central_api.repositories.workers import WorkerRepository
+
+        async with nueva_sesion() as sesion:
+            repo = WorkerRepository(sesion)  # type: ignore[arg-type]
+            fila = await repo.get_by_endpoint(node)
+            if fila is None:
+                fila = await repo.register(
+                    name=node,
+                    endpoint_node=node,
+                    app_version="",
+                    allowed=merge_nodes(get_settings().worker_node_list, ADMIN_NODES),
+                    capacity=min(max(1, int(capacity or 5)), MAX_WORKER_CAPACITY),
+                    sealed_pubkey_pem=None,
+                    protocol_version=PROTOCOL_VERSION,
+                )
+            if fila is not None:
+                entry.worker_id = str(fila.id)
+    except Exception:  # noqa: BLE001 - el latido vive igual en memoria
+        pass
+
+
 @router.post("/workers/{worker_id}/heartbeat")
 async def worker_heartbeat(worker_id: str, body: HeartbeatBody) -> dict:
     # La ruta acepta el UUID pleno o el nodo "ip:port" (compatibilidad).
@@ -273,6 +306,7 @@ async def worker_heartbeat(worker_id: str, body: HeartbeatBody) -> dict:
         entry = await _reincorporar_por_latido(node)
     if entry is None:
         raise HTTPException(status_code=404, detail="worker no registrado")
+    await _sanar_worker_id(entry, node, body.capacity)
     if entry.status == "DRENANDO":
         return {"ok": True, "node": entry.node, "status": entry.status}
     entry.status = body.status

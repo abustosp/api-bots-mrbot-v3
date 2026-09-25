@@ -74,6 +74,21 @@ def decrypt_configured_credential(blob_b64: str) -> str:
         raise CredentialDecryptionError("la credencial descifrada no es UTF-8") from exc
 
 
+def configured_public_pem() -> str:
+    """Deriva la pública PEM desde la privada configurada (solo central)."""
+    from cryptography.hazmat.primitives import serialization
+
+    private = load_private_key(_configured_private_pem())
+    try:
+        public = private.public_key()  # type: ignore[union-attr]
+        return public.public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("ascii")
+    except Exception as exc:
+        raise ValueError("no se pudo derivar la clave pública") from exc
+
+
 def public_key_fingerprint(public_pem: str) -> str:
     """Huella SHA-256 hex de una pública PEM (para ``RSA_KEY_ID`` derivado)."""
     import hashlib
@@ -91,5 +106,6 @@ __all__ = [
     "decrypt_client_secret",
     "encrypt_configured_credential",
     "decrypt_configured_credential",
+    "configured_public_pem",
     "public_key_fingerprint",
 ]
