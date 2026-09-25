@@ -191,7 +191,7 @@ class RetperIibbAgipPlugin:
             ) as sesion:
                 await sesion.login(url=self._login_url)
                 await runtime.cancellation.raise_if_cancelled()
-                usuario = self._usuario or runtime.credentials.cuit
+                usuario = self._usuario or runtime.credentials.cuit_representante
                 await sesion.ingresar(usuario=sin_secretos(usuario, []))
                 datos, artefactos = await self._consultar(sesion, entrada, runtime)
         except ErrorDeBot:
