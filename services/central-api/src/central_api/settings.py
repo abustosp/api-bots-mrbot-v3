@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # Sin endpoint/bucket/credenciales no hay firma real: los endpoints de
     # presign responden un ticket de desarrollo documentado (ver storage.py).
     object_storage_endpoint: str = Field(default="", alias="OBJECT_STORAGE_ENDPOINT")
+    # Host alcanzable por el cliente final para URLs GET prefirmadas. En
+    # Compose local difiere del DNS interno usado por los workers al subir.
+    object_storage_public_endpoint: str = Field(
+        default="", alias="OBJECT_STORAGE_PUBLIC_ENDPOINT"
+    )
     object_storage_region: str = Field(default="us-east-1", alias="OBJECT_STORAGE_REGION")
     object_storage_bucket: str = Field(default="", alias="OBJECT_STORAGE_BUCKET")
     object_storage_access_key: str = Field(default="", alias="OBJECT_STORAGE_ACCESS_KEY")

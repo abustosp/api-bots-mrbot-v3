@@ -11,8 +11,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from central_api.api.bots import OPERATIONS
@@ -20,12 +20,13 @@ from central_api.security.principals import ApiPrincipal
 from central_api.security.secret_redaction import public_error
 from central_api.api.dependencies import require_api_principal
 from central_api.settings import get_settings
-from central_api.storage import firmar_subida
+from central_api.storage import firmar_subida, presign_get_url
 
 router = APIRouter()
 
 UPLOAD_TTL_SECONDS = 900
 UPLOAD_MAX_BYTES = 52_428_800
+ARTIFACT_DOWNLOAD_TTL_SECONDS = 300
 
 # Tickets emitidos por clave de objeto (en PG: tabla de uploads temporales).
 TICKETS: dict[str, dict] = {}
@@ -90,6 +91,73 @@ def request_upload(
             "upload_url": firmado["upload_url"],
             "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
             "required_headers": {"Content-Type": body.content_type},
+        },
+    )
+
+
+@router.get("/jobs/{job_id}/artifacts/{artifact_id}/download")
+async def download_artifact(
+    job_id: str,
+    artifact_id: str,
+    principal: ApiPrincipal = Depends(require_api_principal),
+) -> RedirectResponse:
+    """Redirige al objeto tras comprobar ownership y su vínculo persistido.
+
+    El URL del bucket dura cinco minutos y solo se emite para un artifact
+    asociado al job visible del usuario. Un mismo 404 oculta inexistencia y
+    falta de autorización.
+    """
+    try:
+        job_uuid = uuid.UUID(job_id)
+        artifact_uuid = uuid.UUID(artifact_id)
+        user_uuid = uuid.UUID(str(principal.user_id))
+        from sqlalchemy import select
+
+        from central_api.db import nueva_sesion
+        from central_api.models.execution import JobArtifact
+        from central_api.repositories.jobs import JobRepository
+
+        async with nueva_sesion() as session:
+            repo = JobRepository(session)  # type: ignore[arg-type]
+            await repo.get_scoped(job_uuid, user_uuid)
+            artifact = (await session.execute(
+                select(JobArtifact).where(
+                    JobArtifact.id == artifact_uuid,
+                    JobArtifact.job_id == job_uuid,
+                )
+            )).scalar_one_or_none()
+            if artifact is None:
+                raise LookupError("artifact no encontrado")
+            if artifact.expires_at is not None and artifact.expires_at <= _utcnow():
+                raise LookupError("artifact expirado")
+            object_key = str(artifact.object_key)
+    except Exception as exc:  # noqa: BLE001 - oculta job ajeno/no disponible
+        raise HTTPException(status_code=404, detail="artefacto no encontrado") from exc
+
+    settings = get_settings()
+    try:
+        url = presign_get_url(
+            endpoint=(
+                settings.object_storage_public_endpoint
+                or settings.object_storage_endpoint
+            ),
+            region=settings.object_storage_region,
+            bucket=settings.object_storage_bucket,
+            access_key=settings.object_storage_access_key,
+            secret_key=settings.object_storage_secret_key,
+            object_key=object_key,
+            expires_seconds=ARTIFACT_DOWNLOAD_TTL_SECONDS,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=503, detail="almacenamiento no disponible"
+        ) from exc
+    return RedirectResponse(
+        url=url,
+        status_code=307,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Referrer-Policy": "no-referrer",
         },
     )
 

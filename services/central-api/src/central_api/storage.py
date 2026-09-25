@@ -59,12 +59,16 @@ def presign_put_url(
     expires_seconds: int = 900,
     content_type: str | None = None,
     ahora: datetime | None = None,
+    http_method: str = "PUT",
 ) -> str:
-    """Genera una URL ``PUT`` prefirmada SigV4 estilo ruta (S3/MinIO).
+    """Genera una URL ``PUT`` o ``GET`` prefirmada SigV4 estilo ruta.
 
     Falla cerrado (``ValueError``) ante endpoint/bucket/credenciales vacíos
     u object key inválido: nunca se emite una URL a medio firmar.
     """
+    method = str(http_method).upper()
+    if method not in {"GET", "PUT"}:
+        raise ValueError("método de storage no permitido")
     base = (endpoint or "").rstrip("/")
     if not base or not bucket or not access_key or not secret_key:
         raise ValueError("firma de storage sin configurar")
@@ -96,7 +100,8 @@ def presign_put_url(
         cabeceras = f"content-type:{content_type.strip()}\n" + cabeceras
     firmados = parametros["X-Amz-SignedHeaders"]
     canonica = (
-        f"PUT\n{uri}\n{canon_query}\n{cabeceras}\n{firmados}\n{_UNSIGNED_PAYLOAD}"
+        f"{method}\n{uri}\n{canon_query}\n{cabeceras}\n{firmados}\n"
+        f"{_UNSIGNED_PAYLOAD}"
     )
     ambito = f"{amz_fecha}\n{alcance}\n{hashlib.sha256(canonica.encode('utf-8')).hexdigest()}"
     firma = hmac.new(
@@ -105,6 +110,19 @@ def presign_put_url(
         hashlib.sha256,
     ).hexdigest()
     return f"{base}{uri}?{canon_query}&X-Amz-Signature={firma}"
+
+
+def presign_get_url(
+    *, endpoint: str, region: str, bucket: str, access_key: str,
+    secret_key: str, object_key: str, expires_seconds: int = 300,
+    ahora: datetime | None = None,
+) -> str:
+    """Genera una URL GET SigV4 temporal para un objeto autorizado."""
+    return presign_put_url(
+        endpoint=endpoint, region=region, bucket=bucket, access_key=access_key,
+        secret_key=secret_key, object_key=object_key,
+        expires_seconds=expires_seconds, ahora=ahora, http_method="GET",
+    )
 
 
 def ticket_desarrollo(object_key: str) -> str:
@@ -147,6 +165,7 @@ def firmar_subida(
 __all__ = [
     "DEV_STORAGE_HOST",
     "presign_put_url",
+    "presign_get_url",
     "ticket_desarrollo",
     "firmar_subida",
 ]
