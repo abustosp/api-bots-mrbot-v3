@@ -96,3 +96,38 @@ def test_alias_no_proxifica_archivos_y_ofrece_flujo_presignado() -> None:
 
     assert respuesta.status_code == 422
     assert "uploads" in respuesta.json()["detail"]["message"]
+
+
+def test_aliases_libros_iva_y_ddjj_se_mapean_a_operaciones_canonicas_v3() -> None:
+    """Las dos descargas legacy se despachan por el plugin productivo V3."""
+    from central_api.api.bot_compat import BOT_ROUTE_ALIASES
+
+    esperado = {
+        ("/libros_iva/consulta", "libros_portal_iva", "descargar_libros"),
+        ("/libros_iva/ddjj", "libros_portal_iva", "descargar_ddjj"),
+    }
+    assert esperado.issubset(set(BOT_ROUTE_ALIASES))
+
+    cliente = TestClient(create_app())
+    payload = {
+        "representado_cuit": "20123456789",
+        "periodo_desde": "202501",
+        "periodo_hasta": "202503",
+        "denominacion": "CONTRIBUYENTE DE EJEMPLO",
+        "incluir_json": True,
+        "subir_archivos": False,
+    }
+    for path, operation, idempotency_key in (
+        ("/api/v3/libros_iva/consulta", "descargar_libros", "legacy-libros-001"),
+        ("/api/v3/libros_iva/ddjj", "descargar_ddjj", "legacy-ddjj-001"),
+    ):
+        response = cliente.post(
+            path,
+            headers={"Idempotency-Key": idempotency_key},
+            json=payload,
+        )
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        assert job_id in JOBS
+        assert JOBS[job_id].bot == "libros_portal_iva"
+        assert JOBS[job_id].operation == operation

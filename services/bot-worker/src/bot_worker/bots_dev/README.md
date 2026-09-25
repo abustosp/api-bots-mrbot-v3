@@ -14,21 +14,28 @@ fiscales válidos para enviar al organismo.
 
 V1 y V2 tienen 46 carpetas cada uno y comparten los mismos nombres de primer
 nivel. En la comparación de nombres y alias, 32 carpetas se relacionan con un
-plugin productivo V3. Quedan 14 sin plugin V3 identificado:
+plugin productivo V3. Quedan 14 sin plugin de nombre exacto en el registro V3:
 
 - Herramientas o infraestructura: `arca_login`, `bot_builder`, `proxy_login_tester`, `shared`, `tests`.
 - Proyectos no representados como plugin productivo: `beneficios_mipyme`, `carga_931`, `carga_libro_iva`, `cartilla_medica_union_personal`, `efectores_pami`, `habilitar_servicio`, `portal_iva_ddjj_y_libros`, `tucuman`, `xubio_sueldos`.
 
-La coincidencia de nombres no demuestra paridad funcional. Los proyectos no
-representados no se copian al registro de V3: requieren migración al contrato
+Las rutas legacy V3 `/libros_iva/consulta` y `/libros_iva/ddjj` delegan a
+`libros_portal_iva` para descargar libros y DDJJ, respectivamente. Esa capacidad
+ya existe mediante el plugin V3 y aliases centrales, pero no hace que el wrapper
+combinado `portal_iva_ddjj_y_libros` sea un plugin con contrato 1:1. La
+coincidencia de nombres tampoco demuestra paridad funcional. Los proyectos que
+no estén cubiertos por un flujo equivalente requieren migración al contrato
 `BotPlugin`, revisión de seguridad y pruebas propias antes de exponerse como
 operaciones de la API.
 
-### Auditoría estática de proyectos sin plugin
+### Auditoría estática de proyectos sin plugin propio
 
-La revisión de V1/V2 confirma que no es seguro declarar estos nueve proyectos
-como funcionales por su mera presencia en `bots_dev`. Los equivalentes citados
-son cercanos por dominio o formato, no aliases con paridad demostrada:
+Las nueve carpetas de proyectos no tienen un plugin V3 con el mismo nombre.
+Una de ellas, `portal_iva_ddjj_y_libros`, tiene cubiertas sus dos operaciones de
+descarga por las rutas legacy citadas, aunque su wrapper combinado y su entrada
+por lista de períodos no son idénticos. La inspección de las otras ocho carpetas
+confirma que no es seguro declararlas funcionales por su mera presencia en
+`bots_dev`:
 
 | Proyecto legacy | Plugin V3 más cercano | Bloqueo observado y gate previo |
 |---|---|---|
@@ -38,7 +45,7 @@ son cercanos por dominio o formato, no aliases con paridad demostrada:
 | `cartilla_medica_union_personal` | Ninguno identificado | El directorio contiene un draft y logger; falta un flujo productivo validado y pruebas contra contrato V3. |
 | `efectores_pami` | Ninguno identificado | Existe implementación legacy, pero no se demostró equivalencia ni aceptación del portal en V3. |
 | `habilitar_servicio` | Ninguno identificado | Es una operación con efecto sobre servicios fiscales; requiere revisión explícita del alcance y cuenta/sandbox autorizados. |
-| `portal_iva_ddjj_y_libros` | `libros_portal_iva`, solapamiento parcial | El wrapper legacy tiene una dependencia de importación no confirmada. Alinear períodos y DDJJ/libros no basta para afirmar alias. |
+| `portal_iva_ddjj_y_libros` | `libros_portal_iva`, mediante `/libros_iva/consulta` y `/libros_iva/ddjj` | Los aliases cubren ambas descargas. El wrapper local usa una lista de períodos y flags combinados, por lo que el contrato no es 1:1 ni se validó el portal en vivo. |
 | `tucuman` | `declaracion_en_linea`, analogía débil | Hay un draft de presentación anual con credenciales hardcodeadas. Sanitizar y validar en sandbox antes de cualquier presentación. |
 | `xubio_sueldos` | Ninguno identificado | Combina flujo UI, modo API interno y probes de desarrollo; falta contrato, gestión segura de tokens y pruebas de artefactos. |
 
