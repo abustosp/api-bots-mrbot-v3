@@ -100,6 +100,21 @@ class _Page:
         return _NoPopup()
 
 
+class _ModernLoginPage(_Page):
+    """Simula los IDs y controles submit actuales publicados por ARCA."""
+
+    def locator(self, selector: str) -> _Locator:
+        modern_selectors = {
+            "input#F1\\:username",
+            "input[name='F1:username']",
+            "input#F1\\:btnSiguiente",
+            "input#F1\\:btnIngresar",
+            "input[type='submit']",
+            "#F1\\:password",
+        }
+        return _Locator(self, selector, exists=selector in modern_selectors)
+
+
 class _NoPopup:
     async def __aenter__(self):
         return self
@@ -140,6 +155,18 @@ def test_login_usa_page_inyectada_y_es_idempotente() -> None:
     assert page.visited == ["https://auth.afip.gob.ar/contribuyente_/login.xhtml"]
     assert page.filled["input#F1\\:login"] == "20123456789"
     assert page.filled["#F1\\:password"] == "clave-ficticia"
+
+
+def test_login_admite_ids_y_submit_actuales_de_arca() -> None:
+    page = _ModernLoginPage()
+    session = ArcaSession(FiscalCredentials("20123456789", "clave-ficticia"), page=page)
+
+    asyncio.run(session.login())
+
+    assert page.filled["input#F1\\:username"] == "20123456789"
+    assert page.filled["#F1\\:password"] == "clave-ficticia"
+    assert "input#F1\\:btnSiguiente" in page.clicked
+    assert "input#F1\\:btnIngresar" in page.clicked
 
 
 def test_captcha_usa_solver_inyectado_y_no_entorno() -> None:

@@ -223,6 +223,8 @@ class ArcaSession:
         if not await self._fill_first(
             self.page,
             (
+                "input#F1\\:username",
+                "input[name='F1:username']",
                 "input#F1\\:login",
                 "input[type='number']",
                 "input[placeholder*='CUIT' i]",
@@ -234,12 +236,31 @@ class ArcaSession:
             raise ArcaLoginError("no se encontró el campo CUIT en ARCA")
         if not await self._click_first(
             self.page,
-            ("button:has-text('Siguiente')", "#siguiente", "button[type='submit']"),
+            (
+                "button:has-text('Siguiente')",
+                "#siguiente",
+                "button[type='submit']",
+                "input#F1\\:btnSiguiente",
+                "input[type='submit']",
+            ),
         ):
-            try:
-                await self.page.locator("input#F1\\:login").press("Enter")
-            except Exception as exc:
-                raise TargetUnavailableError("no se pudo avanzar en el login de ARCA") from exc
+            advanced = False
+            for selector in (
+                "input#F1\\:username",
+                "input[name='F1:username']",
+                "input#F1\\:login",
+                "input[type='number']",
+            ):
+                try:
+                    locator = self.page.locator(selector)
+                    if await locator.count():
+                        await locator.first.press("Enter")
+                        advanced = True
+                        break
+                except Exception:
+                    continue
+            if not advanced:
+                raise TargetUnavailableError("no se pudo avanzar en el login de ARCA")
         await self._wait_ready()
 
         if await self._captcha_present():
@@ -256,7 +277,13 @@ class ArcaSession:
             raise ArcaLoginError("no se encontró el campo de clave fiscal en ARCA")
         if not await self._click_first(
             self.page,
-            ("button:has-text('Ingresar')", "#ingresar", "button[type='submit']"),
+            (
+                "button:has-text('Ingresar')",
+                "#ingresar",
+                "button[type='submit']",
+                "input#F1\\:btnIngresar",
+                "input[type='submit']",
+            ),
         ):
             try:
                 await self.page.locator("input[type='password']").press("Enter")
