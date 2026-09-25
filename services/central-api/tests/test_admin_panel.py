@@ -38,21 +38,26 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "mrbot_admin_token" in cuerpo
     assert "valor_unica_vez" in cuerpo
     assert "credential-detail" in cuerpo
-    assert "Artefactos MinIO" in cuerpo
+    assert "Archivos" in cuerpo
     assert "Asignado" in cuerpo
     assert "Finalizado" in cuerpo
-    assert "Tablas por bot" in cuerpo
-    assert "Request y response por cada bot" in cuerpo
     assert "bot-sections" in cuerpo
-    assert "Ver request" in cuerpo
-    assert "Ver response" in cuerpo
+    assert "flattenRequest" in cuerpo
+    assert "Request · ${field}" in cuerpo
+    assert "Response JSON" in cuerpo
+    assert "artifactListView" in cuerpo
     assert "executions-table-select" in cuerpo
-    assert "executions-previous" in cuerpo
     assert "/admin/table-catalog" in cuerpo
     assert "Solo se carga la selección actual" in cuerpo
     assert "renderPhysicalBotSection" in cuerpo
     assert "request_payload" in cuerpo
     assert "response_payload" in cuerpo
+    inicio = cuerpo.index('data-panel="executions"')
+    fin = cuerpo.index('data-panel="fleet"', inicio)
+    explorer = cuerpo[inicio:fin]
+    assert 'class="form-actions"' not in explorer
+    assert 'id="execution-table-counts"' not in explorer
+    assert 'id="table-description"' not in explorer
 
 
 def test_panel_sin_abrir_tablas_y_con_buscador_de_tablas() -> None:
@@ -105,11 +110,11 @@ def test_panel_explorador_conserva_detalle_de_tablas_legacy_y_fisicas() -> None:
     assert "Tablas V1/V2 por bot (consulta_*_logs)" in cuerpo
     assert "renderBotSections" in cuerpo
     assert "renderPhysicalBotSection" in cuerpo
-    assert '"request_payload", "response_payload", "artifact_metadata"' in cuerpo
+    assert '"response_payload", "response_data", "artifact_metadata"' in cuerpo
     assert '"status"' in cuerpo
-    assert "Artefactos MinIO" in cuerpo
-    assert "Ver request" in cuerpo
-    assert "Ver response" in cuerpo
+    assert "Request · ${field}" in cuerpo
+    assert "Response JSON" in cuerpo
+    assert "Archivos" in cuerpo
 
 
 def test_panel_login_es_alias_html_y_admin_queda_fuera_de_openapi() -> None:

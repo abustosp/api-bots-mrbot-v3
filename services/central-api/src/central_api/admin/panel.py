@@ -220,10 +220,8 @@ details > .details-body { padding: 0 14px 14px; }
 
       <section class="view hidden" data-panel="executions">
         <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla física de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
-        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Tabla</label><div class="table-combobox" id="executions-table-combobox"><input id="executions-table-search" type="text" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="executions-table-listbox" aria-describedby="executions-table-help" placeholder="Buscar tablas..." autocomplete="off" required><span id="executions-table-help" class="visually-hidden">Escribe para filtrar. Usa las flechas para recorrer, Enter para seleccionar y Escape para cerrar.</span><div id="executions-table-listbox" class="table-combobox-listbox" role="listbox" aria-label="Tablas disponibles" hidden></div><select id="executions-table-select" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Cargando catálogo...</option></select></div></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option selected>50</option><option>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
-        <div class="form-actions"><button class="button secondary small" type="button" id="executions-previous">Anterior</button><button class="button secondary small" type="button" id="executions-next">Siguiente</button><span class="muted" id="execution-table-status">Selecciona una tabla.</span></div>
-        <div class="card table-description" id="table-description"><strong>Tablas por bot</strong><br><span class="muted">Request y response por cada bot, con credenciales protegidas, artefactos por nombre, eventos y timestamps Creado, Asignado, Iniciado y Finalizado.</span></div>
-        <div class="grid" id="execution-table-counts"><div class="empty">Cargando catálogo...</div></div>
+        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Tabla</label><div class="table-combobox" id="executions-table-combobox"><input id="executions-table-search" type="text" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="executions-table-listbox" aria-describedby="executions-table-help" placeholder="Buscar tablas..." autocomplete="off" required><span id="executions-table-help" class="visually-hidden">Escribe para filtrar. Usa las flechas para recorrer, Enter para seleccionar y Escape para cerrar.</span><div id="executions-table-listbox" class="table-combobox-listbox" role="listbox" aria-label="Tablas disponibles" hidden></div><select id="executions-table-select" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Cargando catálogo...</option></select></div></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option>50</option><option selected>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
+        <p class="muted" id="execution-table-status" aria-live="polite">Selecciona una tabla.</p>
         <div class="bot-sections" id="bot-sections"><div class="empty">Selecciona una tabla para consultar.</div></div>
         <div class="table-wrap"><table><thead id="executions-head"><tr><th>Tabla</th><th>Datos</th></tr></thead><tbody id="executions-table"><tr><td colspan="2" class="empty">Selecciona una tabla.</td></tr></tbody></table></div>
       </section>
@@ -248,7 +246,7 @@ details > .details-body { padding: 0 14px 14px; }
   "use strict";
   const TOKEN_KEY = "mrbot_admin_token";
   const initialView = "dashboard";
-  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOffset: 0, tableHasMore: false, tableOptions: [], activeTableOption: -1 };
+  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOptions: [], activeTableOption: -1 };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
@@ -277,12 +275,68 @@ details > .details-body { padding: 0 14px 14px; }
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "object") return payloadView(value, "Ver datos");
     const text = String(value);
-    return text.length > 60 ? `<code>${esc(short(text, 60))}</code>` : esc(text);
+    return text.length > 80
+      ? `<details class="payload"><summary><code>${esc(short(text, 60))}</code></summary><pre class="code">${esc(text)}</pre></details>`
+      : esc(text);
   }
   function renderEmpty(target, colspan, message = "Sin datos") { $(target).innerHTML = `<tr><td colspan="${colspan}" class="empty">${esc(message)}</td></tr>`; }
   function payloadView(value, label) {
     const empty = value === null || value === undefined || (typeof value === "object" && Object.keys(value).length === 0);
     return empty ? "<span class=\"muted\">—</span>" : `<details class="payload"><summary>${esc(label)}</summary><pre class="code">${esc(json(value))}</pre></details>`;
+  }
+  function flattenRequest(value, prefix = "", output = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      if (prefix) output[prefix] = value;
+      return output;
+    }
+    const entries = Object.entries(value);
+    if (!entries.length && prefix) output[prefix] = value;
+    entries.forEach(([key, nested]) => {
+      if (/(password|clave|secret|token|credentialciphertext|privatekey)/i.test(key)) return;
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (nested && typeof nested === "object" && !Array.isArray(nested)) flattenRequest(nested, path, output);
+      else output[path] = nested;
+    });
+    return output;
+  }
+  function requestFieldNames(records, requestKey = "request") {
+    return Array.from(new Set((records || []).flatMap((record) =>
+      Object.keys(flattenRequest(record?.[requestKey] || {}))
+    ))).sort((left, right) => left.localeCompare(right));
+  }
+  function requestCell(value) {
+    if (value === null || value === undefined || value === "") return `<span class="muted">—</span>`;
+    if (typeof value === "object") return payloadView(value, "Ver valor");
+    if (typeof value === "boolean") return value ? "Sí" : "No";
+    return cellValue(value);
+  }
+  function artifactListView(artifacts) {
+    const items = Array.isArray(artifacts) ? artifacts.filter((item) => item && typeof item === "object") : [];
+    if (!items.length) return `<span class="muted">—</span>`;
+    const safeItems = items.map((artifact) => ({
+      id: artifact.id || artifact.artifact_id,
+      nombre: artifact.name || artifact.filename,
+      tipo: artifact.content_type,
+      bytes: artifact.size_bytes,
+      sha256: artifact.sha256,
+      creado_en: artifact.created_at,
+      expira_en: artifact.expires_at,
+    }));
+    return `<details class="payload"><summary>${items.length} archivo${items.length === 1 ? "" : "s"}</summary><pre class="code">${esc(json(safeItems))}</pre></details>`;
+  }
+  function requestColumns(records, requestKey, existingColumns = []) {
+    const fields = requestFieldNames(records, requestKey);
+    const columns = existingColumns.map((key) => ({ key, label: key, kind: "field" }));
+    const index = columns.findIndex((column) => column.key === requestKey);
+    if (index < 0) return columns;
+    columns.splice(index, 1, ...(fields.length
+      ? fields.map((field) => ({ key: `${requestKey}.${field}`, label: `Request · ${field}`, kind: "request", requestKey, field }))
+      : [{ key: requestKey, label: "Request", kind: "field" }]));
+    return columns;
+  }
+  function columnValue(record, column) {
+    if (column.kind !== "request") return record[column.key];
+    return flattenRequest(record[column.requestKey] || {})[column.field];
   }
   function renderBotSections(sections) {
     const node = $("#bot-sections");
@@ -293,51 +347,64 @@ details > .details-body { padding: 0 14px 14px; }
     const legacy = section.tablas_legacy || [];
     const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
     const legacyTables = legacy.length ? legacy.map((table) => `<span class="pill">${esc(table)}</span>`).join(" ") : `<span class="muted">sin tabla histórica directa</span>`;
+    const requestFields = requestFieldNames(records, "request");
+    const headings = ["Job", "Timestamp", "Asignado", "Iniciado", "Operación", "Usuario", "Estado", ...requestFields.map((field) => `Request · ${field}`), "Response JSON", "Archivos", "Credenciales", "Finalizado"];
     const rows = records.length ? records.map((record) => {
       const job = record.job || {};
       const response = record.response ?? record.result;
       const credentials = record.credentials || {};
-      const artifactNames = (record.artifacts || []).map((artifact) => artifact.name || artifact.filename).filter(Boolean);
-      return `<tr><td><code>${esc(short(job.id, 22))}</code><br>${esc(date(job.creado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td><td>${payloadView(record.request, "Ver request")}</td><td>${payloadView(response, "Ver response")}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${artifactNames.length ? artifactNames.map((name) => `<span class="pill">${esc(name)}</span>`).join(" ") : "—"}</td></tr>`;
-    }).join("") : `<tr><td colspan="8" class="empty">Sin ejecuciones para este bot.</td></tr>`;
-    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tablas V3:</strong> ${(section.tablas || []).map((table) => `<span class="pill">${esc(table)}</span>`).join(" ")}<strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr><th>Job / creado</th><th>Operación</th><th>Usuario</th><th>Estado</th><th>Request</th><th>Response</th><th>Credenciales</th><th>Artefactos MinIO</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+      const request = flattenRequest(record.request || {});
+      const requestCells = requestFields.map((field) => `<td>${requestCell(request[field])}</td>`).join("");
+      const responseReceived = response?.received_at ? `<br><span class="muted">${esc(date(response.received_at))}</span>` : "";
+      return `<tr><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td>${requestCells}<td>${payloadView(response, "Ver response")}${responseReceived}</td><td>${artifactListView(record.artifacts)}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${esc(date(job.finalizado_en))}</td></tr>`;
+    }).join("") : `<tr><td colspan="${headings.length}" class="empty">Sin ejecuciones para este bot.</td></tr>`;
+    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr>${headings.map((heading) => `<th>${esc(heading)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
   function renderPhysicalBotSection(section) {
     const node = $("#bot-sections");
     $("#executions-head").closest(".table-wrap").classList.add("hidden");
-    const columns = Array.isArray(section.display_columns)
+    const rawColumns = Array.isArray(section.display_columns)
       ? section.display_columns
       : (Array.isArray(section.columns) ? section.columns : []);
     const records = Array.isArray(section.records) ? section.records : [];
-    if (!columns.length) { node.innerHTML = `<div class="empty">No hay columnas visibles para la tabla física.</div>`; return; }
+    if (!rawColumns.length) { node.innerHTML = `<div class="empty">No hay columnas visibles para la tabla física.</div>`; return; }
+    const requestColumn = rawColumns.find((column) => ["request_payload", "request"].includes(column));
+    const columns = requestColumn
+      ? requestColumns(records, requestColumn, rawColumns)
+      : rawColumns.map((key) => ({ key, label: key, kind: "field" }));
     const cells = (record) => columns.map((column) => {
-      const value = record[column];
-      if (["request_payload", "response_payload", "artifact_metadata"].includes(column)) {
-        const label = column === "request_payload" ? "Ver request" : column === "response_payload" ? "Ver response" : "Ver metadatos";
+      const value = columnValue(record, column);
+      if (column.kind === "request") return `<td>${requestCell(value)}</td>`;
+      if (["response_payload", "response_data", "artifact_metadata"].includes(column.key)) {
+        const label = column.key === "response_payload" || column.key === "response_data" ? "Ver response JSON" : "Ver metadatos";
         return `<td>${payloadView(value, label)}</td>`;
       }
+      if (column.key === "archivos" || column.key === "artifact_names") return `<td>${artifactListView(Array.isArray(value) ? value.map((name) => typeof name === "string" ? { name } : name) : [])}</td>`;
       if (value && typeof value === "object") return `<td>${payloadView(value, "Ver datos")}</td>`;
-      if (column === "job_id") return `<td><code>${esc(short(value, 22))}</code></td>`;
-      if (column === "status") return `<td><span class="status ${statusClass(value)}">${esc(value || "—")}</span></td>`;
+      if (column.key === "job_id" || column.key === "id") return `<td><code>${esc(short(value, 22))}</code></td>`;
+      if (column.key === "status" || column.key === "estado") return `<td><span class="status ${statusClass(value)}">${esc(value || "—")}</span></td>`;
       return `<td>${esc(value ?? "—")}</td>`;
-    }).join("") + `<td><button class="button secondary small" data-action="credential-detail" data-id="${esc(record.job_id || "")}">Ver credenciales</button></td>`;
+    }).join("") + `<td>${record.job_id ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(record.job_id)}">Ver credenciales</button>` : "—"}</td>`;
     const rows = records.length
       ? records.map((record) => `<tr>${cells(record)}</tr>`).join("")
       : `<tr><td colspan="${Math.max(columns.length + 1, 1)}" class="empty">Sin registros para este bot y filtro.</td></tr>`;
     const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
-    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>Tabla física:</strong> <code>${esc(section.tablas?.[0] || "")}</code><strong>Campos sensibles:</strong> secretos, object_key y URLs ocultos. Usa Ver credenciales para descifrar la clave custodiada.</div><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column)}</th>`).join("")}<th>Credenciales</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}<th>Credenciales</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
   function renderCanonicalTable(tableName, rows) {
     const head = $("#executions-head");
     const body = $("#executions-table");
     head.closest(".table-wrap").classList.remove("hidden");
     const keys = (state.tableCatalog.find((item) => item.name === tableName) || {}).columns || [];
-    head.innerHTML = `<tr>${keys.map((key) => `<th>${esc(key)}</th>`).join("")}</tr>`;
-    body.innerHTML = rows.length ? rows.map((row) => `<tr>${keys.map((key) => {
-      const value = row[key];
+    const requestColumn = keys.find((key) => ["request_payload", "request"].includes(key));
+    const columns = requestColumn ? requestColumns(rows, requestColumn, keys) : keys.map((key) => ({ key, label: key, kind: "field" }));
+    head.innerHTML = `<tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}</tr>`;
+    body.innerHTML = rows.length ? rows.map((row) => `<tr>${columns.map((column) => {
+      const key = column.key;
+      const value = columnValue(row, column);
       if (key === "credentials" && value && value.available) return `<td><button class="button secondary small" data-action="credential-detail" data-id="${esc(row.id || row.job_id || "")}">Ver credenciales</button></td>`;
       if (key === "credentials") return `<td><span class="muted">—</span></td>`;
-      if (["estado", "resultado", "result"].includes(key) && typeof value === "string") return `<td><span class="status ${statusClass(value)}">${esc(value)}</span></td>`;
+      if (["estado", "resultado", "result", "status"].includes(key) && typeof value === "string") return `<td><span class="status ${statusClass(value)}">${esc(value)}</span></td>`;
       return `<td>${cellValue(value)}</td>`;
     }).join("")}</tr>`).join("") : `<tr><td colspan="${Math.max(keys.length, 1)}" class="empty">La tabla no contiene registros para este filtro.</td></tr>`;
     $("#bot-sections").innerHTML = `<div class="empty">Vista de tabla canónica: ${esc(tableName)}.</div>`;
@@ -442,7 +509,6 @@ details > .details-body { padding: 0 14px 14px; }
     select.value = bots[0]?.name || canonical[0]?.name || "";
     const selected = select.selectedOptions[0];
     $("#executions-table-search").value = selected?.value ? selected.textContent : "";
-    $("#execution-table-counts").innerHTML = `<div class="card"><div class="metric"><span>Tablas PostgreSQL</span><strong>${canonical.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas por bot</span><strong>${bots.length}</strong></div></div><div class="card"><div class="metric"><span>Tablas V1/V2</span><strong>${legacy.length}</strong></div></div>`;
     closeTableOptions();
     filterTableOptions("");
   }
@@ -514,15 +580,15 @@ details > .details-body { padding: 0 14px 14px; }
       await loadTableCatalog();
       const tabla = $("#executions-table-select").value;
       if (!tabla) { flash("Selecciona una tabla para consultar.", "error"); return; }
-      const params = new URLSearchParams({ limit: $("#executions-limit").value, offset: String(state.tableOffset), tabla });
+      const params = new URLSearchParams({ limit: $("#executions-limit").value, offset: "0", tabla });
       const values = [["q", "#executions-query"], ["job_id", "#executions-job"], ["bot", "#executions-bot"], ["operacion", "#executions-operation"], ["estado", "#executions-state"], ["usuario", "#executions-user"]];
       values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
       const data = await api(`/admin/records?${params}`);
-      state.tableHasMore = Boolean(data.has_more);
-      $("#executions-previous").disabled = state.tableOffset <= 0;
-      $("#executions-next").disabled = !state.tableHasMore;
-      $("#execution-table-status").textContent = `${data.fuente || "—"} · ${data.total || 0} filas desde ${data.offset || 0}`;
-      $("#table-description").innerHTML = `<strong>${esc(data.catalogo?.label || data.tabla_resuelta || tabla)}</strong><br><span class="muted">${esc((data.catalogo?.legacy || []).join(", ") || "Tabla canónica V3")} · límite ${esc(data.limit)}</span>`;
+      const total = Number(data.total || 0);
+      const shown = Number((data.records || []).length);
+      const tablaLabel = data.catalogo?.label || data.tabla_resuelta || tabla;
+      const countLabel = data.has_more ? `${shown} de al menos ${total} filas` : `${shown} de ${total} filas`;
+      $("#execution-table-status").textContent = `${tablaLabel} · ${data.fuente || "—"} · ${countLabel}`;
       if (data.catalogo?.kind === "bot" || data.catalogo?.kind === "legacy") {
         $("#executions-head").innerHTML = "<tr><th>Tabla detallada por bot</th></tr>";
         $("#executions-table").innerHTML = `<tr><td class="empty">La tabla detallada se muestra arriba.</td></tr>`;
@@ -532,13 +598,6 @@ details > .details-body { padding: 0 14px 14px; }
         renderCanonicalTable(data.tabla_resuelta || tabla, data.records || []);
       }
     } catch (error) { flash(error.message, "error"); }
-  }
-  function resetExecutionOffset() { state.tableOffset = 0; }
-  function moveExecutionPage(direction) {
-    const pageSize = Number($("#executions-limit").value || 50);
-    if (direction < 0) state.tableOffset = Math.max(0, state.tableOffset - pageSize);
-    if (direction > 0 && state.tableHasMore) state.tableOffset += pageSize;
-    loadExecutions();
   }
   async function executionAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button || button.dataset.action !== "credential-detail") return;
@@ -571,7 +630,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction); $("#keys-filter").addEventListener("submit", loadKeys); $("#keys-table").addEventListener("click", keyAction);
-  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", (event) => { resetExecutionOffset(); loadExecutions(event); }); $("#executions-table-select").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); });
+  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table-select").addEventListener("change", () => loadExecutions());
   $("#executions-table-search").addEventListener("focus", () => { $("#executions-table-search").select(); openTableOptions(); });
   $("#executions-table-search").addEventListener("input", (event) => { $("#executions-table-select").value = ""; openTableOptions(event.target.value); });
   $("#executions-table-search").addEventListener("keydown", handleTableComboboxKeydown);
@@ -579,7 +638,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#executions-table-listbox").addEventListener("click", (event) => { const option = event.target.closest("[role=option]"); if (option) chooseTableOption(option.dataset.value); });
   document.addEventListener("click", (event) => { if (!$("#executions-table-combobox").contains(event.target)) closeTableOptions(true); });
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
-  $("#executions-limit").addEventListener("change", () => { resetExecutionOffset(); loadExecutions(); }); $("#executions-previous").addEventListener("click", () => moveExecutionPage(-1)); $("#executions-next").addEventListener("click", () => moveExecutionPage(1)); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
+  $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
