@@ -1,0 +1,17 @@
+# Build contexts stay inside api-bots-mrbot-v3 and exclude local credentials/artifacts.
+.git
+**/.git
+.venv
+**/.venv
+.pytest_cache
+**/.pytest_cache
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*
+**/secrets/
+infra/certs/
+**/temp/
+.research/
+plans/
+tests/

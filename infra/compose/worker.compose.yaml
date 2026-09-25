@@ -1,7 +1,8 @@
 # Despliegue rápido del worker (sección worker).
 # Uso (host dedicado, sin central ni db locales):
 #   cp worker.env.example .env.worker
-#   # completar CENTRAL_URL (https de la central) y WORKER_TOKEN
+#   # completar CENTRAL_URL, WORKER_ADVERTISED_URL y WORKER_CONCURRENCY
+#   # permitir la URL anunciada en WORKER_NODES de la central
 #   docker compose -f worker.compose.yaml --env-file .env.worker up -d
 #   docker compose -f worker.compose.yaml --env-file .env.worker \
 #     exec bot-worker python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health', timeout=2).read()[:60])"

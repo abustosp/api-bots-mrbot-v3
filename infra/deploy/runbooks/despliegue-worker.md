@@ -1,9 +1,10 @@
 # Runbook: despliegue de bot-worker
 
 Despliega workers en hosts dedicados o escala los del stack local.
-Un host de worker solo necesita dos datos: `CENTRAL_URL` mas el token.
-Jamas recibe `DATABASE_URL`, clave RSA, credenciales MinIO, SMTP ni
-MercadoPago (ver [plan de infra](../../../plans/06-infra/plan.md) seccion 6).
+Un host de worker usa la URL de la central y su propia URL anunciada por CLI;
+la central debe incluir esa URL (`host:puerto`) en `WORKER_NODES` o darla de alta
+mediante el panel de flota. El worker no recibe un `WORKER_TOKEN` estático ni
+variables de entorno.
 
 ## 1. Requisitos del host
 
@@ -16,24 +17,18 @@ MercadoPago (ver [plan de infra](../../../plans/06-infra/plan.md) seccion 6).
 - Si se publica mediante nginx-v2, la red externa `proxy-edge` debe existir y
   cada despliegue debe usar un `WORKER_NUMBER` distinto.
 
-## 2. Configurar solo CENTRAL_URL mas token
+## 2. Configurar URL de la central, URL anunciada y capacidad
 
 ```bash
-mkdir -p worker-deploy/secrets && cd worker-deploy
-cat > .env <<EOF
-CENTRAL_URL=https://central.ejemplo.com
-WORKER_TOKEN=cambiar-por-token-generado
-MAX_CONCURRENT_JOBS=5
-WORKER_NUMBER=1
-EOF
-printf '%s\n' "$WORKER_TOKEN" > secrets/worker_auth_token.txt
-# Solo si el plugin los usa: proxy, captcha, CUIT, IA.
-# printf '%s\n' '...' > secrets/proxy_credentials.txt
-chmod 600 .env secrets/*
+cp infra/compose/worker.env.example infra/compose/.env.worker
+# Edit .env.worker: CENTRAL_URL, WORKER_ADVERTISED_URL, WORKER_CONCURRENCY y WORKER_NUMBER.
 ```
 
-`MAX_CONCURRENT_JOBS` tiene tope duro de 5 (invariante W-2). Un valor
-mayor se rechaza: la central degrada al worker a SATURADO.
+`WORKER_TOKEN` no forma parte del protocolo actual y no se consume desde `.env`;
+Compose usa las variables solo para interpolar los argumentos CLI, no las pasa al
+proceso worker. Agrega la URL anunciada exacta a `WORKER_NODES` de la central
+(o registra el nodo desde el panel). `WORKER_CONCURRENCY` tiene tope duro de 5
+(invariante W-2).
 
 Con nginx-v2, el worker queda disponible en
 `https://worker-${WORKER_NUMBER}.mrbot.com.ar`. El dominio no sustituye la
@@ -41,18 +36,21 @@ firma Ed25519 de las asignaciones y no se debe agregar un `ports:` al servicio.
 
 ## 3. Levantar el worker sin la central
 
-Desde la raiz del repo, sin arrancar dependencias (`--no-deps` evita
-levantar postgres y central en este host):
+Desde la raíz del repo, usando la sección de worker dedicada (sin variables de
+entorno dentro del contenedor y sin arrancar central o PostgreSQL en este host):
 
 ```text
-CENTRAL_URL=https://central.ejemplo.com WORKER_TOKEN=... \
-docker compose -f infra/compose/docker-compose.yml up -d --no-deps bot-worker
+cp infra/compose/worker.env.example infra/compose/.env.worker
+# Editar .env.worker y fijar CENTRAL_URL, WORKER_ADVERTISED_URL y WORKER_CONCURRENCY.
+docker compose -f infra/compose/worker.compose.yaml \
+  --env-file infra/compose/.env.worker up -d
 ```
 
 En el stack local (mismo host que la central) en cambio:
 
 ```text
-docker compose -f infra/compose/docker-compose.yml up -d --scale bot-worker=2
+docker compose -f infra/compose/docker-compose.yml \
+  --env-file infra/compose/.env up -d --scale bot-worker=2
 ```
 
 ## 4. Verificar registro y salud
@@ -77,7 +75,8 @@ Nunca matar primero un worker con jobs en vuelo:
 4. Repetir worker por worker, conservando capacidad de la flota.
 
 ```text
-docker compose -f infra/compose/docker-compose.yml up -d --no-deps bot-worker
+docker compose -f infra/compose/worker.compose.yaml \
+  --env-file infra/compose/.env.worker up -d
 ```
 
 ## 6. Rollback
@@ -90,7 +89,7 @@ define el protocolo versionado, no el tag de imagen.
 
 | Sintoma | Causa probable | Accion |
 |---|---|---|
-| No se registra | `CENTRAL_URL` o token mal | Revisar `.env` y rotar token |
+| No se registra | `CENTRAL_URL`, `WORKER_ADVERTISED_URL` o allowlist incorrectos | Verificar conectividad y que la URL anunciada esté en `WORKER_NODES` o en el panel |
 | Chromium se cae | `/dev/shm` pequeno | Verificar `shm_size: 2gb` y `tmpfs` en el compose resuelto |
 | `409` constante | 5 jobs en curso | Normal: SATURADO, escalar con otro worker |
 | PIDs agotados | Fuga de procesos | Revisar limite `pids: 512` y reiniciar el contenedor |

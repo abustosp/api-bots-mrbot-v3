@@ -80,6 +80,9 @@ services:
 
   central-api:
     image: ${CENTRAL_IMAGE:-mrbot-central-api:dev}
+    build:
+      context: ../..
+      dockerfile: services/central-api/Dockerfile
     init: true
     env_file: [.env]
     environment:
@@ -170,6 +173,9 @@ services:
 
   bot-worker:
     image: ${WORKER_IMAGE:-mrbot-bot-worker:dev}
+    build:
+      context: ../..
+      dockerfile: services/bot-worker/Dockerfile
     init: true
     # Sin entorno a propósito: el worker no lee variables (su config entra
     # por `command:` y su arranque falla si ve secretos en el entorno).

@@ -25,34 +25,52 @@ cd infra/compose
 cp -n .env.example .env
 ```
 
-Variables que sí hay que revisar en `.env` (el resto puede quedar por defecto):
+Opciones del `.env` y del CLI que sí hay que revisar (el resto puede quedar por defecto). El worker no lee entorno: Compose le pasa sus opciones de arranque por argumentos CLI.
 
-| Variable | Efecto |
+| Variable/opción | Efecto |
 |---|---|
 | `CENTRAL_IMAGE` / `WORKER_IMAGE` | imágenes locales (`:dev` admite tag; prod exige digest) |
 | `POSTGRES_DB` / `POSTGRES_USER` | base y rol de la app (el worker jamás las ve, W-1) |
-| `WORKER_TOKEN` | identidad del worker ante la central; **cambiar el placeholder** |
+| `WORKER_NODES` | allowlist de workers; en Compose local incluir `bot-worker:8080` para que el registro se persista |
+| `WORKER_ADVERTISED_URL` | URL anunciada por el worker dedicado, debe coincidir con una entrada de `WORKER_NODES` |
 | `ADMIN_TOKEN` | Bearer [REDACTED] mutaciones de `/admin/*`; sin él son `403` |
-| `WORKER_CONCURRENCY` / `MAX_CONCURRENT_JOBS` | tope duro: jamás mayor a `5` (W-2) |
-| `CENTRAL_URL` | en el stack local ya apunta a `http://central-api:8000` |
+| `--concurrency` | argumento CLI del worker; Compose usa `5` por defecto y el máximo permitido es `5` (W-2) |
+| `--central-url` | argumento CLI; en el stack local apunta a `http://central-api:8000` |
 | `WORKER_NUMBER` | número usado por nginx-v2 en `worker-{numero}.mrbot.com.ar` |
 
-## 2. Secretos de desarrollo (placeholders)
+## 2. Secretos locales de desarrollo
 
-Cada secreto va solo a su destino por Docker secrets (W-1/SEC-3).
-Son placeholders locales, nunca valores reales:
+Cada secreto vive en `infra/compose/secrets/`, excluido de Git, y se monta solo
+en los servicios que lo necesitan. En Compose local, protege el directorio del
+host y deja los archivos legibles por el UID no privilegiado de la central
+(`10001`). Con secretos basados en archivos, `chmod 600` impide que la API los
+lea.
 
 ```bash
-mkdir -p secrets && for s in postgres_app_password database_url \
-  api_key_hmac_secret session_signing_key smtp_password \
+mkdir -p secrets
+[ -s secrets/postgres_app_password.txt ] || openssl rand -hex 32 > secrets/postgres_app_password.txt
+[ -s secrets/minio_root_user.txt ] || printf 'mrbot-local\n' > secrets/minio_root_user.txt
+[ -s secrets/minio_root_password.txt ] || openssl rand -hex 32 > secrets/minio_root_password.txt
+for s in api_key_hmac_secret session_signing_key smtp_password \
   mercadopago_access_token minio_central_credentials worker_auth_token \
   proxy_credentials capmonster_arca_key capmonster_srt_key \
-  cuit_service_key ai_api_key minio_root_user minio_root_password \
-  oidc_client_secret; do
-  [ -f secrets/$s.txt ] || printf 'dev-placeholder\n' > secrets/$s.txt; done
-# La clave RSA se monta como .pem (ver `secrets:` en docker-compose.yml):
-[ -f secrets/rsa_private_key.pem ] || printf 'dev-placeholder\n' > secrets/rsa_private_key.pem
-chmod 600 secrets/*
+  cuit_service_key ai_api_key oidc_client_secret; do
+  [ -s secrets/$s.txt ] || openssl rand -hex 32 > secrets/$s.txt
+done
+# DATABASE_URL_FILE debe contener la URL real de la base local.
+. .env
+printf 'postgresql+psycopg://%s:%s@postgres:5432/%s\n' \
+  "${POSTGRES_USER:-mrbot_app}" "$(cat secrets/postgres_app_password.txt)" \
+  "${POSTGRES_DB:-mrbot}" > secrets/database_url.txt
+# La clave Ed25519 debe ser persistente para que los workers acepten asignaciones
+# después de reiniciar la central. No crear una clave efímera por arranque.
+[ -s secrets/assignment_signing_key.pem ] || openssl genpkey -algorithm Ed25519 -out secrets/assignment_signing_key.pem
+# La clave RSA se monta como .pem (ver `secrets:` en docker-compose.yml).
+[ -f secrets/rsa_private_key.pem ] || openssl genrsa -out secrets/rsa_private_key.pem 2048
+# Los archivos se montan individualmente; el directorio privado evita acceso de
+# otros usuarios del host mientras el UID 10001 de la central puede leerlos.
+chmod 700 secrets
+chmod 644 secrets/*
 ```
 
 ## 3. PKI local para mTLS (opcional salvo overlay mTLS)
@@ -153,7 +171,7 @@ del proceso; `/ready` es capacidad de servir (falla sin `DATABASE_URL` o sin
 esquema); en el worker `/internal/v1/health` es anónima y
 `/internal/v1/status` exige el Bearer [REDACTED] worker.
 
-## 7. Sembrar admin y API key de desarrollo
+## 7. Crear usuario cliente de prueba y API key de desarrollo
 
 1. Fijar `ADMIN_TOKEN` en `infra/compose/.env` y recrear la central:
    `docker compose up -d central-api`.
@@ -178,6 +196,11 @@ curl -sf -X POST http://127.0.0.1:8000/admin/users/<USER_ID>/api-keys \
   -d '{"scopes":[],"motivo":"siembra local de desarrollo"}'
 # → {"success":true,"clave":{...},"valor_unica_vez":"...","aviso":"..."}
 ```
+
+> Este endpoint crea un usuario cliente y su API key se conserva solo en memoria
+> de `central-api`; no crea un administrador ni datos durables. Un reinicio o
+> recreación de la central invalida ambos. En entornos persistentes use una
+> ruta de aprovisionamiento respaldada por base de datos.
 
 4. Guardar `valor_unica_vez` en el gestor de secretos local (no en el repo) y
    humo contra la API pública:
