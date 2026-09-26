@@ -19,7 +19,7 @@ import uuid
 from typing import Literal
 from dataclasses import asdict, dataclass, field
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from central_api.admin._common import enmascarar, require_admin, validar_motivo
@@ -130,16 +130,16 @@ def emitir_clave(
 ) -> tuple[ApiKeyMeta, str]:
     """Crea una clave, guarda solo verificador+prefijo y devuelve el valor único.
 
-    Con ``valor_fijo`` (p. ej. ``testing`` para depuración) se conserva el
-    valor literal en vez de generar uno aleatorio. Debe tener 4+ caracteres
-    sin espacios y un verificador HMAC único.
+    Con ``valor_fijo`` se conserva el valor literal en vez de generar uno
+    aleatorio. Debe tener al menos 3 caracteres sin espacios y un verificador
+    HMAC único.
     """
     if valor_fijo:
         valor = valor_fijo.strip()
-        if len(valor) < 4 or any(ch.isspace() for ch in valor):
+        if len(valor) < 3 or any(ch.isspace() for ch in valor):
             raise HTTPException(
                 status_code=400,
-                detail="valor_fijo debe tener 4+ caracteres sin espacios",
+                detail="valor_fijo debe tener al menos 3 caracteres sin espacios",
             )
     else:
         valor = "mrk_" + secrets.token_urlsafe(32)
@@ -191,7 +191,10 @@ class CrearUsuarioBody(BaseModel):
     plan: str = "free"
     api_key: str = Field(
         default="",
-        description="API key fija opcional. Vacía = generar automáticamente.",
+        description=(
+            "API key fija opcional, mínimo 3 caracteres sin espacios. "
+            "Vacía = generar automáticamente."
+        ),
     )
     valor_fijo: str = Field(
         default="",
@@ -221,7 +224,7 @@ class EmitirClaveBody(BaseModel):
     motivo: str = ""
     valor_fijo: str = Field(
         default="",
-        description="Valor literal para depuración (p. ej. testing). Vacío = aleatorio.",
+        description="Valor literal con mínimo 3 caracteres y sin espacios. Vacío = aleatorio.",
     )
 
 
@@ -267,6 +270,7 @@ async def _id_pg_por_email(email: str) -> str | None:
 @router.post("/users", status_code=201)
 async def crear_usuario(
     body: CrearUsuarioBody,
+    response: Response,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
@@ -277,6 +281,7 @@ async def crear_usuario(
     para conservar el flujo de alta de V1/V2.
     """
     actor = require_admin(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
     motivo = validar_motivo(body.motivo)
     email = _normalizar_identidad(body.email)
     if any(u.email == email for u in USERS.values()):
@@ -330,9 +335,11 @@ async def crear_usuario(
             {
                 "enviadas": entregadas,
                 "motivo": motivo_envio,
-                # Si el SMTP funcionó, el secreto ya se entregó y no vuelve a
-                # viajar en la respuesta. Si falló, el admin lo puede copiar.
-                "valor_unica_vez": None if entregadas else valor,
+                # El valor solo se devuelve a esta operación administrativa.
+                # El panel lo mantiene en memoria temporal para copiarlo
+                # aunque también se haya enviado por email. Nunca se incluye
+                # en listados ni auditoría.
+                "valor_unica_vez": valor,
             }
         )
     log_event(
@@ -452,11 +459,13 @@ def deshabilitar_usuario(
 def emitir_clave_api(
     user_id: str,
     body: EmitirClaveBody,
+    response: Response,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
     """Emite una clave y la revela una única vez; la auditoría guarda el prefijo."""
     actor = require_admin(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
     motivo = validar_motivo(body.motivo)
     if user_id not in USERS:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
@@ -480,11 +489,13 @@ def emitir_clave_api(
 def rotar_clave_api(
     user_id: str,
     body: RotarClaveBody,
+    response: Response,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
     """Emite una clave nueva y revoca la anterior; audita ambos IDs."""
     actor = require_admin(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
     motivo = validar_motivo(body.motivo)
     if user_id not in USERS:
         raise HTTPException(status_code=404, detail="usuario no encontrado")

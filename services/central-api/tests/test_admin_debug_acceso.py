@@ -89,7 +89,7 @@ def test_crear_usuario_con_api_key_estado_y_envio_opcional(admin, monkeypatch) -
         "/admin/users",
         json={
             "email": "sin-envio@example.com",
-            "api_key": "fixed-test-key",
+            "api_key": "abc",
             "estado": "deshabilitado",
             "enviar_credenciales": False,
             "motivo": "alta con credencial definida sin envío",
@@ -97,9 +97,10 @@ def test_crear_usuario_con_api_key_estado_y_envio_opcional(admin, monkeypatch) -
         headers=_headers(),
     )
     assert sin_envio.status_code == 201
+    assert sin_envio.headers["cache-control"] == "private, no-store"
     cuerpo_sin_envio = sin_envio.json()
     assert cuerpo_sin_envio["usuario"]["estado"] == "deshabilitado"
-    assert cuerpo_sin_envio["credenciales"]["valor_unica_vez"] == "fixed-test-key"
+    assert cuerpo_sin_envio["credenciales"]["valor_unica_vez"] == "abc"
     assert cuerpo_sin_envio["credenciales"]["enviadas"] is False
     assert entregas == []
 
@@ -118,7 +119,7 @@ def test_crear_usuario_con_api_key_estado_y_envio_opcional(admin, monkeypatch) -
     cuerpo_con_envio = con_envio.json()
     assert cuerpo_con_envio["usuario"]["estado"] == "habilitado"
     assert cuerpo_con_envio["credenciales"]["enviadas"] is True
-    assert cuerpo_con_envio["credenciales"]["valor_unica_vez"] is None
+    assert cuerpo_con_envio["credenciales"]["valor_unica_vez"] == "mail-test-key"
     assert entregas == [("con-envio@example.com", "mail-test-key", "")]
 
     debug_con_envio = cliente.post(
@@ -148,22 +149,34 @@ def test_emitir_clave_valor_fijo_y_autentica_borde(admin, monkeypatch) -> None:
         json={
             "scopes": [],
             "motivo": "emisión de depuración desde tests",
-            "valor_fijo": "testing",
+            "valor_fijo": "abc",
         },
         headers=_headers(),
     )
     assert respuesta.status_code == 201
-    assert respuesta.json()["valor_unica_vez"] == "testing"
+    assert respuesta.headers["cache-control"] == "private, no-store"
+    assert respuesta.json()["valor_unica_vez"] == "abc"
 
     # El valor fijo queda custodiado como HMAC, nunca en claro.
     meta = next(iter(admin_users.API_KEYS.values()))
-    assert meta.verificador_hmac != "testing"
+    assert meta.verificador_hmac != "abc"
 
     # Con secreto configurado y sin base, el borde usa el fallback en memoria.
-    ok = cliente.get("/api/v3/bots", headers={"X-API-Key": "testing"})
+    ok = cliente.get("/api/v3/bots", headers={"X-API-Key": "abc"})
     assert ok.status_code == 200
     mala = cliente.get("/api/v3/bots", headers={"X-API-Key": "no-existe"})
     assert mala.status_code == 401
+
+    demasiado_corta = cliente.post(
+        f"/admin/users/{usuario['id']}/api-keys",
+        json={
+            "scopes": [],
+            "motivo": "rechazar clave demasiado corta",
+            "valor_fijo": "ab",
+        },
+        headers=_headers(),
+    )
+    assert demasiado_corta.status_code == 400
 
 
 def test_listar_editar_revocar_restaurar_claves(admin, monkeypatch) -> None:
@@ -178,6 +191,7 @@ def test_listar_editar_revocar_restaurar_claves(admin, monkeypatch) -> None:
         headers=_headers(),
     )
     assert emitida.status_code == 201
+    assert emitida.headers["cache-control"] == "private, no-store"
     clave = emitida.json()["clave"]
     valor = emitida.json()["valor_unica_vez"]
 
@@ -185,6 +199,8 @@ def test_listar_editar_revocar_restaurar_claves(admin, monkeypatch) -> None:
     assert listado.status_code == 200
     assert listado.json()["total"] == 2
     assert listado.json()["claves"][0]["estado"] == "activa"
+    assert all("valor_unica_vez" not in item for item in listado.json()["claves"])
+    assert all("verificador_hmac" not in item for item in listado.json()["claves"])
 
     vigente = cliente.get("/api/v3/bots", headers={"X-API-Key": valor})
     assert vigente.status_code == 200

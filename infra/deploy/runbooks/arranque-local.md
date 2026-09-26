@@ -208,8 +208,12 @@ curl -sf -X POST http://127.0.0.1:8000/admin/users \
 # → {"success":true,"usuario":{"id":"<USER_ID>",...}}
 ```
 
-3. Emitir su API key (**se muestra una sola vez** en `valor_unica_vez`;
-   solo quedan prefijo y verificador HMAC en el servidor):
+3. Emitir su API key (**se muestra en la respuesta administrativa y puede
+   mostrarse/copiarse en la consola mientras esa pestaña siga abierta**; solo
+   quedan prefijo y verificador HMAC en el servidor). El endpoint agrega
+   `Cache-Control: private, no-store`. Las claves manuales deben tener al menos
+   3 caracteres sin espacios. No es posible recuperar claves anteriores: emite
+   una clave nueva si necesitas volver a verla.
 
 ```bash
 curl -sf -X POST http://127.0.0.1:8000/admin/users/<USER_ID>/api-keys \

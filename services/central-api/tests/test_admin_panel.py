@@ -49,6 +49,14 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "executions-table-select" in cuerpo
     assert "/admin/table-catalog" in cuerpo
     assert 'id="new-api-key"' in cuerpo
+    assert 'id="new-api-key" type="password" minlength="3"' in cuerpo
+    assert 'id="api-key-reveal"' in cuerpo
+    assert 'id="toggle-issued-api-key"' in cuerpo
+    assert 'id="copy-issued-api-key"' in cuerpo
+    assert 'id="clear-issued-api-key"' in cuerpo
+    assert "revealApiKey(data.valor_unica_vez" in cuerpo
+    assert "navigator.clipboard.writeText(state.revealedApiKey)" in cuerpo
+    assert "clearRevealedApiKey(); state.token = \"\"" in cuerpo
     assert 'id="new-state"' in cuerpo
     assert 'id="new-send-credentials"' in cuerpo
     assert 'list="module-options"' in cuerpo
