@@ -367,6 +367,7 @@ async def crear_usuario(
 
 @router.get("/users")
 def listar_usuarios(
+    response: Response,
     authorization: str | None = Header(default=None),
     email: str = "",
     estado: str = "",
@@ -376,6 +377,7 @@ def listar_usuarios(
 ) -> dict:
     """Busca usuarios por email, estado y plan con paginación por offset."""
     require_admin(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
     usuarios = list(USERS.values())
     if email:
         usuarios = [u for u in usuarios if email.lower() in u.email]
@@ -389,14 +391,37 @@ def listar_usuarios(
     return {
         "success": True,
         "total": total,
-        "usuarios": [_vista_usuario(u) for u in pagina],
+        "usuarios": [
+            {
+                **_vista_usuario(u),
+                "claves_api": [
+                    {
+                        "id": clave.id,
+                        "prefijo": clave.prefijo,
+                        "estado": "revocada" if clave.revocada else "activa",
+                        "emitida_en": clave.emitida_en,
+                    }
+                    for clave in sorted(
+                        (k for k in API_KEYS.values() if k.user_id == u.id),
+                        key=lambda k: k.emitida_en,
+                        reverse=True,
+                    )
+                ],
+            }
+            for u in pagina
+        ],
     }
 
 
 @router.get("/users/{user_id}")
-def ver_usuario(user_id: str, authorization: str | None = Header(default=None)) -> dict:
+def ver_usuario(
+    user_id: str,
+    response: Response,
+    authorization: str | None = Header(default=None),
+) -> dict:
     """Devuelve un usuario con sus claves (metadatos) y ledger reciente."""
     require_admin(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
     usuario = USERS.get(user_id)
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")

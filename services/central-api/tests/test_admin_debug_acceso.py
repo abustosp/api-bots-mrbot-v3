@@ -179,6 +179,61 @@ def test_emitir_clave_valor_fijo_y_autentica_borde(admin, monkeypatch) -> None:
     assert demasiado_corta.status_code == 400
 
 
+def test_usuario_lista_prefijo_y_cambia_estado_activo_desactivado(admin, monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("API_KEY_HMAC_SECRET", "secreto-servidor-test")
+    get_settings.cache_clear()
+    cliente = TestClient(create_app())
+    usuario = _crear_usuario(cliente, "abp").json()["usuario"]
+    user_id = usuario["id"]
+
+    emitida = cliente.post(
+        f"/admin/users/{user_id}/api-keys",
+        json={
+            "scopes": [],
+            "motivo": "clave manual para usuario de prueba",
+            "valor_fijo": "abp",
+        },
+        headers=_headers(),
+    )
+    assert emitida.status_code == 201
+    assert emitida.json()["valor_unica_vez"] == "abp"
+    assert emitida.headers["cache-control"] == "private, no-store"
+
+    listado = cliente.get("/admin/users", headers=_headers())
+    assert listado.status_code == 200
+    assert listado.headers["cache-control"] == "private, no-store"
+    fila = next(item for item in listado.json()["usuarios"] if item["id"] == user_id)
+    assert fila["claves_api"][0]["prefijo"] == "abp"
+    assert fila["claves_api"][0]["estado"] == "activa"
+    assert "verificador_hmac" not in repr(fila)
+    assert "valor_unica_vez" not in repr(fila)
+
+    desactivado = cliente.post(
+        f"/admin/users/{user_id}/disable",
+        json={"motivo": "desactivar usuario desde la vista de usuarios"},
+        headers=_headers(),
+    )
+    assert desactivado.status_code == 200
+    assert desactivado.json()["usuario"]["estado"] == "deshabilitado"
+    denegada = cliente.get("/api/v3/bots", headers={"X-API-Key": "abp"})
+    assert denegada.status_code == 401
+
+    fila_deshabilitada = cliente.get("/admin/users", headers=_headers()).json()["usuarios"][0]
+    assert fila_deshabilitada["claves_api"][0]["estado"] == "revocada"
+
+    activado = cliente.post(
+        f"/admin/users/{user_id}/enable",
+        json={"motivo": "reactivar usuario desde la vista de usuarios"},
+        headers=_headers(),
+    )
+    assert activado.status_code == 200
+    assert activado.json()["usuario"]["estado"] == "habilitado"
+    assert cliente.get("/admin/users/" + user_id, headers=_headers()).headers[
+        "cache-control"
+    ] == "private, no-store"
+
+
 def test_listar_editar_revocar_restaurar_claves(admin, monkeypatch) -> None:
     monkeypatch.setenv("API_KEY_HMAC_SECRET", "secreto-servidor-test")
     get_settings.cache_clear()

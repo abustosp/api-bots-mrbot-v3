@@ -37,6 +37,14 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "sessionStorage" in cuerpo
     assert "mrbot_admin_token" in cuerpo
     assert "valor_unica_vez" in cuerpo
+    assert "API key (prefijo)" in cuerpo
+    assert "userKeyPreview" in cuerpo
+    assert 'data-action="user-toggle"' in cuerpo
+    assert "Desactivar" in cuerpo and "Activar" in cuerpo
+    assert "Emitir y revelar clave" in cuerpo
+    assert "la clave completa solo se revela una vez" in cuerpo
+    assert 'value="habilitado">Activo' in cuerpo
+    assert 'value="deshabilitado">Desactivado' in cuerpo
     assert "credential-detail" in cuerpo
     assert "Archivos" in cuerpo
     assert "Asignado" in cuerpo
