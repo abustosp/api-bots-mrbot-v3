@@ -10,11 +10,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import re
 import secrets
 import uuid
+from typing import Literal
 from dataclasses import asdict, dataclass, field
 
 from fastapi import APIRouter, Header, HTTPException
@@ -22,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from central_api.admin._common import enmascarar, require_admin, validar_motivo
 from central_api.admin.audit import log_event
+from central_api.admin.notifications import enviar_credenciales_email
 from central_api.settings import get_settings
 from central_api.store import utcnow
 
@@ -186,6 +189,25 @@ class CrearUsuarioBody(BaseModel):
     email: str
     display_name: str = ""
     plan: str = "free"
+    api_key: str = Field(
+        default="",
+        description="API key fija opcional. Vacía = generar automáticamente.",
+    )
+    valor_fijo: str = Field(
+        default="",
+        description="Alias de api_key para compatibilidad con el panel de depuración.",
+    )
+    estado: Literal["habilitado", "deshabilitado"] = "habilitado"
+    habilitado: bool | None = Field(
+        default=None,
+        description="Alias booleano compatible con el formulario V1/V2.",
+    )
+    enviar_credenciales: bool = False
+    send_credentials: bool | None = None
+    send_api_key_email: bool | None = Field(
+        default=None,
+        description="Alias compatible con V1/V2 para solicitar envío por email.",
+    )
     motivo: str = Field(default="", description="Justificación de 10 a 500 caracteres")
 
 
@@ -248,24 +270,88 @@ async def crear_usuario(
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Da de alta un usuario con email o nombre de depuración único."""
+    """Da de alta usuario y API key en una sola operación administrativa.
+
+    La forma moderna usa ``api_key``, ``estado`` y ``enviar_credenciales``.
+    También se aceptan ``valor_fijo``, ``habilitado`` y ``send_api_key_email``
+    para conservar el flujo de alta de V1/V2.
+    """
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     email = _normalizar_identidad(body.email)
     if any(u.email == email for u in USERS.values()):
         raise HTTPException(status_code=409, detail="identidad ya registrada")
+    api_key = body.api_key.strip()
+    valor_fijo = body.valor_fijo.strip()
+    if api_key and valor_fijo and api_key != valor_fijo:
+        raise HTTPException(status_code=400, detail="api_key y valor_fijo no coinciden")
+    api_key = api_key or valor_fijo
+    enviar = body.enviar_credenciales
+    if body.send_credentials is not None:
+        enviar = body.send_credentials
+    if body.send_api_key_email is not None:
+        enviar = body.send_api_key_email
+    estado = body.estado
+    if body.habilitado is not None:
+        estado = "habilitado" if body.habilitado else "deshabilitado"
+    if enviar and ("@" not in email or "." not in email.rsplit("@", 1)[-1]):
+        raise HTTPException(
+            status_code=400,
+            detail="enviar_credenciales requiere un email con dominio",
+        )
     usuario = AdminUser(
         id=await _id_pg_por_email(email) or _nuevo_id(),
         email=email, display_name=body.display_name,
-        plan=body.plan, motivo=motivo,
+        estado=estado, plan=body.plan, motivo=motivo,
     )
     USERS[usuario.id] = usuario
+    try:
+        meta, valor = emitir_clave(usuario.id, [], "", api_key)
+    except Exception:
+        USERS.pop(usuario.id, None)
+        raise
+
+    credenciales = {
+        "clave": _vista_clave(meta),
+        "solicitado": enviar,
+        "enviadas": False,
+        "destino": email if enviar else "",
+        "motivo": "no_solicitado",
+        "valor_unica_vez": valor,
+    }
+    if enviar:
+        entregadas, motivo_envio = await asyncio.to_thread(
+            enviar_credenciales_email,
+            email,
+            valor,
+            body.display_name.strip(),
+        )
+        credenciales.update(
+            {
+                "enviadas": entregadas,
+                "motivo": motivo_envio,
+                # Si el SMTP funcionó, el secreto ya se entregó y no vuelve a
+                # viajar en la respuesta. Si falló, el admin lo puede copiar.
+                "valor_unica_vez": None if entregadas else valor,
+            }
+        )
     log_event(
         "user.created", actor_id=actor, target_type="user", target_id=usuario.id,
         request_id=request_id or "", reason=motivo,
-        metadata={"email": email, "plan": body.plan},
+        metadata={
+            "email": email,
+            "plan": body.plan,
+            "estado": estado,
+            "api_key_prefijo": meta.prefijo,
+            "credenciales_solicitadas": enviar,
+            "credenciales_enviadas": credenciales["enviadas"],
+        },
     )
-    return {"success": True, "usuario": _vista_usuario(usuario)}
+    return {
+        "success": True,
+        "usuario": _vista_usuario(usuario),
+        "credenciales": credenciales,
+    }
 
 
 @router.get("/users")

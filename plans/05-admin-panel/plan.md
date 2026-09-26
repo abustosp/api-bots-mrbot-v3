@@ -524,7 +524,7 @@ Las auditorías y entidades operativas utilizan UUIDv7 donde corresponda.
 
 | Operación | Validación | Auditoría obligatoria |
 |---|---|---|
-| Alta | Email normalizado único, consentimiento y plan inicial | Actor, usuario, plan, origen, resultado. |
+| Alta | Email normalizado único, API key fija o generada, estado inicial, consentimiento y plan inicial | Actor, usuario, plan, estado, prefijo de clave, origen, resultado. |
 | Baja lógica | Confirmación y motivo, sin borrar ledger | Actor, usuario, motivo, resultado. |
 | Habilitar | Verificar que no haya bloqueo legal o de fraude | Actor, transición y motivo. |
 | Deshabilitar | Requiere motivo, revoca claves y bloquea nuevos jobs | Actor, impacto y resultado. |
@@ -537,6 +537,12 @@ Las auditorías y entidades operativas utilizan UUIDv7 donde corresponda.
 La clave API se revela una única vez en una página que prohíbe caché.
 
 El operador debe confirmar recepción antes de abandonar el flujo.
+
+El alta integrada acepta `api_key` opcional, `estado` y `enviar_credenciales`.
+Los alias `habilitado` y `send_api_key_email` conservan compatibilidad con el
+formulario administrativo de V1/V2. El envío usa SMTP STARTTLS desde
+`central-api`; si no está configurado o falla, la creación no se revierte y el
+resultado informa que el operador debe entregar la clave manualmente.
 
 La interfaz nunca lista valores de claves existentes.
 

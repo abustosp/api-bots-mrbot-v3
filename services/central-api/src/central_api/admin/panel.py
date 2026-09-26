@@ -201,7 +201,7 @@ details > .details-body { padding: 0 14px 14px; }
       <section class="view hidden" data-panel="users">
         <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3. Para depuración se admite un nombre sin mail (p. ej. abp).</p>
         <form id="users-filter" class="toolbar"><div class="field wide"><label for="users-email">Buscar por email o usuario</label><input id="users-email" name="email" type="search" placeholder="cliente@example.com o abp"></div><div class="field"><label for="users-state">Estado</label><select id="users-state"><option value="">Todos</option><option value="habilitado">Habilitado</option><option value="deshabilitado">Deshabilitado</option></select></div><button class="button primary" type="submit">Buscar</button></form>
-        <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-plan">Plan</label><select id="new-plan"><option>free</option><option>basico</option><option>pro</option><option>empresa</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" required></div></div><button class="button primary" type="submit">Crear usuario</button></form></div></details>
+        <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-plan">Plan</label><select id="new-plan"><option>free</option><option>basico</option><option>pro</option><option>empresa</option></select></div><div class="field"><label for="new-api-key">API key</label><input id="new-api-key" type="text" placeholder="Vacío = generar automáticamente" autocomplete="off"></div><div class="field"><label for="new-state">Estado inicial</label><select id="new-state"><option value="habilitado">Habilitado</option><option value="deshabilitado">Deshabilitado</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" required></div></div><div class="form-actions"><label class="checkbox-inline"><input id="new-send-credentials" type="checkbox"> Enviar credenciales por email</label><button class="button primary" type="submit">Crear usuario</button></div></form></div></details>
         <div class="table-wrap"><table><thead><tr><th>Email / usuario</th><th>Nombre</th><th>Plan</th><th>Estado</th><th>Créditos</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="6" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
@@ -213,15 +213,15 @@ details > .details-body { padding: 0 14px 14px; }
 
       <section class="view hidden" data-panel="jobs">
         <div class="kicker">Cola y ejecución</div><h2>Jobs</h2><p class="subtle">Observa asignaciones, intentos y acciones durables sin exponer payloads sensibles.</p>
-        <form id="jobs-filter" class="toolbar"><div class="field"><label for="jobs-state">Estado</label><select id="jobs-state"><option value="">Todos</option><option>PENDIENTE</option><option>ASIGNADO</option><option>CORRIENDO</option><option>COMPLETO</option><option>FALLIDO</option><option>CANCELADO</option></select></div><div class="field"><label for="jobs-bot">Bot</label><input id="jobs-bot" type="text" placeholder="consulta_cuit"></div><div class="field"><label for="jobs-user">Usuario</label><input id="jobs-user" type="text" placeholder="UUID"></div><button class="button primary" type="submit">Actualizar</button></form>
+        <form id="jobs-filter" class="toolbar"><div class="field"><label for="jobs-state">Estado</label><select id="jobs-state"><option value="">Todos</option><option>PENDIENTE</option><option>ASIGNADO</option><option>CORRIENDO</option><option>COMPLETO</option><option>FALLIDO</option><option>CANCELADO</option></select></div><div class="field"><label for="jobs-bot">Módulo / bot</label><input id="jobs-bot" list="module-options" type="search" placeholder="Escribir para filtrar módulos" autocomplete="off"></div><div class="field"><label for="jobs-user">Usuario</label><input id="jobs-user" type="text" placeholder="UUID"></div><button class="button primary" type="submit">Actualizar</button></form>
         <div class="grid" id="jobs-metrics"><div class="empty">Cargando métricas...</div></div>
         <div class="table-wrap"><table><thead><tr><th>Job</th><th>Estado</th><th>Bot / operación</th><th>Usuario</th><th>Worker</th><th>Intento</th><th>Acciones</th></tr></thead><tbody id="jobs-table"><tr><td colspan="7" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="executions">
         <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla física de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
-        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Tabla</label><div class="table-combobox" id="executions-table-combobox"><input id="executions-table-search" type="text" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="executions-table-listbox" aria-describedby="executions-table-help" placeholder="Buscar tablas..." autocomplete="off" required><span id="executions-table-help" class="visually-hidden">Escribe para filtrar. Usa las flechas para recorrer, Enter para seleccionar y Escape para cerrar.</span><div id="executions-table-listbox" class="table-combobox-listbox" role="listbox" aria-label="Tablas disponibles" hidden></div><select id="executions-table-select" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Cargando catálogo...</option></select></div></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Bot</label><input id="executions-bot" type="text" placeholder="todos"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option>50</option><option selected>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
-        <p class="muted" id="execution-table-status" aria-live="polite">Selecciona una tabla.</p>
+        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Tabla</label><div class="table-combobox" id="executions-table-combobox"><input id="executions-table-search" type="text" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="executions-table-listbox" aria-describedby="executions-table-help" placeholder="Buscar tablas..." autocomplete="off" required><span id="executions-table-help" class="visually-hidden">Escribe para filtrar. Usa las flechas para recorrer, Enter para seleccionar y Escape para cerrar.</span><div id="executions-table-listbox" class="table-combobox-listbox" role="listbox" aria-label="Tablas disponibles" hidden></div><select id="executions-table-select" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Cargando catálogo...</option></select></div></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Módulo / bot</label><input id="executions-bot" list="module-options" type="search" placeholder="Escribir para filtrar módulos" autocomplete="off"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option>50</option><option selected>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
+        <datalist id="module-options"></datalist><p class="muted" id="execution-table-status" aria-live="polite">Selecciona una tabla.</p>
         <div class="bot-sections" id="bot-sections"><div class="empty">Selecciona una tabla para consultar.</div></div>
         <div class="table-wrap"><table><thead id="executions-head"><tr><th>Tabla</th><th>Datos</th></tr></thead><tbody id="executions-table"><tr><td colspan="2" class="empty">Selecciona una tabla.</td></tr></tbody></table></div>
       </section>
@@ -246,7 +246,7 @@ details > .details-body { padding: 0 14px 14px; }
   "use strict";
   const TOKEN_KEY = "mrbot_admin_token";
   const initialView = "dashboard";
-  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOptions: [], activeTableOption: -1 };
+  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOptions: [], activeTableOption: -1, moduleOptions: [], moduleOptionsLoaded: false };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
@@ -270,7 +270,7 @@ details > .details-body { padding: 0 14px 14px; }
     if (!response.ok) throw new Error(data.detail || data.message || `HTTP ${response.status}`);
     return data;
   }
-  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, keys: loadKeys, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; (loaders[view] || loadDashboard)(); }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, keys: loadKeys, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
   function cellValue(value) {
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "object") return payloadView(value, "Ver datos");
@@ -512,10 +512,42 @@ details > .details-body { padding: 0 14px 14px; }
     closeTableOptions();
     filterTableOptions("");
   }
+  function renderModuleOptions(values) {
+    const datalist = $("#module-options");
+    if (!datalist) return;
+    const options = Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right, "es"));
+    state.moduleOptions = options;
+    datalist.innerHTML = options.map((value) => `<option value="${esc(value)}"></option>`).join("");
+  }
+  function addModuleOptions(values) {
+    renderModuleOptions([...state.moduleOptions, ...(values || [])]);
+  }
+  async function loadModuleOptions() {
+    if (state.moduleOptionsLoaded) return;
+    state.moduleOptionsLoaded = true;
+    try {
+      const [jobs, catalog] = await Promise.all([
+        api("/admin/jobs?limit=200"),
+        api("/admin/table-catalog"),
+      ]);
+      const jobModules = (jobs.jobs || []).map((item) => item.bot);
+      const catalogModules = (catalog.tables || [])
+        .filter((item) => item.kind === "bot" || item.kind === "legacy")
+        .flatMap((item) => [item.bot, item.module, item.name]);
+      addModuleOptions([...jobModules, ...catalogModules]);
+    } catch (error) {
+      state.moduleOptionsLoaded = false;
+      flash(error.message, "error");
+    }
+  }
   async function loadTableCatalog() {
     if (state.tableCatalog.length) return;
     const data = await api("/admin/table-catalog");
     renderCatalog(data.tables || []);
+    addModuleOptions((data.tables || [])
+      .filter((item) => item.kind === "bot" || item.kind === "legacy")
+      .flatMap((item) => [item.bot, item.module, item.name]));
   }
   async function loadDashboard() {
     try {
@@ -532,8 +564,30 @@ details > .details-body { padding: 0 14px 14px; }
     try { const data = await api(`/admin/users?${params}`); const rows = data.usuarios || []; $("#users-table").innerHTML = rows.length ? rows.map((user) => `<tr><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td><span class="status ${statusClass(user.estado)}">${esc(user.estado)}</span></td><td>${esc(user.saldo_creditos)}</td><td class="actions"><button class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${user.estado === "habilitado"}">${user.estado === "habilitado" ? "Deshabilitar" : "Habilitar"}</button><button class="button secondary small" data-action="issue-key" data-id="${esc(user.id)}">Emitir clave</button></td></tr>`).join("") : `<tr><td colspan="6" class="empty">No hay usuarios para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
   async function createUser(event) {
-    event.preventDefault(); const payload = { email: $("#new-email").value.trim(), display_name: $("#new-display").value.trim(), plan: $("#new-plan").value, motivo: $("#new-reason").value.trim() };
-    try { const data = await api("/admin/users", { method: "POST", body: JSON.stringify(payload) }); $("#create-user-form").reset(); flash(`Usuario creado: ${data.usuario?.email || payload.email}`); await loadUsers(); } catch (error) { flash(error.message, "error"); }
+    event.preventDefault();
+    const payload = {
+      email: $("#new-email").value.trim(),
+      display_name: $("#new-display").value.trim(),
+      plan: $("#new-plan").value,
+      api_key: $("#new-api-key").value.trim(),
+      estado: $("#new-state").value,
+      enviar_credenciales: $("#new-send-credentials").checked,
+      motivo: $("#new-reason").value.trim(),
+    };
+    try {
+      const data = await api("/admin/users", { method: "POST", body: JSON.stringify(payload) });
+      const credenciales = data.credenciales || {};
+      $("#create-user-form").reset();
+      flash(`Usuario creado: ${data.usuario?.email || payload.email}`);
+      if (credenciales.valor_unica_vez) {
+        window.alert(`API key de una sola vez:\n\n${credenciales.valor_unica_vez}`);
+      } else if (credenciales.solicitado && credenciales.enviadas) {
+        flash(`Usuario creado y credenciales enviadas a ${credenciales.destino}.`, "ok");
+      } else if (credenciales.solicitado) {
+        flash(`Usuario creado, pero no se enviaron credenciales: ${credenciales.motivo}.`, "error");
+      }
+      await loadUsers();
+    } catch (error) { flash(error.message, "error"); }
   }
   async function userAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const userId = button.dataset.id;

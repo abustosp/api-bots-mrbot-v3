@@ -73,6 +73,66 @@ def test_crear_usuario_debug_sin_mail(admin) -> None:
     assert clasico.json()["usuario"]["email"] == "debug@example.com"
 
 
+def test_crear_usuario_con_api_key_estado_y_envio_opcional(admin, monkeypatch) -> None:
+    from central_api.admin import users as admin_users
+
+    entregas: list[tuple[str, str, str]] = []
+
+    def _enviar(destinatario: str, api_key: str, nombre: str = "") -> tuple[bool, str]:
+        entregas.append((destinatario, api_key, nombre))
+        return True, "enviado"
+
+    monkeypatch.setattr(admin_users, "enviar_credenciales_email", _enviar)
+    cliente = TestClient(create_app())
+
+    sin_envio = cliente.post(
+        "/admin/users",
+        json={
+            "email": "sin-envio@example.com",
+            "api_key": "fixed-test-key",
+            "estado": "deshabilitado",
+            "enviar_credenciales": False,
+            "motivo": "alta con credencial definida sin envío",
+        },
+        headers=_headers(),
+    )
+    assert sin_envio.status_code == 201
+    cuerpo_sin_envio = sin_envio.json()
+    assert cuerpo_sin_envio["usuario"]["estado"] == "deshabilitado"
+    assert cuerpo_sin_envio["credenciales"]["valor_unica_vez"] == "fixed-test-key"
+    assert cuerpo_sin_envio["credenciales"]["enviadas"] is False
+    assert entregas == []
+
+    con_envio = cliente.post(
+        "/admin/users",
+        json={
+            "email": "con-envio@example.com",
+            "api_key": "mail-test-key",
+            "habilitado": True,
+            "send_api_key_email": True,
+            "motivo": "alta con credencial definida y envío",
+        },
+        headers=_headers(),
+    )
+    assert con_envio.status_code == 201
+    cuerpo_con_envio = con_envio.json()
+    assert cuerpo_con_envio["usuario"]["estado"] == "habilitado"
+    assert cuerpo_con_envio["credenciales"]["enviadas"] is True
+    assert cuerpo_con_envio["credenciales"]["valor_unica_vez"] is None
+    assert entregas == [("con-envio@example.com", "mail-test-key", "")]
+
+    debug_con_envio = cliente.post(
+        "/admin/users",
+        json={
+            "email": "abp",
+            "enviar_credenciales": True,
+            "motivo": "rechazar envío a usuario de depuración",
+        },
+        headers=_headers(),
+    )
+    assert debug_con_envio.status_code == 400
+
+
 def test_emitir_clave_valor_fijo_y_autentica_borde(admin, monkeypatch) -> None:
     from central_api.admin import users as admin_users
 
@@ -123,7 +183,7 @@ def test_listar_editar_revocar_restaurar_claves(admin, monkeypatch) -> None:
 
     listado = cliente.get("/admin/api-keys", headers=_headers())
     assert listado.status_code == 200
-    assert listado.json()["total"] == 1
+    assert listado.json()["total"] == 2
     assert listado.json()["claves"][0]["estado"] == "activa"
 
     vigente = cliente.get("/api/v3/bots", headers={"X-API-Key": valor})

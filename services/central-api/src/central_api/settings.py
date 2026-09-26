@@ -87,6 +87,15 @@ class Settings(BaseSettings):
     # despliegues previos; los workers nuevos sin entorno no lo usan.
     worker_service_token: str = Field(default="", alias="WORKER_TOKEN")
     admin_token: str = Field(default="", alias="ADMIN_TOKEN")
+
+    # Notificaciones administrativas. El worker nunca recibe estos valores.
+    smtp_server: str = Field(default="", alias="SMTP_SERVER")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from: str = Field(default="", alias="SMTP_FROM")
+    smtp_starttls: bool = Field(default=True, alias="SMTP_STARTTLS")
+
     # Clave privada RSA de custodia: solo la central la lee desde secreto.
     # También descifra ``clave_encriptada`` recibida por clientes V2 y
     # desencripta el ciphertext persistido para el panel administrativo.

@@ -48,6 +48,11 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "artifactListView" in cuerpo
     assert "executions-table-select" in cuerpo
     assert "/admin/table-catalog" in cuerpo
+    assert 'id="new-api-key"' in cuerpo
+    assert 'id="new-state"' in cuerpo
+    assert 'id="new-send-credentials"' in cuerpo
+    assert 'list="module-options"' in cuerpo
+    assert 'id="module-options"' in cuerpo
     assert "Solo se carga la selección actual" in cuerpo
     assert "renderPhysicalBotSection" in cuerpo
     assert "request_payload" in cuerpo

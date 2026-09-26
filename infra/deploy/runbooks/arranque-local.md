@@ -173,6 +173,28 @@ esquema); en el worker `/internal/v1/health` es anónima y
 
 ## 7. Crear usuario cliente de prueba y API key de desarrollo
 
+El alta integrada de V3 permite definir la identidad, una API key opcional, el
+estado inicial y si se intentan enviar las credenciales por SMTP. Los alias
+`habilitado` y `send_api_key_email` conservan la forma usada por V1/V2:
+
+```bash
+curl -sf -X POST http://127.0.0.1:8000/admin/users \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{
+    "email":"dev@example.com",
+    "display_name":"desarrollo",
+    "api_key":"testing-api-key",
+    "estado":"habilitado",
+    "enviar_credenciales":false,
+    "motivo":"alta local de desarrollo con credencial definida"
+  }'
+```
+
+Cuando `enviar_credenciales` es `true`, la central intenta enviar la API key
+por SMTP STARTTLS. Si SMTP no está configurado o falla, el usuario igualmente
+se crea y la respuesta informa el motivo para permitir una entrega manual.
+
 1. Fijar `ADMIN_TOKEN` en `infra/compose/.env` y recrear la central:
    `docker compose up -d central-api`.
 2. Crear un usuario de desarrollo (el `motivo` es obligatorio, 10–500

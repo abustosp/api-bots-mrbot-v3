@@ -283,7 +283,7 @@ Inventario completo en
 | `API_KEY_HMAC_SECRET` | Secreto del verificador de claves API |
 | `RSA_PRIVATE_KEY_FILE` | Secreto PEM privado RSA de custodia de credenciales |
 | `MINIO_*` | Credenciales y buckets del almacenamiento de objetos |
-| `SMTP_*` | Envío de avisos al administrador |
+| `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USER`, `SMTP_FROM`, `SMTP_PASSWORD_FILE`, `SMTP_STARTTLS` | Envío opcional de credenciales y avisos desde la central. STARTTLS es obligatorio. |
 | `MERCADOPAGO_*` | Tokens de cobro y validación de webhooks |
 | `WORKER_TOKEN_SECRET` | Emisión de tokens para los workers |
 | `SCHEDULER_*` | Intervalos, umbrales de salud, TTL del lease |
