@@ -95,13 +95,16 @@ async def _persistir_job_db(
         async with nueva_sesion() as sesion:
             # Los usuarios de depuración del panel (p. ej. ``abp``) viven en
             # el store en memoria pero la FK ``jobs.user_id`` exige fila en
-            # ``users``: se autoaprovisiona idempotente para no 503.
+            # ``users``: se autoaprovisiona idempotente para no 503. Quien
+            # llega acá ya pasó la autenticación (usuario habilitado), así
+            # que la fila nace habilitada: con el default ``false`` la
+            # verificación contra PostgreSQL lo bloquearía desde el 2.º job.
             from sqlalchemy import text as _texto
 
             await sesion.execute(
                 _texto(
-                    "INSERT INTO users (id, email) VALUES (:id, :email) "
-                    "ON CONFLICT DO NOTHING"
+                    "INSERT INTO users (id, email, habilitado) "
+                    "VALUES (:id, :email, true) ON CONFLICT DO NOTHING"
                 ),
                 {"id": str(uid), "email": _email_debug(user_id, uid)},
             )
