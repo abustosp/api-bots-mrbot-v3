@@ -43,7 +43,6 @@ def _documentation_app(*, include_private: bool) -> FastAPI:
         title="central-api",
         version=APP_VERSION,
         description=(
-            "Autenticación de clientes mediante Authorization: Bearer. "
             "Autenticación (cualquiera de las tres, desde Authorize en Swagger): "
             "HTTPBearer con b64(usuario).b64(api_key) (generalo con POST /api/v3/auth/token), "
             "HTTPBasic con usuario y API key, o headers email + X-API-Key como en la V1."
