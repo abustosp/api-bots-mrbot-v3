@@ -70,6 +70,8 @@ def normalize_v2_payload(
 
     aliases = {
         "cuit_representado": "representado_cuit",
+        "cuit_inicio_sesion": "cuit_representante",
+        "cuit_login": "cuit_representante",
         "movimientos": "incluir_movimientos",
         "descarga_emitidos": "emitidos",
         "descarga_recibidos": "recibidos",
@@ -81,6 +83,14 @@ def normalize_v2_payload(
         if old_name in normalized and new_name not in normalized:
             normalized[new_name] = normalized[old_name]
         normalized.pop(old_name, None)
+
+    if bot == "arba" and "cuit" in normalized:
+        normalized.setdefault("representado_cuit", normalized["cuit"])
+        normalized.pop("cuit", None)
+    if bot in {"arba", "liquidacion_granos", "rcel", "retper_iibb_misiones"}:
+        if "denominacion" in normalized:
+            normalized.setdefault("representado_nombre", normalized["denominacion"])
+            normalized.pop("denominacion", None)
 
     if "pdf" in normalized:
         pdf = normalized.pop("pdf")
@@ -97,22 +107,54 @@ def normalize_v2_payload(
         normalized.pop("hasta", None)
 
     upload_flag = None
+    upload_target_by_bot = {
+        "aportes_en_linea": "subir",
+        "arba": "subir",
+        "ccma": "subir",
+        "certificado_mipyme": "subir",
+        "compensaciones": "subir",
+        "comprobantes": "subir_csv",
+        "consulta_pagos_vep": "subir_csv",
+        "controladores_fiscales": "subir_constancia",
+        "declaracion_en_linea": "subir_archivos",
+        "hacienda": "subir_excel",
+        "libros_portal_iva": "subir_archivos",
+        "liquidacion_granos": "subir_archivos",
+        "mis_comprobantes": "subir_csv",
+        "mis_facilidades": "subir_archivos",
+        "mis_retenciones": "subir_csv",
+        "mis_retenciones_iva_simple": "subir_csv",
+        "moa": "subir_csv",
+        "pago_devoluciones": "subir_archivo",
+        "portal_iva": "subir_csv",
+        "rcel": "subir_pdf",
+        "retper_iibb_agip": "subir_archivo",
+        "retper_iibb_misiones": "subir_archivo",
+        "sifere": "subir",
+        "siper": "subir",
+        "vep_archivo": "subir_pdf",
+        "vep_ccma": "subir_pdf",
+    }
     for source in ("carga_minio", "minio_upload"):
         if source in normalized:
             upload_flag = normalized.pop(source)
             break
     if upload_flag is not None:
-        for target in (
-            "subir",
-            "subir_csv",
-            "subir_archivos",
-            "subir_archivo",
-            "subir_pdf",
-            "subir_excel",
-        ):
-            if target not in normalized:
-                normalized[target] = upload_flag
-                break
+        target = upload_target_by_bot.get(bot)
+        if target is not None:
+            normalized.setdefault(target, upload_flag)
+        else:
+            for target in (
+                "subir",
+                "subir_csv",
+                "subir_archivos",
+                "subir_archivo",
+                "subir_pdf",
+                "subir_excel",
+            ):
+                if target not in normalized:
+                    normalized[target] = upload_flag
+                    break
 
     # El proxy de V2 era una instrucción de infraestructura. La central lo
     # resuelve desde su configuración y lo entrega al worker en el sobre

@@ -19,7 +19,9 @@ from central_api.api.bot_payloads import (  # noqa: E402
     _v1_request_schemas,
     public_bot_body_schema,
 )
+from central_api.api.bot_schemas import get_request_model  # noqa: E402
 from central_api.main import create_app  # noqa: E402
+from mrbot_contracts.request_fields import V2_OPERATION_FIELDS  # noqa: E402
 
 V1_SNAPSHOT = json.loads(
     (SRC / "central_api" / "api" / "v1_request_schemas.json").read_text(
@@ -28,19 +30,86 @@ V1_SNAPSHOT = json.loads(
 )
 
 
-def test_todos_los_aliases_reproducen_exactamente_los_schemas_v1() -> None:
+def test_aliases_documentan_solo_los_campos_historicos_de_cada_operacion() -> None:
     schema = create_app().openapi()
 
-    for route_path, _bot, _operation in BOT_ROUTE_ALIASES:
+    for route_path, bot, operation_name in BOT_ROUTE_ALIASES:
         operation = schema["paths"][f"/api/v3{route_path}"]["post"]
         request_body = operation["requestBody"]
         assert request_body["required"] is True
         body_schema = request_body["content"]["application/json"]["schema"]
-        expected = V1_SNAPSHOT[V1_SCHEMA_BY_ALIAS[route_path]]["schema"]
-        assert body_schema == expected
-        assert list(body_schema["properties"]) == V1_SNAPSHOT[
-            V1_SCHEMA_BY_ALIAS[route_path]
-        ]["fields"]
+        expected = list(get_request_model(bot, operation_name).model_fields)
+        assert list(body_schema["properties"]) == expected
+        if (bot, operation_name) in V2_OPERATION_FIELDS:
+            assert expected == list(V2_OPERATION_FIELDS[(bot, operation_name)])
+        assert "eliminar_descargas" not in body_schema["properties"]
+        assert "nombre_archivo" not in body_schema["properties"]
+        documented = json.dumps(body_schema, ensure_ascii=False).lower()
+        assert "valor-de-ejemplo" not in documented
+        assert "archivo-ejemplo" not in documented
+        request_examples = operation["requestBody"]["content"]["application/json"]["examples"]
+        assert all(set(item["value"]) == set(expected) for item in request_examples.values())
+
+
+def test_mis_comprobantes_consulta_tiene_el_contrato_v2_en_alias_y_payload_canonico() -> None:
+    expected = [
+        "clave_encriptada",
+        "desde",
+        "hasta",
+        "cuit_inicio_sesion",
+        "representado_nombre",
+        "representado_cuit",
+        "contrasena",
+        "descarga_emitidos",
+        "descarga_recibidos",
+        "puntos_venta_emitidos",
+        "puntos_venta_recibidos",
+        "carga_minio",
+        "carga_json",
+        "timeout_mc",
+        "proxy_request",
+    ]
+    schema = create_app().openapi()
+    alias_body = schema["paths"]["/api/v3/mis_comprobantes/consulta"]["post"][
+        "requestBody"
+    ]["content"]["application/json"]["schema"]
+    assert list(alias_body["properties"]) == expected
+
+    canonical_body = schema["paths"]["/api/v3/bots/{bot}/{operacion}"]["post"][
+        "requestBody"
+    ]["content"]["application/json"]["schema"]
+    payload_model = next(
+        payload
+        for payload in canonical_body["properties"]["payload"]["oneOf"]
+        if payload["examples"][0].get("desde") == "01/01/2024"
+        and "timeout_mc" in payload["properties"]
+    )
+    assert list(payload_model["properties"]) == expected
+
+
+def test_removed_retention_and_output_name_fields_are_ignored_for_legacy_clients() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v3/mis_comprobantes/consulta",
+        headers={"Idempotency-Key": "retired-fields-are-ignored"},
+        json={
+            "desde": "01/01/2024",
+            "hasta": "31/12/2024",
+            "cuit_inicio_sesion": "20123456780",
+            "representado_nombre": "Empresa Ejemplo S.A.",
+            "representado_cuit": "30876543210",
+            "contrasena": "mi_contraseña_secreta",
+            "descarga_emitidos": True,
+            "descarga_recibidos": False,
+            "eliminar_descargas": False,
+            "conservar_descargas": True,
+            "nombre_archivo": "cliente.txt",
+            "nombre_archivo_descarga": "cliente.csv",
+            "archivo_nombre": "cliente.txt",
+            "name_hint": "cliente.pdf",
+        },
+    )
+    assert response.status_code == 202
 
 
 def test_ccma_muestra_campos_requeridos_y_cancelacion() -> None:
@@ -49,7 +118,7 @@ def test_ccma_muestra_campos_requeridos_y_cancelacion() -> None:
     create_schema = schema["paths"]["/api/v3/ccma/consulta"]["post"]
     body_schema = create_schema["requestBody"]["content"]["application/json"]["schema"]
     assert "cuit_representado" in body_schema["required"]
-    assert body_schema["properties"]["cuit_representado"]["example"] == "20123456789"
+    assert body_schema["examples"][0]["cuit_representado"] == "20123456789"
     assert list(body_schema["properties"]) == [
         "clave_encriptada",
         "cuit_representante",
@@ -71,7 +140,13 @@ def test_body_documentado_no_cambia_el_flujo_json_ni_multipart() -> None:
     json_response = cliente.post(
         "/api/v3/ccma/consulta",
         headers={"Idempotency-Key": "swagger-contract-json"},
-        json={"representado_cuit": "20123456789", "periodo": "202608"},
+        json={
+            "cuit_representante": "20123456789",
+            "clave_representante": "DEMO_NO_USAR",
+            "cuit_representado": "20123456789",
+            "eliminar_descargas": False,
+            "nombre_archivo": "cliente.txt",
+        },
     )
     assert json_response.status_code == 202
 
@@ -91,7 +166,7 @@ def test_ruta_canonica_muestra_el_envelope_y_los_payloads_de_bots() -> None:
 
     assert body["required"] == ["payload"]
     assert len(body["properties"]["payload"]["oneOf"]) == 42
-    assert body["example"]["payload"]["representado_cuit"] == "20123456789"
+    assert body["example"]["payload"]["cuit_representado"] == "20123456789"
     assert body["example"]["credentials"]["clave"] == "clave_fiscal"
     for payload_schema in body["properties"]["payload"]["oneOf"]:
         assert set(payload_schema["properties"]) == set(payload_schema["examples"][0])
@@ -125,8 +200,8 @@ def test_catalogo_y_status_publican_schemas_y_ejemplos_completos() -> None:
     detalle_json = cliente.get("/api/v3/bots/ccma")
     assert detalle_json.status_code == 200
     operacion = detalle_json.json()["operaciones"][0]
-    assert operacion["input_schema"]["properties"]["representado_cuit"]
-    assert operacion["example"]["payload"]["representado_cuit"] == "20123456789"
+    assert operacion["input_schema"]["properties"]["cuit_representado"]
+    assert operacion["example"]["payload"]["cuit_representado"] == "20123456789"
     assert operacion["credentials_schema"]["example"]["clave"] == "clave_fiscal"
 
 

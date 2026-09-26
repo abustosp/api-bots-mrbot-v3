@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from bot_worker.schemas import (  # noqa: E402
     get_openapi_examples as worker_get_openapi_examples,
     get_request_model as worker_get_request_model,
 )
+from mrbot_contracts.request_fields import V2_OPERATION_FIELDS  # noqa: E402
 
 
 PAIRS = [
@@ -29,25 +31,29 @@ PAIRS = [
 ]
 
 
-def test_catalogue_pairs_have_flat_described_models_and_multiple_realistic_examples() -> None:
+def test_catalogue_pairs_have_operation_specific_fields_and_realistic_examples() -> None:
     assert set(PAIRS) == set(OPERATIONS)
     assert len(PAIRS) == 42
 
     for bot, operation in PAIRS:
         model = get_request_model(bot, operation)
         assert issubclass(model, BaseModel)
-        assert "cuit_representante" in model.model_fields
-        assert "clave" in model.model_fields
         assert "credentials" not in model.model_fields
         assert all(field.description for field in model.model_fields.values())
+        if (bot, operation) in V2_OPERATION_FIELDS:
+            assert tuple(model.model_fields) == V2_OPERATION_FIELDS[(bot, operation)]
 
         examples = get_openapi_examples(bot, operation)
-        assert len(examples) >= 2
+        assert len(examples) == 1
         assert all({"summary", "description", "value"} <= set(item) for item in examples.values())
-        assert all(item["value"]["cuit_representante"] == "20123456789" for item in examples.values())
-        assert "clave" in examples["consulta_habitual"]["value"]
-        assert "clave_encriptada" in examples["clave_cifrada"]["value"]
-        assert len(model.model_json_schema()["examples"]) >= 2
+        assert set(examples["consulta_habitual"]["value"]) == set(model.model_fields)
+        assert len(model.model_json_schema()["examples"]) == 1
+
+        documented = json.dumps(examples, ensure_ascii=False).lower()
+        assert "valor-de-ejemplo" not in documented
+        assert "archivo-ejemplo" not in documented
+        assert "eliminar_descargas" not in documented
+        assert "nombre_archivo" not in documented
 
         # All documented payload examples are also valid model instances.
         for item in examples.values():
@@ -78,18 +84,29 @@ def test_models_keep_operation_specific_types_and_validations() -> None:
             }
         )
 
-    comprobantes = get_request_model("mis_comprobantes", "consultar")
-    assert comprobantes.model_fields["emitidos"].annotation is bool
-    assert comprobantes.model_fields["recibidos"].annotation is bool
-    assert comprobantes.model_fields["fecha_desde"].annotation is str
+    comprobantes = get_request_model("mis_comprobantes", "consulta")
+    assert list(comprobantes.model_fields) == [
+        "clave_encriptada", "desde", "hasta", "cuit_inicio_sesion",
+        "representado_nombre", "representado_cuit", "contrasena",
+        "descarga_emitidos", "descarga_recibidos", "puntos_venta_emitidos",
+        "puntos_venta_recibidos", "carga_minio", "carga_json", "timeout_mc",
+        "proxy_request",
+    ]
+    assert comprobantes.model_fields["descarga_emitidos"].annotation is bool
+    assert comprobantes.model_fields["puntos_venta_emitidos"].annotation == list[str] | None
+
+    vep_archivo = get_request_model("vep_archivo", "generar")
+    assert "archivo_nombre" in vep_archivo.model_fields
+    assert "archivo de entrada" in vep_archivo.model_fields["archivo_nombre"].description
+    assert "no para nombrar archivos subidos" in vep_archivo.model_fields["archivo_nombre"].description
 
 
 def test_unknown_bot_operation_uses_permissive_documented_fallback() -> None:
     model = get_request_model("bot_futuro", "operacion_nueva")
     assert issubclass(model, BaseModel)
     assert model.model_config["extra"] == "allow"
-    assert "cuit_representante" in model.model_fields
-    assert len(get_openapi_examples("bot_futuro", "operacion_nueva")) == 3
+    assert not model.model_fields
+    assert len(get_openapi_examples("bot_futuro", "operacion_nueva")) == 1
     assert model.model_validate(
         {"cuit_representante": "20123456789", "clave": "DEMO", "campo_futuro": True}
     ).model_dump()["campo_futuro"] is True

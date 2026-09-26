@@ -33,7 +33,11 @@ def test_alias_json_crea_job_y_consulta_estado_por_la_misma_central() -> None:
     creado = cliente.post(
         "/api/v3/ccma/consulta",
         headers={"Idempotency-Key": clave},
-        json={"representado_cuit": "20123456789", "periodo": "202608"},
+        json={
+            "cuit_representante": "20123456789",
+            "clave_representante": "test-clave",
+            "cuit_representado": "20123456789",
+        },
     )
 
     assert creado.status_code == 202
@@ -56,17 +60,29 @@ def test_alias_reproduce_idempotencia_y_conflicto() -> None:
     primero = cliente.post(
         ruta,
         headers={"Idempotency-Key": clave},
-        json={"representado_cuit": "20123456789", "periodo": "202608"},
+        json={
+            "cuit_representante": "20123456789",
+            "clave": "test-clave",
+            "cuit_representado": "20123456789",
+        },
     )
     repetido = cliente.post(
         ruta,
         headers={"Idempotency-Key": clave},
-        json={"representado_cuit": "20123456789", "periodo": "202608"},
+        json={
+            "cuit_representante": "20123456789",
+            "clave": "test-clave",
+            "cuit_representado": "20123456789",
+        },
     )
     conflicto = cliente.post(
         ruta,
         headers={"Idempotency-Key": clave},
-        json={"representado_cuit": "27222222222", "periodo": "202608"},
+        json={
+            "cuit_representante": "20123456789",
+            "clave": "test-clave",
+            "cuit_representado": "27222222222",
+        },
     )
 
     assert primero.status_code == 202
@@ -110,12 +126,12 @@ def test_aliases_libros_iva_y_ddjj_se_mapean_a_operaciones_canonicas_v3() -> Non
 
     cliente = TestClient(create_app())
     payload = {
-        "representado_cuit": "20123456789",
+        "cuit_representante": "20123456789",
+        "clave": "test-clave",
+        "cuit_representado": "20123456789",
         "periodo_desde": "202501",
         "periodo_hasta": "202503",
         "denominacion": "CONTRIBUYENTE DE EJEMPLO",
-        "incluir_json": True,
-        "subir_archivos": False,
     }
     for path, operation, idempotency_key in (
         ("/api/v3/libros_iva/consulta", "descargar_libros", "legacy-libros-001"),

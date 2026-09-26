@@ -14,7 +14,8 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, create_model
+from pydantic_core import PydanticUndefined
 
 
 class CompatBodyBase(BaseModel):
@@ -25,8 +26,9 @@ class CompatBodyBase(BaseModel):
         str_strip_whitespace=True,
         json_schema_extra={
             "description": (
-                "Payload del bot. Los campos desconocidos se conservan para "
-                "permitir evolución compatible del esquema del worker."
+                "Payload del bot. Los campos desconocidos se ignoran para "
+                "permitir compatibilidad. Los archivos temporales se eliminan "
+                "siempre al terminar la operación."
             )
         },
     )
@@ -310,35 +312,181 @@ _V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
     "cuit_representado": _string(pattern=CUIT),
     "cuit_inicio_sesion": _string(pattern=CUIT),
     "cuit_login": _string(pattern=CUIT),
+    "cuit": _string(pattern=CUIT),
     "clave": _string(max_length=4096),
     "clave_representante": _string(max_length=4096),
     "contrasena": _string(max_length=4096),
-    "clave_encriptada": _string(max_length=16384),
-    "desde": _string(pattern=DATE),
-    "hasta": _string(pattern=DATE),
-    "proxy_request": (dict[str, Any] | None, Field(default=None)),
+    "clave_encriptada": (str | None, Field(default=None, max_length=16384)),
+    "desde": _string(),
+    "hasta": _string(),
+    "proxy_request": (bool | None, Field(default=None)),
     "movimientos": _boolean(),
     "pdf": _boolean(),
-    "descarga_emitidos": _boolean(),
-    "descarga_recibidos": _boolean(),
+    "descarga_emitidos": (bool, Field(default=False, validation_alias=AliasChoices("descarga_emitidos", "emitidos"))),
+    "descarga_recibidos": (bool, Field(default=False, validation_alias=AliasChoices("descarga_recibidos", "recibidos"))),
     "descarga_csv_ventas": _boolean(),
     "descarga_csv_compras": _boolean(),
-    "carga_minio": _boolean(),
+    "carga_minio": _boolean(default=True),
     "carga_json": _boolean(),
-    "minio_upload": _boolean(),
-    "eliminar_descargas": _boolean(),
+    "minio_upload": _boolean(default=True),
     "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
     "usuario": _string(max_length=256),
-    "tipo_comprobante": _string(max_length=64),
+    "denominacion": _string(max_length=256),
+    "nombre_rcel": _string(max_length=256),
+    "medio_pago": _string(),
+    "archivo_historico_minio": _boolean(default=True),
+    "lista_exclusion_situacion": _list(item=str),
+    "detalle_minio": _boolean(),
+    "categorias_minio": _boolean(),
+    "vencimientos_excel_minio": _boolean(),
+    "vencimientos_csv_minio": _boolean(),
+    "vencimientos_pdf_minio": _boolean(),
+    "deudas_excel_minio": _boolean(),
+    "deudas_csv_minio": _boolean(),
+    "deudas_pdf_minio": _boolean(),
+    "ddjj_pendientes_excel_minio": _boolean(),
+    "ddjj_pendientes_csv_minio": _boolean(),
+    "ddjj_pendientes_pdf_minio": _boolean(),
+    "filtro_impuestos": _list(item=dict),
+    "filtro_intereses": _list(item=dict),
+    "seleccionar_impuestos": _boolean(default=True),
+    "seleccionar_intereses": _boolean(default=True),
+    "generar_volante": _boolean(default=True),
+    "representado_cuit": _string(pattern=CUIT),
+    "representado_nombre": _string(max_length=256),
+    "puntos_venta_emitidos": _list(item=str),
+    "puntos_venta_recibidos": _list(item=str),
+    "periodo": _string(),
+    "excel": _boolean(),
+    "csv": _boolean(),
+    "cuits": _list(item=str),
+    "despachos": _list(item=str),
+    "tipo_agente": _string(),
+    "rol": _string(),
+    "impuestos": _list(item=str),
+    "jurisdicciones": _list(item=int),
+    "cuits_consulta": _list(item=str),
+    "periodo_desde": _string(),
+    "periodo_hasta": _string(),
+    "operaciones_ng_o_e": _boolean(),
+    "prorrateo_global": _boolean(),
+    "prorrateo_asignacion_directa": _boolean(),
+    "prorrateo_ambos": _boolean(),
+    "importacion_definitiva_bienes": _boolean(),
+    "importacion_servicios": _boolean(),
+    "regimen_turiva": _boolean(),
+    "bienes_usados": _boolean(),
+    "ninguna_anteriores": _boolean(default=True),
+    "carga": _boolean(),
+    "minio_upload": _boolean(default=True),
+    "proxy": _boolean(),
+    "representado_cuit": _string(pattern=CUIT),
+    "fecha_desde": _string(),
+    "fecha_hasta": _string(),
+    "emitidos": _boolean(),
+    "recibidos": _boolean(),
+    "incluir_json": _boolean(default=True),
+    "subir_csv": _boolean(default=True),
+    "subir_archivos": _boolean(default=True),
+    "archivo_nombre": _string(min_length=1, max_length=128),
+    "archivo_b64": _string(min_length=1),
+    "incluir_pdf": _boolean(default=True),
+    "subir_pdf": _boolean(default=True),
+    "ventas_txt": _string(min_length=1, max_length=5_000_000),
+    "compras_txt": _string(min_length=1, max_length=5_000_000),
     "puntos_venta": _list(item=int),
-    "nombre_archivo": _string(max_length=512),
+}
+
+
+# Campos exactos de los modelos de entrada V2. Se listan por clase/operación,
+# no como una unión global: cada alias y cada payload canónico documenta solo
+# los campos de su propio bot. eliminar_descargas se excluyó porque la limpieza
+# del workdir temporal es incondicional en V3.
+_V2_OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("aportes_en_linea", "descargar"): ("clave_encriptada", "cuit_login", "clave", "cuit_representado", "archivo_historico_minio", "proxy_request"),
+    ("arba", "descargar"): ("clave_encriptada", "cuit", "clave", "periodo", "denominacion", "proxy_request", "carga_minio"),
+    ("carga_portal_iva", "cargar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "periodo", "operaciones_ng_o_e", "prorrateo_global", "prorrateo_asignacion_directa", "prorrateo_ambos", "importacion_definitiva_bienes", "importacion_servicios", "regimen_turiva", "bienes_usados", "ninguna_anteriores", "proxy_request"),
+    ("ccma", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "proxy_request", "movimientos", "pdf"),
+    ("certificado_mipyme", "descargar"): ("clave_encriptada", "cuit_representante", "clave", "cuit_representado", "proxy_request"),
+    ("compensaciones", "consultar"): ("clave_encriptada", "cuit_login", "clave", "cuit_representado", "desde", "hasta", "excel", "csv", "pdf", "proxy_request"),
+    ("consulta_cuit", "consulta"): ("cuit",),
+    ("consulta_cuit", "consultar"): ("cuit",),
+    ("consulta_cuit", "consultar_masivo"): ("cuits",),
+    ("consulta_pagos_vep", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "periodo", "minio_upload", "proxy_request"),
+    ("controladores_fiscales", "presentar"): ("clave_encriptada", "cuit_representante", "clave", "proxy_request", "minio_upload"),
+    ("declaracion_en_linea", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "representado_nombre", "periodo_desde", "periodo_hasta", "proxy_request", "carga_minio"),
+    ("facturometro", "consultar"): ("clave_encriptada", "cuit_login", "clave", "cuit_representado", "proxy_request"),
+    ("hacienda", "consultar"): ("clave_encriptada", "desde", "hasta", "cuit_representante", "denominacion", "representado_cuit", "clave", "minio_upload", "proxy_request"),
+    ("libros_portal_iva", "descargar_ddjj"): ("clave_encriptada", "cuit_representante", "clave", "cuit_representado", "denominacion", "periodo_desde", "periodo_hasta", "proxy_request"),
+    ("libros_portal_iva", "descargar_libros"): ("clave_encriptada", "cuit_representante", "clave", "cuit_representado", "denominacion", "periodo_desde", "periodo_hasta", "proxy_request"),
+    ("liquidacion_granos", "consultar"): ("clave_encriptada", "desde", "hasta", "cuit_representante", "clave", "denominacion", "cuit_representado", "minio_upload", "proxy_request"),
+    ("mis_comprobantes", "consulta"): ("clave_encriptada", "desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "descarga_emitidos", "descarga_recibidos", "puntos_venta_emitidos", "puntos_venta_recibidos", "carga_minio", "carga_json", "timeout_mc", "proxy_request"),
+    ("mis_comprobantes", "consultar"): ("clave_encriptada", "desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "descarga_emitidos", "descarga_recibidos", "puntos_venta_emitidos", "puntos_venta_recibidos", "carga_minio", "carga_json", "timeout_mc", "proxy_request"),
+    ("mis_comprobantes", "solicitar"): ("clave_encriptada", "desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "emitidos", "recibidos", "puntos_venta_emitidos", "puntos_venta_recibidos", "proxy_request"),
+    ("mis_comprobantes", "historial"): ("clave_encriptada", "desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "descarga_emitidos", "descarga_recibidos", "carga_minio", "carga_json", "proxy_request"),
+    ("mis_facilidades", "consultar"): ("clave_encriptada", "cuit_login", "clave", "cuit_representado", "denominacion", "lista_exclusion_situacion", "proxy_request", "carga_minio"),
+    ("mis_retenciones", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "desde", "hasta", "impuestos", "exportar_para_aplicativo", "proxy_request", "carga_minio"),
+    ("mis_retenciones_iva_simple", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "desde", "hasta", "proxy_request", "carga_minio"),
+    ("moa", "consultar"): ("clave_encriptada", "cuit_representante", "clave", "cuit_representado", "despachos", "tipo_agente", "rol", "minio_upload", "proxy_request"),
+    ("pago_devoluciones", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "proxy_request", "carga_minio"),
+    ("portal_iva", "descargar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "periodo", "operaciones_ng_o_e", "prorrateo_global", "prorrateo_asignacion_directa", "prorrateo_ambos", "importacion_definitiva_bienes", "importacion_servicios", "regimen_turiva", "bienes_usados", "ninguna_anteriores", "descarga_csv_ventas", "descarga_csv_compras", "carga_minio", "proxy_request"),
+    ("rcel", "descargar"): ("clave_encriptada", "desde", "hasta", "cuit_representante", "nombre_rcel", "representado_cuit", "clave", "minio_upload", "proxy_request"),
+    ("retper_iibb_agip", "consultar"): ("clave_encriptada", "usuario", "clave", "cuit_representado", "denominacion", "desde", "hasta", "proxy_request", "carga_minio"),
+    ("retper_iibb_misiones", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "desde", "hasta", "denominacion", "proxy_request", "carga_minio"),
+    ("sct", "consultar"): ("clave_encriptada", "cuit_login", "clave", "cuit_representado", "proxy_request", "vencimientos_excel_minio", "vencimientos_csv_minio", "vencimientos_pdf_minio", "deudas_excel_minio", "deudas_csv_minio", "deudas_pdf_minio", "ddjj_pendientes_excel_minio", "ddjj_pendientes_csv_minio", "ddjj_pendientes_pdf_minio"),
+    ("sifere", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "periodo", "representado_nombre", "proxy_request", "jurisdicciones", "carga_minio"),
+    ("siper", "consultar"): ("clave_encriptada", "cuit_representante", "clave", "cuit_representado", "detalle_minio", "categorias_minio", "proxy_request"),
+    ("srt", "consultar_alicuotas"): ("clave_encriptada", "cuit_login", "clave", "cuits_consulta", "proxy_request"),
+    ("vep_archivo", "generar"): ("clave_encriptada", "cuit_inicio_sesion", "medio_pago", "contrasena", "minio_upload", "proxy_request", "representado_cuit", "archivo_nombre", "archivo_b64", "incluir_json", "subir_pdf"),
+    ("vep_ccma", "generar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "medio_pago", "filtro_impuestos", "filtro_intereses", "seleccionar_impuestos", "seleccionar_intereses", "minio_upload", "proxy_request", "generar_volante"),
+}
+
+
+_V2_REQUIRED_FIELDS: dict[tuple[str, str], frozenset[str]] = {
+    ("aportes_en_linea", "descargar"): frozenset({"cuit_login", "clave"}),
+    ("arba", "descargar"): frozenset({"cuit", "clave", "periodo", "denominacion"}),
+    ("carga_portal_iva", "cargar"): frozenset({"cuit_representante", "clave_representante", "periodo"}),
+    ("ccma", "consultar"): frozenset({"cuit_representante", "clave_representante", "cuit_representado"}),
+    ("certificado_mipyme", "descargar"): frozenset({"cuit_representante", "clave", "cuit_representado"}),
+    ("compensaciones", "consultar"): frozenset({"cuit_login", "clave", "cuit_representado", "desde", "hasta"}),
+    ("consulta_cuit", "consulta"): frozenset({"cuit"}),
+    ("consulta_cuit", "consultar"): frozenset({"cuit"}),
+    ("consulta_cuit", "consultar_masivo"): frozenset({"cuits"}),
+    ("consulta_pagos_vep", "consultar"): frozenset({"cuit_representante", "clave_representante", "cuit_representado"}),
+    ("controladores_fiscales", "presentar"): frozenset({"cuit_representante", "clave"}),
+    ("declaracion_en_linea", "consultar"): frozenset({"cuit_representante", "clave_representante", "periodo_desde", "periodo_hasta"}),
+    ("facturometro", "consultar"): frozenset({"cuit_login", "clave", "cuit_representado"}),
+    ("hacienda", "consultar"): frozenset({"desde", "hasta", "cuit_representante", "denominacion", "representado_cuit", "clave"}),
+    ("libros_portal_iva", "descargar_ddjj"): frozenset({"cuit_representante", "clave", "periodo_desde", "periodo_hasta"}),
+    ("libros_portal_iva", "descargar_libros"): frozenset({"cuit_representante", "clave", "periodo_desde", "periodo_hasta"}),
+    ("liquidacion_granos", "consultar"): frozenset({"desde", "hasta", "cuit_representante", "clave", "denominacion"}),
+    ("mis_comprobantes", "consulta"): frozenset({"desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "descarga_emitidos", "descarga_recibidos"}),
+    ("mis_comprobantes", "consultar"): frozenset({"desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "descarga_emitidos", "descarga_recibidos"}),
+    ("mis_comprobantes", "solicitar"): frozenset({"desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "emitidos", "recibidos"}),
+    ("mis_comprobantes", "historial"): frozenset({"desde", "hasta", "cuit_inicio_sesion", "representado_nombre", "representado_cuit", "contrasena", "descarga_emitidos", "descarga_recibidos"}),
+    ("mis_facilidades", "consultar"): frozenset({"cuit_login", "clave"}),
+    ("mis_retenciones", "consultar"): frozenset({"cuit_representante", "clave_representante", "denominacion", "desde", "hasta"}),
+    ("mis_retenciones_iva_simple", "consultar"): frozenset({"cuit_representante", "clave_representante", "denominacion", "desde", "hasta"}),
+    ("moa", "consultar"): frozenset({"cuit_representante", "clave", "cuit_representado", "despachos"}),
+    ("pago_devoluciones", "consultar"): frozenset({"cuit_representante", "clave_representante"}),
+    ("portal_iva", "descargar"): frozenset({"cuit_representante", "clave_representante", "periodo"}),
+    ("rcel", "descargar"): frozenset({"desde", "hasta", "cuit_representante", "nombre_rcel", "representado_cuit", "clave"}),
+    ("retper_iibb_agip", "consultar"): frozenset({"usuario", "clave", "cuit_representado", "denominacion", "desde", "hasta"}),
+    ("retper_iibb_misiones", "consultar"): frozenset({"cuit_representante", "clave_representante", "desde", "hasta", "denominacion"}),
+    ("sct", "consultar"): frozenset({"cuit_login", "clave", "cuit_representado"}),
+    ("sifere", "consultar"): frozenset({"cuit_representante", "clave_representante", "cuit_representado", "periodo"}),
+    ("siper", "consultar"): frozenset({"cuit_representante", "clave"}),
+    ("srt", "consultar_alicuotas"): frozenset({"cuit_login", "clave", "cuits_consulta"}),
+    ("vep_archivo", "generar"): frozenset({"cuit_inicio_sesion", "medio_pago", "contrasena"}),
+    ("vep_ccma", "generar"): frozenset({"cuit_representante", "clave_representante", "cuit_representado"}),
 }
 
 
 # El checkout de V1 no existe en el contenedor de la central. Este snapshot se
 # generó desde ``/home/abp/Desktop/Proyectos Python/Scripts/Mr bot/api/api-bots-mrbot``
 # y se versiona junto con la central para que el contrato OpenAPI no dependa de
-# una ruta del host de desarrollo.
+# una ruta del host de desarrollo. ``eliminar_descargas`` se omitió del snapshot
+# al retirar esa opción: V3 siempre limpia el workdir temporal en ``finally``.
 _V1_SCHEMA_SNAPSHOT = Path(__file__).with_name("v1_request_schemas.json")
 
 
@@ -475,6 +623,32 @@ def _historical_example_values(bot: str, operation: str) -> dict[str, Any]:
                 values[canonical_name] = property_schema["example"]
                 break
 
+    if bot == "mis_comprobantes" and operation in {"consulta", "consultar", "solicitar", "historial"}:
+        values.update({
+            "clave_encriptada": "BASE64_RSA_OAEP_CIPHERTEXT",
+            "desde": "01/01/2024",
+            "hasta": "31/12/2024",
+            "cuit_inicio_sesion": "20123456780",
+            "representado_nombre": "Empresa Ejemplo S.A.",
+            "representado_cuit": "30876543210",
+            "contrasena": "mi_contraseña_secreta",
+            "descarga_emitidos": True,
+            "descarga_recibidos": False,
+            "emitidos": True,
+            "recibidos": False,
+            "puntos_venta_emitidos": ["1", "002", "00003"],
+            "puntos_venta_recibidos": ["1", "002", "00003"],
+            "carga_minio": True,
+            "carga_json": False,
+            "timeout_mc": 30,
+            "proxy_request": False,
+        })
+        if operation == "solicitar":
+            for name in ("descarga_emitidos", "descarga_recibidos", "carga_minio", "carga_json", "timeout_mc"):
+                values.pop(name, None)
+        elif operation == "historial":
+            values.pop("timeout_mc", None)
+
     context = next(
         (
             properties[name]["example"]
@@ -503,6 +677,33 @@ def _historical_example_values(bot: str, operation: str) -> dict[str, Any]:
 
 
 def _fields_for_operation(bot: str, operation: str) -> dict[str, tuple[Any, Any]]:
+    historical_names = _V2_OPERATION_FIELD_NAMES.get((bot, operation))
+    if historical_names is not None:
+        required = _V2_REQUIRED_FIELDS.get((bot, operation), frozenset())
+        historical_fields: dict[str, tuple[Any, Any]] = {}
+        for name in historical_names:
+            descriptor = _V2_COMPAT_FIELDS.get(name) or _FAMILY_FIELDS.get(bot, {}).get(name)
+            if descriptor is None:
+                raise RuntimeError(f"descriptor ausente para {bot}/{operation}.{name}")
+            annotation, field_info = descriptor
+            field_info = deepcopy(field_info)
+            if name in required:
+                field_info.default = PydanticUndefined
+                field_info._attributes_set.pop("default", None)
+                if annotation == str | None:
+                    annotation = str
+                elif annotation == bool | None:
+                    annotation = bool
+                elif annotation == int | None:
+                    annotation = int
+            elif field_info.default is None and annotation in {str, bool, int, list[str]}:
+                annotation = annotation | None
+            if bot == "mis_comprobantes" and name == "carga_minio":
+                field_info.default = operation == "historial"
+                field_info._attributes_set["default"] = operation == "historial"
+            historical_fields[name] = (annotation, field_info)
+        return historical_fields
+
     fields = dict(_FAMILY_FIELDS.get(bot, {}))
     names = _OPERATION_FIELD_NAMES.get((bot, operation))
     if names is not None:
@@ -526,8 +727,6 @@ def public_bot_body_model(bot: str, operation: str) -> type[BaseModel]:
 def public_bot_compat_body_model(bot: str, operation: str) -> type[BaseModel]:
     """Clase de borde con el cuerpo plano que aceptaban las rutas V2."""
     fields = _fields_for_operation(bot, operation)
-    for name, descriptor in _V2_COMPAT_FIELDS.items():
-        fields.setdefault(name, descriptor)
     model_name = "".join(
         part.capitalize() for part in f"{bot}_{operation}_v2_compat".split("_")
     ) + "Body"
@@ -536,6 +735,8 @@ def public_bot_compat_body_model(bot: str, operation: str) -> type[BaseModel]:
 
 def _example_value(field_name: str, bot: str, operation: str, default: Any) -> Any:
     """Valor representativo y seguro para cada propiedad pública."""
+    if default is PydanticUndefined:
+        default = None
     if field_name == "credentials":
         return {
             "cuit_representante": "20123456789",
@@ -550,15 +751,13 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
     if field_name in {"desde", "hasta"}:
         return "01/08/2026"
     if field_name == "timeout_mc":
-        return 120
+        return 30
     if field_name == "proxy_request":
-        return {"host": "proxy.ejemplo.invalid", "port": 8080}
+        return False
     if field_name == "puntos_venta":
         return [1, 2]
-    if field_name == "tipo_comprobante":
-        return "FACTURA"
-    if field_name == "nombre_archivo":
-        return "archivo-ejemplo.txt"
+    if field_name == "usuario":
+        return "usuario@ejemplo.com"
     if field_name in {"cuit", "representado_cuit"}:
         return "20123456789"
     if field_name in {"cuits", "cuits_consulta"}:
@@ -583,6 +782,8 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
         return ["moroso"]
     if field_name == "impuestos":
         return ["217"] if bot == "mis_retenciones" else ["216", "217"]
+    if field_name == "lista_exclusion_situacion":
+        return ["Vigente", "Plan Cancelado", "Plan Caduco"]
     if field_name == "tipos":
         return ["Retencion", "Percepcion"]
     if field_name == "secciones":
@@ -611,9 +812,15 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
         return "Empresa de ejemplo"
     if isinstance(default, bool):
         return default
-    if field_name in {"name_hint", "archivo_nombre"}:
-        return "archivo-ejemplo.txt" if field_name == "archivo_nombre" else "constancia-ejemplo.pdf"
-    return "valor-de-ejemplo"
+    if field_name == "archivo_nombre":
+        return "vep_entrada.txt"
+    if field_name in {"filtro_impuestos", "filtro_intereses"}:
+        return [{"periodo": "04/2024", "impuesto": "011", "concepto": "019"}]
+    if isinstance(default, bool):
+        return default
+    if default is not None:
+        return default
+    return "Empresa Ejemplo SA"
 
 
 @lru_cache(maxsize=None)
@@ -648,26 +855,13 @@ def public_bot_compat_body_schema(
     operation: str,
     route_path: str | None = None,
 ) -> dict[str, Any]:
-    """Devuelve el schema V1 exacto para un alias, cuando existe.
-
-    La copia conserva el orden JSON de ``properties``, los campos requeridos,
-    defaults, descripciones y ejemplos que generaba Pydantic en V1. Para una
-    operación sin ruta histórica conocida se mantiene el schema V3 anterior,
-    evitando inventar un contrato V1.
-    """
-    if route_path is not None:
-        schema_name = V1_SCHEMA_BY_ALIAS.get(route_path)
-        if schema_name is not None:
-            snapshot = _v1_request_schemas().get(schema_name)
-            if snapshot is None:
-                raise RuntimeError(f"schema V1 ausente en snapshot: {schema_name}")
-            return deepcopy(snapshot["schema"])
-
+    """Schema plano individual para los campos históricos de la operación."""
     model = public_bot_compat_body_model(bot, operation)
     schema = model.model_json_schema()
+    historical = _historical_example_values(bot, operation)
     schema["examples"] = [
         {
-            name: _example_value(name, bot, operation, field.default)
+            name: historical.get(name, _example_value(name, bot, operation, field.default))
             for name, field in model.model_fields.items()
         }
     ]
@@ -675,31 +869,7 @@ def public_bot_compat_body_schema(
 
 
 def install_v1_openapi_patch(app: Any) -> Any:
-    """Hace que ``app.openapi()`` publique los schemas V1 sin normalización.
-
-    FastAPI elimina algunos ``default: null`` al fusionar ``openapi_extra``.
-    El contrato V1 se restaura después de construir el documento para mantener
-    incluso esos detalles de serialización.
-    """
-    original_openapi = app.openapi
-
-    def openapi_with_v1_contract() -> dict[str, Any]:
-        document = original_openapi()
-        for route_path, schema_name in V1_SCHEMA_BY_ALIAS.items():
-            operation = document.get("paths", {}).get(f"/api/v3{route_path}", {}).get("post")
-            if operation is None:
-                continue
-            body = operation.get("requestBody", {})
-            content = body.get("content", {})
-            application_json = content.get("application/json")
-            if application_json is None:
-                continue
-            application_json["schema"] = deepcopy(
-                _v1_request_schemas()[schema_name]["schema"]
-            )
-        return document
-
-    app.openapi = openapi_with_v1_contract
+    """Compatibilidad histórica; los modelos por operación gobiernan OpenAPI."""
     return app
 
 

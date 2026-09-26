@@ -3047,7 +3047,6 @@
       "medio_pago",
       "contrasena",
       "minio_upload",
-      "eliminar_descargas",
       "proxy_request"
     ],
     "schema": {
@@ -3093,19 +3092,6 @@
           "default": false,
           "example": true,
           "title": "Minio Upload"
-        },
-        "eliminar_descargas": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": true,
-          "example": true,
-          "title": "Eliminar Descargas"
         },
         "proxy_request": {
           "anyOf": [

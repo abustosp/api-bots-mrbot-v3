@@ -145,10 +145,11 @@ def test_alias_v2_plano_crea_registro_sin_credencial_en_payload(monkeypatch) -> 
             "/api/v3/ccma/consulta",
             headers={"Idempotency-Key": "v2-flat-credential-contract"},
             json={
+                "cuit_representante": "20123456789",
+                "clave_representante": "secreto-solo-memoria",
                 "cuit_representado": "20123456789",
                 "movimientos": True,
                 "pdf": True,
-                "clave": "secreto-solo-memoria",
             },
         )
         assert response.status_code == 202
@@ -174,7 +175,7 @@ def test_admin_registra_ejecuciones_y_revela_solo_con_auth(monkeypatch) -> None:
         created = cliente.post(
             "/api/v3/ccma/consulta",
             headers={"Idempotency-Key": "admin-record-contract"},
-            json={"representado_cuit": "20123456789", "clave": "admin-secret"},
+            json={"cuit_representante": "20123456789", "clave_representante": "admin-secret", "cuit_representado": "20123456789"},
         )
         job_id = created.json()["job_id"]
         assert cliente.get(f"/admin/jobs/{job_id}/credentials").status_code == 401
@@ -203,8 +204,9 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
             "/api/v3/ccma/consulta",
             headers={"Idempotency-Key": "admin-table-contract"},
             json={
+                "cuit_representante": "20123456789",
+                "clave_representante": "table-secret",
                 "cuit_representado": "20123456789",
-                "clave": "table-secret",
             },
         )
         assert created.status_code == 202
@@ -226,7 +228,7 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         }
         job_record = next(row for row in body["tables"]["jobs"] if row["id"] == job_id)
         assert job_record["credentials"]["available"] is True
-        assert "clave" in job_record["credentials"]["fields"]
+        assert "clave_representante" in job_record["credentials"]["fields"]
         assert "credential_ciphertext" not in job_record
         assert all("url" not in key.lower() for key in job_record)
         sections = body["bot_sections"]
@@ -301,7 +303,7 @@ def test_admin_table_catalogo_y_tabla_virtual_por_bot(monkeypatch) -> None:
             created = cliente.post(
                 "/api/v3/ccma/consulta",
                 headers={"Idempotency-Key": f"admin-bot-table-{suffix}"},
-                json={"representado_cuit": "20123456789", "clave": "catalog-secret"},
+                json={"cuit_representante": "20123456789", "clave_representante": "catalog-secret", "cuit_representado": "20123456789"},
             )
             assert created.status_code == 202
         for job in JOBS.values():

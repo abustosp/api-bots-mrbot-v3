@@ -47,6 +47,10 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "subir_archivos": "Solicitar la generación y carga de los archivos de resultado.",
     "subir": "Solicitar la carga del archivo de resultado.",
     "proxy_request": "Configuración opcional de proxy para la solicitud.",
+    "archivo_nombre": (
+        "Nombre del archivo de entrada TXT que el cliente envió. Solo lo usa el "
+        "bot para localizar la entrada temporal, no para nombrar archivos subidos."
+    ),
 }
 
 
@@ -65,53 +69,51 @@ def _example_values(bot: str, operation: str, *, alternate: bool = False,
                     encrypted: bool = False) -> dict[str, Any]:
     """Build a complete, safe, useful flat body for OpenAPI documentation."""
     model = public_bot_compat_body_model(bot, operation)
-    historical: dict[str, Any] = {}
     values: dict[str, Any] = {}
     for name, field in model.model_fields.items():
         if name == "credentials":
             continue
-        value = historical.get(name, _example_value(name, bot, operation, field.default))
-        if alternate:
-            if name in {"fecha_desde", "desde"}:
-                value = "01/07/2026"
-            elif name in {"fecha_hasta", "hasta"}:
-                value = "31/07/2026"
-            elif name == "periodo":
-                value = "9" if bot == "consulta_pagos_vep" else "202607"
-            elif name == "periodo_desde":
-                value = "02/2026" if bot == "ccma" else "202607"
-            elif name == "periodo_hasta":
-                value = "03/2026" if bot == "ccma" else "202608"
-            elif name in {"emitidos", "descarga_emitidos", "descarga_ventas"}:
-                value = False
-            elif name in {"recibidos", "descarga_recibidos", "descarga_compras"}:
-                value = True
-            elif name in {"incluir_json", "carga_json"}:
-                value = False
-            elif name in {"subir_csv", "carga_minio", "subir_archivos"}:
-                value = True
-        if encrypted and name in {"clave", "clave_representante", "contrasena"}:
-            continue
+        value = _example_value(name, bot, operation, field.default)
         if encrypted and name == "clave_encriptada":
             value = "BASE64_RSA_OAEP_CIPHERTEXT_DEMO"
         values[name] = value
 
-    # Use the canonical flat V1 credential pair even when the historical model
-    # used an alias such as cuit_login/contrasena.
-    values["cuit_representante"] = "20123456789"
-    if encrypted:
-        values["clave_encriptada"] = "BASE64_RSA_OAEP_CIPHERTEXT_DEMO"
-    else:
-        values["clave"] = "REEMPLAZAR_CON_CLAVE_FISCAL"
+    if bot == "mis_comprobantes" and operation in {"consulta", "consultar", "solicitar", "historial"}:
+        values.update({
+            "clave_encriptada": "BASE64_RSA_OAEP_CIPHERTEXT",
+            "desde": "01/01/2024",
+            "hasta": "31/12/2024",
+            "cuit_inicio_sesion": "20123456780",
+            "representado_nombre": "Empresa Ejemplo S.A.",
+            "representado_cuit": "30876543210",
+            "contrasena": "mi_contraseña_secreta",
+            "descarga_emitidos": True,
+            "descarga_recibidos": False,
+            "emitidos": True,
+            "recibidos": False,
+            "puntos_venta_emitidos": ["1", "002", "00003"],
+            "puntos_venta_recibidos": ["1", "002", "00003"],
+            "carga_minio": True,
+            "carga_json": False,
+            "timeout_mc": 30,
+            "proxy_request": False,
+        })
+        if operation == "solicitar":
+            for name in ("descarga_emitidos", "descarga_recibidos", "carga_minio", "carga_json", "timeout_mc"):
+                values.pop(name, None)
+        else:
+            values.pop("emitidos", None)
+            values.pop("recibidos", None)
+        if operation == "historial":
+            values.pop("timeout_mc", None)
+            values.pop("puntos_venta_emitidos", None)
+            values.pop("puntos_venta_recibidos", None)
+
     return values
 
 
 def _examples(bot: str, operation: str) -> list[dict[str, Any]]:
-    return [
-        _example_values(bot, operation),
-        _example_values(bot, operation, alternate=True),
-        _example_values(bot, operation, encrypted=True),
-    ]
+    return [_example_values(bot, operation)]
 
 
 @lru_cache(maxsize=None)
@@ -133,20 +135,6 @@ def get_request_model(bot: str, operation: str) -> type[BaseModel]:
         field_info.description = field_info.description or _description(name)
         fields[name] = (field.annotation, field_info)
 
-    # A common flat credential pair is present for every bot and operation.
-    fields.setdefault(
-        "cuit_representante",
-        (str | None, Field(default=None, description=_FIELD_DESCRIPTIONS["cuit_representante"], pattern=r"^\d{11}$")),
-    )
-    fields.setdefault(
-        "clave",
-        (str | None, Field(default=None, description=_FIELD_DESCRIPTIONS["clave"], max_length=4096)),
-    )
-    fields.setdefault(
-        "clave_encriptada",
-        (str | None, Field(default=None, description=_FIELD_DESCRIPTIONS["clave_encriptada"], max_length=16384)),
-    )
-
     base_examples = _examples(bot, operation)
     base = type(
         f"{bot}_{operation}_RequestBase",
@@ -160,7 +148,8 @@ def get_request_model(bot: str, operation: str) -> type[BaseModel]:
                     "description": (
                         f"Cuerpo plano de la operación {bot}/{operation}. "
                         "Incluye los campos de consulta y las credenciales fiscales "
-                        "del representante, como en la API V1."
+                        "del representante. Los archivos temporales se eliminan "
+                        "siempre al terminar la operación."
                     ),
                     "examples": base_examples,
                 },
@@ -175,20 +164,10 @@ def get_openapi_examples(bot: str, operation: str) -> dict[str, dict[str, Any]]:
     """Return examples in FastAPI's ``openapi_examples`` format."""
     return {
         "consulta_habitual": {
-            "summary": "Consulta habitual",
-            "description": "Ejemplo de consulta con credenciales planas y parámetros de período habituales.",
+            "summary": "Ejemplo del esquema histórico",
+            "description": "Valores tomados del schema del bot o de sus campos de entrada reales.",
             "value": _examples(bot, operation)[0],
-        },
-        "rango_y_opciones": {
-            "summary": "Período alternativo y flags",
-            "description": "Ejemplo alternativo con fechas/períodos y opciones de salida explícitas.",
-            "value": _examples(bot, operation)[1],
-        },
-        "clave_cifrada": {
-            "summary": "Autenticación con clave cifrada",
-            "description": "Ejemplo documental que reemplaza la clave en claro por una clave cifrada de demostración.",
-            "value": _examples(bot, operation)[2],
-        },
+        }
     }
 
 

@@ -48,7 +48,11 @@ def test_create_returns_v1_status_cancel_links_and_scopes_job_to_operation() -> 
     created = client.post(
         "/api/v3/ccma/consulta",
         headers={"Idempotency-Key": "bot-route-links-test"},
-        json={"representado_cuit": "20123456789", "periodo_desde": "08/2026"},
+        json={
+            "cuit_representante": "20123456789",
+            "clave_representante": "route-test-secret",
+            "cuit_representado": "20123456789",
+        },
     )
 
     assert created.status_code == 202

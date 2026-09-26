@@ -459,7 +459,41 @@ async def submit_job(
             status_code=404, content=public_error("not_found", corr),
             headers={"X-Correlation-ID": corr},
         )
-    normalized_payload = normalize_v2_payload(bot, operacion, payload)
+    # Older clients may still send fields that used to control temporary-file
+    # retention or output object names. V3 always removes the workdir and lets
+    # each bot choose upload object names, so these keys are accepted but ignored.
+    retired_request_fields = {
+        "eliminar_descargas",
+        "conservar_descargas",
+        "mantener_descargas",
+        "preservar_descargas",
+        "guardar_descargas",
+        "borrar_descargas",
+        "delete_downloads",
+        "retain_downloads",
+        "keep_downloads",
+        "nombre_archivo",
+        "nombre_archivo_descarga",
+        "nombre_archivo_salida",
+        "nombre_salida",
+        "nombre_descarga",
+        "nombre_objeto",
+        "filename",
+        "file_name",
+        "download_filename",
+        "output_filename",
+        "output_name",
+        "name_hint",
+        "minio_filename",
+        "s3_filename",
+    }
+    if bot != "vep_archivo":
+        retired_request_fields.add("archivo_nombre")
+    accepted_payload = {
+        name: value for name, value in payload.items()
+        if name not in retired_request_fields
+    }
+    normalized_payload = normalize_v2_payload(bot, operacion, accepted_payload)
     credential_metadata_value = credential_metadata(normalized_payload, credentials)
     try:
         (

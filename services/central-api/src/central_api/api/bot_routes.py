@@ -22,11 +22,10 @@ from central_api.api.jobs import (
     cancel_job,
 )
 from central_api.db import db_configurado
-from central_api.security.credentials import normalize_v2_payload
 from central_api.security.principals import ApiPrincipal
 
 try:
-    from central_api.api.bot_schemas import get_openapi_examples, get_request_model
+    from central_api.api.bot_schemas import get_request_model
 except ImportError:  # pragma: no cover - transitional compatibility during schema rollout
     from pydantic import ConfigDict, create_model
 
@@ -101,17 +100,14 @@ def _body_openapi(bot: str, operation: str, route_path: str | None) -> dict[str,
         operation,
         route_path=route_path,
     )
-    examples = get_openapi_examples(bot, operation)
-    if not examples:
-        schema_examples = model.model_json_schema().get("examples") or []
-        examples = {
-            f"ejemplo_{index + 1}": {
-                "summary": f"Ejemplo {index + 1}",
-                "description": "Ejemplo del cuerpo plano de la operación.",
-                "value": value,
-            }
-            for index, value in enumerate(schema_examples)
+    schema_examples = schema.get("examples") or model.model_json_schema().get("examples") or []
+    examples = {
+        "consulta_habitual": {
+            "summary": "Ejemplo de la operación",
+            "description": "Ejemplo de entrada tomado del schema histórico o del plugin correspondiente.",
+            "value": schema_examples[0] if schema_examples else {},
         }
+    }
     return {
         "requestBody": {
             "required": True,
@@ -170,9 +166,8 @@ def _create_handler(
         # are intentionally generic so Pydantic cannot echo a submitted secret.
         input_body = dict(payload)
         input_body.update(credentials)
-        validation_body = normalize_v2_payload(bot, operation, input_body)
         try:
-            typed_body = request_model.model_validate(validation_body)
+            typed_body = request_model.model_validate(input_body)
         except ValidationError:
             return _bad_payload("El cuerpo no coincide con el esquema de la operación.")
         normalized_body = typed_body.model_dump(exclude_unset=True)

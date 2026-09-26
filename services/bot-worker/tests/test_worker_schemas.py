@@ -20,42 +20,40 @@ from bot_worker.schemas import (  # noqa: E402
 )
 
 
-def test_worker_schema_models_are_local_and_have_flat_credentials_and_examples() -> None:
+def test_worker_schema_models_are_operation_specific_and_have_examples() -> None:
     schema_source = (WORKER_SRC / "bot_worker" / "schemas" / "__init__.py").read_text(
         encoding="utf-8"
     )
     assert "from central_api" not in schema_source
     assert "import central_api" not in schema_source
 
-    model = get_request_model("mis_comprobantes", "consultar")
-    assert "cuit_representante" in model.model_fields
-    assert "cuit_login" in model.model_fields
-    assert "clave" in model.model_fields
+    model = get_request_model("mis_comprobantes", "consulta")
+    assert list(model.model_fields) == [
+        "clave_encriptada", "desde", "hasta", "cuit_inicio_sesion",
+        "representado_nombre", "representado_cuit", "contrasena",
+        "descarga_emitidos", "descarga_recibidos", "puntos_venta_emitidos",
+        "puntos_venta_recibidos", "carga_minio", "carga_json", "timeout_mc",
+        "proxy_request",
+    ]
     assert "credentials" not in model.model_fields
-    assert len(model.model_json_schema()["examples"]) == 3
-    assert len(get_openapi_examples("mis_comprobantes", "consultar")) == 3
-    for example in get_openapi_examples("mis_comprobantes", "consultar").values():
+    assert len(model.model_json_schema()["examples"]) == 1
+    examples = get_openapi_examples("mis_comprobantes", "consulta")
+    assert len(examples) == 1
+    for example in examples.values():
         model.model_validate(example["value"])
 
 
-def test_schema_document_is_secret_safe_and_has_openapi_example_format() -> None:
+def test_schema_document_has_operation_fields_and_openapi_example_format() -> None:
     document = get_schema_document("ccma", "consultar")
     parsed = BotSchemaDocument.model_validate(document)
     assert parsed.bot == "ccma"
     assert parsed.operation == "consultar"
-    assert "cuit_representante" in parsed.request_schema["properties"]
-    assert set(parsed.openapi_examples) == {
-        "consulta_habitual",
-        "rango_y_opciones",
-        "clave_cifrada",
-    }
+    assert "cuit_representado" in parsed.request_schema["properties"]
+    assert set(parsed.openapi_examples) == {"consulta_habitual"}
     assert all(
         {"summary", "description", "value"} <= set(example)
         for example in parsed.openapi_examples.values()
     )
-    encrypted = parsed.openapi_examples["clave_cifrada"]["value"]
-    assert encrypted["clave_encriptada"] == "BASE64_RSA_OAEP_CIPHERTEXT_DEMO"
-    assert "clave" not in encrypted
 
 
 def test_worker_publishes_schema_route_and_documents_examples_without_changing_job_envelope() -> None:
@@ -72,7 +70,7 @@ def test_worker_publishes_schema_route_and_documents_examples_without_changing_j
     document = response.json()
     assert document["bot"] == "ccma"
     assert document["operation"] == "consultar"
-    assert "representado_cuit" in document["schema"]["properties"]
+    assert "cuit_representado" in document["schema"]["properties"]
     assert "openapi_examples" in document
 
     openapi = app.openapi()
