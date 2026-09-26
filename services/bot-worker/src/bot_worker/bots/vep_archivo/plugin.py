@@ -46,6 +46,7 @@ from bot_worker.bots.errors import (
     sin_secretos,
 )
 from bot_worker.bots.vep_archivo.schema import (
+    ARCHIVO_ENTRADA,
     ENTRADAS,
     MAX_REGISTROS_POR_LOTE,
     esquema_entrada,
@@ -219,7 +220,7 @@ class VepArchivoPlugin:
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
         try:
-            archivo = runtime.artifact_store.resolve(entrada.archivo_nombre)
+            archivo = runtime.artifact_store.resolve(ARCHIVO_ENTRADA)
             archivo.write_bytes(base64.b64decode(str(entrada.archivo_b64)))
             async with runtime.browser_factory.arca_session(
                 credentials=runtime.credentials,
@@ -251,20 +252,21 @@ class VepArchivoPlugin:
         await runtime.event_sink.progress(
             phase="GENERANDO", percent=45, message="Generando VEP desde archivo"
         )
-        archivo = runtime.artifact_store.resolve(entrada.archivo_nombre)
+        archivo = runtime.artifact_store.resolve(ARCHIVO_ENTRADA)
         resumen = await servicio.generar_vep_desde_archivo(
             archivo=archivo, medio_pago=entrada.medio_pago
         )
         await runtime.event_sink.progress(
             phase="PROCESANDO", percent=65, message="Descargando detalle"
         )
+        representado = entrada.representado_cuit or runtime.credentials.cuit_representante
         detalle = runtime.artifact_store.resolve(
-            f"{entrada.representado_cuit} - VEP - {entrada.medio_pago}.pdf"
+            f"{representado} - VEP - {entrada.medio_pago}.pdf"
         )
         await servicio.descargar_detalle(destino=detalle)
         datos: dict[str, Any] = {
             "operacion": "generar",
-            "representado_cuit": entrada.representado_cuit,
+            "representado_cuit": representado,
             "medio_pago": entrada.medio_pago,
             "registros": registros,
             "lote": str((resumen or {}).get("lote", "")),

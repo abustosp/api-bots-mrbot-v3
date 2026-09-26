@@ -437,7 +437,7 @@ _V2_OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
     ("sifere", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "periodo", "representado_nombre", "proxy_request", "jurisdicciones", "carga_minio"),
     ("siper", "consultar"): ("clave_encriptada", "cuit_representante", "clave", "cuit_representado", "detalle_minio", "categorias_minio", "proxy_request"),
     ("srt", "consultar_alicuotas"): ("clave_encriptada", "cuit_login", "clave", "cuits_consulta", "proxy_request"),
-    ("vep_archivo", "generar"): ("clave_encriptada", "cuit_inicio_sesion", "medio_pago", "contrasena", "minio_upload", "proxy_request", "representado_cuit", "archivo_nombre", "archivo_b64", "incluir_json", "subir_pdf"),
+    ("vep_archivo", "generar"): ("clave_encriptada", "cuit_inicio_sesion", "medio_pago", "contrasena", "archivo_b64", "minio_upload", "proxy_request"),
     ("vep_ccma", "generar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "medio_pago", "filtro_impuestos", "filtro_intereses", "seleccionar_impuestos", "seleccionar_intereses", "minio_upload", "proxy_request", "generar_volante"),
 }
 
@@ -477,7 +477,7 @@ _V2_REQUIRED_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("sifere", "consultar"): frozenset({"cuit_representante", "clave_representante", "cuit_representado", "periodo"}),
     ("siper", "consultar"): frozenset({"cuit_representante", "clave"}),
     ("srt", "consultar_alicuotas"): frozenset({"cuit_login", "clave", "cuits_consulta"}),
-    ("vep_archivo", "generar"): frozenset({"cuit_inicio_sesion", "medio_pago", "contrasena"}),
+    ("vep_archivo", "generar"): frozenset({"cuit_inicio_sesion", "medio_pago", "contrasena", "archivo_b64"}),
     ("vep_ccma", "generar"): frozenset({"cuit_representante", "clave_representante", "cuit_representado"}),
 }
 

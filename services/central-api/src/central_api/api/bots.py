@@ -486,9 +486,8 @@ async def submit_job(
         "name_hint",
         "minio_filename",
         "s3_filename",
+        "archivo_nombre",
     }
-    if bot != "vep_archivo":
-        retired_request_fields.add("archivo_nombre")
     accepted_payload = {
         name: value for name, value in payload.items()
         if name not in retired_request_fields

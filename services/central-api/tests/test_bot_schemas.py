@@ -96,9 +96,11 @@ def test_models_keep_operation_specific_types_and_validations() -> None:
     assert comprobantes.model_fields["puntos_venta_emitidos"].annotation == list[str] | None
 
     vep_archivo = get_request_model("vep_archivo", "generar")
-    assert "archivo_nombre" in vep_archivo.model_fields
-    assert "archivo de entrada" in vep_archivo.model_fields["archivo_nombre"].description
-    assert "no para nombrar archivos subidos" in vep_archivo.model_fields["archivo_nombre"].description
+    assert "archivo_nombre" not in vep_archivo.model_fields
+    assert list(vep_archivo.model_fields) == [
+        "clave_encriptada", "cuit_inicio_sesion", "medio_pago", "contrasena",
+        "archivo_b64", "minio_upload", "proxy_request",
+    ]
 
 
 def test_unknown_bot_operation_uses_permissive_documented_fallback() -> None:

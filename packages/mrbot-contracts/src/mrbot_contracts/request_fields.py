@@ -40,7 +40,7 @@ sct/consultar: clave_encriptada cuit_login! clave! cuit_representado! proxy_requ
 sifere/consultar: clave_encriptada cuit_representante! clave_representante! cuit_representado! periodo! representado_nombre proxy_request jurisdicciones carga_minio
 siper/consultar: clave_encriptada cuit_representante! clave! cuit_representado detalle_minio categorias_minio proxy_request
 srt/consultar_alicuotas: clave_encriptada cuit_login! clave! cuits_consulta! proxy_request
-vep_archivo/generar: clave_encriptada cuit_inicio_sesion! medio_pago! contrasena! minio_upload proxy_request representado_cuit archivo_nombre archivo_b64 incluir_json subir_pdf
+vep_archivo/generar: clave_encriptada cuit_inicio_sesion! medio_pago! contrasena! archivo_b64! minio_upload proxy_request
 vep_ccma/generar: clave_encriptada cuit_representante! clave_representante! cuit_representado! medio_pago filtro_impuestos filtro_intereses seleccionar_impuestos seleccionar_intereses minio_upload proxy_request generar_volante
 """
 

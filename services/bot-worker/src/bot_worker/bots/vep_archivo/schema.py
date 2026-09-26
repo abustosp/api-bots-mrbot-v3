@@ -18,6 +18,8 @@ CUIT_PATTERN = r"^\d{11}$"
 MEDIOS_PAGO = ("link", "pago_mis_cuentas", "internet_banking", "xn_group")
 MAX_REGISTROS_POR_LOTE = 600
 MAX_ARCHIVO_BYTES = 7_000_000
+# Nombre del TXT temporal dentro del workdir del job: lo define el bot.
+ARCHIVO_ENTRADA = "vep_entrada.txt"
 
 
 class _Base(BaseModel):
@@ -52,15 +54,21 @@ def decodificar_archivo(valor: Any) -> bytes:
 
 
 class VepArchivoGenerarInput(_Base):
-    """Operacion ``generar``: VEP desde archivo .txt."""
+    """Operacion ``generar``: VEP desde archivo .txt.
 
-    representado_cuit: str = Field(
+    Igual que V2, el cliente solo envía el TXT (aquí en Base64), el medio de
+    pago y si se sube el PDF. El nombre del TXT temporal y el del PDF subido
+    los define el bot; el CUIT se toma de la sesión fiscal cuando no se
+    informa. Los archivos temporales siempre se eliminan al terminar.
+    """
+
+    representado_cuit: str | None = Field(
+        default=None,
         validation_alias=AliasChoices("representado_cuit", "cuit"),
         min_length=11,
         max_length=14,
     )
     medio_pago: str = Field(default="internet_banking", min_length=1)
-    archivo_nombre: str = Field(min_length=1, max_length=128)
     archivo_b64: str = Field(min_length=1)
     incluir_json: bool = True
     subir_pdf: bool = True
@@ -81,8 +89,6 @@ class VepArchivoGenerarInput(_Base):
     def _archivo_y_medio(self) -> VepArchivoGenerarInput:
         if self.medio_pago not in MEDIOS_PAGO:
             raise ValueError(f"medio_pago debe ser uno de {list(MEDIOS_PAGO)}")
-        if not self.archivo_nombre.lower().endswith(".txt"):
-            raise ValueError("archivo_nombre debe terminar en .txt")
         decodificar_archivo(self.archivo_b64)
         if not self.incluir_json and not self.subir_pdf:
             raise ValueError("seleccionar al menos una salida (json o pdf)")
@@ -105,7 +111,6 @@ def esquema_entrada() -> dict[str, Any]:
             "operacion": {"type": "string", "enum": ["generar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
             "medio_pago": {"type": "string", "enum": list(MEDIOS_PAGO)},
-            "archivo_nombre": {"type": "string", "minLength": 1},
             "archivo_b64": {"type": "string", "minLength": 1},
             "incluir_json": {"type": "boolean"},
             "subir_pdf": {"type": "boolean"},
