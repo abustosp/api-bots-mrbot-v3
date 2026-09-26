@@ -475,7 +475,19 @@ class ArcaSession:
                     diagnostic_code="arca_service_navigation_failed",
                 ) from exc
 
-        service_locator = await self._find_service(value)
+        # El portal de Clave Fiscal es una SPA: el documento puede haber
+        # alcanzado ``domcontentloaded`` mientras el catálogo todavía se
+        # hidrata. Sin esta espera, una sesión válida se reporta como
+        # ``arca_service_not_visible`` de forma intermitente.
+        service_locator = None
+        for _ in range(30):
+            service_locator = await self._find_service(value)
+            if service_locator is not None:
+                break
+            try:
+                await self.page.wait_for_timeout(500)
+            except Exception:
+                break
         if service_locator is None:
             # El portal oculta el catálogo completo tras "Ver todos".
             await self._click_first_in_contexts(
@@ -487,7 +499,14 @@ class ArcaSession:
                 ),
             )
             await self._wait_ready()
-            service_locator = await self._find_service(value)
+            for _ in range(30):
+                service_locator = await self._find_service(value)
+                if service_locator is not None:
+                    break
+                try:
+                    await self.page.wait_for_timeout(500)
+                except Exception:
+                    break
         if service_locator is None:
             raise TargetUnavailableError(
                 "servicio ARCA no habilitado o no visible",
