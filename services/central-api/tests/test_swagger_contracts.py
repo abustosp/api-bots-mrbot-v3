@@ -12,7 +12,13 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from central_api.api.bot_compat import BOT_ROUTE_ALIASES  # noqa: E402
-from central_api.api.bot_payloads import V1_SCHEMA_BY_ALIAS  # noqa: E402
+from central_api.api.bot_payloads import (  # noqa: E402
+    V1_SCHEMA_BY_ALIAS,
+    _HISTORICAL_FIELD_ALIASES,
+    _HISTORICAL_SCHEMA_BY_OPERATION,
+    _v1_request_schemas,
+    public_bot_body_schema,
+)
 from central_api.main import create_app  # noqa: E402
 
 V1_SNAPSHOT = json.loads(
@@ -86,7 +92,7 @@ def test_ruta_canonica_muestra_el_envelope_y_los_payloads_de_bots() -> None:
     assert body["required"] == ["payload"]
     assert len(body["properties"]["payload"]["oneOf"]) == 42
     assert body["example"]["payload"]["representado_cuit"] == "20123456789"
-    assert body["example"]["credentials"]["clave"] == "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
+    assert body["example"]["credentials"]["clave"] == "clave_fiscal"
     for payload_schema in body["properties"]["payload"]["oneOf"]:
         assert set(payload_schema["properties"]) == set(payload_schema["examples"][0])
         assert "credentials" not in payload_schema["properties"]
@@ -121,6 +127,64 @@ def test_catalogo_y_status_publican_schemas_y_ejemplos_completos() -> None:
     operacion = detalle_json.json()["operaciones"][0]
     assert operacion["input_schema"]["properties"]["representado_cuit"]
     assert operacion["example"]["payload"]["representado_cuit"] == "20123456789"
-    assert operacion["credentials_schema"]["example"]["clave"] == (
-        "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
-    )
+    assert operacion["credentials_schema"]["example"]["clave"] == "clave_fiscal"
+
+
+def test_examples_canonicos_reutilizan_los_valores_historicos() -> None:
+    snapshots = _v1_request_schemas()
+
+    for (bot, operation), schema_name in _HISTORICAL_SCHEMA_BY_OPERATION.items():
+        historical = snapshots[schema_name]["schema"]["properties"]
+        example = public_bot_body_schema(bot, operation)["examples"][0]
+
+        for canonical_name, value in example.items():
+            if canonical_name == "credentials":
+                context = next(
+                    (
+                        historical[name]["example"]
+                        for name in (
+                            "cuit_representante",
+                            "cuit_login",
+                            "cuit_inicio_sesion",
+                        )
+                        if name in historical and "example" in historical[name]
+                    ),
+                    None,
+                )
+                secret = next(
+                    (
+                        historical[name]["example"]
+                        for name in ("clave_representante", "clave", "contrasena")
+                        if name in historical and "example" in historical[name]
+                    ),
+                    None,
+                )
+                expected = (
+                    {
+                        "cuit_representante": context or "20123456789",
+                        "clave": secret or "clave_fiscal",
+                    }
+                    if context is not None or secret is not None
+                    else {}
+                )
+                assert value == expected
+                continue
+
+            candidates = (canonical_name,) + _HISTORICAL_FIELD_ALIASES.get(
+                canonical_name, ()
+            )
+            historical_name = next(
+                (
+                    name
+                    for name in candidates
+                    if name in historical and "example" in historical[name]
+                ),
+                None,
+            )
+            if historical_name is not None:
+                assert value == historical[historical_name]["example"], (
+                    bot,
+                    operation,
+                    canonical_name,
+                    historical_name,
+                )

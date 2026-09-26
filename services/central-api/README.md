@@ -159,7 +159,11 @@ El body documentado de cada uno de los 36 aliases se toma del snapshot
 snapshot conserva el orden de propiedades, nombres, campos requeridos,
 defaults, descripciones y ejemplos de Pydantic V1. La API canónica
 `POST /api/v3/bots/{bot}/{operacion}` mantiene deliberadamente su envelope V3
-con `payload` y `credentials`.
+con `payload` y `credentials`. Cuando una operación canónica corresponde a un
+body histórico, sus `example` se traducen al vocabulario V3 reutilizando los
+mismos valores de V1/V2, incluidos CUIT, períodos, flags y credenciales
+ficticias como `clave_fiscal`. Las operaciones nuevas conservan únicamente los
+campos adicionales propios de V3.
 
 Una clave puede llegar en texto plano o como `clave_encriptada` RSA-OAEP-
 SHA256. La central descifra el segundo formato, elimina el secreto del

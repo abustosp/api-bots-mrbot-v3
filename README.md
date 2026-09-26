@@ -202,7 +202,7 @@ Content-Type: application/json
   },
   "credentials": {
     "cuit_representante": "20123456789",
-    "clave": "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
+    "clave": "clave_fiscal"
   }
 }
 ```
@@ -220,7 +220,7 @@ Content-Type: application/json
 
 {
   "cuit_representante": "20123456789",
-  "clave_representante": "REEMPLAZAR_CON_CREDENCIAL_SELLADA",
+  "clave_representante": "clave_fiscal",
   "cuit_representado": "20123456789",
   "movimientos": true,
   "pdf": true

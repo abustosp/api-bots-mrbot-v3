@@ -390,6 +390,117 @@ V1_SCHEMA_BY_ALIAS: dict[str, str] = {
 }
 
 
+# La ruta histórica y la operación canónica no siempre tienen el mismo nombre
+# (por ejemplo ``/ccma/consulta`` se publica como ``ccma/consultar`` en V3).
+# Este índice permite que el envelope canónico conserve los mismos valores de
+# ejemplo que el body plano V1/V2, en vez de inventar placeholders nuevos.
+_HISTORICAL_SCHEMA_BY_OPERATION: dict[tuple[str, str], str] = {
+    ("aportes_en_linea", "descargar"): "aportes_en_linea.ConsultaAportesEnLineaRequest",
+    ("arba", "descargar"): "retper_iibb_arba.ConsultaRetPerIIBBARBARequest",
+    ("carga_portal_iva", "cargar"): "carga_portal_iva.CargaPortalIvaRequest",
+    ("ccma", "consultar"): "ccma.ConsultaCCMARequest",
+    ("certificado_mipyme", "descargar"): "certificado_mipyme.CertificadoMipymeRequest",
+    ("compensaciones", "consultar"): "sct.ConsultaSCTCompensacionesRequest",
+    ("consulta_cuit", "consulta"): "consulta_cuits.ConsultaCUITIndividualRequest",
+    ("consulta_cuit", "consultar"): "consulta_cuits.ConsultaCUITIndividualRequest",
+    ("consulta_cuit", "consultar_masivo"): "consulta_cuits.ConsultaCUITMasivoRequest",
+    ("consulta_pagos_vep", "consultar"): "vep.ConsultaPagosVEPRequest",
+    ("controladores_fiscales", "presentar"): "controladores_fiscales.ConsultaControladoresFiscalesRequest",
+    ("declaracion_en_linea", "consultar"): "declaracion_en_linea.ConsultaDeclaracionEnLineaRequest",
+    ("facturometro", "consultar"): "facturometro.ConsultaFacturometroRequest",
+    ("hacienda", "consultar"): "hacienda.ConsultaHaciendaRequest",
+    ("libros_portal_iva", "descargar_ddjj"): "libros_portal_iva.ConsultaLibrosIvaRequest",
+    ("libros_portal_iva", "descargar_libros"): "libros_portal_iva.ConsultaLibrosIvaRequest",
+    ("liquidacion_granos", "consultar"): "liquidacion_granos.ConsultaLiquidacionGranosRequest",
+    ("mis_comprobantes", "consulta"): "mis_comprobantes.MCRequest",
+    ("mis_comprobantes", "consultar"): "mis_comprobantes.MCRequest",
+    ("mis_comprobantes", "solicitar"): "mis_comprobantes.MCConsultaRequest",
+    ("mis_comprobantes", "historial"): "mis_comprobantes.MCHistorialRequest",
+    ("mis_facilidades", "consultar"): "mis_facilidades.ConsultaMisFacilidadesRequest",
+    ("mis_retenciones", "consultar"): "mis_retenciones.ConsultaMisRetencionesRequest",
+    ("mis_retenciones_iva_simple", "consultar"): "mis_retenciones_iva_simple.ConsultaMisRetencionesIvaSimpleRequest",
+    ("moa", "consultar"): "moa.ConsultaMOARequest",
+    ("pago_devoluciones", "consultar"): "pago_devoluciones.ConsultaPagoDevolucionesRequest",
+    ("portal_iva", "descargar"): "portal_iva.ConsultaPortalIvaRequest",
+    ("rcel", "descargar"): "rcel.ConsultaRCELRequest",
+    ("retper_iibb_agip", "consultar"): "retper_iibb_agip.ConsultaRetPerIIBBAGIPRequest",
+    ("retper_iibb_misiones", "consultar"): "retper_iibb_misiones.ConsultaRetPerIIBBMisionesRequest",
+    ("sct", "consultar"): "sct.ConsultaSCTRequest",
+    ("sifere", "consultar"): "sifere.ConsultaSIFERERequest",
+    ("siper", "consultar"): "siper.ConsultaSIPERRequest",
+    ("srt", "consultar_alicuotas"): "srt.ConsultaSRTAlicuotasRequest",
+    ("vep_archivo", "generar"): "vep.VEPArchivoRequest",
+    ("vep_ccma", "generar"): "vep_ccma.VEPCCMARequest",
+}
+
+
+_HISTORICAL_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "representado_cuit": ("cuit_representado", "representado_cuit"),
+    "representado_nombre": ("representado_nombre", "denominacion", "nombre_rcel"),
+    "fecha_desde": ("fecha_desde", "desde"),
+    "fecha_hasta": ("fecha_hasta", "hasta"),
+    "periodo_desde": ("periodo_desde", "periodo"),
+    "periodo_hasta": ("periodo_hasta", "periodo"),
+    "subir": ("subir", "carga_minio", "minio_upload", "archivo_historico_minio"),
+    "subir_archivo": ("subir_archivo", "carga_minio", "minio_upload"),
+    "subir_archivos": ("subir_archivos", "carga_minio", "minio_upload"),
+    "subir_csv": ("subir_csv", "carga_minio", "minio_upload"),
+    "subir_pdf": ("subir_pdf", "pdf", "minio_upload"),
+    "incluir_json": ("incluir_json", "carga_json"),
+    "incluir_pdf": ("incluir_pdf", "pdf"),
+    "incluir_movimientos": ("incluir_movimientos", "movimientos"),
+    "emitidos": ("emitidos", "descarga_emitidos"),
+    "recibidos": ("recibidos", "descarga_recibidos"),
+    "descarga_ventas": ("descarga_ventas", "descarga_csv_ventas"),
+    "descarga_compras": ("descarga_compras", "descarga_csv_compras"),
+}
+
+
+def _historical_example_values(bot: str, operation: str) -> dict[str, Any]:
+    """Traduce los ejemplos V1/V2 al vocabulario del envelope V3."""
+    schema_name = _HISTORICAL_SCHEMA_BY_OPERATION.get((bot, operation))
+    if schema_name is None:
+        return {}
+    properties = _v1_request_schemas()[schema_name]["schema"]["properties"]
+
+    values: dict[str, Any] = {}
+    for canonical_name in _fields_for_operation(bot, operation):
+        candidates = (canonical_name,) + _HISTORICAL_FIELD_ALIASES.get(
+            canonical_name, ()
+        )
+        for historical_name in candidates:
+            property_schema = properties.get(historical_name)
+            if property_schema is not None and "example" in property_schema:
+                values[canonical_name] = property_schema["example"]
+                break
+
+    context = next(
+        (
+            properties[name]["example"]
+            for name in ("cuit_representante", "cuit_login", "cuit_inicio_sesion")
+            if name in properties and "example" in properties[name]
+        ),
+        None,
+    )
+    secret = next(
+        (
+            properties[name]["example"]
+            for name in ("clave_representante", "clave", "contrasena")
+            if name in properties and "example" in properties[name]
+        ),
+        None,
+    )
+    values["credentials"] = (
+        {
+            "cuit_representante": context or "20123456789",
+            "clave": secret or "clave_fiscal",
+        }
+        if context is not None or secret is not None
+        else {}
+    )
+    return values
+
+
 def _fields_for_operation(bot: str, operation: str) -> dict[str, tuple[Any, Any]]:
     fields = dict(_FAMILY_FIELDS.get(bot, {}))
     names = _OPERATION_FIELD_NAMES.get((bot, operation))
@@ -427,20 +538,16 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
     if field_name == "credentials":
         return {
             "cuit_representante": "20123456789",
-            "clave": "REEMPLAZAR_CON_CREDENCIAL_SELLADA",
+            "clave": "clave_fiscal",
         }
     if field_name in {"clave", "clave_representante", "contrasena"}:
-        return "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
+        return "clave_fiscal"
     if field_name == "clave_encriptada":
         return "BASE64_RSA_OAEP_CIPHERTEXT"
     if field_name in {"cuit_representante", "cuit_representado", "cuit_inicio_sesion"}:
         return "20123456789"
     if field_name in {"desde", "hasta"}:
         return "01/08/2026"
-    if field_name in {"movimientos", "pdf", "descarga_emitidos", "descarga_recibidos"}:
-        return True
-    if field_name in {"carga_minio", "carga_json", "minio_upload"}:
-        return True
     if field_name == "timeout_mc":
         return 120
     if field_name == "proxy_request":
@@ -513,8 +620,12 @@ def public_bot_body_schema(bot: str, operation: str) -> dict[str, Any]:
     """Esquema inline para aliases, con ejemplo seguro visible en Swagger."""
     model = public_bot_body_model(bot, operation)
     schema = model.model_json_schema()
+    historical = _historical_example_values(bot, operation)
     example = {
-        name: _example_value(name, bot, operation, field.default)
+        name: historical.get(
+            name,
+            _example_value(name, bot, operation, field.default),
+        )
         for name, field in model.model_fields.items()
     }
     schema["examples"] = [example]
