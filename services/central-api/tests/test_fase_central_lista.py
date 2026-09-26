@@ -335,6 +335,47 @@ def test_dispatcher_firma_sobre_sin_bearer(entorno_limpio, monkeypatch):
     )
 
 
+def test_dispatcher_declara_slots_de_salida_por_bot(entorno_limpio):
+    """CCMA y Mis Comprobantes reciben solo los slots que solicitaron."""
+    from central_api.scheduler.dispatcher import build_envelope
+    from central_api.store import Job, WorkerEntry
+
+    worker = WorkerEntry(node="192.0.2.99:8080")
+    ccma = build_envelope(
+        Job(
+            id=new_job_id(),
+            bot="ccma",
+            operation="consulta",
+            payload={"incluir_pdf": True, "subir": True},
+        ),
+        worker,
+        "token-ccma",
+    )
+    assert ccma["artifact_uploads"] == [
+        {
+            "artifact_id": "ccma_resumen.pdf",
+            "name_hint": "ccma_resumen.pdf",
+            "max_bytes": 10_485_760,
+            "content_types": ["application/pdf"],
+        }
+    ]
+
+    comprobantes = build_envelope(
+        Job(
+            id=new_job_id(),
+            bot="mis_comprobantes",
+            operation="consulta",
+            payload={"emitidos": True, "recibidos": True, "subir_csv": True},
+        ),
+        worker,
+        "token-comprobantes",
+    )
+    assert [slot["artifact_id"] for slot in comprobantes["artifact_uploads"]] == [
+        "emitidos_csv",
+        "recibidos_csv",
+    ]
+
+
 def test_migrate_encuentra_alembic_del_checkout():
     """El job de migraciones localiza env.py + versions en el checkout."""
     from central_api.migrate import _dir_alembic

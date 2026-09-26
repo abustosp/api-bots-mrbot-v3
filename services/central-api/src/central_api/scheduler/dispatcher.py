@@ -87,6 +87,40 @@ def worker_operation(bot: str, operation: str) -> str:
     return OPERACION_WORKER.get((bot, operation), operation)
 
 
+def artifact_upload_slots(job: Job) -> list[dict]:
+    """Declara los artefactos opcionales que el job puede subir.
+
+    Los slots se entregan sin URL. El worker los presigna bajo demanda, una
+    vez que la asignación está viva y la central puede autorizarla.
+    """
+    payload = job.payload if isinstance(job.payload, dict) else {}
+    slots: list[dict] = []
+    if job.bot == "ccma" and payload.get("incluir_pdf") and payload.get("subir", True):
+        slots.append(
+            {
+                "artifact_id": "ccma_resumen.pdf",
+                "name_hint": "ccma_resumen.pdf",
+                "max_bytes": 10_485_760,
+                "content_types": ["application/pdf"],
+            }
+        )
+    if job.bot == "mis_comprobantes" and payload.get("subir_csv", True):
+        for tipo, artifact_id in (
+            ("emitidos", "emitidos_csv"),
+            ("recibidos", "recibidos_csv"),
+        ):
+            if payload.get(tipo):
+                slots.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "name_hint": f"{tipo}.csv",
+                        "max_bytes": 52_428_800,
+                        "content_types": ["text/csv"],
+                    }
+                )
+    return slots
+
+
 def build_envelope(
     job: Job,
     worker: WorkerEntry,
@@ -138,6 +172,7 @@ def build_envelope(
         "sealed": False,
         "sealed_section": None,
         "credentials": None,
+        "artifact_uploads": artifact_upload_slots(job),
         "force": bool(force),
         "assignment_expires_at": expires_at,
         "assignment_signature": "",
