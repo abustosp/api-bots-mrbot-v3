@@ -265,7 +265,7 @@ details > .details-body { padding: 0 14px 14px; }
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", `Bearer ${state.token}`);
     if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(path, { ...options, headers });
+    const response = await fetch(path, { cache: "no-store", ...options, headers });
     const text = await response.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { raw: text }; }
@@ -601,10 +601,28 @@ details > .details-body { padding: 0 14px 14px; }
   async function loadKeys(event) {
     if (event) event.preventDefault();
     const params = new URLSearchParams({ limit: "100" }); const q = $("#keys-q").value.trim(); const estado = $("#keys-state").value; if (q) params.set("q", q); if (estado) params.set("estado", estado);
-    try { const data = await api(`/admin/api-keys?${params}`); const rows = data.claves || []; $("#keys-table").innerHTML = rows.length ? rows.map((key) => `<tr><td><code>${esc(key.prefijo)}</code></td><td>${esc(key.usuario_email || "—")}</td><td>${esc((key.scopes || []).join(", ") || "—")}</td><td>${esc(key.expira_en || "—")}</td><td><span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${esc(key.estado)}</span></td><td>${esc(date(key.emitida_en))}</td><td class="actions"><button class="button secondary small" data-action="key-edit" data-id="${esc(key.id)}">Editar</button>${key.estado === "activa" ? `<button class="button danger small" data-action="key-revoke" data-id="${esc(key.id)}">Revocar</button>` : `<button class="button secondary small" data-action="key-restore" data-id="${esc(key.id)}">Restaurar</button>`}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay claves para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+    try { const data = await api(`/admin/api-keys?${params}`); const rows = data.claves || []; $("#keys-table").innerHTML = rows.length ? rows.map((key) => `<tr><td><code>${esc(key.prefijo)}</code></td><td>${esc(key.usuario_email || "—")}</td><td>${esc((key.scopes || []).join(", ") || "—")}</td><td>${esc(key.expira_en || "—")}</td><td><span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${esc(key.estado)}</span></td><td>${esc(date(key.emitida_en))}</td><td class="actions">${key.estado === "activa" ? `<button class="button primary small" data-action="key-replace" data-id="${esc(key.id)}" data-user="${esc(key.user_id)}" data-scopes="${esc(JSON.stringify(key.scopes || []))}">Reemplazar</button>` : ""}<button class="button secondary small" data-action="key-edit" data-id="${esc(key.id)}">Editar</button>${key.estado === "activa" ? `<button class="button danger small" data-action="key-revoke" data-id="${esc(key.id)}">Revocar</button>` : `<button class="button secondary small" data-action="key-restore" data-id="${esc(key.id)}">Restaurar</button>`}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay claves para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
   async function keyAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const keyId = button.dataset.id;
+    if (button.dataset.action === "key-replace") {
+      let newSecret = window.prompt("Ingresa una nueva API key (mínimo 3 caracteres). No se guardará en texto plano y solo se mostrará una vez:", "");
+      if (newSecret === null) return;
+      if (newSecret.trim().length < 3 || /\s/.test(newSecret.trim())) { flash("La API key debe tener al menos 3 caracteres y no contener espacios.", "error"); return; }
+      if (!window.confirm("Se emitirá una nueva clave y se revocará la actual. Confirma que tienes autorización y guardaste el valor en un lugar seguro.")) return;
+      const motivo = window.prompt("Motivo para reemplazar la clave (10-500 caracteres):", "rotación desde panel V3"); if (!motivo) return;
+      let issued = null;
+      try {
+        issued = await api(`/admin/users/${encodeURIComponent(button.dataset.user)}/api-keys/rotate`, { method: "POST", body: JSON.stringify({ key_id: keyId, periodo_gracia_horas: 0, motivo, valor_fijo: newSecret.trim() }) });
+        newSecret = "";
+        revealApiKey(issued.valor_unica_vez, "Nueva API key (se muestra una sola vez)");
+        flash("Clave reemplazada. Copia el secreto ahora: no es posible recuperarlo después.", "ok");
+        await loadKeys();
+      } catch (error) {
+        flash(`No se pudo completar la rotación: ${error.message}. La clave anterior continúa activa si la emisión fue rechazada.`, "error");
+      }
+      return;
+    }
     const motivo = window.prompt("Motivo del cambio (10-500 caracteres):", "cambio desde panel V3"); if (!motivo) return;
     try {
       if (button.dataset.action === "key-edit") {

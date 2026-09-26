@@ -241,6 +241,64 @@ def test_listar_editar_revocar_restaurar_claves(admin, monkeypatch) -> None:
     assert rehabilitada.status_code == 200
 
 
+def test_rotar_clave_personalizada_revoca_la_anterior_solo_si_emite(admin, monkeypatch) -> None:
+    monkeypatch.setenv("API_KEY_HMAC_SECRET", "secreto-servidor-test")
+    get_settings.cache_clear()
+
+    cliente = TestClient(create_app())
+    usuario = _crear_usuario(cliente, "rotacion@example.com").json()["usuario"]
+    inicial = cliente.post(
+        f"/admin/users/{usuario['id']}/api-keys",
+        json={
+            "scopes": ["jobs:create"],
+            "motivo": "emisión de clave inicial para rotación",
+            "valor_fijo": "clave-anterior",
+        },
+        headers=_headers(),
+    )
+    assert inicial.status_code == 201
+    key_id = inicial.json()["clave"]["id"]
+
+    rechazada = cliente.post(
+        f"/admin/users/{usuario['id']}/api-keys/rotate",
+        json={
+            "key_id": key_id,
+            "motivo": "rechazo por secreto demasiado corto",
+            "valor_fijo": "ab",
+        },
+        headers=_headers(),
+    )
+    assert rechazada.status_code == 400
+    assert admin.API_KEYS[key_id].revocada is False
+    assert cliente.get(
+        "/api/v3/bots", headers={"X-API-Key": "clave-anterior"}
+    ).status_code == 200
+
+    rotada = cliente.post(
+        f"/admin/users/{usuario['id']}/api-keys/rotate",
+        json={
+            "key_id": key_id,
+            "motivo": "rotación segura de clave por administrador",
+            "valor_fijo": "clave-nueva",
+        },
+        headers=_headers(),
+    )
+    assert rotada.status_code == 200
+    assert rotada.headers["cache-control"] == "private, no-store"
+    cuerpo = rotada.json()
+    assert cuerpo["valor_unica_vez"] == "clave-nueva"
+    assert cuerpo["revocada"] == key_id
+    assert admin.API_KEYS[key_id].revocada is True
+    nueva = admin.API_KEYS[cuerpo["clave"]["id"]]
+    assert nueva.scopes == ["jobs:create"]
+    assert cliente.get(
+        "/api/v3/bots", headers={"X-API-Key": "clave-anterior"}
+    ).status_code == 401
+    assert cliente.get(
+        "/api/v3/bots", headers={"X-API-Key": "clave-nueva"}
+    ).status_code == 200
+
+
 def test_clave_publica_y_custodia_rsa(monkeypatch) -> None:
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa

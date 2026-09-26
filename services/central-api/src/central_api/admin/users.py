@@ -232,6 +232,10 @@ class RotarClaveBody(BaseModel):
     key_id: str = ""
     periodo_gracia_horas: int = 0
     motivo: str = ""
+    valor_fijo: str = Field(
+        default="",
+        description="Nuevo valor opcional, mínimo 3 caracteres y sin espacios.",
+    )
 
 
 class AsignarPlanBody(BaseModel):
@@ -502,8 +506,13 @@ def rotar_clave_api(
     anterior = API_KEYS.get(body.key_id)
     if anterior is None or anterior.user_id != user_id:
         raise HTTPException(status_code=404, detail="clave anterior no encontrada")
+    # Emitir primero permite validar la clave nueva antes de revocar la actual.
+    # La operación queda en un único endpoint para que el panel no deje dos
+    # claves activas por un fallo entre requests.
+    meta, valor = emitir_clave(
+        user_id, anterior.scopes, anterior.expira_en, body.valor_fijo
+    )
     anterior.revocada = True
-    meta, valor = emitir_clave(user_id, anterior.scopes, anterior.expira_en)
     log_event(
         "user.api_key.rotated", actor_id=actor, target_type="api_key",
         target_id=meta.id, request_id=request_id or "", reason=motivo,

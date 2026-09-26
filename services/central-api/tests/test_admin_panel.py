@@ -55,6 +55,12 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert 'id="copy-issued-api-key"' in cuerpo
     assert 'id="clear-issued-api-key"' in cuerpo
     assert "revealApiKey(data.valor_unica_vez" in cuerpo
+    assert 'data-action="key-replace"' in cuerpo
+    assert "window.confirm(\"Se emitirá una nueva clave y se revocará la actual." in cuerpo
+    assert "/api-keys/rotate`" in cuerpo
+    assert "valor_fijo: newSecret.trim()" in cuerpo
+    assert "newSecret = \"\"" in cuerpo
+    assert 'cache: "no-store"' in cuerpo
     assert "navigator.clipboard.writeText(state.revealedApiKey)" in cuerpo
     assert "clearRevealedApiKey(); state.token = \"\"" in cuerpo
     assert 'if (view !== "users") clearRevealedApiKey();' in cuerpo

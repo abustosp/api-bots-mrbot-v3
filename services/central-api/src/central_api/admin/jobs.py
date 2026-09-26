@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
@@ -34,7 +35,7 @@ from central_api.security.rsa_credentials import (
     decrypt_configured_credential,
 )
 from central_api.settings import get_settings
-from central_api.store import JOBS, Job, utcnow
+from central_api.store import JOBS, WORKERS, Job, utcnow
 
 router = APIRouter()
 
@@ -292,19 +293,38 @@ async def _jobs_db() -> list | None:
 
 
 async def _conteo_estados_db() -> dict | None:
-    """Conteo de jobs por estado en PostgreSQL; ``None`` sin base."""
+    """Conteo de jobs por estado, excluyendo ejecuciones expiradas o stale.
+
+    ``CORRIENDO`` solo es operativo mientras conserve un lease vigente y el
+    worker haya enviado heartbeat dentro del umbral de caída. El resto de
+    estados mantiene el conteo histórico normal.
+    """
     if not db_configurado():
         return None
     try:
-        from sqlalchemy import func, select
+        from sqlalchemy import and_, func, or_, select
 
         from central_api.models.execution import Job
+        from central_api.models.fleet import Worker
     except Exception:  # noqa: BLE001 - sin modelos, solo memoria
         return None
     try:
+        now = utcnow()
+        worker_cutoff = now - timedelta(
+            seconds=get_settings().worker_down_after_seconds
+        )
         async with nueva_sesion() as sesion:
             filas = (await sesion.execute(
-                select(Job.status, func.count()).group_by(Job.status)
+                select(Job.status, func.count())
+                .outerjoin(Worker, Job.worker_id == Worker.id)
+                .where(or_(
+                    Job.status != "CORRIENDO",
+                    and_(
+                        Job.lease_expires_at > now,
+                        Worker.last_heartbeat_at >= worker_cutoff,
+                    ),
+                ))
+                .group_by(Job.status)
             )).all()
     except Exception:  # noqa: BLE001 - sin base, solo memoria
         return None
@@ -1270,10 +1290,23 @@ async def metricas_cola(authorization: str | None = Header(default=None)) -> dic
     conteo_db = await _conteo_estados_db()
     por_estado: dict[str, int] = dict(conteo_db) if conteo_db is not None else {}
     if conteo_db is None:
+        now = utcnow()
+        worker_cutoff = now - timedelta(
+            seconds=get_settings().worker_down_after_seconds
+        )
         for job in JOBS.values():
+            if job.status == "CORRIENDO":
+                worker = WORKERS.get(job.worker_node or "")
+                if (
+                    worker is None
+                    or worker.last_heartbeat_at is None
+                    or worker.last_heartbeat_at < worker_cutoff
+                ):
+                    continue
             por_estado[job.status] = por_estado.get(job.status, 0) + 1
     pendientes = por_estado.get("PENDIENTE", 0)
-    corriendo = por_estado.get("CORRIENDO", 0) + por_estado.get("ASIGNADO", 0)
+    # Asignado significa reservado, no necesariamente iniciado por el worker.
+    corriendo = por_estado.get("CORRIENDO", 0)
     return {
         "success": True,
         "por_estado": por_estado,
