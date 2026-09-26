@@ -7,6 +7,7 @@ lee configuracion de entorno ni conserva cookies fuera del contexto del job.
 from __future__ import annotations
 
 import base64
+import json
 import re
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -83,6 +84,108 @@ class ArcaServicePage:
             "no se pudo seleccionar el CUIT representado",
             diagnostic_code="represented_cuit_not_selectable",
         )
+
+    async def _esperar_mis_comprobantes(self) -> None:
+        """Espera la navegación AJAX sin bloquear el deadline del job."""
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=30_000)
+        except Exception:
+            # ARCA mantiene conexiones abiertas de telemetría. Los
+            # localizadores de la pantalla siguen siendo la señal útil.
+            pass
+
+    async def _abrir_tipo_comprobante(self, tipo: str) -> None:
+        nombre = (
+            "Comprobantes Emitidos"
+            if tipo == "emitidos"
+            else "Comprobantes Recibidos"
+        )
+        await self._esperar_mis_comprobantes()
+        await self._page.get_by_text(nombre, exact=True).click(timeout=15_000)
+        await self._esperar_mis_comprobantes()
+
+    async def _configurar_rango(self, desde: str, hasta: str) -> None:
+        await self._page.get_by_label("Fecha del Comprobante *").click()
+        campo_desde = self._page.locator("input[name='daterangepicker_start']")
+        campo_hasta = self._page.locator("input[name='daterangepicker_end']")
+        await campo_desde.click()
+        await campo_desde.fill(desde)
+        await campo_hasta.click()
+        await campo_hasta.fill(hasta)
+        await self._page.get_by_role("button", name="Aplicar").click()
+
+    async def _buscar(self) -> None:
+        await self._page.get_by_role("button", name="Buscar").click()
+        await self._esperar_mis_comprobantes()
+
+    async def _volver_menu_principal(self) -> None:
+        try:
+            await self._page.get_by_text("Menú Principal", exact=True).click(
+                timeout=10_000
+            )
+            await self._esperar_mis_comprobantes()
+        except Exception:
+            pass
+
+    async def descargar_csv(
+        self, tipo: str, destino: Any, desde: str, hasta: str
+    ) -> None:
+        """Descarga el CSV real de emitidos o recibidos a ``destino``."""
+        await self._abrir_tipo_comprobante(tipo)
+        await self._configurar_rango(desde, hasta)
+        await self._buscar()
+        async with self._page.expect_download(timeout=60_000) as descarga:
+            await self._page.get_by_role("button", name="CSV").click(
+                timeout=60_000
+            )
+        archivo = await descarga.value
+        await archivo.save_as(path=str(destino))
+        await self._volver_menu_principal()
+
+    async def solicitar_consulta(
+        self, tipo: str, desde: str, hasta: str
+    ) -> str:
+        """Solicita una consulta asíncrona y devuelve su ``idConsulta``."""
+        await self._abrir_tipo_comprobante(tipo)
+        await self._configurar_rango(desde, hasta)
+        codigo = "E" if tipo == "emitidos" else "R"
+        async with self._page.expect_response(
+            lambda response: (
+                "ajax.do?f=generarConsulta" in response.url
+                and f"&t={codigo}" in response.url
+            ),
+            timeout=60_000,
+        ) as respuesta:
+            await self._page.get_by_role("button", name="Buscar").click()
+        response = await respuesta.value
+        if response.status != 200:
+            raise TargetUnavailableError(
+                "ARCA rechazó la solicitud de Mis Comprobantes",
+                diagnostic_code="mis_comprobantes_query_rejected",
+            )
+        try:
+            body = json.loads(await response.text())
+        except (TypeError, ValueError) as exc:
+            raise TargetUnavailableError(
+                "ARCA devolvió una respuesta inválida",
+                diagnostic_code="mis_comprobantes_query_invalid_response",
+            ) from exc
+        datos = body.get("datos") if isinstance(body, dict) else None
+        consulta = datos if isinstance(datos, dict) else body
+        identificador = None
+        if isinstance(consulta, dict):
+            for clave in ("idConsulta", "id_consulta", "idConsultaAsync", "id"):
+                if consulta.get(clave):
+                    identificador = consulta[clave]
+                    break
+        if not identificador:
+            raise TargetUnavailableError(
+                "ARCA no devolvió el identificador de consulta",
+                diagnostic_code="mis_comprobantes_query_id_missing",
+            )
+        await self._esperar_mis_comprobantes()
+        await self._volver_menu_principal()
+        return str(identificador)
 
 
 class ArcaSession:
