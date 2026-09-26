@@ -22,7 +22,11 @@ WORKER_TIMEOUT_SECONDS = 10.0
 
 
 def worker_base_url(node: str) -> str:
-    return f"http://{node}"
+    address = str(node).strip()
+    if address.startswith(("http://", "https://")):
+        return address.rstrip("/")
+    scheme = "https" if address.rsplit(":", 1)[-1] == "443" else "http"
+    return f"{scheme}://{address}"
 
 
 def _limpio(valor: str) -> str | None:

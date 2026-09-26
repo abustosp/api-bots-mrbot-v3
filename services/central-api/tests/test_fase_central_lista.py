@@ -335,6 +335,19 @@ def test_dispatcher_firma_sobre_sin_bearer(entorno_limpio, monkeypatch):
     )
 
 
+def test_dispatcher_elige_https_para_worker_publico_443():
+    """Los workers anunciados en 443 se contactan por HTTPS."""
+    from central_api.scheduler.dispatcher import worker_base_url
+
+    assert worker_base_url("worker-2.mrbot.com.ar:443") == (
+        "https://worker-2.mrbot.com.ar:443"
+    )
+    assert worker_base_url("bot-worker:8080") == "http://bot-worker:8080"
+    assert worker_base_url("https://worker-2.mrbot.com.ar:443/") == (
+        "https://worker-2.mrbot.com.ar:443"
+    )
+
+
 def test_dispatcher_declara_slots_de_salida_por_bot(entorno_limpio):
     """CCMA y Mis Comprobantes reciben solo los slots que solicitaron."""
     from central_api.scheduler.dispatcher import build_envelope
