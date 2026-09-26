@@ -1,4 +1,4 @@
-"""Autenticación por HTTPBasic, HTTPBearer y usuario + key en headers (V1)."""
+"""Autenticación por HTTPBasic y usuario + key en headers (V1)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ sys.path.insert(0, str(SRC))
 
 from central_api.admin import users as admin_users  # noqa: E402
 from central_api.main import create_app  # noqa: E402
-from central_api.security.bearer import encode_bearer  # noqa: E402
 from central_api.settings import get_settings  # noqa: E402
 
 RUTA = "/api/v3/usuarios/me"
@@ -57,11 +56,14 @@ def test_basic_valido_e_invalido(cliente) -> None:
     assert cliente.get(RUTA, headers=_basic("metodos@example.com", "clave-otro")).status_code == 401
 
 
-def test_bearer_sigue_funcionando(cliente) -> None:
-    token = encode_bearer("metodos@example.com", "clave-metodos")
-    assert cliente.get(RUTA, headers={"Authorization": f"Bearer {token}"}).status_code == 200
-    malo = encode_bearer("otro@example.com", "clave-metodos")
-    assert cliente.get(RUTA, headers={"Authorization": f"Bearer {malo}"}).status_code == 401
+def test_bearer_ya_no_se_acepta(cliente) -> None:
+    token = ".".join(
+        base64.urlsafe_b64encode(v.encode()).decode() for v in ("metodos@example.com", "clave-metodos")
+    )
+    assert cliente.get(RUTA, headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert cliente.post(
+        "/api/v3/auth/token", json={"usuario": "metodos@example.com", "api_key": "clave-metodos"}
+    ).status_code in (404, 405)
 
 
 def test_headers_usuario_y_key_forma_v1(cliente) -> None:
@@ -80,13 +82,13 @@ def test_sin_credenciales_401(cliente) -> None:
     assert respuesta.status_code == 401
 
 
-def test_openapi_documenta_los_tres_metodos(cliente) -> None:
+def test_openapi_documenta_los_metodos(cliente) -> None:
     esquema = cliente.get("/openapi.json").json()
     schemes = esquema["components"]["securitySchemes"]
-    assert schemes["HTTPBearer"]["scheme"] == "bearer"
+    assert "HTTPBearer" not in schemes
     assert schemes["HTTPBasic"]["scheme"] == "basic"
     assert schemes["ApiKeyHeader"]["name"] == "X-API-Key"
     assert schemes["UserHeader"]["name"] == "email"
     seguridad = esquema["paths"]["/api/v3/jobs/cola"]["get"]["security"]
     nombres = {nombre for item in seguridad for nombre in item}
-    assert {"HTTPBearer", "HTTPBasic", "ApiKeyHeader", "UserHeader"} <= nombres
+    assert nombres == {"HTTPBasic", "ApiKeyHeader", "UserHeader"}

@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import base64
+
 from fastapi.testclient import TestClient
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -15,6 +17,11 @@ from central_api.admin.audit import AUDIT_LOG  # noqa: E402
 from central_api.main import create_app  # noqa: E402
 from central_api.settings import get_settings  # noqa: E402
 
+
+
+def _basic(usuario: str, api_key: str) -> dict:
+    token = base64.b64encode(f"{usuario}:{api_key}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
 
 def test_public_signup_disables_user_and_admin_can_enable_then_rotate(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -50,12 +57,9 @@ def test_public_signup_disables_user_and_admin_can_enable_then_rotate(monkeypatc
         )
         assert duplicate.status_code == 409
 
-        rejected = client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "new.user@example.com", "api_key": api_key},
-        )
+        rejected = client.get("/api/v3/usuarios/me", headers=_basic("new.user@example.com", api_key))
         assert rejected.status_code == 401
-        assert rejected.headers["www-authenticate"] == "Bearer"
+        assert rejected.headers["www-authenticate"] == "Basic"
 
         enabled = client.post(
             f"/admin/users/{user_id}/enable",
@@ -63,15 +67,9 @@ def test_public_signup_disables_user_and_admin_can_enable_then_rotate(monkeypatc
             json={"motivo": "Activar cuenta recién creada"},
         )
         assert enabled.status_code == 200
-        token_response = client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "NEW.USER@example.com", "api_key": api_key},
-        )
+        token_response = client.get("/api/v3/usuarios/me", headers=_basic("NEW.USER@example.com", api_key))
         assert token_response.status_code == 200
-        bearer = token_response.json()["access_token"]
-        personal = client.get(
-            "/api/v3/usuarios/me", headers={"Authorization": f"Bearer {bearer}"}
-        )
+        personal = token_response
         assert personal.status_code == 200
         assert personal.json()["estado"] == "habilitado"
         assert personal.json()["plan"] == "free"
@@ -87,15 +85,9 @@ def test_public_signup_disables_user_and_admin_can_enable_then_rotate(monkeypatc
         )
         assert changed.status_code == 200
         assert "otra-clave-segura" not in changed.text
-        old_token = client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "new.user@example.com", "api_key": api_key},
-        )
+        old_token = client.get("/api/v3/usuarios/me", headers=_basic("new.user@example.com", api_key))
         assert old_token.status_code == 401
-        new_token = client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "new.user@example.com", "api_key": "otra-clave-segura"},
-        )
+        new_token = client.get("/api/v3/usuarios/me", headers=_basic("new.user@example.com", "otra-clave-segura"))
         assert new_token.status_code == 200
         legacy = client.get(
             "/api/v3/mi/cuenta", headers={"X-API-Key": "otra-clave-segura"}
@@ -154,7 +146,7 @@ def test_public_reset_is_generic_and_set_key_rejects_wrong_current(monkeypatch) 
             },
         )
         assert invalid.status_code == 401
-        assert invalid.headers["www-authenticate"] == "Bearer"
+        assert invalid.headers["www-authenticate"] == "Basic"
     finally:
         admin_users.USERS.clear()
         admin_users.USERS.update(saved_users)
@@ -203,10 +195,7 @@ def test_public_reset_delivers_only_by_email_and_revokes_old_key(monkeypatch) ->
             json={"usuario": "email-reset@example.com"},
         )
         assert failed_reset.status_code == 202
-        assert client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "email-reset@example.com", "api_key": old_key},
-        ).status_code == 200
+        assert client.get("/api/v3/usuarios/me", headers=_basic("email-reset@example.com", old_key)).status_code == 200
 
         monkeypatch.setattr(
             "central_api.api.users.enviar_credenciales_email", capture_email
@@ -222,14 +211,8 @@ def test_public_reset_delivers_only_by_email_and_revokes_old_key(monkeypatch) ->
         new_key = delivered[0][1]
         assert old_key != new_key
         assert new_key not in reset.text
-        assert client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "email-reset@example.com", "api_key": old_key},
-        ).status_code == 401
-        assert client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "email-reset@example.com", "api_key": new_key},
-        ).status_code == 200
+        assert client.get("/api/v3/usuarios/me", headers=_basic("email-reset@example.com", old_key)).status_code == 401
+        assert client.get("/api/v3/usuarios/me", headers=_basic("email-reset@example.com", new_key)).status_code == 200
     finally:
         admin_users.USERS.clear()
         admin_users.USERS.update(saved_users)

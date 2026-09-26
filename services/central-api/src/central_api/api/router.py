@@ -3,7 +3,6 @@
 from fastapi import APIRouter
 
 from central_api.api.account import router as account_router
-from central_api.api.auth import router as auth_router
 from central_api.api.billing import router as billing_router
 from central_api.api.bot_compat import router as bot_compat_router
 from central_api.api.bot_routes import router as bot_routes_router
@@ -15,7 +14,6 @@ from central_api.api.users import router as users_router
 from central_api.api.utilities import router as utilities_router
 
 router = APIRouter()
-router.include_router(auth_router)
 router.include_router(users_router)
 router.include_router(bots_router, tags=["bots"])
 router.include_router(bot_routes_router)

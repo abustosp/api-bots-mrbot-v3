@@ -3,7 +3,14 @@
 Documento de coordinación del swarm. Todos los agentes lo respetan; los cambios
 de contrato se piden al coordinador (elephant), no se improvisan.
 
-## 1. Autenticación Bearer (agente AUTH)
+## 1. Autenticación (actualizado)
+
+> Actualización: el esquema HTTPBearer `b64(usuario).b64(api_key)` y el
+> endpoint `POST /api/v3/auth/token` fueron retirados a pedido del usuario.
+> Métodos vigentes: HTTPBasic (usuario:api_key) y headers `email` + `X-API-Key`
+> (forma V1; `X-API-Key` sola se mantiene por compatibilidad V3).
+
+Texto original (histórico):
 
 - Header normativo: `Authorization: Bearer <token>`.
 - `token = base64url(usuario) + "." + base64url(api_key)`, UTF-8, se acepta con o

@@ -1,4 +1,4 @@
-"""Pruebas de autenticación Bearer y compatibilidad de API keys."""
+"""Pruebas de autenticación HTTPBasic, headers V1 y rechazo de Bearer."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from central_api.api.dependencies import _principal_desde_pg  # noqa: E402
 from central_api.main import create_app  # noqa: E402
 from central_api.models.identity import User  # noqa: E402
 from central_api.security import sign_secret  # noqa: E402
-from central_api.security.bearer import decode_bearer, encode_bearer  # noqa: E402
 from central_api.settings import get_settings  # noqa: E402
 
 
@@ -34,15 +33,9 @@ def _active_user(email: str, key: str) -> str:
     return user_id
 
 
-def test_bearer_helper_round_trip_padding_utf8_and_standard_base64() -> None:
-    encoded = encode_bearer("Mí@Ejemplo.com", "clave+/ñ")
-    assert decode_bearer(encoded) == ("Mí@Ejemplo.com", "clave+/ñ")
-
-    standard = ".".join(
-        base64.b64encode(part.encode("utf-8")).decode("ascii")
-        for part in ("usuario@example.com", "api/clave+1")
-    )
-    assert decode_bearer(standard) == ("usuario@example.com", "api/clave+1")
+def _basic(usuario: str, key: str) -> dict:
+    token = base64.b64encode(f"{usuario}:{key}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
 
 
 def test_postgres_principal_requires_enabled_matching_owner(monkeypatch) -> None:
@@ -92,7 +85,7 @@ def test_postgres_principal_requires_enabled_matching_owner(monkeypatch) -> None
     assert asyncio.run(validate("pg-user@example.com")) is None
 
 
-def test_auth_token_bearer_owner_validation_and_x_api_key_compat(monkeypatch) -> None:
+def test_basic_owner_validation_bearer_rejected_and_x_api_key_compat(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("API_KEY_HMAC_SECRET", "bearer-auth-test-secret")
     get_settings.cache_clear()
@@ -106,26 +99,9 @@ def test_auth_token_bearer_owner_validation_and_x_api_key_compat(monkeypatch) ->
         _active_user("case@example.com", key)
         client = TestClient(create_app())
 
-        exchanged = client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "CASE@example.com", "api_key": key},
-        )
-        assert exchanged.status_code == 200
-        assert exchanged.headers["cache-control"] == "no-store"
-        body = exchanged.json()
-        assert body["token_type"] == "bearer"
-        assert body["usuario"] == "case@example.com"
-        bearer = body["access_token"]
-
-        private = client.get(
-            "/api/v3/mi/cuenta",
-            headers={"Authorization": f"Bearer {bearer}"},
-        )
+        private = client.get("/api/v3/mi/cuenta", headers=_basic("CASE@example.com", key))
         assert private.status_code == 200
-        personal = client.get(
-            "/api/v3/usuarios/me",
-            headers={"Authorization": f"Bearer {bearer}"},
-        )
+        personal = client.get("/api/v3/usuarios/me", headers=_basic("case@example.com", key))
         assert personal.status_code == 200
         assert personal.json()["usuario"] == "case@example.com"
         assert personal.json()["estado"] == "habilitado"
@@ -133,17 +109,21 @@ def test_auth_token_bearer_owner_validation_and_x_api_key_compat(monkeypatch) ->
         legacy = client.get("/api/v3/mi/cuenta", headers={"X-API-Key": key})
         assert legacy.status_code == 200
 
-        wrong_owner = client.post(
-            "/api/v3/auth/token",
-            json={"usuario": "otro@example.com", "api_key": key},
+        # El endpoint generador de tokens y el esquema Bearer ya no existen.
+        assert client.post(
+            "/api/v3/auth/token", json={"usuario": "case@example.com", "api_key": key}
+        ).status_code in (404, 405)
+        token = ".".join(
+            base64.urlsafe_b64encode(v.encode()).decode() for v in ("case@example.com", key)
         )
-        invalid = client.get(
-            "/api/v3/mi/cuenta",
-            headers={"Authorization": f"Bearer {encode_bearer('case@example.com', 'bad-key')}"},
-        )
+        bearer = client.get("/api/v3/mi/cuenta", headers={"Authorization": f"Bearer {token}"})
+        assert bearer.status_code == 401
+
+        wrong_owner = client.get("/api/v3/mi/cuenta", headers=_basic("otro@example.com", key))
+        invalid = client.get("/api/v3/mi/cuenta", headers=_basic("case@example.com", "bad-key"))
         assert wrong_owner.status_code == invalid.status_code == 401
-        assert wrong_owner.headers["www-authenticate"] == "Bearer"
-        assert invalid.headers["www-authenticate"] == "Bearer"
+        assert wrong_owner.headers["www-authenticate"] == "Basic"
+        assert invalid.headers["www-authenticate"] == "Basic"
         assert wrong_owner.json()["detail"] == invalid.json()["detail"]
     finally:
         admin_users.USERS.clear()
@@ -154,21 +134,20 @@ def test_auth_token_bearer_owner_validation_and_x_api_key_compat(monkeypatch) ->
         get_settings.cache_clear()
 
 
-def test_openapi_protected_operations_advertise_http_bearer(monkeypatch) -> None:
+def test_openapi_protected_operations_advertise_basic_and_v1_headers(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     get_settings.cache_clear()
     try:
         client = TestClient(create_app())
         schema = client.get("/openapi.json").json()
-        bearer = schema["components"]["securitySchemes"]["HTTPBearer"]
-        assert bearer["type"] == "http"
-        assert bearer["scheme"] == "bearer"
-        assert bearer["bearerFormat"] == "b64(usuario).b64(api_key)"
+        schemes = schema["components"]["securitySchemes"]
+        assert "HTTPBearer" not in schemes
+        assert schemes["HTTPBasic"]["scheme"] == "basic"
         security = schema["paths"]["/api/v3/mi/cuenta"]["get"]["security"]
-        assert {"HTTPBearer": []} in security
         assert {"HTTPBasic": []} in security
         assert {"ApiKeyHeader": []} in security
-        assert "security" not in schema["paths"]["/api/v3/auth/token"]["post"]
+        assert all("HTTPBearer" not in item for item in security)
+        assert "/api/v3/auth/token" not in schema["paths"]
         assert "Authorize" in schema["info"]["description"]
         docs = client.get("/docs")
         assert docs.status_code == 200

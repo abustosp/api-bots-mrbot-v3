@@ -27,14 +27,11 @@ from fastapi import Header, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
 from fastapi.security import (
     APIKeyHeader,
-    HTTPAuthorizationCredentials,
     HTTPBasic,
     HTTPBasicCredentials,
-    HTTPBearer,
 )
 
 from central_api.security.api_keys import parse_api_key, verify_presented_secret
-from central_api.security.bearer import decode_bearer
 from central_api.security.principals import ANONYMOUS_USER_ID, ApiPrincipal
 from central_api.security.secret_redaction import public_error
 from central_api.settings import get_settings
@@ -42,17 +39,6 @@ from central_api.settings import get_settings
 # Registro de idempotencia en memoria (en PG: tabla con UNIQUE + retención
 # IDEMPOTENCY_RETENTION_DAYS, reutilizable tras estado terminal, S-2).
 IDEMPOTENCY: dict[tuple[str, str], dict] = {}
-
-bearer_scheme = HTTPBearer(
-    scheme_name="HTTPBearer",
-    bearerFormat="b64(usuario).b64(api_key)",
-    description=(
-        "Token base64url(usuario).base64url(api_key). Se obtiene con "
-        "POST /api/v3/auth/token. Alternativas: HTTPBasic o headers "
-        "email + X-API-Key (forma V1)."
-    ),
-    auto_error=False,
-)
 
 basic_scheme = HTTPBasic(
     scheme_name="HTTPBasic",
@@ -104,7 +90,7 @@ def _no_autorizado() -> HTTPException:
     return HTTPException(
         status_code=401,
         detail=public_error("authentication")["detail"],
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={"WWW-Authenticate": "Basic"},
     )
 
 
@@ -247,7 +233,7 @@ def _selector_y_secreto(api_key: str) -> tuple[str, str]:
 async def authenticate_api_key(
     identidad: str | None, api_key: str
 ) -> ApiPrincipal | None:
-    """Valida clave, propietario, vigencia y estado para tokens Bearer o login."""
+    """Valida clave, propietario, vigencia y estado para Basic o headers V1."""
     from central_api.db import db_configurado
 
     if not api_key:
@@ -283,16 +269,14 @@ async def authenticate_api_key(
 
 async def require_api_principal(
     request: Request,
-    bearer_credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
     basic_credentials: HTTPBasicCredentials | None = Security(basic_scheme),
     x_api_key: str | None = Security(api_key_header_scheme),
     email: str | None = Security(email_header_scheme),
 ) -> ApiPrincipal:
-    """Autentica al cliente por cualquiera de los tres métodos admitidos.
+    """Autentica al cliente por cualquiera de los dos métodos admitidos.
 
-    1. ``Authorization: Bearer b64(usuario).b64(api_key)``.
-    2. ``Authorization: Basic b64(usuario:api_key)``.
-    3. Headers ``email`` + ``X-API-Key`` (forma V1). ``X-API-Key`` sin
+    1. ``Authorization: Basic b64(usuario:api_key)``.
+    2. Headers ``email`` + ``X-API-Key`` (forma V1). ``X-API-Key`` sin
        ``email`` se conserva por compatibilidad con clientes V3 previos.
 
     Orden de verificación: PostgreSQL cuando hay secreto + base; fallback en
@@ -310,19 +294,9 @@ async def require_api_principal(
             return principal
         raise _no_autorizado()
 
-    if bearer_credentials is not None:
-        try:
-            identidad, api_key = decode_bearer(bearer_credentials.credentials)
-        except ValueError:
-            raise _no_autorizado() from None
-        principal = await authenticate_api_key(identidad, api_key)
-        if principal is not None:
-            return principal
-        raise _no_autorizado()
-
     if authorization:
-        # No degradar Authorization mal formado a la autenticación abierta de
-        # desarrollo cuando el esquema HTTP no es Bearer.
+        # Cualquier otro esquema (incluido Bearer) se rechaza: no se degrada a
+        # la autenticación abierta de desarrollo.
         raise _no_autorizado()
 
     if x_api_key:
