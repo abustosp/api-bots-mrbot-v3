@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from bot_worker.bots.errors import ArtifactUploadError, ErrorDeBot
 from bot_worker.bots.registry import get_plugin
 from bot_worker.config import PROTOCOL_VERSION, WorkerConfig, WorkerSettings, parse_args
+from bot_worker.schemas import BotSchemaDocument, get_schema_document
 from bot_worker.reporting.central import (
     PresignError,
     request_presign,
@@ -573,6 +574,36 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         # Liveness minima: sin auth y sin dependencias externas.
         return {"status": "ok"}
+
+    @app.get(
+        "/internal/v1/bots/{bot}/{operation}/schema",
+        response_model=BotSchemaDocument,
+        summary="Schema documental de una operación de bot",
+        description=(
+            "Devuelve el JSON Schema del body plano V1, los campos de "
+            "credenciales y ejemplos documentales en formato OpenAPI. "
+            "No crea ni asigna jobs."
+        ),
+        tags=["schemas"],
+        responses={
+            200: {
+                "description": "Schema de request y ejemplos documentales, sin credenciales reales.",
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "ccma_consultar": {
+                                "summary": "Schema de ejemplo para CCMA",
+                                "description": "La respuesta real contiene el modelo de la pareja bot/operación solicitada.",
+                                "value": get_schema_document("ccma", "consultar"),
+                            }
+                        }
+                    }
+                },
+            }
+        },
+    )
+    async def bot_schema(bot: str, operation: str) -> dict[str, Any]:
+        return get_schema_document(bot, operation)
 
     # ------------------------------------------------------------ asignar ---
     @app.post("/internal/v1/jobs", status_code=202)

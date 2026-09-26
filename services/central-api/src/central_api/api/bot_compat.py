@@ -1,25 +1,20 @@
-"""Aliases de compatibilidad para las rutas de bots de V2.
+"""Compatibilidad para las rutas históricas de bots de V1/V2.
 
-La superficie normativa V3 es ``/bots/{bot}/{operacion}``, pero algunos
-clientes todavía consumen las rutas por bot de V2. Estos aliases no ejecutan
-plugins ni llaman workers directamente: traducen el path al manifiesto V3 y
-reutilizan exactamente el mismo submitter, scheduler, idempotencia y ownership.
-Los uploads grandes siguen el flujo V3 de ``/uploads`` con object keys
-prefirmadas. Un multipart proxificado no se copia a memoria de la central.
+Las rutas por operación se generan ahora en :mod:`bot_routes`, que reutiliza
+la misma tabla de aliases y el mismo submitter. Este módulo conserva el parser
+plano usado por esos endpoints, así como el GET histórico de APOC.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from central_api.api.bot_payloads import public_bot_compat_body_schema
-from central_api.api.bots import CreateJobResponse, OPERATIONS, submit_job
+from central_api.api.bots import submit_job
 from central_api.api.dependencies import require_api_principal
-from central_api.api.jobs import CancelBody, JobStatusResponse, cancel_job, get_job
 from central_api.security.principals import ApiPrincipal
 
 router = APIRouter()
@@ -32,8 +27,8 @@ _V2_SECRET_FIELDS = {
 }
 
 
-# V2 generated routes mapped to the canonical V3 bot and operation. The list
-# intentionally lives in one adapter instead of recreating one router per bot.
+# (path V1, bot canónico, operación canónica). La tabla también define los
+# prefijos y paths de operación de los routers generados en bot_routes.py.
 BOT_ROUTE_ALIASES: tuple[tuple[str, str, str], ...] = (
     ("/mis_comprobantes/consulta", "mis_comprobantes", "consultar"),
     ("/mis_comprobantes/solicitar_consulta", "mis_comprobantes", "solicitar"),
@@ -103,12 +98,7 @@ def _bad_payload(message: str) -> JSONResponse:
 
 
 async def _decode_payload(request: Request) -> tuple[dict, dict] | JSONResponse:
-    """Lee JSON V3 o campos simples de formulario sin proxificar archivos.
-
-    Un archivo recibido por multipart no se copia ni se conserva en la
-    central. El cliente debe pedir un ticket en ``POST /uploads`` y enviar el
-    ``object_key`` en el JSON del job.
-    """
+    """Lee JSON plano/envelope o formulario sin proxificar archivos."""
     content_type = request.headers.get("content-type", "").lower()
     if "application/json" in content_type or not content_type:
         try:
@@ -160,123 +150,7 @@ async def _decode_payload(request: Request) -> tuple[dict, dict] | JSONResponse:
     return _bad_payload("Content-Type no soportado. Use application/json.")
 
 
-def _create_handler(bot: str, operacion: str) -> Callable[..., Awaitable[JSONResponse]]:
-    async def create_compat_job(
-        request: Request,
-        principal: ApiPrincipal = Depends(require_api_principal),
-        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    ) -> JSONResponse:
-        decoded = await _decode_payload(request)
-        if isinstance(decoded, JSONResponse):
-            return decoded
-        payload, credentials = decoded
-        return await submit_job(
-            bot=bot,
-            operacion=operacion,
-            payload=payload,
-            credentials=credentials,
-            request=request,
-            principal=principal,
-            idempotency_key=idempotency_key,
-        )
-
-    create_compat_job.__name__ = f"create_{bot}_{operacion}_compat"
-    return create_compat_job
-
-
-def _status_handler() -> Callable[..., Awaitable[JSONResponse]]:
-    async def status_compat_job(
-        job_id: str,
-        principal: ApiPrincipal = Depends(require_api_principal),
-    ) -> JSONResponse:
-        return await get_job(job_id, principal)
-
-    status_compat_job.__name__ = "status_compat_job"
-    return status_compat_job
-
-
-def _cancel_handler() -> Callable[..., Awaitable[JSONResponse]]:
-    async def cancel_compat_job(
-        job_id: str,
-        request: Request,
-        principal: ApiPrincipal = Depends(require_api_principal),
-    ) -> JSONResponse:
-        motivo = "cancelado desde alias V2"
-        if request.headers.get("content-type", "").startswith("application/json"):
-            try:
-                raw = await request.json()
-            except (ValueError, json.JSONDecodeError):
-                raw = {}
-            if isinstance(raw, dict):
-                motivo = str(raw.get("motivo") or motivo)[:500]
-        return cancel_job(job_id, CancelBody(motivo=motivo), principal)
-
-    cancel_compat_job.__name__ = "cancel_compat_job"
-    return cancel_compat_job
-
-
-def _register_routes() -> None:
-    status_handler = _status_handler()
-    cancel_handler = _cancel_handler()
-    for route_path, bot, operacion in BOT_ROUTE_ALIASES:
-        if (bot, operacion) not in OPERATIONS:
-            raise RuntimeError(
-                f"alias de bot sin operación canónica: {route_path} -> {bot}/{operacion}"
-            )
-        router.add_api_route(
-            route_path,
-            _create_handler(bot, operacion),
-            methods=["POST"],
-            status_code=202,
-            response_model=CreateJobResponse,
-            openapi_extra={
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": public_bot_compat_body_schema(
-                                bot,
-                                operacion,
-                                route_path=route_path,
-                            ),
-                        }
-                    },
-                }
-            },
-            name=f"compat_{bot}_{operacion}_create",
-            tags=["bots-compatibilidad"],
-        )
-        router.add_api_route(
-            f"{route_path}/{{job_id}}",
-            status_handler,
-            methods=["GET"],
-            response_model=JobStatusResponse,
-            name=f"compat_{bot}_{operacion}_status",
-            tags=["bots-compatibilidad"],
-        )
-        router.add_api_route(
-            f"{route_path}/cancelar/{{job_id}}",
-            cancel_handler,
-            methods=["POST"],
-            response_model=JobStatusResponse,
-            openapi_extra={
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": CancelBody.model_json_schema(),
-                        }
-                    }
-                }
-            },
-            name=f"compat_{bot}_{operacion}_cancel",
-            tags=["bots-compatibilidad"],
-        )
-
-
-_register_routes()
-
-
-@router.get("/apoc/consulta/{cuit}", status_code=202, tags=["bots-compatibilidad"])
+@router.get("/apoc/consulta/{cuit}", status_code=202, tags=["apoc"])
 async def apoc_compat_get(
     cuit: str,
     request: Request,

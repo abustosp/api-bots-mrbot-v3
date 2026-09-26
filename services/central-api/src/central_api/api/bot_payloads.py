@@ -309,6 +309,7 @@ _V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
     "cuit_representante": _string(pattern=CUIT),
     "cuit_representado": _string(pattern=CUIT),
     "cuit_inicio_sesion": _string(pattern=CUIT),
+    "cuit_login": _string(pattern=CUIT),
     "clave": _string(max_length=4096),
     "clave_representante": _string(max_length=4096),
     "contrasena": _string(max_length=4096),
@@ -544,7 +545,7 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
         return "clave_fiscal"
     if field_name == "clave_encriptada":
         return "BASE64_RSA_OAEP_CIPHERTEXT"
-    if field_name in {"cuit_representante", "cuit_representado", "cuit_inicio_sesion"}:
+    if field_name in {"cuit_representante", "cuit_representado", "cuit_inicio_sesion", "cuit_login"}:
         return "20123456789"
     if field_name in {"desde", "hasta"}:
         return "01/08/2026"

@@ -42,6 +42,11 @@ def _documentation_app(*, include_private: bool) -> FastAPI:
     docs = FastAPI(
         title="central-api",
         version=APP_VERSION,
+        description=(
+            "Autenticación de clientes mediante Authorization: Bearer. "
+            "Obtén un token con POST /api/v3/auth/token y usa Authorize en Swagger. "
+            "X-API-Key permanece disponible temporalmente como compatibilidad deprecated."
+        ),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

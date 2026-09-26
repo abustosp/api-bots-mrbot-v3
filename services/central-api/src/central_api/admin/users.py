@@ -410,7 +410,35 @@ def ver_usuario(user_id: str, authorization: str | None = Header(default=None)) 
     }
 
 
-def _cambiar_estado(
+async def _persistir_estado_pg(user_id: str, estado: str) -> None:
+    """Mantiene ``users.habilitado`` y sus claves alineados con el panel."""
+    from uuid import UUID
+
+    from sqlalchemy import func, update
+
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey, User
+
+    if not db_configurado():
+        return
+    try:
+        user_uuid = UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        return
+    async with nueva_sesion() as sesion:
+        usuario_pg = await sesion.get(User, user_uuid)
+        if usuario_pg is None:
+            return
+        usuario_pg.habilitado = estado == "habilitado"
+        if estado == "deshabilitado":
+            await sesion.execute(
+                update(ApiKey)
+                .where(ApiKey.user_id == user_uuid, ApiKey.revoked_at.is_(None))
+                .values(revoked_at=func.current_timestamp())
+            )
+
+
+async def _cambiar_estado(
     user_id: str, estado: str, motivo_raw: str, actor: str, request_id: str,
     accion: str,
 ) -> dict:
@@ -418,6 +446,10 @@ def _cambiar_estado(
     usuario = USERS.get(user_id)
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
+    try:
+        await _persistir_estado_pg(user_id, estado)
+    except Exception:  # noqa: BLE001 - no exponer conexión ni detalles internos
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
     anterior = usuario.estado
     usuario.estado = estado
     usuario.motivo = motivo
@@ -434,7 +466,7 @@ def _cambiar_estado(
 
 
 @router.post("/users/{user_id}/enable")
-def habilitar_usuario(
+async def habilitar_usuario(
     user_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
@@ -442,11 +474,13 @@ def habilitar_usuario(
 ) -> dict:
     """Habilita un usuario con motivo y evento auditado."""
     actor = require_admin(authorization)
-    return _cambiar_estado(user_id, "habilitado", body.motivo, actor, request_id or "", "user.enabled")
+    return await _cambiar_estado(
+        user_id, "habilitado", body.motivo, actor, request_id or "", "user.enabled"
+    )
 
 
 @router.post("/users/{user_id}/disable")
-def deshabilitar_usuario(
+async def deshabilitar_usuario(
     user_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
@@ -454,7 +488,7 @@ def deshabilitar_usuario(
 ) -> dict:
     """Deshabilita un usuario, revoca sus claves y bloquea nuevos jobs."""
     actor = require_admin(authorization)
-    return _cambiar_estado(
+    return await _cambiar_estado(
         user_id, "deshabilitado", body.motivo, actor, request_id or "", "user.disabled"
     )
 

@@ -1,0 +1,182 @@
+"""Pruebas de autenticación Bearer y compatibilidad de API keys."""
+
+from __future__ import annotations
+
+import base64
+import asyncio
+from contextlib import asynccontextmanager
+import sys
+import uuid
+from pathlib import Path
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SRC))
+
+from central_api.admin import users as admin_users  # noqa: E402
+from central_api.admin.audit import AUDIT_LOG  # noqa: E402
+from central_api.api.dependencies import _principal_desde_pg  # noqa: E402
+from central_api.main import create_app  # noqa: E402
+from central_api.models.identity import User  # noqa: E402
+from central_api.security import sign_secret  # noqa: E402
+from central_api.security.bearer import decode_bearer, encode_bearer  # noqa: E402
+from central_api.settings import get_settings  # noqa: E402
+
+
+def _active_user(email: str, key: str) -> str:
+    user_id = str(uuid.uuid4())
+    admin_users.USERS[user_id] = admin_users.AdminUser(
+        id=user_id, email=email, display_name="Test", estado="habilitado"
+    )
+    admin_users.emitir_clave(user_id, [], "", key)
+    return user_id
+
+
+def test_bearer_helper_round_trip_padding_utf8_and_standard_base64() -> None:
+    encoded = encode_bearer("Mí@Ejemplo.com", "clave+/ñ")
+    assert decode_bearer(encoded) == ("Mí@Ejemplo.com", "clave+/ñ")
+
+    standard = ".".join(
+        base64.b64encode(part.encode("utf-8")).decode("ascii")
+        for part in ("usuario@example.com", "api/clave+1")
+    )
+    assert decode_bearer(standard) == ("usuario@example.com", "api/clave+1")
+
+
+def test_postgres_principal_requires_enabled_matching_owner(monkeypatch) -> None:
+    key_id = "db-key-selector"
+    api_secret = "persisted-api-secret"
+    account_id = uuid.uuid4()
+    key_row = SimpleNamespace(
+        verifier_hmac=sign_secret("db-hmac-secret", api_secret),
+        user_id=account_id,
+        scopes=[],
+    )
+    account = SimpleNamespace(
+        id=account_id, email="pg-user@example.com", habilitado=True
+    )
+
+    class Result:
+        def scalar_one_or_none(self):
+            return key_row
+
+    class Session:
+        async def execute(self, _statement):
+            return Result()
+
+        async def get(self, model, _identity):
+            assert model is User
+            return account
+
+    @asynccontextmanager
+    async def fake_session():
+        yield Session()
+
+    import central_api.db
+
+    monkeypatch.setattr(central_api.db, "nueva_sesion", fake_session)
+
+    async def validate(identity: str | None):
+        return await _principal_desde_pg(
+            "db-hmac-secret", key_id, api_secret, identity
+        )
+
+    principal = asyncio.run(validate("PG-USER@example.com"))
+    assert principal is not None
+    assert principal.user_id == str(account_id)
+    assert asyncio.run(validate("someone-else@example.com")) is None
+
+    account.habilitado = False
+    assert asyncio.run(validate("pg-user@example.com")) is None
+
+
+def test_auth_token_bearer_owner_validation_and_x_api_key_compat(monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("API_KEY_HMAC_SECRET", "bearer-auth-test-secret")
+    get_settings.cache_clear()
+    saved_users = dict(admin_users.USERS)
+    saved_keys = dict(admin_users.API_KEYS)
+    saved_audit = list(AUDIT_LOG)
+    admin_users.USERS.clear()
+    admin_users.API_KEYS.clear()
+    try:
+        key = "api/key+legacy"
+        _active_user("case@example.com", key)
+        client = TestClient(create_app())
+
+        exchanged = client.post(
+            "/api/v3/auth/token",
+            json={"usuario": "CASE@example.com", "api_key": key},
+        )
+        assert exchanged.status_code == 200
+        assert exchanged.headers["cache-control"] == "no-store"
+        body = exchanged.json()
+        assert body["token_type"] == "bearer"
+        assert body["usuario"] == "case@example.com"
+        bearer = body["access_token"]
+
+        private = client.get(
+            "/api/v3/mi/cuenta",
+            headers={"Authorization": f"Bearer {bearer}"},
+        )
+        assert private.status_code == 200
+        personal = client.get(
+            "/api/v3/usuarios/me",
+            headers={"Authorization": f"Bearer {bearer}"},
+        )
+        assert personal.status_code == 200
+        assert personal.json()["usuario"] == "case@example.com"
+        assert personal.json()["estado"] == "habilitado"
+
+        legacy = client.get("/api/v3/mi/cuenta", headers={"X-API-Key": key})
+        assert legacy.status_code == 200
+
+        wrong_owner = client.post(
+            "/api/v3/auth/token",
+            json={"usuario": "otro@example.com", "api_key": key},
+        )
+        invalid = client.get(
+            "/api/v3/mi/cuenta",
+            headers={"Authorization": f"Bearer {encode_bearer('case@example.com', 'bad-key')}"},
+        )
+        assert wrong_owner.status_code == invalid.status_code == 401
+        assert wrong_owner.headers["www-authenticate"] == "Bearer"
+        assert invalid.headers["www-authenticate"] == "Bearer"
+        assert wrong_owner.json()["detail"] == invalid.json()["detail"]
+    finally:
+        admin_users.USERS.clear()
+        admin_users.USERS.update(saved_users)
+        admin_users.API_KEYS.clear()
+        admin_users.API_KEYS.update(saved_keys)
+        AUDIT_LOG[:] = saved_audit
+        get_settings.cache_clear()
+
+
+def test_openapi_protected_operations_advertise_http_bearer(monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    get_settings.cache_clear()
+    try:
+        client = TestClient(create_app())
+        schema = client.get("/openapi.json").json()
+        bearer = schema["components"]["securitySchemes"]["HTTPBearer"]
+        assert bearer["type"] == "http"
+        assert bearer["scheme"] == "bearer"
+        assert bearer["bearerFormat"] == "b64(usuario).b64(api_key)"
+        assert schema["paths"]["/api/v3/mi/cuenta"]["get"]["security"] == [
+            {"HTTPBearer": []}
+        ]
+        legacy_header = next(
+            parameter
+            for parameter in schema["paths"]["/api/v3/mi/cuenta"]["get"]["parameters"]
+            if parameter["name"] == "X-API-Key"
+        )
+        assert legacy_header["deprecated"] is True
+        assert "security" not in schema["paths"]["/api/v3/auth/token"]["post"]
+        assert "Authorize" in schema["info"]["description"]
+        docs = client.get("/docs")
+        assert docs.status_code == 200
+        assert "/openapi.json" in docs.text
+    finally:
+        get_settings.cache_clear()

@@ -18,14 +18,17 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import uuid
 from dataclasses import dataclass
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Header, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from central_api.security.api_keys import parse_api_key, verify_presented_secret
+from central_api.security.bearer import decode_bearer
 from central_api.security.principals import ANONYMOUS_USER_ID, ApiPrincipal
 from central_api.security.secret_redaction import public_error
 from central_api.settings import get_settings
@@ -33,6 +36,16 @@ from central_api.settings import get_settings
 # Registro de idempotencia en memoria (en PG: tabla con UNIQUE + retención
 # IDEMPOTENCY_RETENTION_DAYS, reutilizable tras estado terminal, S-2).
 IDEMPOTENCY: dict[tuple[str, str], dict] = {}
+
+bearer_scheme = HTTPBearer(
+    scheme_name="HTTPBearer",
+    bearerFormat="b64(usuario).b64(api_key)",
+    description=(
+        "Token base64url(usuario).base64url(api_key). El header X-API-Key "
+        "sigue aceptado temporalmente por compatibilidad, pero está deprecated."
+    ),
+    auto_error=False,
+)
 
 
 def correlation_id(request: Request) -> str:
@@ -64,11 +77,12 @@ def _no_autorizado() -> HTTPException:
     return HTTPException(
         status_code=401,
         detail=public_error("authentication")["detail"],
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
 
 async def _principal_desde_pg(
-    hmac_secret: str, key_id: str, secret: str
+    hmac_secret: str, key_id: str, secret: str, identidad: str | None = None
 ) -> ApiPrincipal | None:
     """Verifica la key contra PostgreSQL; ``None`` si no autentica.
 
@@ -98,8 +112,10 @@ async def _principal_desde_pg(
             return None
         if fila is None:
             return None  # dummy comparado: no existe, sin oráculo
-        usuario = await sesion.get(User, fila.user_id)
-        if usuario is None or not usuario.habilitado:
+        cuenta = await sesion.get(User, fila.user_id)
+        if cuenta is None or not cuenta.habilitado:
+            return None
+        if identidad is not None and cuenta.email.strip().casefold() != identidad.strip().casefold():
             return None
         scopes = list(getattr(fila, "scopes", None) or [])
         if scopes:
@@ -110,7 +126,45 @@ async def _principal_desde_pg(
         return ApiPrincipal(user_id=str(fila.user_id), key_id=key_id)
 
 
-def _principal_desde_memoria(presented: str | None) -> ApiPrincipal | None:
+async def _clave_registrada_pg(key_id: str) -> bool:
+    """Indica si existe el selector en PostgreSQL, incluso si está revocado."""
+    from sqlalchemy import select
+
+    from central_api.db import nueva_sesion
+    from central_api.models.identity import ApiKey
+
+    async with nueva_sesion() as sesion:
+        fila = (
+            await sesion.execute(
+                select(ApiKey.id).where(ApiKey.key_prefix == key_id).limit(1)
+            )
+        ).first()
+    return fila is not None
+
+
+async def _habilitado_en_pg(user_id: str) -> bool | None:
+    """Estado persistente del usuario, o ``None`` si solo existe en memoria."""
+    from sqlalchemy import select
+
+    from central_api.db import nueva_sesion
+    from central_api.models.identity import User
+
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    async with nueva_sesion() as sesion:
+        fila = (
+            await sesion.execute(
+                select(User.habilitado).where(User.id == user_uuid).limit(1)
+            )
+        ).first()
+    return bool(fila[0]) if fila is not None else None
+
+
+def _principal_desde_memoria(
+    presented: str | None, identidad: str | None = None
+) -> ApiPrincipal | None:
     """Verifica la clave contra el store en memoria del panel admin.
 
     Cubre usuarios de depuración (p. ej. ``abp``/``testing``) y claves
@@ -134,6 +188,8 @@ def _principal_desde_memoria(presented: str | None) -> ApiPrincipal | None:
         usuario = USERS.get(meta.user_id)
         if usuario is None or usuario.estado != "habilitado":
             continue
+        if identidad is not None and usuario.email.strip().casefold() != identidad.strip().casefold():
+            continue
         scopes = frozenset(meta.scopes) if meta.scopes else ApiPrincipal(
             user_id=usuario.id, key_id=meta.id
         ).scopes
@@ -141,8 +197,72 @@ def _principal_desde_memoria(presented: str | None) -> ApiPrincipal | None:
     return None
 
 
+def _selector_y_secreto(api_key: str) -> tuple[str, str]:
+    """Obtiene el selector y el material firmado para cualquier API key.
+
+    Las claves V3 mantienen ``mbk_<key_id>_<secret>``. Para claves elegidas
+    literalmente por un usuario se usa un selector HMAC con el secreto del
+    servidor, sin persistir ni exponer el valor original.
+    """
+    parsed = parse_api_key(api_key)
+    if parsed is not None and len(parsed[0]) <= 16:
+        return parsed
+    selector_secret = get_settings().api_key_hmac_secret
+    if selector_secret:
+        selector = hmac.new(
+            selector_secret.encode("utf-8"), api_key.encode("utf-8"), hashlib.sha256
+        ).hexdigest()[:16]
+    else:
+        selector = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+    return selector, api_key
+
+
+async def authenticate_api_key(
+    identidad: str | None, api_key: str
+) -> ApiPrincipal | None:
+    """Valida clave, propietario, vigencia y estado para tokens Bearer o login."""
+    from central_api.db import db_configurado
+
+    if not api_key:
+        return None
+    settings = get_settings()
+    if settings.api_key_hmac_secret and db_configurado():
+        key_id, secret = _selector_y_secreto(api_key)
+        try:
+            principal = await _principal_desde_pg(
+                settings.api_key_hmac_secret, key_id, secret, identidad
+            )
+            if principal is not None:
+                return principal
+            # Una clave que exista en PostgreSQL no puede volver a ser válida
+            # por un metadato de memoria obsoleto (revocada, vencida o usuario
+            # deshabilitado).
+            if await _clave_registrada_pg(key_id):
+                return None
+            principal_memoria = _principal_desde_memoria(api_key, identidad)
+            if principal_memoria is None:
+                return None
+            habilitado = await _habilitado_en_pg(principal_memoria.user_id)
+            if habilitado is False:
+                return None
+            return principal_memoria
+        except Exception:  # noqa: BLE001 - fallo de DB sanitizado
+            raise HTTPException(
+                status_code=503,
+                detail=public_error("service_not_enabled")["detail"],
+            ) from None
+    return _principal_desde_memoria(api_key, identidad)
+
+
 async def require_api_principal(
-    request: Request, x_api_key: str | None = Header(default=None, alias="X-API-Key")
+    request: Request,
+    x_api_key: str | None = Header(
+        default=None,
+        alias="X-API-Key",
+        description="Deprecated: use Authorization: Bearer <token>.",
+        deprecated=True,
+    ),
+    bearer_credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ) -> ApiPrincipal:
     """Autentica la API key del cliente y construye el principal.
 
@@ -152,31 +272,34 @@ async def require_api_principal(
     secreto pero sin coincidencia falla cerrado (401); con base caída
     responde 503 sanitizado (sin exponer el motivo interno).
     """
-    from central_api.db import db_configurado
-
-    settings = get_settings()
-    if not settings.api_key_hmac_secret:
-        memoria = _principal_desde_memoria(x_api_key)
-        if memoria is not None:
-            return memoria
-        return ApiPrincipal(user_id=current_user_id(), key_id="dev")
-    parsed = parse_api_key(x_api_key)
-    if parsed is not None and db_configurado():
-        key_id, secret = parsed
+    authorization = request.headers.get("Authorization", "")
+    if bearer_credentials is not None:
         try:
-            principal = await _principal_desde_pg(
-                settings.api_key_hmac_secret, key_id, secret
-            )
-        except Exception:  # noqa: BLE001 - base caída: 503 sin detalle interno
-            raise HTTPException(
-                status_code=503,
-                detail=public_error("service_not_enabled")["detail"],
-            ) from None
+            identidad, api_key = decode_bearer(bearer_credentials.credentials)
+        except ValueError:
+            raise _no_autorizado() from None
+        principal = await authenticate_api_key(identidad, api_key)
         if principal is not None:
             return principal
-    memoria = _principal_desde_memoria(x_api_key)
-    if memoria is not None:
-        return memoria
+        raise _no_autorizado()
+
+    if authorization:
+        # No degradar Authorization mal formado a la autenticación abierta de
+        # desarrollo cuando el esquema HTTP no es Bearer.
+        raise _no_autorizado()
+
+    if x_api_key:
+        principal = await authenticate_api_key(None, x_api_key)
+        if principal is not None:
+            return principal
+        if get_settings().api_key_hmac_secret:
+            raise _no_autorizado()
+        # En desarrollo se conserva compatibilidad con los clientes de test
+        # que no tienen almacén de claves configurado.
+        return ApiPrincipal(user_id=current_user_id(), key_id="dev")
+
+    if not get_settings().api_key_hmac_secret:
+        return ApiPrincipal(user_id=current_user_id(), key_id="dev")
     raise _no_autorizado()
 
 

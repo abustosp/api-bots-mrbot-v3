@@ -15,7 +15,7 @@ import base64
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -104,6 +104,8 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
         _meta={
             "started_at": fila.started_at.isoformat() if fila.started_at else None,
             "finished_at": fila.finished_at.isoformat() if fila.finished_at else None,
+            "cancel_reason": getattr(fila, "cancel_reason", None),
+            "cancelled_by": getattr(fila, "cancelled_by", None),
             "files": files,
             "data": {"schema_version": 1, **(payload or {})},
             "error": (summary or {}).get("error"),
@@ -190,6 +192,125 @@ def _visible_job(job_id: str, principal: ApiPrincipal):
     return job
 
 
+LIVE_STATUSES = ("PENDIENTE", "ASIGNADO", "CORRIENDO")
+
+
+def _queue_item(job: Any, position: int | None) -> dict[str, Any]:
+    return {
+        "job_id": str(job.id),
+        "status": str(job.status),
+        "bot": job.bot,
+        "operation": job.operation,
+        "operacion": job.operation,
+        "position": position,
+        "queue_position": position,
+    }
+
+
+def _queue_response(items: list[dict[str, Any]]) -> JSONResponse:
+    return JSONResponse(
+        status_code=200,
+        content={"success": True, "jobs": items, "items": items, "count": len(items)},
+    )
+
+
+async def _queue_jobs_db(
+    principal: ApiPrincipal,
+    *,
+    bot: str | None,
+    status: str | None,
+) -> list[dict[str, Any]]:
+    """Read live jobs and global pending positions from PostgreSQL."""
+    import uuid
+
+    from sqlalchemy import select
+
+    from central_api.models.execution import Job
+
+    try:
+        user_id = uuid.UUID(str(principal.user_id))
+    except (ValueError, AttributeError, TypeError):
+        return []
+    requested_status = status.strip().upper() if status else None
+    if requested_status and requested_status not in LIVE_STATUSES:
+        return []
+
+    async with nueva_sesion() as session:
+        # Queue position is the actual global FIFO rank, independent of the
+        # owner's optional bot/status filters.
+        pending_ids = (
+            await session.execute(
+                select(Job.id)
+                .where(Job.status == "PENDIENTE")
+                .order_by(Job.priority.asc(), Job.created_at.asc(), Job.id.asc())
+            )
+        ).scalars().all()
+        positions = {str(job_id): index for index, job_id in enumerate(pending_ids, 1)}
+
+        statement = select(Job).where(
+            Job.user_id == user_id,
+            Job.status.in_(LIVE_STATUSES),
+        )
+        if bot:
+            statement = statement.where(Job.bot == bot)
+        if requested_status:
+            statement = statement.where(Job.status == requested_status)
+        rows = (
+            await session.execute(
+                statement.order_by(
+                    Job.priority.asc(), Job.created_at.asc(), Job.id.asc()
+                )
+            )
+        ).scalars().all()
+        return [_queue_item(row, positions.get(str(row.id))) for row in rows]
+
+
+@router.get(
+    "/jobs/cola",
+    summary="Listar jobs activos propios y su posición en cola",
+)
+async def list_queue(
+    bot: str | None = None,
+    status: str | None = None,
+    principal: ApiPrincipal = Depends(require_api_principal),
+) -> JSONResponse:
+    """List the authenticated user's active jobs, preferring PostgreSQL."""
+    if status and status.strip().upper() not in LIVE_STATUSES:
+        return _queue_response([])
+    if db_configurado():
+        try:
+            return _queue_response(
+                await _queue_jobs_db(principal, bot=bot, status=status)
+            )
+        except Exception:  # noqa: BLE001 - no degradar a memoria cuando hay DB
+            return JSONResponse(
+                status_code=503,
+                content=public_error("service_not_enabled"),
+                headers={"Retry-After": "3"},
+            )
+
+    pending = sorted(
+        (job for job in JOBS.values() if job.status == "PENDIENTE"),
+        key=lambda job: (job.created_at, job.id),
+    )
+    positions = {job.id: index for index, job in enumerate(pending, 1)}
+    owned = [
+        job
+        for job in JOBS.values()
+        if job.status in LIVE_STATUSES
+        and can_read_job(
+            principal,
+            str(JOB_META.get(job.id, {}).get("owner", principal.user_id)),
+        )
+        and (not bot or job.bot == bot)
+        and (not status or job.status == status.strip().upper())
+    ]
+    owned.sort(key=lambda job: (job.created_at, job.id))
+    return _queue_response(
+        [_queue_item(job, positions.get(job.id)) for job in owned]
+    )
+
+
 @router.get(
     "/jobs/{job_id}",
     response_model=JobStatusResponse,
@@ -198,9 +319,11 @@ def _visible_job(job_id: str, principal: ApiPrincipal):
 async def get_job(
     job_id: str, principal: ApiPrincipal = Depends(require_api_principal)
 ) -> JSONResponse:
-    job = _visible_job(job_id, principal)
-    if job is None and db_configurado():
+    job = None
+    if db_configurado():
         job = await _visible_job_db(job_id, principal)
+    else:
+        job = _visible_job(job_id, principal)
     if job is None:
         return JSONResponse(status_code=404, content=public_error("not_found"))
     return JSONResponse(
@@ -209,15 +332,97 @@ async def get_job(
     )
 
 
+async def _cancel_job_db(
+    job_id: str,
+    body: CancelBody,
+    principal: ApiPrincipal,
+) -> JSONResponse:
+    """Cancel a PostgreSQL job using a scoped row lock and durable update."""
+    import uuid
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from central_api.models.execution import Job
+
+    try:
+        parsed_id = uuid.UUID(str(job_id))
+    except (ValueError, TypeError, AttributeError):
+        return JSONResponse(status_code=404, content=public_error("not_found"))
+
+    release_reservation = False
+    async with nueva_sesion() as session:
+        row = (
+            await session.execute(
+                select(Job).where(Job.id == parsed_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None or not can_cancel(principal, str(row.user_id)):
+            return JSONResponse(status_code=404, content=public_error("not_found"))
+
+        now = utcnow()
+        if row.status not in TERMINAL:
+            row.cancel_reason = body.motivo or None
+            row.cancelled_by = "USER"
+            if row.status == "PENDIENTE":
+                row.status = "CANCELADO"
+                row.finished_at = now
+                row.result = None
+                release_reservation = True
+
+        meta = {
+            "started_at": row.started_at.isoformat() if row.started_at else None,
+            "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+            "cancel_reason": row.cancel_reason,
+            "cancelled_by": row.cancelled_by,
+            "error": row.error_message,
+            "files": [],
+            "data": None,
+        }
+        projected = project_job(
+            SimpleNamespace(
+                id=str(row.id),
+                status=str(row.status),
+                result={"result": row.result} if row.result else None,
+                bot=row.bot,
+                operation=row.operation,
+                created_at=row.created_at,
+            ),
+            meta,
+        )
+
+    if release_reservation:
+        release_usage(job_id, motivo="cancelado en PENDIENTE")
+    mirror = JOBS.get(job_id)
+    if mirror is not None:
+        mirror.status = projected["status"]
+    mirror_meta = ensure_meta(job_id, principal.user_id)
+    mirror_meta["cancel_reason"] = projected["cancel_reason"]
+    mirror_meta["cancelled_by"] = projected["cancelled_by"]
+    if projected["finished_at"]:
+        mirror_meta["finished_at"] = projected["finished_at"]
+    return JSONResponse(status_code=200, content=projected)
+
+
 @router.post(
     "/jobs/{job_id}/cancelar",
     response_model=JobStatusResponse,
     summary="Cancelar un job",
 )
-def cancel_job(
+async def cancel_job(
     job_id: str, body: CancelBody,
     principal: ApiPrincipal = Depends(require_api_principal),
 ) -> JSONResponse:
+    if db_configurado():
+        try:
+            return await _cancel_job_db(job_id, body, principal)
+        except Exception:  # noqa: BLE001 - no degradar a memoria cuando hay DB
+            return JSONResponse(
+                status_code=503,
+                content=public_error("service_not_enabled"),
+                headers={"Retry-After": "3"},
+            )
+
     job = JOBS.get(job_id)
     meta = JOB_META.get(job_id, {})
     if job is None or not can_cancel(principal, str(meta.get("owner", principal.user_id))):
@@ -238,6 +443,28 @@ def cancel_job(
         # reaper cierra al vencer la lease. Sin reembolso automático.
         meta["cancel_requested_at"] = now
     return JSONResponse(status_code=200, content=project_job(job))
+
+
+@router.delete(
+    "/jobs/{job_id}",
+    response_model=JobStatusResponse,
+    summary="Cancelar un job por ID (alias DELETE)",
+)
+async def delete_job(
+    job_id: str,
+    request: Request,
+    principal: ApiPrincipal = Depends(require_api_principal),
+) -> JSONResponse:
+    """REST-style alias for the existing POST cancellation endpoint."""
+    motivo = "cancelado desde DELETE"
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            raw = await request.json()
+        except (ValueError, json.JSONDecodeError):
+            raw = {}
+        if isinstance(raw, dict):
+            motivo = str(raw.get("motivo") or motivo)[:500]
+    return await cancel_job(job_id, CancelBody(motivo=motivo), principal)
 
 
 @router.post("/jobs/estado:lote")
