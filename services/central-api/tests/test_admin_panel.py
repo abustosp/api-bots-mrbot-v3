@@ -57,6 +57,8 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "revealApiKey(data.valor_unica_vez" in cuerpo
     assert "navigator.clipboard.writeText(state.revealedApiKey)" in cuerpo
     assert "clearRevealedApiKey(); state.token = \"\"" in cuerpo
+    assert 'if (view !== "users") clearRevealedApiKey();' in cuerpo
+    assert "las claves cortas son débiles" in cuerpo
     assert 'id="new-state"' in cuerpo
     assert 'id="new-send-credentials"' in cuerpo
     assert 'list="module-options"' in cuerpo
