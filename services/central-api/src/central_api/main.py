@@ -171,6 +171,23 @@ async def lifespan(app: FastAPI):
     import asyncio
 
     app.state.db_configurado = db_configurado()
+    if app.state.db_configurado:
+        # El catálogo debe existir para que la FK fk_jobs_operation acepte
+        # jobs. El upsert es idempotente y barato; si falla (p. ej. esquema
+        # aún sin migrar) no bloquea el arranque y se reintenta en el próximo.
+        import logging
+
+        try:
+            from central_api.migrate import seed_catalog_async
+
+            bots, ops = await seed_catalog_async()
+            logging.getLogger(__name__).info(
+                "catálogo sembrado al arrancar: %s bots, %s operaciones", bots, ops
+            )
+        except Exception as exc:  # noqa: BLE001 - no bloquear el arranque
+            logging.getLogger(__name__).warning(
+                "no se pudo sembrar el catálogo al arrancar: %s", type(exc).__name__
+            )
     tarea_scheduler: asyncio.Task | None = None
     if get_settings().scheduler_enabled:
         from central_api.scheduler.loop import scheduler_loop

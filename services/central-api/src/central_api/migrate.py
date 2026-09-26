@@ -71,36 +71,38 @@ def _seed_catalog() -> None:
     """
     import asyncio
 
+    bots, operaciones = asyncio.run(seed_catalog_async())
+    print(f"catálogo sembrado: {bots} bots, {operaciones} operaciones")
+
+
+async def seed_catalog_async() -> tuple[int, int]:
+    """Upsert idempotente del catálogo; lo usan ``migrate`` y el arranque."""
     from central_api.api.bots import catalog_seed_rows
     from central_api.db import nueva_sesion
     from central_api.repositories.catalog import CatalogRepository
 
-    async def _aplicar() -> tuple[int, int]:
-        filas = catalog_seed_rows()
-        bots = 0
-        operaciones = 0
-        vistos: set[str] = set()
-        async with nueva_sesion() as sesion:
-            repo = CatalogRepository(sesion)  # type: ignore[arg-type]
-            for fila in filas:
-                if fila["bot"] not in vistos:
-                    await repo.upsert_bot(
-                        code=fila["bot"], display_name=fila["display_name"]
-                    )
-                    vistos.add(fila["bot"])
-                    bots += 1
-                await repo.upsert_operation(
-                    bot_code=fila["bot"],
-                    code=fila["operation"],
-                    input_schema_version="1",
-                    unit_cost=fila["unit_cost"],
-                    effect_class=fila["effect_class"],
+    filas = catalog_seed_rows()
+    bots = 0
+    operaciones = 0
+    vistos: set[str] = set()
+    async with nueva_sesion() as sesion:
+        repo = CatalogRepository(sesion)  # type: ignore[arg-type]
+        for fila in filas:
+            if fila["bot"] not in vistos:
+                await repo.upsert_bot(
+                    code=fila["bot"], display_name=fila["display_name"]
                 )
-                operaciones += 1
-        return bots, operaciones
-
-    bots, operaciones = asyncio.run(_aplicar())
-    print(f"catálogo sembrado: {bots} bots, {operaciones} operaciones")
+                vistos.add(fila["bot"])
+                bots += 1
+            await repo.upsert_operation(
+                bot_code=fila["bot"],
+                code=fila["operation"],
+                input_schema_version="1",
+                unit_cost=fila["unit_cost"],
+                effect_class=fila["effect_class"],
+            )
+            operaciones += 1
+    return bots, operaciones
 
 
 if __name__ == "__main__":
