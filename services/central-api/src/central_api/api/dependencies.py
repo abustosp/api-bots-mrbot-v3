@@ -42,23 +42,55 @@ IDEMPOTENCY: dict[tuple[str, str], dict] = {}
 
 basic_scheme = HTTPBasic(
     scheme_name="HTTPBasic",
-    description="Usuario (email o alias) como username y la API key como password.",
+    description="Método 1: username = usuario (email o alias), password = API key.",
     auto_error=False,
 )
 
 api_key_header_scheme = APIKeyHeader(
     name="X-API-Key",
-    scheme_name="ApiKeyHeader",
-    description="API key en el request (forma V1). Usar junto con el header email.",
+    scheme_name="V1",
+    description=(
+        "Método 2 (como en la V1): headers `email` (usuario) + `X-API-Key` "
+        "(API key), enviados juntos. En Swagger se completan ambos campos en "
+        "esta misma sección."
+    ),
     auto_error=False,
 )
 
-email_header_scheme = APIKeyHeader(
-    name="email",
-    scheme_name="UserHeader",
-    description="Usuario (email o alias) dueño de la API key enviada en X-API-Key (forma V1).",
-    auto_error=False,
-)
+# Requisitos de seguridad publicados en OpenAPI: dos métodos alternativos.
+OPENAPI_SECURITY = [
+    {"HTTPBasic": []},
+    {"V1": []},
+]
+_SECURITY_SCHEMES_AUTH = {"HTTPBasic", "V1"}
+
+
+def apply_auth_openapi(document: dict) -> dict:
+    """Unifica la seguridad del OpenAPI a los dos métodos admitidos.
+
+    FastAPI publica cada dependencia ``Security`` como alternativa separada.
+    Se fija explícitamente ``HTTPBasic`` o ``V1`` (email + X-API-Key).
+    """
+    for item in document.get("paths", {}).values():
+        for operation in item.values():
+            if not isinstance(operation, dict):
+                continue
+            security = operation.get("security")
+            if not security:
+                continue
+            names = {name for requirement in security for name in requirement}
+            if names & _SECURITY_SCHEMES_AUTH:
+                operation["security"] = [dict(r) for r in OPENAPI_SECURITY]
+    schemes = document.get("components", {}).get("securitySchemes")
+    if schemes:
+        ordered = {
+            name: schemes[name]
+            for name in ("HTTPBasic", "V1")
+            if name in schemes
+        }
+        ordered.update({k: v for k, v in schemes.items() if k not in ordered})
+        document["components"]["securitySchemes"] = ordered
+    return document
 
 
 def correlation_id(request: Request) -> str:
@@ -271,7 +303,7 @@ async def require_api_principal(
     request: Request,
     basic_credentials: HTTPBasicCredentials | None = Security(basic_scheme),
     x_api_key: str | None = Security(api_key_header_scheme),
-    email: str | None = Security(email_header_scheme),
+    email: str | None = Header(default=None, include_in_schema=False),
 ) -> ApiPrincipal:
     """Autentica al cliente por cualquiera de los dos métodos admitidos.
 

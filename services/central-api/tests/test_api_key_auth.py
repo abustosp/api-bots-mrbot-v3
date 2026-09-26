@@ -145,7 +145,7 @@ def test_openapi_protected_operations_advertise_basic_and_v1_headers(monkeypatch
         assert schemes["HTTPBasic"]["scheme"] == "basic"
         security = schema["paths"]["/api/v3/mi/cuenta"]["get"]["security"]
         assert {"HTTPBasic": []} in security
-        assert {"ApiKeyHeader": []} in security
+        assert {"V1": []} in security
         assert all("HTTPBearer" not in item for item in security)
         assert "/api/v3/auth/token" not in schema["paths"]
         assert "Authorize" in schema["info"]["description"]

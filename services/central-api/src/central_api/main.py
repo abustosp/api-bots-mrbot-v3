@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from central_api.admin import router as admin_router
 from central_api.admin._common import require_admin
 from central_api.api.bot_payloads import install_v1_openapi_patch
+from central_api.api.dependencies import apply_auth_openapi
 from central_api.api.router import router as public_router
 from central_api.db import cerrar_motor, db_configurado
 from central_api.internal.router import router as internal_router
@@ -43,8 +44,10 @@ def _documentation_app(*, include_private: bool) -> FastAPI:
         title="central-api",
         version=APP_VERSION,
         description=(
-            "Autenticación (cualquiera de las dos, desde Authorize en Swagger): "
-            "HTTPBasic con usuario y API key, o headers email + X-API-Key como en la V1."
+            "Autenticación (dos métodos, desde Authorize en Swagger): "
+            "1) HTTPBasic con username = usuario y password = API key; "
+            "2) V1: headers email + X-API-Key como en la V1 (en Authorize se "
+            "completan email y API key en la sección V1)."
         ),
         docs_url=None,
         redoc_url=None,
@@ -62,7 +65,14 @@ def _documentation_app(*, include_private: bool) -> FastAPI:
 
         docs.include_router(internal_router, prefix="/internal/v1")
         docs.include_router(admin_router, prefix="/admin")
-    return install_v1_openapi_patch(docs)
+    patched = install_v1_openapi_patch(docs)
+    base_openapi = patched.openapi
+
+    def openapi_with_auth() -> dict:
+        return apply_auth_openapi(base_openapi())
+
+    patched.openapi = openapi_with_auth
+    return patched
 
 
 def _admin_docs_html() -> HTMLResponse:
@@ -91,6 +101,62 @@ def _admin_docs_html() -> HTMLResponse:
 </script>
 """
     return HTMLResponse(html.replace("</head>", interceptor + "</head>"))
+
+
+# Swagger UI solo dibuja un campo por esquema apiKey. Para el método V1
+# (email + X-API-Key) se agrega el campo email dentro del mismo recuadro de
+# Authorize y un requestInterceptor que envía ese header junto con la key.
+_PUBLIC_DOCS_V1_AUTH = """
+<script>
+(function () {
+  const KEY = "mrbot_v1_email";
+  const getEmail = () => window.sessionStorage.getItem(KEY) || "";
+  window.__mrbotRequestInterceptor = function (req) {
+    const headers = req.headers || {};
+    const hasKey = Object.keys(headers).some((h) => h.toLowerCase() === "x-api-key");
+    const email = getEmail();
+    if (hasKey && email) headers["email"] = email;
+    req.headers = headers;
+    return req;
+  };
+  function inject() {
+    document.querySelectorAll(".auth-container").forEach((box) => {
+      if (box.querySelector("input[name=mrbot-v1-email]")) return;
+      const title = box.querySelector("h4");
+      if (!title || !/\\bV1\\b/.test(title.textContent || "")) return;
+      const keyInput = box.querySelector("input[type=text], input[type=password]");
+      if (!keyInput) return;
+      const wrap = document.createElement("div");
+      wrap.className = "wrapper";
+      wrap.innerHTML = '<label>email (usuario):</label><section class=""><input name="mrbot-v1-email" type="text" autocomplete="username" placeholder="usuario@example.com"></section>';
+      const input = wrap.querySelector("input");
+      input.value = getEmail();
+      input.addEventListener("input", () => window.sessionStorage.setItem(KEY, input.value.trim()));
+      const keyWrapper = keyInput.closest(".wrapper") || keyInput.parentElement;
+      keyWrapper.parentElement.insertBefore(wrap, keyWrapper);
+    });
+  }
+  new MutationObserver(inject).observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script>
+"""
+
+
+def _public_docs_html() -> HTMLResponse:
+    """Swagger UI público con los dos métodos: HTTPBasic y V1 (email + key)."""
+    response = get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="central-api clientes",
+        swagger_ui_parameters={"persistAuthorization": True},
+    )
+    html = response.body.decode("utf-8")
+    html = html.replace("</head>", _PUBLIC_DOCS_V1_AUTH + "</head>")
+    html = html.replace(
+        "SwaggerUIBundle({",
+        "SwaggerUIBundle({\n    requestInterceptor: (req) => window.__mrbotRequestInterceptor(req),",
+        1,
+    )
+    return HTMLResponse(html)
 
 
 @asynccontextmanager
@@ -172,10 +238,7 @@ def create_app() -> FastAPI:
 
     @app.get("/docs", include_in_schema=False)
     def public_docs() -> HTMLResponse:
-        return get_swagger_ui_html(
-            openapi_url="/openapi.json",
-            title="central-api clientes",
-        )
+        return _public_docs_html()
 
     @app.get("/redoc", include_in_schema=False)
     def public_redoc() -> HTMLResponse:

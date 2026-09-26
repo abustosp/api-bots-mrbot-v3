@@ -85,10 +85,18 @@ def test_sin_credenciales_401(cliente) -> None:
 def test_openapi_documenta_los_metodos(cliente) -> None:
     esquema = cliente.get("/openapi.json").json()
     schemes = esquema["components"]["securitySchemes"]
-    assert "HTTPBearer" not in schemes
+    assert list(schemes) == ["HTTPBasic", "V1"]
     assert schemes["HTTPBasic"]["scheme"] == "basic"
-    assert schemes["ApiKeyHeader"]["name"] == "X-API-Key"
-    assert schemes["UserHeader"]["name"] == "email"
-    seguridad = esquema["paths"]["/api/v3/jobs/cola"]["get"]["security"]
-    nombres = {nombre for item in seguridad for nombre in item}
-    assert nombres == {"HTTPBasic", "ApiKeyHeader", "UserHeader"}
+    assert schemes["V1"]["name"] == "X-API-Key"
+    assert "email" in schemes["V1"]["description"]
+    operacion = esquema["paths"]["/api/v3/jobs/cola"]["get"]
+    assert operacion["security"] == [{"HTTPBasic": []}, {"V1": []}]
+    # email no aparece como parámetro suelto: se completa en Authorize (V1).
+    assert all(p["name"] != "email" for p in operacion.get("parameters", []))
+
+
+def test_swagger_publico_agrega_email_al_metodo_v1(cliente) -> None:
+    html = cliente.get("/docs").text
+    assert "requestInterceptor: (req) => window.__mrbotRequestInterceptor(req)" in html
+    assert 'headers["email"] = email' in html
+    assert "mrbot-v1-email" in html
