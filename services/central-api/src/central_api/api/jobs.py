@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import base64
 import json
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from central_api.api.dependencies import (
     JOB_META,
@@ -121,6 +122,64 @@ class BatchBody(BaseModel):
     job_ids: list[str] = Field(default_factory=list)
 
 
+class JobArtifactResponse(BaseModel):
+    """Metadata pública de un artefacto, sin URLs internas ni secretos."""
+
+    artifact_id: str
+    filename: str
+    content_type: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    download_url: str | None = None
+
+
+class JobStatusResponse(BaseModel):
+    """Forma V2 compatible para consultar el resultado de un job V3."""
+
+    job_id: str = Field(..., examples=["0190f0c0-7f5b-7b2e-9f7e-123456789abc"])
+    status: str = Field(..., examples=["COMPLETO"])
+    result: str | None = Field(default=None, examples=["OK"])
+    bot: str
+    operation: str
+    created_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    cancel_reason: str | None = None
+    cancelled_by: str | None = None
+    error: Any = None
+    files: list[JobArtifactResponse] = Field(default_factory=list)
+    data: dict[str, Any] | None = None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "job_id": "0190f0c0-7f5b-7b2e-9f7e-123456789abc",
+                "status": "COMPLETO",
+                "result": "OK",
+                "bot": "mis_comprobantes",
+                "operation": "consultar",
+                "created_at": "2026-09-26T04:00:00Z",
+                "started_at": "2026-09-26T04:00:02Z",
+                "finished_at": "2026-09-26T04:00:12Z",
+                "cancel_reason": None,
+                "cancelled_by": None,
+                "error": None,
+                "files": [
+                    {
+                        "artifact_id": "0190f0c0-7f5b-7b2e-9f7e-123456789abd",
+                        "filename": "comprobantes-2025.zip",
+                        "content_type": "application/zip",
+                        "size_bytes": 20480,
+                        "sha256": "<sha256>",
+                        "download_url": "/api/v3/jobs/0190f0c0-7f5b-7b2e-9f7e-123456789abc/artifacts/0190f0c0-7f5b-7b2e-9f7e-123456789abd/download",
+                    }
+                ],
+                "data": {"schema_version": 1, "items": []},
+            }
+        }
+    )
+
+
 def _visible_job(job_id: str, principal: ApiPrincipal):
     job = JOBS.get(job_id)
     if job is None:
@@ -131,7 +190,11 @@ def _visible_job(job_id: str, principal: ApiPrincipal):
     return job
 
 
-@router.get("/jobs/{job_id}")
+@router.get(
+    "/jobs/{job_id}",
+    response_model=JobStatusResponse,
+    summary="Consultar estado y resultado de un job",
+)
 async def get_job(
     job_id: str, principal: ApiPrincipal = Depends(require_api_principal)
 ) -> JSONResponse:
@@ -146,7 +209,11 @@ async def get_job(
     )
 
 
-@router.post("/jobs/{job_id}/cancelar")
+@router.post(
+    "/jobs/{job_id}/cancelar",
+    response_model=JobStatusResponse,
+    summary="Cancelar un job",
+)
 def cancel_job(
     job_id: str, body: CancelBody,
     principal: ApiPrincipal = Depends(require_api_principal),

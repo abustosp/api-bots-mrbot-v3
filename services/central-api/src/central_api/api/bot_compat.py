@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from central_api.api.bot_payloads import public_bot_compat_body_schema
 from central_api.api.bots import CreateJobResponse, OPERATIONS, submit_job
 from central_api.api.dependencies import require_api_principal
-from central_api.api.jobs import CancelBody, cancel_job, get_job
+from central_api.api.jobs import CancelBody, JobStatusResponse, cancel_job, get_job
 from central_api.security.principals import ApiPrincipal
 
 router = APIRouter()
@@ -250,7 +250,7 @@ def _register_routes() -> None:
             f"{route_path}/{{job_id}}",
             status_handler,
             methods=["GET"],
-            response_model=dict[str, Any],
+            response_model=JobStatusResponse,
             name=f"compat_{bot}_{operacion}_status",
             tags=["bots-compatibilidad"],
         )
@@ -258,7 +258,7 @@ def _register_routes() -> None:
             f"{route_path}/cancelar/{{job_id}}",
             cancel_handler,
             methods=["POST"],
-            response_model=dict[str, Any],
+            response_model=JobStatusResponse,
             openapi_extra={
                 "requestBody": {
                     "content": {

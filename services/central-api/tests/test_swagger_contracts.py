@@ -91,3 +91,36 @@ def test_ruta_canonica_muestra_el_envelope_y_los_payloads_de_bots() -> None:
         assert set(payload_schema["properties"]) == set(payload_schema["examples"][0])
         assert "credentials" not in payload_schema["properties"]
         assert "credentials" not in payload_schema["examples"][0]
+
+
+def test_catalogo_y_status_publican_schemas_y_ejemplos_completos() -> None:
+    app = create_app()
+    schema = app.openapi()
+
+    catalogo = schema["paths"]["/api/v3/bots"]["get"]
+    catalogo_response = catalogo["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert catalogo_response["$ref"].endswith("BotCatalogResponse")
+
+    detalle = schema["paths"]["/api/v3/bots/{bot}"]["get"]
+    detalle_response = detalle["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert detalle_response["$ref"].endswith("BotDetailResponse")
+
+    status_response = schema["paths"]["/api/v3/ccma/consulta/{job_id}"]["get"]
+    status_schema = status_response["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert status_schema["$ref"].endswith("JobStatusResponse")
+
+    cliente = TestClient(app)
+    detalle_json = cliente.get("/api/v3/bots/ccma")
+    assert detalle_json.status_code == 200
+    operacion = detalle_json.json()["operaciones"][0]
+    assert operacion["input_schema"]["properties"]["representado_cuit"]
+    assert operacion["example"]["payload"]["representado_cuit"] == "20123456789"
+    assert operacion["credentials_schema"]["example"]["clave"] == (
+        "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
+    )

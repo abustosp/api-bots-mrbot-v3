@@ -170,24 +170,64 @@ monorepo y aplicar las migraciones como job one-off antes de usar PostgreSQL.
 ## Uso de la API
 
 > Contrato definido en [`plans/02-central-api/plan.md`](plans/02-central-api/plan.md).
-> Los ejemplos siguientes son el diseño previsto, no una implementación existente.
+> Los endpoints de bots están implementados como jobs asíncronos y sus schemas
+> completos se pueden explorar en `GET /api/v3/bots` y `GET /api/v3/bots/{bot}`.
 
-Crear una ejecución:
+Consultar el catálogo y el schema de un bot:
 
 ```http
-POST /api/v3/bots/mis_comprobantes/consulta
+GET /api/v3/bots/ccma
+X-API-Key: <clave>
+```
+
+La respuesta incluye `operaciones[].input_schema`,
+`operaciones[].credentials_schema` y `operaciones[].example`. Los ejemplos usan
+valores ficticios y nunca contienen credenciales reales.
+
+Crear una ejecución con el envelope V3:
+
+```http
+POST /api/v3/bots/ccma/consultar
 X-API-Key: <clave>
 Idempotency-Key: <uuid opcional>
 Content-Type: application/json
 
-{ "...": "parámetros del bot" }
+{
+  "payload": {
+    "representado_cuit": "20123456789",
+    "periodo_desde": "01/2026",
+    "incluir_movimientos": true,
+    "incluir_pdf": true,
+    "subir": true
+  },
+  "credentials": {
+    "cuit_representante": "20123456789",
+    "clave": "REEMPLAZAR_CON_CREDENCIAL_SELLADA"
+  }
+}
 ```
 
 ```json
 { "success": true, "job_id": "018f...", "status": "PENDIENTE" }
 ```
 
-Consultar el resultado:
+Los aliases históricos conservan el body plano de V1/V2. Por ejemplo, CCMA:
+
+```http
+POST /api/v3/ccma/consulta
+X-API-Key: <clave>
+Content-Type: application/json
+
+{
+  "cuit_representante": "20123456789",
+  "clave_representante": "REEMPLAZAR_CON_CREDENCIAL_SELLADA",
+  "cuit_representado": "20123456789",
+  "movimientos": true,
+  "pdf": true
+}
+```
+
+Consultar el resultado del job:
 
 ```http
 GET /api/v3/jobs/018f...
@@ -201,8 +241,12 @@ X-API-Key: <clave>
   "result": "OK",
   "bot": "mis_comprobantes",
   "operation": "consulta",
-  "files": [{ "name": "emitidos.xlsx", "url": "https://...", "size": 20480 }],
-  "data": { "...": "payload del bot" }
+  "files": [{
+    "filename": "comprobantes-2025.zip",
+    "download_url": "/api/v3/jobs/018f.../artifacts/.../download",
+    "size_bytes": 20480
+  }],
+  "data": { "schema_version": 1, "items": [] }
 }
 ```
 

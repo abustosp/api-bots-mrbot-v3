@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
@@ -158,9 +159,85 @@ class CreateJobBody(BaseModel):
 
 
 class CreateJobResponse(BaseModel):
+    """Respuesta común de alta de jobs V3 y aliases históricos."""
+
+    success: bool = Field(
+        default=True,
+        description="Indica que el job fue aceptado para ejecución asíncrona.",
+    )
+    job_id: str = Field(
+        ...,
+        description="Identificador estable para consultar, cancelar o agrupar el job.",
+        examples=["0190f0c0-7f5b-7b2e-9f7e-123456789abc"],
+    )
+    status: str = Field(
+        default="PENDIENTE",
+        description="Estado inicial del job. El resultado se consulta con job_id.",
+        examples=["PENDIENTE"],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "job_id": "0190f0c0-7f5b-7b2e-9f7e-123456789abc",
+                "status": "PENDIENTE",
+            }
+        }
+    )
+
+
+class BotOperationDocumentation(BaseModel):
+    """Contrato explorable de una operación de bot."""
+
+    id: str = Field(..., description="Nombre de la operación canónica.")
+    modo: str = Field(default="job", description="Todas las operaciones son asíncronas.")
+    costo_creditos: int = Field(
+        ..., description="Créditos reservados al crear el job.", ge=0
+    )
+    input_schema: dict[str, Any] = Field(
+        ...,
+        description=(
+            "Schema del payload específico. Las credenciales se envían en el "
+            "campo credentials del envelope V3 y nunca dentro del payload."
+        ),
+    )
+    credentials_schema: dict[str, Any] = Field(
+        ...,
+        description="Schema informativo de las credenciales efímeras aceptadas.",
+    )
+    example: dict[str, Any] = Field(
+        ...,
+        description="Ejemplo completo del envelope V3 para esta operación.",
+    )
+
+
+class BotCatalogItem(BaseModel):
+    id: str = Field(..., description="Identificador estable del bot.")
+    nombre: str = Field(..., description="Nombre legible del bot.")
+    estado: str = Field(..., examples=["HABILITADO"])
+    costo_creditos: int = Field(..., ge=0)
+    operaciones: list[BotOperationDocumentation]
+
+
+class BotCatalogResponse(BaseModel):
     success: bool = True
-    job_id: str
-    status: str = "PENDIENTE"
+    bots: list[dict[str, Any]] = Field(
+        ..., description="Catálogo compacto compatible con clientes existentes."
+    )
+    items: list[BotCatalogItem] = Field(
+        ..., description="Catálogo enriquecido con schemas y ejemplos por operación."
+    )
+
+
+class BotDetailResponse(BaseModel):
+    id: str = Field(..., description="Identificador estable del bot.")
+    nombre: str
+    estado: str = Field(..., examples=["HABILITADO"])
+    operaciones: list[BotOperationDocumentation]
+    planes: list[str] = Field(
+        ..., description="Planes que pueden consultar esta metadata de catálogo."
+    )
 
 
 # Manifiesto único (plan 02 §3.11): única fuente de catálogo, validación,
@@ -526,6 +603,13 @@ async def submit_job(
 @router.post(
     "/bots/{bot}/{operacion}",
     status_code=202,
+    response_model=CreateJobResponse,
+    summary="Crear un job de bot",
+    description=(
+        "Acepta el envelope V3 y devuelve un job asíncrono. Use GET /jobs/{job_id} "
+        "para consultar estados, resultados y artefactos. Los aliases históricos "
+        "mantienen los cuerpos planos de V1/V2."
+    ),
     openapi_extra=_canonical_body_openapi(),
 )
 async def create_job(
@@ -555,8 +639,46 @@ async def create_job(
     )
 
 
-@router.get("/bots")
-def list_bots(principal: ApiPrincipal = Depends(require_api_principal)) -> dict:
+def _operation_documentation(bot: str, operation: str) -> dict[str, Any]:
+    """Construye el contrato explorable de una operación sin importar plugins."""
+
+    body_schema = public_bot_body_schema(bot, operation)
+    payload_schema = public_bot_payload_schema(bot, operation)
+    body_example = dict(body_schema["examples"][0])
+    credentials_example = body_example.pop("credentials", {})
+    return {
+        "id": operation,
+        "modo": "job",
+        "costo_creditos": BOT_CREDIT_COST.get((bot, operation), 1),
+        "input_schema": payload_schema,
+        "credentials_schema": {
+            "type": "object",
+            "additionalProperties": True,
+            "description": (
+                "Credenciales fiscales efímeras. Se envían en el envelope y "
+                "nunca forman parte de request_payload."
+            ),
+            "example": credentials_example,
+        },
+        "example": {
+            "payload": body_example,
+            "credentials": credentials_example,
+        },
+    }
+
+
+@router.get(
+    "/bots",
+    response_model=BotCatalogResponse,
+    summary="Listar bots y sus operaciones",
+    description=(
+        "Devuelve el catálogo compacto y, en items, el schema de entrada y un "
+        "ejemplo seguro para cada operación disponible."
+    ),
+)
+def list_bots(
+    principal: ApiPrincipal = Depends(require_api_principal),
+) -> dict[str, Any]:
     """Catálogo visible con costo y disponibilidad (plan 02 §3.10)."""
     _ = principal
     items = [
@@ -567,27 +689,29 @@ def list_bots(principal: ApiPrincipal = Depends(require_api_principal)) -> dict:
             "costo_creditos": min(
                 (BOT_CREDIT_COST.get((bot, o), 1) for o in ops), default=1
             ),
-            "operaciones": [
-                {"id": op, "modo": "job",
-                 "costo_creditos": BOT_CREDIT_COST.get((bot, op), 1)}
-                for op in ops
-            ],
+            "operaciones": [_operation_documentation(bot, op) for op in ops],
         }
         for bot, ops in ((e["bot"], e["operaciones"]) for e in CATALOGUE)
     ]
     return {"success": True, "bots": CATALOGUE, "items": items}
 
 
-@router.get("/bots/{bot}")
+@router.get(
+    "/bots/{bot}",
+    response_model=BotDetailResponse,
+    summary="Consultar schema y ejemplos de un bot",
+    description=(
+        "Expone las operaciones, costos, schemas de payload y ejemplos de uso "
+        "sin importar ni ejecutar plugins del worker."
+    ),
+)
 def bot_detail(
     bot: str, principal: ApiPrincipal = Depends(require_api_principal)
 ) -> JSONResponse:
     """Detalle y operaciones de un bot con schema de entrada y costo."""
     _ = principal
     ops = [
-        {"id": op, "modo": "job",
-         "costo_creditos": BOT_CREDIT_COST.get((bot, op), 1),
-         "input_schema": {"type": "object"}}
+        _operation_documentation(bot, op)
         for (b, op) in OPERATIONS
         if b == bot
     ]
