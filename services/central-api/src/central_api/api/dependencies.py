@@ -25,7 +25,13 @@ from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import (
+    APIKeyHeader,
+    HTTPAuthorizationCredentials,
+    HTTPBasic,
+    HTTPBasicCredentials,
+    HTTPBearer,
+)
 
 from central_api.security.api_keys import parse_api_key, verify_presented_secret
 from central_api.security.bearer import decode_bearer
@@ -41,9 +47,30 @@ bearer_scheme = HTTPBearer(
     scheme_name="HTTPBearer",
     bearerFormat="b64(usuario).b64(api_key)",
     description=(
-        "Token base64url(usuario).base64url(api_key). El header X-API-Key "
-        "sigue aceptado temporalmente por compatibilidad, pero está deprecated."
+        "Token base64url(usuario).base64url(api_key). Se obtiene con "
+        "POST /api/v3/auth/token. Alternativas: HTTPBasic o headers "
+        "email + X-API-Key (forma V1)."
     ),
+    auto_error=False,
+)
+
+basic_scheme = HTTPBasic(
+    scheme_name="HTTPBasic",
+    description="Usuario (email o alias) como username y la API key como password.",
+    auto_error=False,
+)
+
+api_key_header_scheme = APIKeyHeader(
+    name="X-API-Key",
+    scheme_name="ApiKeyHeader",
+    description="API key en el request (forma V1). Usar junto con el header email.",
+    auto_error=False,
+)
+
+email_header_scheme = APIKeyHeader(
+    name="email",
+    scheme_name="UserHeader",
+    description="Usuario (email o alias) dueño de la API key enviada en X-API-Key (forma V1).",
     auto_error=False,
 )
 
@@ -256,23 +283,33 @@ async def authenticate_api_key(
 
 async def require_api_principal(
     request: Request,
-    x_api_key: str | None = Header(
-        default=None,
-        alias="X-API-Key",
-        description="Deprecated: use Authorization: Bearer <token>.",
-        deprecated=True,
-    ),
     bearer_credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
+    basic_credentials: HTTPBasicCredentials | None = Security(basic_scheme),
+    x_api_key: str | None = Security(api_key_header_scheme),
+    email: str | None = Security(email_header_scheme),
 ) -> ApiPrincipal:
-    """Autentica la API key del cliente y construye el principal.
+    """Autentica al cliente por cualquiera de los tres métodos admitidos.
 
-    Orden: PostgreSQL (``mbk_*``) cuando hay secreto + base; fallback en
-    memoria del panel (depuración ``abp``/``testing`` y ``mrk_*``); sin
-    secreto configurado devuelve el principal estable de desarrollo; con
-    secreto pero sin coincidencia falla cerrado (401); con base caída
-    responde 503 sanitizado (sin exponer el motivo interno).
+    1. ``Authorization: Bearer b64(usuario).b64(api_key)``.
+    2. ``Authorization: Basic b64(usuario:api_key)``.
+    3. Headers ``email`` + ``X-API-Key`` (forma V1). ``X-API-Key`` sin
+       ``email`` se conserva por compatibilidad con clientes V3 previos.
+
+    Orden de verificación: PostgreSQL cuando hay secreto + base; fallback en
+    memoria del panel; sin secreto configurado devuelve el principal estable
+    de desarrollo; con secreto pero sin coincidencia falla cerrado (401); con
+    base caída responde 503 sanitizado.
     """
     authorization = request.headers.get("Authorization", "")
+    if basic_credentials is not None:
+        identidad = (basic_credentials.username or "").strip()
+        if not identidad or not basic_credentials.password:
+            raise _no_autorizado()
+        principal = await authenticate_api_key(identidad, basic_credentials.password)
+        if principal is not None:
+            return principal
+        raise _no_autorizado()
+
     if bearer_credentials is not None:
         try:
             identidad, api_key = decode_bearer(bearer_credentials.credentials)
@@ -289,14 +326,16 @@ async def require_api_principal(
         raise _no_autorizado()
 
     if x_api_key:
-        principal = await authenticate_api_key(None, x_api_key)
+        identidad = (email or "").strip() or None
+        principal = await authenticate_api_key(identidad, x_api_key)
         if principal is not None:
             return principal
-        if get_settings().api_key_hmac_secret:
+        if identidad is not None or get_settings().api_key_hmac_secret:
             raise _no_autorizado()
-        # En desarrollo se conserva compatibilidad con los clientes de test
-        # que no tienen almacén de claves configurado.
         return ApiPrincipal(user_id=current_user_id(), key_id="dev")
+
+    if email and get_settings().api_key_hmac_secret:
+        raise _no_autorizado()
 
     if not get_settings().api_key_hmac_secret:
         return ApiPrincipal(user_id=current_user_id(), key_id="dev")

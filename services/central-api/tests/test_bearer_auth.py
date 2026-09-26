@@ -164,15 +164,10 @@ def test_openapi_protected_operations_advertise_http_bearer(monkeypatch) -> None
         assert bearer["type"] == "http"
         assert bearer["scheme"] == "bearer"
         assert bearer["bearerFormat"] == "b64(usuario).b64(api_key)"
-        assert schema["paths"]["/api/v3/mi/cuenta"]["get"]["security"] == [
-            {"HTTPBearer": []}
-        ]
-        legacy_header = next(
-            parameter
-            for parameter in schema["paths"]["/api/v3/mi/cuenta"]["get"]["parameters"]
-            if parameter["name"] == "X-API-Key"
-        )
-        assert legacy_header["deprecated"] is True
+        security = schema["paths"]["/api/v3/mi/cuenta"]["get"]["security"]
+        assert {"HTTPBearer": []} in security
+        assert {"HTTPBasic": []} in security
+        assert {"ApiKeyHeader": []} in security
         assert "security" not in schema["paths"]["/api/v3/auth/token"]["post"]
         assert "Authorize" in schema["info"]["description"]
         docs = client.get("/docs")

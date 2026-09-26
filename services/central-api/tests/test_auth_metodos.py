@@ -1,0 +1,92 @@
+"""Autenticación por HTTPBasic, HTTPBearer y usuario + key en headers (V1)."""
+
+from __future__ import annotations
+
+import base64
+import sys
+import uuid
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SRC))
+
+from central_api.admin import users as admin_users  # noqa: E402
+from central_api.main import create_app  # noqa: E402
+from central_api.security.bearer import encode_bearer  # noqa: E402
+from central_api.settings import get_settings  # noqa: E402
+
+RUTA = "/api/v3/usuarios/me"
+
+
+@pytest.fixture
+def cliente(monkeypatch):
+    monkeypatch.setenv("API_KEY_HMAC_SECRET", "secreto-auth-metodos")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    get_settings.cache_clear()
+    admin_users.USERS.clear()
+    admin_users.API_KEYS.clear()
+    user_id = str(uuid.uuid4())
+    admin_users.USERS[user_id] = admin_users.AdminUser(
+        id=user_id, email="metodos@example.com", display_name="M", estado="habilitado"
+    )
+    admin_users.emitir_clave(user_id, [], "", "clave-metodos")
+    otro = str(uuid.uuid4())
+    admin_users.USERS[otro] = admin_users.AdminUser(
+        id=otro, email="otro@example.com", display_name="O", estado="habilitado"
+    )
+    admin_users.emitir_clave(otro, [], "", "clave-otro")
+    yield TestClient(create_app())
+    admin_users.USERS.clear()
+    admin_users.API_KEYS.clear()
+    get_settings.cache_clear()
+
+
+def _basic(usuario: str, clave: str) -> dict:
+    token = base64.b64encode(f"{usuario}:{clave}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
+
+
+def test_basic_valido_e_invalido(cliente) -> None:
+    assert cliente.get(RUTA, headers=_basic("metodos@example.com", "clave-metodos")).status_code == 200
+    assert cliente.get(RUTA, headers=_basic("METODOS@example.com", "clave-metodos")).status_code == 200
+    assert cliente.get(RUTA, headers=_basic("metodos@example.com", "mala")).status_code == 401
+    # La clave de otro usuario no autentica con esta identidad.
+    assert cliente.get(RUTA, headers=_basic("metodos@example.com", "clave-otro")).status_code == 401
+
+
+def test_bearer_sigue_funcionando(cliente) -> None:
+    token = encode_bearer("metodos@example.com", "clave-metodos")
+    assert cliente.get(RUTA, headers={"Authorization": f"Bearer {token}"}).status_code == 200
+    malo = encode_bearer("otro@example.com", "clave-metodos")
+    assert cliente.get(RUTA, headers={"Authorization": f"Bearer {malo}"}).status_code == 401
+
+
+def test_headers_usuario_y_key_forma_v1(cliente) -> None:
+    ok = {"email": "metodos@example.com", "X-API-Key": "clave-metodos"}
+    assert cliente.get(RUTA, headers=ok).status_code == 200
+    cruzado = {"email": "otro@example.com", "X-API-Key": "clave-metodos"}
+    assert cliente.get(RUTA, headers=cruzado).status_code == 401
+    # Compatibilidad V3: X-API-Key sola sigue aceptada.
+    assert cliente.get(RUTA, headers={"X-API-Key": "clave-metodos"}).status_code == 200
+    # email sin key nunca autentica.
+    assert cliente.get(RUTA, headers={"email": "metodos@example.com"}).status_code == 401
+
+
+def test_sin_credenciales_401(cliente) -> None:
+    respuesta = cliente.get(RUTA)
+    assert respuesta.status_code == 401
+
+
+def test_openapi_documenta_los_tres_metodos(cliente) -> None:
+    esquema = cliente.get("/openapi.json").json()
+    schemes = esquema["components"]["securitySchemes"]
+    assert schemes["HTTPBearer"]["scheme"] == "bearer"
+    assert schemes["HTTPBasic"]["scheme"] == "basic"
+    assert schemes["ApiKeyHeader"]["name"] == "X-API-Key"
+    assert schemes["UserHeader"]["name"] == "email"
+    seguridad = esquema["paths"]["/api/v3/jobs/cola"]["get"]["security"]
+    nombres = {nombre for item in seguridad for nombre in item}
+    assert {"HTTPBearer", "HTTPBasic", "ApiKeyHeader", "UserHeader"} <= nombres
