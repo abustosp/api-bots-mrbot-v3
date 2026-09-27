@@ -162,7 +162,9 @@ class DeclaracionEnLineaPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(self._servicio)
+                servicio = await sesion.open_service(
+                    self._servicio, portal="declaracion_en_linea"
+                )
                 await servicio.seleccionar_representado(representado)
                 datos, artefactos = await self._consultar_rango(
                     servicio, entrada, representado, periodos, runtime
@@ -221,10 +223,13 @@ class DeclaracionEnLineaPlugin:
                     percent=60 + int(20 * (indice + 1) / max(total, 1)),
                     message=f"Subiendo periodo {indice + 1}/{total}",
                 )
-                for destino, id_artefacto in (
-                    (destino_ddjj, ID_ARTEFACTO_DDJJ),
-                    (destino_vep, ID_ARTEFACTO_VEP),
+                hashes: dict[str, str] = {}
+                for destino, id_artefacto, campo_hash in (
+                    (destino_ddjj, ID_ARTEFACTO_DDJJ, "sha256_ddjj"),
+                    (destino_vep, ID_ARTEFACTO_VEP, "sha256_vep"),
                 ):
+                    if not destino.is_file() or destino.stat().st_size == 0:
+                        continue
                     try:
                         referencia = await runtime.artifact_store.upload(
                             id_artefacto, destino.name
@@ -232,8 +237,11 @@ class DeclaracionEnLineaPlugin:
                     except ValueError as exc:
                         raise ArtifactUploadError(str(exc)) from exc
                     artefactos.append(referencia)
-                registro["sha256_ddjj"] = artefactos[-2]["sha256"]
-                registro["sha256_vep"] = artefactos[-1]["sha256"]
+                    if referencia.get("sha256"):
+                        hashes[campo_hash] = str(referencia["sha256"])
+                registro.update(hashes)
+            if not destino_vep.is_file() or destino_vep.stat().st_size == 0:
+                registro["vep"] = ""
             detalle.append(registro)
         datos: dict[str, Any] = {
             "representado_cuit": representado,
