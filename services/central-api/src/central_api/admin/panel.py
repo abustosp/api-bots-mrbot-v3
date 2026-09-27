@@ -651,16 +651,29 @@ details > .details-body { padding: 0 14px 14px; }
   }
   // "Guardar" reemplaza la clave activa por el valor del campo (vacío = aleatoria).
   // Sin clave activa, emite una nueva. Como en V1, sin confirmaciones extra.
+  // Si la clave cambió desde otra sesión (lista desactualizada), recarga la
+  // fila y reintenta una vez contra la clave activa actual.
+  async function persistKey(userId, keyId, valor) {
+    return keyId
+      ? api(`/admin/users/${encodeURIComponent(userId)}/api-keys/rotate`, { method: "POST", body: JSON.stringify({ key_id: keyId, periodo_gracia_horas: 0, motivo: "edición desde panel", valor_fijo: valor }) })
+      : api(`/admin/users/${encodeURIComponent(userId)}/api-keys`, { method: "POST", body: JSON.stringify({ scopes: [], motivo: "emisión desde panel", valor_fijo: valor }) });
+  }
+  const currentKeyId = (userId) => document.querySelector(`button[data-action="key-save"][data-user="${CSS.escape(userId)}"]`)?.dataset.key || "";
   async function saveKey(button) {
-    const userId = button.dataset.user; const keyId = button.dataset.key;
+    const userId = button.dataset.user;
     const input = keyInput(userId);
     const valor = (input ? input.value : "").trim();
     if (valor && (valor.length < 3 || /\s/.test(valor))) { flash("La API key debe tener al menos 3 caracteres y no contener espacios.", "error"); return; }
     button.disabled = true;
     try {
-      const data = keyId
-        ? await api(`/admin/users/${encodeURIComponent(userId)}/api-keys/rotate`, { method: "POST", body: JSON.stringify({ key_id: keyId, periodo_gracia_horas: 0, motivo: "edición desde panel", valor_fijo: valor }) })
-        : await api(`/admin/users/${encodeURIComponent(userId)}/api-keys`, { method: "POST", body: JSON.stringify({ scopes: [], motivo: "emisión desde panel", valor_fijo: valor }) });
+      let data;
+      try {
+        data = await persistKey(userId, button.dataset.key, valor);
+      } catch (error) {
+        if (!/clave anterior no (está activa|encontrada)/.test(error.message)) throw error;
+        await loadUsers();
+        data = await persistKey(userId, currentKeyId(userId), valor);
+      }
       await loadUsers();
       const nuevo = keyInput(userId);
       if (nuevo) { nuevo.value = data.valor_unica_vez || ""; nuevo.type = "text"; }
