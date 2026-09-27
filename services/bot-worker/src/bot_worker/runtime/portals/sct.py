@@ -42,7 +42,15 @@ class SctPortal(PortalArca):
             await self.page.wait_for_load_state("networkidle", timeout=15_000)
         except Exception:
             pass
-        await super().seleccionar_representado(cuit)
+        for intento in range(3):
+            try:
+                await super().seleccionar_representado(cuit)
+                return
+            except TargetUnavailableError:
+                if intento == 2:
+                    raise
+                # La SPA puede tardar en dibujar el combo del representado.
+                await self._esperar(3_000)
 
     async def preparar(self) -> None:
         """Espera el iframe del SCT (port del bloque previo de V2)."""
@@ -78,16 +86,19 @@ class SctPortal(PortalArca):
                 "el portal SCT no mostró el botón Exportar",
                 diagnostic_code="sct_export_missing",
             )
-        return await self.capturar_descarga(
-            Path(destino),
-            lambda: self._elegir_formato(exportar, opciones),
-            espera_ms=30_000,
+        return await self.paso(
+            "descargar_reporte",
+            self.capturar_descarga(
+                Path(destino),
+                lambda: self._elegir_formato(exportar, opciones),
+                espera_ms=30_000,
+            ),
         )
 
     # ------------------------------------------------------------------
 
     async def _abrir_seccion(self, rotulos: tuple[str, ...]) -> None:
-        if not await self.seleccionar_pestana(rotulos):
+        if not await self.seleccionar_pestana_en_marco(_IFRAME, rotulos):
             raise TargetUnavailableError(
                 "no se pudo abrir la sección pedida en SCT",
                 diagnostic_code="sct_section_open_failed",

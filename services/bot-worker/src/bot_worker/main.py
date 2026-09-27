@@ -1236,6 +1236,9 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                     "data": {},
                 }
             except ErrorDeBot as exc:
+                # Diagnóstico operativo: traza redactada del error esperado
+                # (clase y cadena de causas, sin texto libre del sitio).
+                log.warning("error de plugin: %s", type(exc).__name__, exc_info=exc)
                 category, bot_result = _resultado_error_de_bot(exc)
             except Exception as exc:  # borde: sin texto crudo ni stack
                 log.exception("falla interna de plugin (redactada)")

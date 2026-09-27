@@ -147,6 +147,26 @@ class PortalArca:
         with contextlib.suppress(Exception):
             await self.page.wait_for_timeout(ms)
 
+    async def paso(self, nombre: str, coro: Any) -> Any:
+        """Ejecuta un paso del portal y etiqueta el fallo con su nombre.
+
+        El diagnóstico queda como ``portal_step_<nombre>`` y la causa original
+        viaja encadenada (``cause``), así el operador ve en qué paso falló sin
+        exponer texto del sitio.
+        """
+        from bot_worker.bots.errors import ErrorDeBot
+
+        try:
+            return await coro
+        except ErrorDeBot:
+            raise
+        except Exception as exc:
+            limpio = re.sub(r"[^a-z0-9_]", "_", str(nombre).lower())[:48]
+            raise TargetUnavailableError(
+                f"falló el paso {limpio} del portal",
+                diagnostic_code=f"portal_step_{limpio}",
+            ) from exc
+
     async def _url(self) -> str:
         return str(getattr(self.page, "url", "") or "")
 
@@ -229,10 +249,29 @@ class PortalArca:
             return
         if await self._ya_esta_seleccionado(digits):
             return
+        # Mapa de selectores (nombre propio y cantidad encontrada): orienta al
+        # operador sin exponer texto del sitio.
+        mapa = await self._mapa_de_selectores()
         raise TargetUnavailableError(
-            "no se pudo seleccionar el CUIT representado",
+            f"no se pudo seleccionar el CUIT representado ({mapa})",
             diagnostic_code="represented_cuit_not_selectable",
         )
+
+    async def _mapa_de_selectores(self) -> str:
+        partes: list[str] = []
+        for selector in (
+            'select[name="$PropertySelection"]',
+            "select[id*='representado' i]",
+            "select[id*='contribuyente' i]",
+            "span.nombre-propio.nombre-activo.pull-right",
+            "iframe",
+            "table",
+        ):
+            try:
+                partes.append(f"{selector}={await self.page.locator(selector).count()}")
+            except Exception:
+                partes.append(f"{selector}=?")
+        return " ".join(partes)
 
     async def _seleccionar_en_combo(self, digits: str) -> bool:
         for selector in (
@@ -318,16 +357,36 @@ class PortalArca:
 
     async def seleccionar_pestana(self, nombres: Iterable[str]) -> bool:
         """Click en una pestaña o link por nombre (port de ``_find_tab_locator``)."""
-        localizadores = []
+        return await self._clickear(self._pestanas_de(self.page, nombres), total_ms=8_000)
+
+    async def seleccionar_pestana_en_marco(
+        self, frame_selector: str, nombres: Iterable[str]
+    ) -> bool:
+        """Igual que ``seleccionar_pestana`` pero dentro de un iframe.
+
+        Los portales AFIP clásicos (SCT) dibujan las secciones dentro del
+        iframe; se busca ahí primero y, si no aparece, en la página.
+        """
+        try:
+            marco = self.page.frame_locator(frame_selector)
+            if await self._clickear(self._pestanas_de(marco, nombres), total_ms=8_000):
+                return True
+        except Exception:
+            pass
+        return await self.seleccionar_pestana(nombres)
+
+    @staticmethod
+    def _pestanas_de(ambito: Any, nombres: Iterable[str]) -> tuple[Any, ...]:
+        localizadores: list[Any] = []
         for nombre in nombres:
             patron = re.compile(nombre, re.I)
             localizadores.extend(
                 (
-                    self.page.get_by_role("tab", name=patron),
-                    self.page.get_by_role("link", name=patron),
-                    self.page.locator("a", has_text=patron),
-                    self.page.locator("button", has_text=patron),
-                    self.page.locator("li", has_text=patron),
+                    ambito.get_by_role("tab", name=patron),
+                    ambito.get_by_role("link", name=patron),
+                    ambito.locator("a", has_text=patron),
+                    ambito.locator("button", has_text=patron),
+                    ambito.locator("li", has_text=patron),
                 )
             )
-        return await self._clickear(tuple(localizadores), total_ms=8_000)
+        return tuple(localizadores)

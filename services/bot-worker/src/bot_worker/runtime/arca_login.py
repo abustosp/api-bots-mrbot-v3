@@ -557,15 +557,23 @@ class ArcaSession:
             service_name=str(portal or ""),
         )
 
-    async def open_service(self, service: str, *, portal: str | None = None) -> Any:
+    async def open_service(
+        self,
+        service: str,
+        *,
+        portal: str | None = None,
+        url: str | None = None,
+        hosts_permitidos: tuple[str, ...] = (),
+    ) -> Any:
         """Abre un servicio por nombre o una URL HTTPS del dominio fiscal.
 
         Con ``portal`` se devuelve el servicio portado de V1/V2 para ese bot
         (acciones propias del portal); sin él, el adaptador de página heredado.
+        ``url`` permite abrir directamente una URL del portal (caso SRT).
         """
         if not self._logged_in:
             await self.login()
-        value = str(service or "").strip()
+        value = str(url or service or "").strip()
         if not value:
             raise TargetUnavailableError(
                 "nombre de servicio ARCA vacío",
@@ -576,6 +584,15 @@ class ArcaSession:
             host = (parsed.hostname or "").lower().rstrip(".")
             trusted_host = host.endswith(".afip.gob.ar") or host == "afip.gob.ar"
             trusted_host = trusted_host or host.endswith(".arca.gob.ar") or host == "arca.gob.ar"
+            # Portales propios del bot (SRT y otros organismos) declarados en
+            # el manifiesto: se aceptan solo si el plugin los autoriza.
+            for permitido in hosts_permitidos:
+                limpio = str(permitido or "").lower().split(":")[0].strip()
+                if not limpio:
+                    continue
+                if host == limpio or host.endswith(f".{limpio}"):
+                    trusted_host = True
+                    break
             if (
                 parsed.scheme != "https"
                 or not trusted_host
