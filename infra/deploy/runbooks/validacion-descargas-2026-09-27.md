@@ -59,3 +59,57 @@ Ninguno de los 21 fallos corresponde a un defecto de contrato, cuota o carga de 
 - Flota: `worker2.mrbot.com.ar:443` y `worker-2.mrbot.com.ar:443` quedaron con la imagen que incluye el arreglo, sanos y con 5 plazas. Se aislaron temporalmente durante las pruebas y se restablecieron después.
 - Cuota y saldo: el consumo del período gratuito vive en memoria del proceso, por lo que un reinicio de la central repone las 20 unidades. La acreditación administrativa (`POST /admin/billing/accounts/{id}/credit`) responde 404 para usuarios que existen solo en PostgreSQL, porque busca en el registro del panel; los usuarios creados desde V3 no se pueden acreditar hasta que el panel los hidrate. La corrección de `saldo_creditos` nulo cubre el caso de usuarios hidratados.
 - Pendientes funcionales: equivalencia de flags de SCT, datos de entrada de moa, errores internos de navegación en declaracion_en_linea y mis_facilidades, y nuevas combinaciones autorizadas de credencial/CUIT para los representados no seleccionables.
+
+## Segunda pasada: correcciones y credenciales alternativas
+
+Sobre las 19 operaciones que fallaban se aplicaron tres correcciones de código y se
+reintentó con credenciales de las tres bases exploradas (hasta cinco combinaciones
+credencial/CUIT por operación, sin repetir par representante/representado).
+
+Correcciones de esta pasada:
+
+- SCT: la central traduce las nueve banderas V1 (`vencimientos_*`, `deudas_*`,
+  `ddjj_pendientes_*`) a `secciones` y `formatos`, que es lo que valida el worker.
+  Antes el job moría con `ENVELOPE_INVALID`.
+- Clasificación de errores: cuando la causa real es `AttributeError`, `TypeError`,
+  `NameError` o `NotImplementedError` de código propio, el job se reporta como
+  `INTERNAL` con `plugin_service_api_mismatch` en lugar de culpar al organismo con
+  `TARGET_UNAVAILABLE`. El diagnóstico queda además en el log del worker.
+- Comprobantes: la lectura de las planillas tolera codificaciones locales (cp1252) y
+  filas con campos de más, y el formato inesperado se reporta como
+  `portal_csv_unexpected_format`.
+
+Resultado de los 61 intentos sobre 19 operaciones:
+
+| operación | intentos | causa final |
+|---|---|---|
+| `consulta_pagos_vep.consultar` | 5 | 2 credenciales rechazadas y 3 representados no seleccionables |
+| `liquidacion_granos.consultar` | 5 | las 5 credenciales de mrbot1 rechazadas |
+| `libros_portal_iva.descargar_libros`, `libros_portal_iva.descargar_ddjj` | 5 y 5 | representado no seleccionable en las 5 |
+| `mis_retenciones.consultar`, `mis_retenciones_iva_simple.consultar` | 5 y 5 | representado no seleccionable en las 5 |
+| `portal_iva.descargar`, `rcel.descargar` | 5 y 5 | representado no seleccionable en las 5 |
+| `sifere.consultar` | 5 | 4 servicios no visibles y 1 credencial rechazada |
+| `hacienda.consultar` | 3 | servicio no visible en las 3 |
+| `pago_devoluciones.consultar` | 2 | representado no seleccionable y credencial rechazada |
+| `sct.consultar` | 4 | 3 representados no seleccionables y 1 API de servicio ausente |
+| `siper.consultar` | 1 | servicio no visible |
+| `comprobantes.consultar`, `comprobantes.historial` | 1 y 1 | formato de planilla inesperado del portal |
+| `declaracion_en_linea.consultar`, `mis_facilidades.consultar`, `moa.consultar` | 1 cada una | API de servicio ausente en el runtime |
+| `srt.consultar_alicuotas` | 1 | API de servicio ausente en el runtime |
+
+Lectura de estos resultados:
+
+- Probar otra credencial sirvió para separar dos causas que antes se confundían:
+  `liquidacion_granos` y parte de `sifere`/`vep`/`pago_devoluciones` tienen
+  credenciales realmente rechazadas por el organismo, mientras que
+  `libros_portal_iva`, `mis_retenciones` (ambas), `portal_iva`, `rcel` y `sct`
+  fallan igual con las cinco combinaciones, lo que descarta la credencial como causa.
+- En esos casos el bloqueo real es de implementación: `ArcaServicePage` solo
+  implementa los flujos de Mis Comprobantes (`seleccionar_representado`,
+  `descargar_csv`, `solicitar_consulta`). Los plugins de estos bots invocan métodos
+  de portal que no existen en el runtime (`descargar_reporte`, `descargar_periodo`,
+  `listar_planes`, `consultar_cuit`, `consultar_periodo`, `navegar_arbol_empresa`),
+  por eso la selección de representado falla o el job muere con una API ausente.
+  Completar esos bots requiere implementar la automatización de cada portal.
+- `moa` quedó sin bloqueo de datos: se recuperaron despachos reales de las bases y el
+  caso ya se envía con ellos; lo que falta es el método de scraping en el runtime.
