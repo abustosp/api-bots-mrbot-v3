@@ -182,7 +182,7 @@ class SrtPlugin:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
                 servicio = await sesion.open_service(
-                    self._servicio_nombre, url=self._alicuotas_url
+                    self._servicio_nombre, url=self._alicuotas_url, portal="srt"
                 )
                 datos, artefactos = await self._consultar_lote(
                     servicio, entrada, runtime

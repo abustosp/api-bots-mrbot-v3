@@ -543,8 +543,26 @@ class ArcaSession:
                         continue
         return None
 
-    async def open_service(self, service: str) -> Any:
-        """Abre un servicio por nombre o una URL HTTPS del dominio fiscal."""
+    def _servicio_para(self, page: Any, portal: str | None) -> Any:
+        """Servicio de portal portado de V1/V2, o el adaptador genérico."""
+        from bot_worker.runtime.portals import portal_para
+
+        clase = portal_para(portal) if portal else None
+        if clase is None:
+            return ArcaServicePage(page)
+        return clase(
+            page,
+            captcha=self._captcha,
+            context=self._context,
+            service_name=str(portal or ""),
+        )
+
+    async def open_service(self, service: str, *, portal: str | None = None) -> Any:
+        """Abre un servicio por nombre o una URL HTTPS del dominio fiscal.
+
+        Con ``portal`` se devuelve el servicio portado de V1/V2 para ese bot
+        (acciones propias del portal); sin él, el adaptador de página heredado.
+        """
         if not self._logged_in:
             await self.login()
         value = str(service or "").strip()
@@ -571,7 +589,7 @@ class ArcaSession:
             try:
                 await self.page.goto(value, timeout=45_000)
                 await self._wait_ready()
-                return ArcaServicePage(self.page)
+                return self._servicio_para(self.page, portal)
             except Exception as exc:
                 raise TargetUnavailableError(
                     "no se pudo abrir el servicio ARCA",
@@ -636,7 +654,7 @@ class ArcaSession:
             await service_page.wait_for_load_state("domcontentloaded", timeout=12_000)
         except Exception:
             pass
-        return ArcaServicePage(service_page)
+        return self._servicio_para(service_page, portal)
 
     async def close(self) -> None:
         # BrowserFactory cierra el contexto. Reducir referencias a secretos aquí.

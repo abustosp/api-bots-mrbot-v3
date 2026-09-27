@@ -114,7 +114,38 @@ class CaptchaSolver:
             task["CapMonsterModule"] = self.module
         if self.recognizing_threshold is not None:
             task["recognizingThreshold"] = self.recognizing_threshold
-        timeout_seconds = _bounded_int(self.timeout_seconds, 60, 5, 300)
+        return await self._resolver(task, timeout_seconds=self.timeout_seconds)
+
+    async def solve_recaptcha(
+        self,
+        *,
+        sitekey: str,
+        url: str,
+        timeout_seconds: int | None = None,
+    ) -> str:
+        """Resuelve un reCAPTCHA v2 invisible/simple y devuelve el token.
+
+        Port del proveedor usado por V1/V2 para los portales que exigen
+        reCAPTCHA en la consulta (SRT, entre otros).
+        """
+        if not self.enabled:
+            raise CaptchaUnsolvableError("solucionador deshabilitado")
+        if not self._api_key:
+            raise CaptchaUnsolvableError("sin credencial de proveedor")
+        if not sitekey or not url:
+            raise CaptchaUnsolvableError("reCAPTCHA sin sitekey o URL")
+        task: dict[str, Any] = {
+            "type": "RecaptchaV2TaskProxyless",
+            "websiteURL": url,
+            "websiteKey": sitekey,
+        }
+        return await self._resolver(
+            task, timeout_seconds=timeout_seconds or self.timeout_seconds
+        )
+
+    async def _resolver(self, task: dict[str, Any], *, timeout_seconds: int) -> str:
+        """Crea la tarea y espera la solución (texto o token)."""
+        timeout_seconds = _bounded_int(timeout_seconds, 60, 5, 300)
         poll_seconds = _bounded_int(self.poll_seconds, 3, 1, 10)
         request_timeout = httpx.Timeout(min(timeout_seconds, 120))
         payload = {"clientKey": self._api_key, "task": task}
@@ -142,9 +173,11 @@ class CaptchaSolver:
                             "el proveedor no pudo resolver el CAPTCHA"
                         )
                     if result.get("status") == "ready":
-                        text = result.get("solution", {}).get("text")
-                        if isinstance(text, str) and text.strip():
-                            return text.strip()
+                        solucion = result.get("solution", {})
+                        for campo in ("text", "gRecaptchaResponse", "token"):
+                            valor = solucion.get(campo) if isinstance(solucion, dict) else None
+                            if isinstance(valor, str) and valor.strip():
+                                return valor.strip()
                         raise CaptchaUnsolvableError(
                             "el proveedor devolvió una solución vacía"
                         )
