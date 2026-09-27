@@ -164,7 +164,7 @@ class MoaPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(SERVICIO_ARCA)
+                servicio = await sesion.open_service(SERVICIO_ARCA, portal="moa")
                 datos, artefactos = await self._consultar(servicio, entrada, runtime)
         except ErrorDeBot:
             raise
@@ -217,12 +217,21 @@ class MoaPlugin:
                 datos["despachos_procesados"] += 1
                 datos["despachos_con_error"] += 1
                 datos["errores"].append(
-                    {"despacho": despacho, "diagnostico": exc.diagnostico}
+                    {
+                        "despacho": despacho,
+                        "diagnostico": exc.diagnostico,
+                        "diagnostic_code": getattr(exc, "diagnostic_code", None),
+                    }
                 )
                 continue
             datos["despachos_procesados"] += 1
             datos["despachos_exitosos"] += 1
             datos["datos"].append({"despacho": despacho, **dict(registro or {})})
+        if datos["despachos_exitosos"] == 0:
+            raise TargetUnavailableError(
+                "MOA no devolvió datos para ninguno de los despachos consultados",
+                diagnostic_code="moa_no_dispatch_results",
+            )
         destino = runtime.artifact_store.resolve(
             f"{nombre_base_archivo(entrada.representado_cuit)}.csv"
         )
