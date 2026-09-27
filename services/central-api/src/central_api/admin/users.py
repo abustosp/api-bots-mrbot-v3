@@ -16,6 +16,7 @@ import hmac
 import re
 import secrets
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 from dataclasses import asdict, dataclass, field
 
@@ -25,6 +26,7 @@ from pydantic import BaseModel, Field
 from central_api.admin._common import enmascarar, require_admin, validar_motivo
 from central_api.admin.audit import log_event
 from central_api.admin.notifications import enviar_credenciales_email
+from central_api.models.base import new_uuid7
 from central_api.settings import get_settings
 from central_api.store import utcnow
 
@@ -40,7 +42,7 @@ class AdminUser:
     display_name: str = ""
     estado: str = "habilitado"
     plan: str = "free"
-    saldo_creditos: int = 0
+    saldo_creditos: int | None = 0
     motivo: str = ""
 
 
@@ -147,7 +149,7 @@ def emitir_clave(
     if any(k.verificador_hmac == verificador for k in API_KEYS.values()):
         raise HTTPException(status_code=409, detail="valor de clave ya registrado")
     meta = ApiKeyMeta(
-        id=_nuevo_id(),
+        id=str(new_uuid7()),
         user_id=user_id,
         prefijo=valor[:8],
         verificador_hmac=verificador,
@@ -271,6 +273,131 @@ async def _id_pg_por_email(email: str) -> str | None:
     return str(fila[0]) if fila is not None else None
 
 
+async def _filas_identidad_pg() -> tuple[list[tuple], list[tuple]]:
+    """Lee solo datos administrativos no secretos de usuarios y claves."""
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey, User
+
+    if not db_configurado():
+        return [], []
+    from sqlalchemy import select
+
+    try:
+        async with nueva_sesion() as sesion:
+            usuarios = (
+                await sesion.execute(
+                    select(User.id, User.email, User.habilitado).order_by(User.email)
+                )
+            ).all()
+            claves = (
+                await sesion.execute(
+                    select(
+                        ApiKey.id,
+                        ApiKey.user_id,
+                        ApiKey.key_prefix,
+                        ApiKey.scopes,
+                        ApiKey.expires_at,
+                        ApiKey.revoked_at,
+                        ApiKey.created_at,
+                    ).order_by(ApiKey.created_at.desc())
+                )
+            ).all()
+    except Exception:  # noqa: BLE001 - nunca degradar una lista persistente a memoria vacía
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    return list(usuarios), list(claves)
+
+
+async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
+    """Hidrata una identidad persistida para habilitar acciones desde el panel."""
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import User
+
+    if not db_configurado():
+        return None
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    try:
+        async with nueva_sesion() as sesion:
+            row = await sesion.get(User, user_uuid)
+    except Exception:  # noqa: BLE001 - error DB sanitizado
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    if row is None:
+        return None
+    return AdminUser(
+        id=str(row.id),
+        email=str(row.email),
+        estado="habilitado" if row.habilitado else "deshabilitado",
+        plan="—",
+        saldo_creditos=None,
+    )
+
+
+async def _persistir_api_key_pg(
+    usuario: AdminUser, meta: ApiKeyMeta, valor: str
+) -> None:
+    """Persiste selector y HMAC, nunca el secreto literal de la API key."""
+    from sqlalchemy.exc import IntegrityError
+
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey, User
+
+    if not db_configurado():
+        return
+    settings = get_settings()
+    if not settings.api_key_hmac_secret:
+        raise HTTPException(status_code=503, detail="Servicio no disponible")
+    try:
+        user_uuid = uuid.UUID(usuario.id)
+        key_uuid = uuid.UUID(meta.id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="Identidad o clave inválida") from None
+    try:
+        from central_api.api.dependencies import _selector_y_secreto
+        from central_api.security.api_keys import fingerprint_secret
+
+        selector, secreto_a_firmar = _selector_y_secreto(valor)
+        verifier = fingerprint_secret(settings.api_key_hmac_secret, secreto_a_firmar)
+        expires_at = None
+        if meta.expira_en:
+            try:
+                expires_at = datetime.fromisoformat(
+                    meta.expira_en.replace("Z", "+00:00")
+                )
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="expira_en inválida") from None
+        async with nueva_sesion() as sesion:
+            cuenta = await sesion.get(User, user_uuid)
+            if cuenta is None:
+                cuenta = User(
+                    id=user_uuid,
+                    email=usuario.email,
+                    habilitado=usuario.estado == "habilitado",
+                )
+                sesion.add(cuenta)
+                await sesion.flush()
+            sesion.add(
+                ApiKey(
+                    id=key_uuid,
+                    user_id=user_uuid,
+                    key_prefix=selector,
+                    verifier_hmac=verifier,
+                    scopes=list(meta.scopes),
+                    expires_at=expires_at,
+                )
+            )
+            await sesion.flush()
+    except HTTPException:
+        raise
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="valor de clave ya registrado") from None
+    except Exception:  # noqa: BLE001 - no filtrar DSN ni datos internos
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+
+
 @router.post("/users", status_code=201)
 async def crear_usuario(
     body: CrearUsuarioBody,
@@ -290,6 +417,7 @@ async def crear_usuario(
     email = _normalizar_identidad(body.email)
     if any(u.email == email for u in USERS.values()):
         raise HTTPException(status_code=409, detail="identidad ya registrada")
+    persisted_user_id = await _id_pg_por_email(email)
     api_key = body.api_key.strip()
     valor_fijo = body.valor_fijo.strip()
     if api_key and valor_fijo and api_key != valor_fijo:
@@ -309,15 +437,19 @@ async def crear_usuario(
             detail="enviar_credenciales requiere un email con dominio",
         )
     usuario = AdminUser(
-        id=await _id_pg_por_email(email) or _nuevo_id(),
+        id=persisted_user_id or _nuevo_id(),
         email=email, display_name=body.display_name,
         estado=estado, plan=body.plan, motivo=motivo,
     )
     USERS[usuario.id] = usuario
+    meta = None
     try:
         meta, valor = emitir_clave(usuario.id, [], "", api_key)
+        await _persistir_api_key_pg(usuario, meta, valor)
     except Exception:
         USERS.pop(usuario.id, None)
+        if meta is not None:
+            API_KEYS.pop(meta.id, None)
         raise
 
     credenciales = {
@@ -366,7 +498,7 @@ async def crear_usuario(
 
 
 @router.get("/users")
-def listar_usuarios(
+async def listar_usuarios(
     response: Response,
     authorization: str | None = Header(default=None),
     email: str = "",
@@ -378,7 +510,45 @@ def listar_usuarios(
     """Busca usuarios por email, estado y plan con paginación por offset."""
     require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
-    usuarios = list(USERS.values())
+    filas_usuarios, filas_claves = await _filas_identidad_pg()
+    usuarios_por_id = {user.id: user for user in USERS.values()}
+    claves_por_usuario: dict[str, dict[str, dict]] = {}
+    ahora = utcnow()
+    for user_id, email_pg, habilitado in filas_usuarios:
+        uid = str(user_id)
+        usuario = usuarios_por_id.get(uid)
+        if usuario is None:
+            usuario = AdminUser(
+                id=uid,
+                email=str(email_pg),
+                estado="habilitado" if habilitado else "deshabilitado",
+                plan="—",
+                saldo_creditos=None,
+            )
+            USERS[uid] = usuario
+            usuarios_por_id[uid] = usuario
+        else:
+            # El estado persistido es canónico tras reinicios o cambios externos.
+            usuario.estado = "habilitado" if habilitado else "deshabilitado"
+        claves_por_usuario[uid] = {}
+    for key_id, user_id, prefix, scopes, expires_at, revoked_at, created_at in filas_claves:
+        uid = str(user_id)
+        expirada = expires_at is not None and expires_at <= ahora
+        estado_clave = "revocada" if revoked_at is not None else ("expirada" if expirada else "activa")
+        claves_por_usuario.setdefault(uid, {})[str(key_id)] = {
+            "id": str(key_id),
+            "prefijo": str(prefix),
+            "estado": estado_clave,
+            "emitida_en": created_at.isoformat() if created_at else "",
+        }
+    for clave in API_KEYS.values():
+        claves_por_usuario.setdefault(clave.user_id, {})[clave.id] = {
+            "id": clave.id,
+            "prefijo": clave.prefijo,
+            "estado": "revocada" if clave.revocada else "activa",
+            "emitida_en": clave.emitida_en,
+        }
+    usuarios = list(usuarios_por_id.values())
     if email:
         usuarios = [u for u in usuarios if email.lower() in u.email]
     if estado:
@@ -394,19 +564,11 @@ def listar_usuarios(
         "usuarios": [
             {
                 **_vista_usuario(u),
-                "claves_api": [
-                    {
-                        "id": clave.id,
-                        "prefijo": clave.prefijo,
-                        "estado": "revocada" if clave.revocada else "activa",
-                        "emitida_en": clave.emitida_en,
-                    }
-                    for clave in sorted(
-                        (k for k in API_KEYS.values() if k.user_id == u.id),
-                        key=lambda k: k.emitida_en,
-                        reverse=True,
-                    )
-                ],
+                "claves_api": sorted(
+                    claves_por_usuario.get(u.id, {}).values(),
+                    key=lambda clave: clave["emitida_en"],
+                    reverse=True,
+                ),
             }
             for u in pagina
         ],
@@ -414,7 +576,7 @@ def listar_usuarios(
 
 
 @router.get("/users/{user_id}")
-def ver_usuario(
+async def ver_usuario(
     user_id: str,
     response: Response,
     authorization: str | None = Header(default=None),
@@ -423,6 +585,10 @@ def ver_usuario(
     require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     usuario = USERS.get(user_id)
+    if usuario is None:
+        usuario = await _usuario_pg_por_id(user_id)
+        if usuario is not None:
+            USERS[user_id] = usuario
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
     claves = [_vista_clave(k) for k in API_KEYS.values() if k.user_id == user_id]
@@ -469,6 +635,10 @@ async def _cambiar_estado(
 ) -> dict:
     motivo = validar_motivo(motivo_raw)
     usuario = USERS.get(user_id)
+    if usuario is None:
+        usuario = await _usuario_pg_por_id(user_id)
+        if usuario is not None:
+            USERS[user_id] = usuario
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
     try:
@@ -519,7 +689,7 @@ async def deshabilitar_usuario(
 
 
 @router.post("/users/{user_id}/api-keys", status_code=201)
-def emitir_clave_api(
+async def emitir_clave_api(
     user_id: str,
     body: EmitirClaveBody,
     response: Response,
@@ -530,11 +700,21 @@ def emitir_clave_api(
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     motivo = validar_motivo(body.motivo)
-    if user_id not in USERS:
+    usuario = USERS.get(user_id)
+    if usuario is None:
+        usuario = await _usuario_pg_por_id(user_id)
+        if usuario is not None:
+            USERS[user_id] = usuario
+    if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
     meta, valor = emitir_clave(
         user_id, body.scopes, body.expira_en, body.valor_fijo
     )
+    try:
+        await _persistir_api_key_pg(usuario, meta, valor)
+    except Exception:
+        API_KEYS.pop(meta.id, None)
+        raise
     log_event(
         "user.api_key.issued", actor_id=actor, target_type="api_key",
         target_id=meta.id, request_id=request_id or "", reason=motivo,

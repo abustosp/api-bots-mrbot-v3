@@ -564,7 +564,10 @@ details > .details-body { padding: 0 14px 14px; }
   function userKeyPreview(keys) {
     const items = Array.isArray(keys) ? keys : [];
     return items.length
-      ? items.map((key) => `<div><code>${esc(key.prefijo || "—")}</code> <span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${key.estado === "activa" ? "Activa" : "Revocada"}</span></div>`).join("")
+      ? items.map((key) => {
+        const label = key.estado === "activa" ? "Activa" : key.estado === "expirada" ? "Expirada" : "Revocada";
+        return `<div><code>${esc(key.prefijo || "—")}</code> <span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${label}</span></div>`;
+      }).join("")
       : `<span class="muted">Sin clave</span>`;
   }
   async function loadUsers(event) {
@@ -575,7 +578,7 @@ details > .details-body { padding: 0 14px 14px; }
       const rows = data.usuarios || [];
       $("#users-table").innerHTML = rows.length ? rows.map((user) => {
         const enabled = user.estado === "habilitado";
-        return `<tr><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${userKeyPreview(user.claves_api)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.saldo_creditos)}</td><td class="actions"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button><button type="button" class="button secondary small" data-action="issue-key" data-id="${esc(user.id)}">Emitir y revelar clave</button></td></tr>`;
+        return `<tr><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${userKeyPreview(user.claves_api)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.saldo_creditos ?? "—")}</td><td class="actions"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button><button type="button" class="button secondary small" data-action="issue-key" data-id="${esc(user.id)}">Emitir y revelar clave</button></td></tr>`;
       }).join("") : `<tr><td colspan="7" class="empty">No hay usuarios para ese filtro.</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
   }

@@ -234,6 +234,96 @@ def test_usuario_lista_prefijo_y_cambia_estado_activo_desactivado(admin, monkeyp
     ] == "private, no-store"
 
 
+def test_usuarios_persistidos_se_hidratan_y_su_estado_se_alterna(admin, monkeypatch) -> None:
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    user_id = str(uuid4())
+    key_id = str(uuid4())
+    persisted = {"enabled": True, "revoked_at": None}
+
+    async def filas_pg():
+        return (
+            [(user_id, "abp", persisted["enabled"])],
+            [
+                (
+                    key_id,
+                    user_id,
+                    "selector-abp",
+                    [],
+                    None,
+                    persisted["revoked_at"],
+                    datetime.now(timezone.utc),
+                )
+            ],
+        )
+
+    async def persistir_estado(user_id_arg: str, estado: str) -> None:
+        assert user_id_arg == user_id
+        persisted["enabled"] = estado == "habilitado"
+        if estado == "deshabilitado":
+            persisted["revoked_at"] = datetime.now(timezone.utc)
+
+    monkeypatch.setattr(admin, "_filas_identidad_pg", filas_pg)
+    monkeypatch.setattr(admin, "_persistir_estado_pg", persistir_estado)
+    cliente = TestClient(create_app())
+
+    respuesta = cliente.get("/admin/users", headers=_headers())
+    assert respuesta.status_code == 200
+    assert respuesta.headers["cache-control"] == "private, no-store"
+    usuario = respuesta.json()["usuarios"][0]
+    assert usuario["email"] == "abp"
+    assert usuario["estado"] == "habilitado"
+    assert usuario["claves_api"][0]["prefijo"] == "selector-abp"
+    assert usuario["claves_api"][0]["estado"] == "activa"
+    assert "verifier_hmac" not in repr(usuario)
+
+    desactivado = cliente.post(
+        f"/admin/users/{user_id}/disable",
+        headers=_headers(),
+        json={"motivo": "desactivar usuario persistido en la prueba"},
+    )
+    assert desactivado.status_code == 200
+    usuario_deshabilitado = cliente.get(
+        "/admin/users", headers=_headers()
+    ).json()["usuarios"][0]
+    assert usuario_deshabilitado["estado"] == "deshabilitado"
+    assert usuario_deshabilitado["claves_api"][0]["estado"] == "revocada"
+
+    activado = cliente.post(
+        f"/admin/users/{user_id}/enable",
+        headers=_headers(),
+        json={"motivo": "activar usuario persistido en la prueba"},
+    )
+    assert activado.status_code == 200
+    assert cliente.get("/admin/users", headers=_headers()).json()["usuarios"][0][
+        "estado"
+    ] == "habilitado"
+
+
+def test_emision_manual_invoca_persistencia_y_mantiene_secreto_de_una_sola_vez(
+    admin, monkeypatch
+) -> None:
+    cliente = TestClient(create_app())
+    usuario = _crear_usuario(cliente, "abp").json()["usuario"]
+    persistidas: list[tuple[str, str, str]] = []
+
+    async def persistir(usuario_admin, meta, valor: str) -> None:
+        persistidas.append((usuario_admin.id, meta.id, valor))
+
+    monkeypatch.setattr(admin, "_persistir_api_key_pg", persistir)
+    emitir = cliente.post(
+        f"/admin/users/{usuario['id']}/api-keys",
+        headers=_headers(),
+        json={"valor_fijo": "abp", "motivo": "clave abp de prueba"},
+    )
+    assert emitir.status_code == 201
+    assert emitir.headers["cache-control"] == "private, no-store"
+    assert emitir.json()["valor_unica_vez"] == "abp"
+    assert persistidas[0][0] == usuario["id"]
+    assert persistidas[0][2] == "abp"
+
+
 def test_listar_editar_revocar_restaurar_claves(admin, monkeypatch) -> None:
     monkeypatch.setenv("API_KEY_HMAC_SECRET", "secreto-servidor-test")
     get_settings.cache_clear()
