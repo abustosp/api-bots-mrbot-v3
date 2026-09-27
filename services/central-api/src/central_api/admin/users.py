@@ -211,7 +211,9 @@ def aplicar_credito(
     usuario = USERS.get(user_id)
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
-    previo = usuario.saldo_creditos
+    # Los usuarios hidratados desde PostgreSQL llegan con saldo desconocido
+    # (None): el libro del panel arranca en 0 en vez de fallar con 500.
+    previo = usuario.saldo_creditos or 0
     posterior = previo + delta
     if posterior < 0:
         raise HTTPException(status_code=422, detail="saldo de créditos negativo")

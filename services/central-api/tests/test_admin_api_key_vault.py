@@ -482,3 +482,18 @@ def test_panel_claves_api_pide_motivo_de_3_a_500(copy_panel) -> None:
     assert "El motivo debe tener entre 3 y 500 caracteres." in html
     assert "(10-500 caracteres)" not in html.split("Motivo del forzado")[0]
     assert 'id="new-reason" type="text" value="alta desde panel V3" minlength="3" maxlength="500"' in html
+
+
+def test_credito_a_usuario_hidratado_desde_pg_sin_saldo(copy_panel) -> None:
+    """Un usuario cargado desde PostgreSQL tiene saldo None: acreditar no da 500."""
+    uid = str(uuid.uuid4())
+    admin_users.USERS[uid] = admin_users.AdminUser(
+        id=uid, email="pg-sin-saldo@example.com", estado="habilitado", plan="—", saldo_creditos=None
+    )
+    r = copy_panel.post(
+        f"/admin/billing/accounts/{uid}/credit",
+        json={"delta": 50, "motivo": "carga de prueba", "referencia": "t1"},
+        headers=_admin_headers(),
+    )
+    assert r.status_code == 200, r.text
+    assert admin_users.USERS[uid].saldo_creditos == 50
