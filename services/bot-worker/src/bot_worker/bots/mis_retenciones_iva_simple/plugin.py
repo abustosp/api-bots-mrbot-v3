@@ -182,7 +182,9 @@ class MisRetencionesIvaSimplePlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(SERVICIO_ARCA)
+                servicio = await sesion.open_service(
+                    SERVICIO_ARCA, portal="mis_retenciones_iva_simple"
+                )
                 await servicio.seleccionar_representado(entrada.representado_cuit)
                 datos, artefactos = await self._consultar(servicio, entrada, runtime)
         except ErrorDeBot:
