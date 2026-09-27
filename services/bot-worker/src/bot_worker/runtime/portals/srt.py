@@ -30,14 +30,26 @@ class SrtPortal(PortalArca):
         self._preparado = False
 
     async def preparar(self) -> None:
-        """Deja la página de consulta lista (port del preámbulo de V2).
+        """Reproduce el orden de V1/V2 dentro de la sesión SSO.
 
-        V2 abría el servicio desde Clave Fiscal, clickeaba "Ingresar" cuando el
-        contribuyente lo pedía y recién después navegaba a la consulta. Sin ese
-        preámbulo la página no trae el campo de CUIT.
+        Primero se entra a E-SERVICIOS SRT desde Clave Fiscal, después se
+        confirma el representado con "Ingresar" cuando el portal lo solicita,
+        y por último se sigue el enlace interno a Consulta de Alícuotas.
         """
+        try:
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        except Exception:
+            pass
         await self._click_ingresar_temporal()
         await self.abrir_consulta()
+
+    def configurar_captcha_srt(self, solver: Any = None) -> None:
+        """Usa el perfil ``capmonster_srt`` para el CAPTCHA del organismo.
+
+        El CAPTCHA de Clave Fiscal pertenece al perfil ARCA. No debe
+        reutilizarse aquí el resolvedor de login que entrega ``ArcaSession``.
+        """
+        self._captcha = solver
 
     async def _click_ingresar_temporal(self) -> bool:
         """Click en "Ingresar" de la selección de representado (solo algunos CUIT)."""
@@ -55,35 +67,63 @@ class SrtPortal(PortalArca):
             await objetivo.click(timeout=5_000)
         except Exception:
             return False
+        try:
+            await self.page.wait_for_url(re.compile(r"Servicios\.aspx", re.I), timeout=10_000)
+        except Exception:
+            pass
+        try:
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        except Exception:
+            pass
         await self._esperar(1_500)
         return True
 
     async def abrir_consulta(self) -> None:
         """Abre la consulta de alícuotas dentro del portal SRT.
 
-        Port de ``_open_srt_query_page`` de V2: primero se busca el enlace de la
-        consulta en el portal (mantiene la sesión SSO que abrió Clave Fiscal) y
-        solo como respaldo se navega directo a la URL. Navegar directo sin la
-        sesión del portal devuelve ``/ErrorValidate.aspx``.
+        Port de ``_open_srt_query_page`` de V1/V2: el portal se abre siguiendo
+        su enlace ``id=11`` o el enlace rotulado. No navegar directamente a la
+        URL: hacerlo omite la validación SSO y termina en ``ErrorValidate.aspx``.
         """
+        try:
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        except Exception:
+            pass
         enlace = await self._primero_visible(
             (
+                # Selector literal de V1/V2. En el portal vigente la entrada
+                # "Consulta de Alícuotas" suele conservar el id numérico.
+                self.page.locator('[id="11"]'),
                 self.page.get_by_role("link", name=re.compile(r"consulta\s+de\s+al[ií]cuotas", re.I)),
-                self.page.get_by_role("tab", name=re.compile(r"al[ií]cuotas", re.I)),
-                self.page.locator("a", has_text=re.compile(r"al[ií]cuotas", re.I)),
-                self.page.get_by_role("button", name=re.compile(r"al[ií]cuotas", re.I)),
+                self.page.locator('[id="11"] a'),
+                self.page.locator("a", has_text=re.compile(r"consulta\s+(?:de\s+)?al[ií]cuotas", re.I)),
             ),
-            total_ms=8_000,
+            total_ms=15_000,
         )
-        if enlace is not None:
-            try:
-                await enlace.click(timeout=6_000)
-                await self._esperar(1_500)
-            except Exception:
-                pass
+        if enlace is None:
+            pista = await self._pista_de_pagina()
+            raise TargetUnavailableError(
+                f"no se encontró el enlace de Consulta de Alícuotas del portal SRT ({pista})",
+                diagnostic_code="srt_query_link_missing",
+            )
+        try:
+            await enlace.click(timeout=8_000)
+        except Exception as exc:
+            raise TargetUnavailableError(
+                "no se pudo seguir el enlace de Consulta de Alícuotas del portal SRT",
+                diagnostic_code="srt_query_link_click_failed",
+            ) from exc
+        try:
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        except Exception:
+            pass
+        await self._esperar(1_500)
         if "ErrorValidate" in await self._url() or await self._campo_cuit() is None:
-            await self.abrir_url(ALICUOTAS_URL)
-            await self._esperar(1_000)
+            pista = await self._pista_de_pagina()
+            raise TargetUnavailableError(
+                f"el enlace del portal no abrió la consulta SRT ({pista})",
+                diagnostic_code="srt_query_link_invalid",
+            )
 
     async def _campo_cuit(self) -> Any | None:
         return await self._primero_visible(

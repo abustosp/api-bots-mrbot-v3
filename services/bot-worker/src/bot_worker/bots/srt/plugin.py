@@ -74,6 +74,16 @@ def es_respuesta_sin_datos(texto: str) -> str | None:
     return None
 
 
+def _configurar_captcha_srt(servicio: Any, browser_factory: Any) -> None:
+    """Asigna solo el resolvedor ``srt`` al portal SRT si está disponible."""
+    configurar = getattr(servicio, "configurar_captcha_srt", None)
+    if not callable(configurar):
+        return
+    resolvedores = getattr(browser_factory, "_solvers", {})
+    resolvedor_srt = resolvedores.get("srt") if isinstance(resolvedores, dict) else None
+    configurar(resolvedor_srt)
+
+
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     """Mapea excepciones del flujo a errores tipados con diagnostico seguro."""
     if isinstance(exc, ErrorDeBot):
@@ -186,6 +196,10 @@ class SrtPlugin:
                     portal="srt",
                     hosts_permitidos=tuple(self.manifest.hosts_permitidos or ()),
                 )
+                # El login ARCA usa capmonster_arca. El desafío del formulario
+                # SRT debe resolverse con el perfil capmonster_srt provisionado
+                # en la factoría para este mismo job.
+                _configurar_captcha_srt(servicio, runtime.browser_factory)
                 datos, artefactos = await self._consultar_lote(
                     servicio, entrada, runtime
                 )
