@@ -10,19 +10,19 @@ respecto de V2:
 - Sin ``os.environ`` ni ``get_proxy_config()``: proxy y credenciales
   llegan por ``runtime`` desde el sobre sellado.
 - Sin ``_subir_a_minio`` con claves: cada archivo se sube con
-  ``artifact_store.upload`` (slots ``libros_iva_archivo`` y
-  ``ddjj_archivo``).
+  ``artifact_store.upload`` (slots ``libros_iva_bin`` y ``ddjj_bin``).
 - Sin links de MinIO en el resultado (V2 los recorta con
   ``_strip_minio_links``): el resultado trae nombres, periodos y
   hashes, nunca URLs firmadas.
 - Sin credenciales en logs: categoria + diagnostico redactado.
 
 Dos operaciones (``descargar_libros`` y ``descargar_ddjj``) que reflejan
-``_download_libros_iva`` y ``_download_ddjj`` de V2 sobre el Portal IVA
-(``siapweb.cloud.afip.gob.ar/iva``).
+``_download_libros_iva`` y ``_download_ddjj`` de V2. El plugin abre ``Portal
+IVA`` desde el catálogo de Clave Fiscal para obtener el token de lanzamiento
+(la URL profunda ``/iva`` responde HTTP 401 si se navega sin ese token).
 
-La seccion ``service`` del sobre sellado (vía :meth:`configure`) solo
-ajusta la URL del portal.
+La sección ``service`` del sobre sellado (vía :meth:`configure`) permite
+ajustar el nombre del servicio del catálogo mediante ``portal_iva_service``.
 """
 
 from __future__ import annotations
@@ -54,9 +54,9 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotResult = Any  # type: ignore[assignment,misc]
     BotRuntime = Any  # type: ignore[assignment,misc]
 
-PORTAL_IVA_URL = "https://siapweb.cloud.afip.gob.ar/iva"
-ID_ARTEFACTO_LIBROS = "libros_iva_archivo"
-ID_ARTEFACTO_DDJJ = "ddjj_archivo"
+PORTAL_IVA_SERVICE = "Portal IVA"
+ID_ARTEFACTO_LIBROS = "libros_iva_bin"
+ID_ARTEFACTO_DDJJ = "ddjj_bin"
 
 IDS_POR_OPERACION = {
     "descargar_libros": ID_ARTEFACTO_LIBROS,
@@ -114,9 +114,9 @@ class LibrosPortalIvaPlugin:
         ),
     )
 
-    def __init__(self, portal_url: str | None = None) -> None:
-        """Valor por defecto; la seccion sellada lo ajusta en ``configure``."""
-        self._portal_url = portal_url or PORTAL_IVA_URL
+    def __init__(self, portal_service: str | None = None) -> None:
+        """Nombre del servicio en Clave Fiscal; no navega la URL directamente."""
+        self._portal_service = portal_service or PORTAL_IVA_SERVICE
 
     def __repr__(self) -> str:
         return "LibrosPortalIvaPlugin(<redacted>)"
@@ -124,12 +124,13 @@ class LibrosPortalIvaPlugin:
     def configure(self, service: dict[str, Any] | None) -> "LibrosPortalIvaPlugin":
         """Aplica la seccion ``service`` del sobre sellado (por job).
 
-        Clave conocida: ``portal_iva_url`` (URL del Portal IVA). Sin
-        seccion rige el valor por defecto V2.
+        Clave conocida: ``portal_iva_service`` (nombre en el catálogo de Clave
+        Fiscal). Sin sección rige ``Portal IVA``. No se abre la URL profunda
+        directamente porque ARCA exige el token de lanzamiento del catálogo.
         """
         service = service if isinstance(service, dict) else {}
-        if service.get("portal_iva_url"):
-            self._portal_url = str(service["portal_iva_url"])
+        if service.get("portal_iva_service"):
+            self._portal_service = str(service["portal_iva_service"])
         return self
 
     async def validate(self, payload: Mapping[str, Any]) -> Any:
@@ -176,7 +177,9 @@ class LibrosPortalIvaPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                portal = await sesion.open_service(self._portal_url)
+                portal = await sesion.open_service(
+                    self._portal_service, portal="libros_portal_iva"
+                )
                 await portal.seleccionar_representado(representado)
                 datos, artefactos = await self._descargar(
                     portal, entrada, representado, periodos, operacion, runtime
