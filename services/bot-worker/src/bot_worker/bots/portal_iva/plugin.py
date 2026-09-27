@@ -109,6 +109,8 @@ class PortalIvaPlugin:
         browser_instances_max=1,
         hosts_permitidos=(
             "www.afip.gob.ar",
+            "siapweb.cloud.afip.gob.ar",
+            "liva.afip.gob.ar",
             "api.capmonster.cloud",
         ),
     )
@@ -177,11 +179,14 @@ class PortalIvaPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(SERVICIO_ARCA)
+                servicio = await sesion.open_service(SERVICIO_ARCA, portal="portal_iva")
                 cuit_objetivo = (
                     entrada.representado_cuit or runtime.credentials.cuit_representante
                 )
-                await servicio.seleccionar_representado(cuit_objetivo)
+                await servicio.seleccionar_representado(
+                    cuit_objetivo,
+                    cuit_representante=runtime.credentials.cuit_representante,
+                )
                 await servicio.seleccionar_periodo(entrada.periodo)
                 if operacion == "importar":
                     datos, artefactos = await self._importar(
@@ -299,18 +304,26 @@ class PortalIvaPlugin:
     @staticmethod
     def _contar_filas(archivo: Path) -> int:
         """Cuenta filas de datos del CSV sin cargarlo completo en memoria."""
-        try:
-            with open(archivo, "r", encoding="utf-8-sig", newline="") as fh:
-                return max(0, sum(1 for _ in fh) - 1)
-        except OSError:
-            return 0
+        for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                with open(archivo, "r", encoding=encoding, newline="") as fh:
+                    return max(0, sum(1 for _ in fh) - 1)
+            except UnicodeDecodeError:
+                continue
+            except OSError:
+                return 0
+        return 0
 
     @staticmethod
     def _muestra(archivo: Path, limite: int = 5) -> list[dict[str, str]]:
         """Lee las primeras filas del CSV final para el JSON de respuesta."""
-        try:
-            with open(archivo, "r", encoding="utf-8-sig", newline="") as fh:
-                lector = csv.DictReader(fh)
-                return [dict(fila) for _, fila in zip(range(limite), lector)]
-        except OSError:
-            return []
+        for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                with open(archivo, "r", encoding=encoding, newline="") as fh:
+                    lector = csv.DictReader(fh)
+                    return [dict(fila) for _, fila in zip(range(limite), lector)]
+            except UnicodeDecodeError:
+                continue
+            except OSError:
+                return []
+        return []
