@@ -223,6 +223,12 @@ class MoaPortal(PortalArca):
                     diagnostic_code="moa_back_button_missing",
                 )
             await self._esperar(300)
+        campo = self.page.locator('input[name="declaracion"]')
+        if not await self._primero_visible((campo,), total_ms=15_000):
+            raise TargetUnavailableError(
+                "MOA no volvió al formulario de búsqueda",
+                diagnostic_code="moa_back_form_missing",
+            )
 
     async def _esperar_carga(self) -> None:
         try:

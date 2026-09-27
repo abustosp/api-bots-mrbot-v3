@@ -109,6 +109,41 @@ def test_busqueda_diagnostica_formulario_ausente() -> None:
     assert exc.value.diagnostic_code == "moa_search_form_missing"
 
 
+def test_volver_espera_a_que_reaparezca_el_formulario() -> None:
+    class _Campo:
+        def __init__(self) -> None:
+            self.llamadas = 0
+
+        async def count(self) -> int:
+            self.llamadas += 1
+            return int(self.llamadas > 1)
+
+        @property
+        def first(self) -> "_Campo":
+            return self
+
+        async def is_visible(self, **_: Any) -> bool:
+            return True
+
+    class _Pagina:
+        def __init__(self) -> None:
+            self.campo = _Campo()
+
+        def locator(self, _: str) -> _Campo:
+            return self.campo
+
+        def get_by_role(self, *_: Any, **__: Any) -> object:
+            return object()
+
+    portal = MoaPortal(_Pagina())
+    portal._clickear = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    portal._esperar = AsyncMock()  # type: ignore[method-assign]
+
+    asyncio.run(portal._volver_al_formulario())
+
+    assert portal._clickear.await_count == 2
+
+
 def test_plugin_abre_servicio_con_portal_moa() -> None:
     class _Servicio:
         pass
