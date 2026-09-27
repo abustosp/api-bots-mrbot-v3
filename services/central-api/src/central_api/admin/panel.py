@@ -250,7 +250,7 @@ details > .details-body { padding: 0 14px 14px; }
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
   const short = (value, size = 18) => { const text = String(value ?? ""); return text.length > size ? text.slice(0, size) + "…" : text; };
-  const date = (value) => value ? new Date(value).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "medium" }) : "—";
+  const date = (value) => value ? new Date(value).toLocaleString("es-AR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
   const statusClass = (value) => { const text = String(value ?? ""); if (["SANO","COMPLETO","habilitado"].includes(text)) return "status-good"; if (["PENDIENTE","ASIGNADO","SATURADO"].includes(text)) return "status-warn"; if (["FALLIDO","CAIDO","CANCELADO","deshabilitado"].includes(text)) return "status-bad"; return "status-neutral"; };
   const json = (value) => { try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); } };
   function flash(message, kind = "ok") { const node = $("#flash"); node.textContent = message; node.className = `flash show ${kind}`; window.clearTimeout(flash.timer); flash.timer = window.setTimeout(() => { node.className = "flash"; }, 7000); }
