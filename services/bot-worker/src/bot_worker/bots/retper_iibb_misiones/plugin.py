@@ -46,6 +46,7 @@ from bot_worker.bots.errors import (
     sin_secretos,
 )
 from bot_worker.bots.retper_iibb_misiones.schema import ENTRADAS, esquema_entrada
+from bot_worker.bots.retper_iibb_misiones.session import MisionesSession
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
 
 try:
@@ -196,12 +197,21 @@ class RetperIibbMisionesPlugin:
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
         try:
-            async with runtime.browser_factory.arca_session(
-                credentials=runtime.credentials,
-                proxy=runtime.proxy,
-                deadline=runtime.deadline,
-                cancellation=runtime.cancellation,
-            ) as sesion:
+            async with runtime.browser_factory.new_context() as (_, context):
+                page = await context.new_page()
+                resolvedores = getattr(runtime.browser_factory, "_solvers", {})
+                captcha_solver = (
+                    resolvedores.get("arca")
+                    if isinstance(resolvedores, dict)
+                    else None
+                )
+                sesion = MisionesSession(
+                    runtime.credentials,
+                    page=page,
+                    context=context,
+                    captcha_solver=captcha_solver,
+                    denominacion=entrada.denominacion,
+                )
                 await sesion.login(url=f"{self._base_url}/Extranet/index.php")
                 await runtime.cancellation.raise_if_cancelled()
                 await sesion.ingresar()

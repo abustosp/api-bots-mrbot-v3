@@ -50,7 +50,11 @@ class RetperIibbMisionesConsultarInput(_Base):
         min_length=11,
         max_length=14,
     )
-    denominacion: str = Field(min_length=1, max_length=256)
+    denominacion: str = Field(
+        validation_alias=AliasChoices("denominacion", "representado_nombre"),
+        min_length=1,
+        max_length=256,
+    )
     periodo_desde: str = Field(
         validation_alias=AliasChoices("periodo_desde", "desde"),
         min_length=6,
