@@ -319,3 +319,103 @@ def test_rotacion_persistente_cifra_nueva_y_revoca_anterior_en_la_misma_ruta(
     )
     assert reveal.status_code == 200, reveal.text
     assert reveal.json()["api_key"] == "clave-nueva-persistida"
+
+
+def test_claves_api_lista_clave_pg_para_copiar_sin_exponer_ciphertext(
+    copy_panel, monkeypatch
+) -> None:
+    from central_api import db
+    from central_api.api.dependencies import _selector_y_secreto
+    from central_api.models.identity import ApiKey, User
+    from central_api.security.api_keys import fingerprint_secret
+    from central_api.store import utcnow
+
+    cleartext = "clave-persistida-para-listado"
+    created = copy_panel.post(
+        "/admin/users",
+        json={
+            "email": "keys-list@example.com",
+            "api_key": cleartext,
+            "estado": "habilitado",
+            "motivo": "crear usuario para lista de claves persistidas",
+        },
+        headers=_admin_headers(),
+    )
+    assert created.status_code == 201
+    user_id = created.json()["usuario"]["id"]
+    key_id = created.json()["credenciales"]["clave"]["id"]
+    meta = admin_users.API_KEYS[key_id]
+    user_row = User(id=uuid.UUID(user_id), email="keys-list@example.com", habilitado=True)
+    selector, secret = _selector_y_secreto(cleartext)
+    key_row = ApiKey(
+        id=uuid.UUID(key_id),
+        user_id=uuid.UUID(user_id),
+        key_prefix=selector,
+        verifier_hmac=fingerprint_secret("test-hmac-secret-for-api-key-vault", secret),
+        encrypted_value=meta.valor_cifrado,
+        scopes=[],
+        expires_at=None,
+        revoked_at=None,
+        created_at=utcnow(),
+    )
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def all(self):
+            return self.rows
+
+        def first(self):
+            return self.rows
+
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def execute(self, statement):
+            self.calls += 1
+            if self.calls == 1:
+                return Result([(user_row.id, user_row.email, user_row.habilitado)])
+            if self.calls == 2:
+                return Result([(
+                    key_row.id,
+                    key_row.user_id,
+                    key_row.key_prefix,
+                    key_row.scopes,
+                    key_row.expires_at,
+                    key_row.revoked_at,
+                    key_row.created_at,
+                    True,
+                )])
+            return Result((key_row, True))
+
+    session = Session()
+    monkeypatch.setattr(db, "db_configurado", lambda: True)
+    monkeypatch.setattr(db, "nueva_sesion", lambda: session)
+    admin_users.USERS.clear()
+    admin_users.API_KEYS.clear()
+
+    listed = copy_panel.get("/admin/api-keys", headers=_admin_headers())
+    assert listed.status_code == 200, listed.text
+    assert listed.headers["cache-control"] == "private, no-store"
+    key = next(item for item in listed.json()["claves"] if item["id"] == key_id)
+    assert key["revelable"] is True
+    assert key["owner_enabled"] is True
+    serialized = json.dumps(key)
+    assert cleartext not in serialized
+    assert "encrypted_value" not in serialized
+    assert "valor_cifrado" not in serialized
+
+    reveal = copy_panel.post(
+        f"/admin/users/{user_id}/api-keys/{key_id}/reveal",
+        headers=_admin_headers(),
+    )
+    assert reveal.status_code == 200, reveal.text
+    assert reveal.json() == {"success": True, "api_key": cleartext}

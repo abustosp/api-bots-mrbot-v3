@@ -612,26 +612,29 @@ details > .details-body { padding: 0 14px 14px; }
       await loadUsers();
     } catch (error) { flash(error.message, "error"); }
   }
+  async function copyApiKeyToClipboard(userId, keyId) {
+    const data = await api(`/admin/users/${encodeURIComponent(userId)}/api-keys/${encodeURIComponent(keyId)}/reveal`, { method: "POST" });
+    const value = String(data.api_key || "");
+    if (!value) throw new Error("La API no devolvió una clave recuperable.");
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const temporary = document.createElement("textarea");
+      temporary.value = value; temporary.setAttribute("readonly", "");
+      temporary.style.position = "fixed"; temporary.style.opacity = "0";
+      document.body.appendChild(temporary);
+      let copied = false;
+      try { temporary.select(); copied = document.execCommand("copy"); }
+      finally { temporary.remove(); }
+      if (!copied) throw new Error("No se pudo acceder al portapapeles.");
+    }
+    flash("API key copiada al portapapeles.");
+  }
   async function userAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const userId = button.dataset.id;
     if (button.dataset.action === "copy-user-key") {
       try {
-        const data = await api(`/admin/users/${encodeURIComponent(userId)}/api-keys/${encodeURIComponent(button.dataset.key)}/reveal`, { method: "POST" });
-        const value = String(data.api_key || "");
-        if (!value) throw new Error("La API no devolvió una clave recuperable.");
-        if (navigator.clipboard && window.isSecureContext) {
-          await navigator.clipboard.writeText(value);
-        } else {
-          const temporary = document.createElement("textarea");
-          temporary.value = value; temporary.setAttribute("readonly", "");
-          temporary.style.position = "fixed"; temporary.style.opacity = "0";
-          document.body.appendChild(temporary);
-          let copied = false;
-          try { temporary.select(); copied = document.execCommand("copy"); }
-          finally { temporary.remove(); }
-          if (!copied) throw new Error("No se pudo acceder al portapapeles.");
-        }
-        flash("API key copiada al portapapeles.");
+        await copyApiKeyToClipboard(userId, button.dataset.key);
       } catch (error) { flash(error.message, "error"); }
       return;
     }
@@ -642,10 +645,26 @@ details > .details-body { padding: 0 14px 14px; }
   async function loadKeys(event) {
     if (event) event.preventDefault();
     const params = new URLSearchParams({ limit: "100" }); const q = $("#keys-q").value.trim(); const estado = $("#keys-state").value; if (q) params.set("q", q); if (estado) params.set("estado", estado);
-    try { const data = await api(`/admin/api-keys?${params}`); const rows = data.claves || []; $("#keys-table").innerHTML = rows.length ? rows.map((key) => `<tr><td><code>${esc(key.prefijo)}</code></td><td>${esc(key.usuario_email || "—")}</td><td>${esc((key.scopes || []).join(", ") || "—")}</td><td>${esc(key.expira_en || "—")}</td><td><span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${esc(key.estado)}</span></td><td>${esc(date(key.emitida_en))}</td><td class="actions">${key.estado === "activa" ? `<button class="button primary small" data-action="key-replace" data-id="${esc(key.id)}" data-user="${esc(key.user_id)}" data-scopes="${esc(JSON.stringify(key.scopes || []))}">Reemplazar</button>` : ""}<button class="button secondary small" data-action="key-edit" data-id="${esc(key.id)}">Editar</button>${key.estado === "activa" ? `<button class="button danger small" data-action="key-revoke" data-id="${esc(key.id)}">Revocar</button>` : `<button class="button secondary small" data-action="key-restore" data-id="${esc(key.id)}">Restaurar</button>`}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay claves para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+    try {
+      const data = await api(`/admin/api-keys?${params}`);
+      const rows = data.claves || [];
+      $("#keys-table").innerHTML = rows.length ? rows.map((key) => {
+        const copia = key.estado === "activa" && key.revelable && key.owner_enabled
+          ? `<button class="button secondary small" data-action="key-copy" data-id="${esc(key.id)}" data-user="${esc(key.user_id)}">Copiar API key</button>`
+          : key.estado === "activa" && !key.revelable
+            ? `<span class="muted">Reemite para habilitar copia</span>`
+            : "";
+        return `<tr><td><code>${esc(key.prefijo)}</code></td><td>${esc(key.usuario_email || "—")}</td><td>${esc((key.scopes || []).join(", ") || "—")}</td><td>${esc(key.expira_en || "—")}</td><td><span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${esc(key.estado)}</span></td><td>${esc(date(key.emitida_en))}</td><td class="actions">${copia}${key.estado === "activa" ? `<button class="button primary small" data-action="key-replace" data-id="${esc(key.id)}" data-user="${esc(key.user_id)}" data-scopes="${esc(JSON.stringify(key.scopes || []))}">Reemplazar</button>` : ""}<button class="button secondary small" data-action="key-edit" data-id="${esc(key.id)}">Editar</button>${key.estado === "activa" ? `<button class="button danger small" data-action="key-revoke" data-id="${esc(key.id)}">Revocar</button>` : `<button class="button secondary small" data-action="key-restore" data-id="${esc(key.id)}">Restaurar</button>`}</td></tr>`;
+      }).join("") : `<tr><td colspan="7" class="empty">No hay claves para ese filtro.</td></tr>`;
+    } catch (error) { flash(error.message, "error"); }
   }
   async function keyAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const keyId = button.dataset.id;
+    if (button.dataset.action === "key-copy") {
+      try { await copyApiKeyToClipboard(button.dataset.user, keyId); }
+      catch (error) { flash(error.message, "error"); }
+      return;
+    }
     if (button.dataset.action === "key-replace") {
       let newSecret = window.prompt("Ingresa una nueva API key (mínimo 3 caracteres). Deja vacío para generar una aleatoria alfanumérica:", "");
       if (newSecret === null) return;

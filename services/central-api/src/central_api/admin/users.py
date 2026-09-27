@@ -1121,7 +1121,8 @@ def _vista_clave_admin(meta: ApiKeyMeta) -> dict:
 
 
 @router.get("/api-keys")
-def listar_claves_api(
+async def listar_claves_api(
+    response: Response,
     authorization: str | None = Header(default=None),
     user_id: str = "",
     estado: str = "",
@@ -1131,29 +1132,88 @@ def listar_claves_api(
 ) -> dict:
     """Lista metadatos de claves API (nunca valores) con filtros de panel."""
     require_admin(authorization)
-    claves = list(API_KEYS.values())
-    if user_id:
-        claves = [k for k in claves if k.user_id == user_id]
-    if estado in ("activa", "revocada"):
-        claves = [
-            k for k in claves
-            if _estado_clave(k) == estado
-        ]
-    if q.strip():
-        termino = q.strip().lower()
-        claves = [
-            k for k in claves
-            if termino in k.prefijo.lower()
-            or termino in (USERS.get(k.user_id).email.lower() if USERS.get(k.user_id) else "")
-            or any(termino in s.lower() for s in k.scopes)
-        ]
-    total = len(claves)
+    response.headers["Cache-Control"] = "private, no-store"
+    from central_api.db import db_configurado
+
+    vistas: list[dict] = []
+    if db_configurado():
+        filas_usuarios, filas_claves = await _filas_identidad_pg()
+        usuarios_pg = {
+            str(uid): (str(email), bool(habilitado))
+            for uid, email, habilitado in filas_usuarios
+        }
+        ahora = utcnow()
+        for (
+            key_id,
+            owner_id,
+            prefix,
+            scopes,
+            expires_at,
+            revoked_at,
+            created_at,
+            revelable,
+        ) in filas_claves:
+            owner_id_str = str(owner_id)
+            if user_id and owner_id_str != user_id:
+                continue
+            expirada = expires_at is not None and expires_at <= ahora
+            estado_clave = (
+                "revocada" if revoked_at is not None else "expirada" if expirada else "activa"
+            )
+            if estado and estado != estado_clave:
+                continue
+            email_owner, owner_enabled = usuarios_pg.get(owner_id_str, ("", False))
+            scopes_lista = list(scopes or [])
+            if q.strip():
+                termino = q.strip().lower()
+                if not (
+                    termino in str(prefix).lower()
+                    or termino in email_owner.lower()
+                    or any(termino in scope.lower() for scope in scopes_lista)
+                ):
+                    continue
+            vistas.append(
+                {
+                    "id": str(key_id),
+                    "user_id": owner_id_str,
+                    "prefijo": str(prefix),
+                    "scopes": scopes_lista,
+                    "expira_en": expires_at.isoformat() if expires_at else "",
+                    "revocada": revoked_at is not None,
+                    "emitida_en": created_at.isoformat() if created_at else "",
+                    "revelable": bool(revelable),
+                    "usuario_email": email_owner,
+                    "estado": estado_clave,
+                    "owner_enabled": owner_enabled,
+                }
+            )
+    else:
+        claves = list(API_KEYS.values())
+        if user_id:
+            claves = [k for k in claves if k.user_id == user_id]
+        if estado in ("activa", "revocada"):
+            claves = [k for k in claves if _estado_clave(k) == estado]
+        if q.strip():
+            termino = q.strip().lower()
+            claves = [
+                k for k in claves
+                if termino in k.prefijo.lower()
+                or termino in (USERS.get(k.user_id).email.lower() if USERS.get(k.user_id) else "")
+                or any(termino in s.lower() for s in k.scopes)
+            ]
+        vistas = []
+        for clave in claves:
+            vista = _vista_clave_admin(clave)
+            usuario = USERS.get(clave.user_id)
+            vista["owner_enabled"] = bool(usuario and usuario.estado == "habilitado")
+            vistas.append(vista)
+    total = len(vistas)
     top = max(1, min(limit, 200))
-    pagina = claves[max(0, offset): max(0, offset) + top]
+    pagina = vistas[max(0, offset): max(0, offset) + top]
     return {
         "success": True,
         "total": total,
-        "claves": [_vista_clave_admin(k) for k in pagina],
+        "claves": pagina,
     }
 
 

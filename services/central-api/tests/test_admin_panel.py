@@ -41,7 +41,11 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "userKeyPreview" in cuerpo
     assert 'data-action="copy-user-key"' in cuerpo
     assert "Copiar API key" in cuerpo
-    assert "/api-keys/${encodeURIComponent(button.dataset.key)}/reveal" in cuerpo
+    assert "/api-keys/${encodeURIComponent(keyId)}/reveal" in cuerpo
+    assert 'data-action="key-copy"' in cuerpo
+    assert "copyApiKeyToClipboard(button.dataset.user, keyId)" in cuerpo
+    assert 'key.revelable && key.owner_enabled' in cuerpo
+    assert "Reemite para habilitar copia" in cuerpo
     assert 'data-action="user-toggle"' in cuerpo
     assert "Desactivar" in cuerpo and "Activar" in cuerpo
     assert "Emitir y revelar clave" in cuerpo
