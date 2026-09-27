@@ -114,3 +114,20 @@ def test_slot_del_sobre_sigue_siendo_el_camino_principal(tmp_path: Path) -> None
 
     assert llamadas == []
     assert referencia["object_key"] == "jobs/j/1/historico_xls"
+
+
+def test_planilla_con_codificacion_local_se_filtra(tmp_path: Path) -> None:
+    """Un CSV del organismo en cp1252 no debe romper el filtrado por rango."""
+    from bot_worker.bots.comprobantes.plugin import filtrar_csv_por_rango
+
+    origen = tmp_path / "comprobantes.csv"
+    origen.write_bytes(
+        "Fecha,Razón Social,Importe\n01/09/2026,ACME S.A.,100,00\n"
+        "15/09/2026,Cañerías Ñandú,200,00\n".encode("cp1252")
+    )
+    destino = tmp_path / "filtrado.csv"
+
+    conservadas = filtrar_csv_por_rango(origen, destino, "01/09/2026", "30/09/2026")
+
+    assert conservadas == 2
+    assert "Cañerías" in destino.read_text(encoding="utf-8")

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import io
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -75,6 +76,22 @@ def nombre_base_archivo(
     return f"{cuit[-1]} - {sigla} - {desde_limpio} - {hasta_limpio} - {cuit} - {representado_nombre}"
 
 
+def _leer_planilla(ruta: Path) -> str:
+    """Texto de una planilla del organismo, tolerando codificaciones locales.
+
+    Los CSV de ARCA no siempre vienen en UTF-8 (hay exportes en cp1252); sin
+    esta tolerancia el filtrado falla con ``UnicodeDecodeError`` y el job
+    termina como caída del portal.
+    """
+    crudo = Path(ruta).read_bytes()
+    for codec in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return crudo.decode(codec)
+        except UnicodeDecodeError:
+            continue
+    return crudo.decode("utf-8", errors="replace")
+
+
 def filtrar_csv_por_rango(
     origen: Path, destino: Path, desde: str, hasta: str
 ) -> int:
@@ -89,7 +106,7 @@ def filtrar_csv_por_rango(
 
     inicio = datetime.strptime(normalizar_fecha(desde), "%d/%m/%Y").date()
     fin = datetime.strptime(normalizar_fecha(hasta), "%d/%m/%Y").date()
-    with open(origen, "r", encoding="utf-8-sig", newline="") as fh:
+    with io.StringIO(_leer_planilla(origen), newline="") as fh:
         lector = csv.DictReader(fh)
         if lector.fieldnames is None:
             raise ValueError("csv sin encabezado")
@@ -100,6 +117,10 @@ def filtrar_csv_por_rango(
             raise ValueError("csv sin columna de fecha conocida")
         filas = list(lector)
         campos = lector.fieldnames
+    # ``DictReader`` acumula en la clave ``None`` los campos que sobran (pasa
+    # cuando un importe viene con coma decimal sin comillas): se descartan para
+    # que el CSV filtrado conserve solo las columnas del encabezado.
+    filas = [{k: v for k, v in fila.items() if k is not None} for fila in filas]
     conservadas = []
     for fila in filas:
         try:
@@ -109,7 +130,7 @@ def filtrar_csv_por_rango(
         if inicio <= dia <= fin:
             conservadas.append(fila)
     with open(destino, "w", encoding="utf-8", newline="") as fh:
-        escritor = csv.DictWriter(fh, fieldnames=campos)
+        escritor = csv.DictWriter(fh, fieldnames=campos, extrasaction="ignore")
         escritor.writeheader()
         escritor.writerows(conservadas)
     return len(conservadas)
@@ -352,6 +373,6 @@ class ComprobantesPlugin:
 
     def _muestra(self, archivo: Path) -> list[dict[str, str]]:
         """Lee las primeras filas del CSV final para el JSON de respuesta."""
-        with open(archivo, "r", encoding="utf-8", newline="") as fh:
+        with io.StringIO(_leer_planilla(archivo), newline="") as fh:
             lector = csv.DictReader(fh)
             return [dict(fila) for _, fila in zip(range(self._muestra_json), lector)]
