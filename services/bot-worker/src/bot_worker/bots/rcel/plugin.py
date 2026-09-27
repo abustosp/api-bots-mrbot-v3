@@ -14,8 +14,8 @@ al contrato S7. Cambios obligatorios respecto de V2:
 - Sin credenciales en logs: el error es categoria + diagnostico
   redactado (``sin_secretos``); la clave fiscal nunca se interpola.
 
-Soporta 0..N archivos por corrida: el manifiesto no declara cupo
-previo (``artefactos_produce=()``) y cada PDF se sube con un
+Soporta 0..N archivos por corrida: el manifiesto declara la familia
+dinámica ``rcel`` sin cupo previo y cada PDF se sube con un
 ``artifact_id`` propio (``rcel_000.pdf``...); los slots sin URL se
 resuelven por presign contra la central antes del PUT. Con 0
 facturas la corrida es OK con lista vacia, sin subidas.
@@ -47,7 +47,7 @@ from bot_worker.bots.errors import (
     sin_secretos,
 )
 from bot_worker.bots.rcel.schema import ENTRADAS, esquema_entrada
-from bot_worker.bots.registry import BotManifest
+from bot_worker.bots.registry import ArtifactSpec, BotManifest
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -89,7 +89,16 @@ class RcelPlugin:
         version="3.0.0",
         operaciones=("descargar",),
         esquema_entrada=esquema_entrada(),
-        artefactos_produce=(),
+        # ``rcel`` es una familia dinámica: ArtifactStore admite sufijos
+        # ``rcel_000_pdf``, ``rcel_001_pdf``, ... y pide presign por archivo.
+        artefactos_produce=(
+            ArtifactSpec(
+                nombre="rcel",
+                content_types=("application/pdf",),
+                max_bytes=52_428_800,
+                obligatorio=False,
+            ),
+        ),
         timeout_por_defecto_seconds=1800,
         requiere_credenciales_fiscales=True,
         requiere_proxy=False,
@@ -158,8 +167,10 @@ class RcelPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(SERVICIO_ARCA)
-                await servicio.seleccionar_representado(entrada.representado_cuit)
+                servicio = await sesion.open_service(SERVICIO_ARCA, portal="rcel")
+                await servicio.seleccionar_representado(
+                    entrada.representado_cuit, entrada.representado_nombre
+                )
                 datos, artefactos, errores = await self._descargar(
                     servicio, entrada, runtime
                 )
