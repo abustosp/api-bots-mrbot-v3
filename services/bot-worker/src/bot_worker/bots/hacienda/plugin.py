@@ -53,7 +53,7 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotResult = Any  # type: ignore[assignment,misc]
     BotRuntime = Any  # type: ignore[assignment,misc]
 
-SERVICIO_COMPROBANTES = "COMPROBANTES EN LINEA"
+SERVICIO_COMPROBANTES = "COMPROBANTES EN LÍNEA"
 SERVICIO_HACIENDA = "Hacienda y Carne - Liquidacion"
 ID_ARTEFACTO_CONSOLIDADO = "hacienda_consolidado"
 
@@ -111,7 +111,7 @@ class HaciendaPlugin:
         esquema_entrada=esquema_entrada(),
         artefactos_produce=(
             ArtifactSpec(
-                nombre="hacienda_consolidado.csv",
+                nombre="hacienda_consolidado",
                 content_types=("text/csv",),
                 max_bytes=52_428_800,
                 obligatorio=False,
@@ -201,7 +201,7 @@ class HaciendaPlugin:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
                 comprobantes = await sesion.open_service(
-                    self._servicio_comprobantes
+                    self._servicio_comprobantes, portal="hacienda"
                 )
                 await comprobantes.seleccionar_denominacion(
                     entrada.denominacion,
