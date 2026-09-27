@@ -134,6 +134,19 @@ def test_cuerpo_v2_plano_separa_credencial_y_normaliza_aliases(monkeypatch) -> N
         get_settings.cache_clear()
 
 
+def test_normalizacion_de_descargas_respeta_campos_del_worker() -> None:
+    base = {"denominacion": "Empresa de prueba", "pdf": True}
+    assert normalize_v2_payload("compensaciones", "consultar", base)["pdf"] is True
+    assert "incluir_pdf" not in normalize_v2_payload("compensaciones", "consultar", base)
+    for bot in ("mis_retenciones", "mis_retenciones_iva_simple", "portal_iva"):
+        payload = normalize_v2_payload(bot, "consultar", base)
+        assert payload["representado_nombre"] == "Empresa de prueba"
+        assert "denominacion" not in payload
+    rcel = normalize_v2_payload("rcel", "descargar", {"nombre_rcel": "Prueba"})
+    assert rcel["representado_nombre"] == "Prueba"
+    assert "nombre_rcel" not in rcel
+
+
 def test_alias_v2_plano_crea_registro_sin_credencial_en_payload(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("RSA_PRIVATE_KEY", raising=False)

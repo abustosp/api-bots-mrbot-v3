@@ -87,14 +87,20 @@ def normalize_v2_payload(
     if bot == "arba" and "cuit" in normalized:
         normalized.setdefault("representado_cuit", normalized["cuit"])
         normalized.pop("cuit", None)
-    if bot in {"arba", "liquidacion_granos", "rcel", "retper_iibb_misiones"}:
+    if bot in {
+        "arba", "liquidacion_granos", "rcel", "retper_iibb_misiones",
+        "mis_retenciones", "mis_retenciones_iva_simple", "portal_iva",
+    }:
         if "denominacion" in normalized:
             normalized.setdefault("representado_nombre", normalized["denominacion"])
             normalized.pop("denominacion", None)
 
+    if bot == "rcel" and "nombre_rcel" in normalized:
+        normalized.setdefault("representado_nombre", normalized.pop("nombre_rcel"))
+
     if "pdf" in normalized:
         pdf = normalized.pop("pdf")
-        for target in ("incluir_pdf", "subir_pdf"):
+        for target in (("pdf",) if bot == "compensaciones" else ("incluir_pdf", "subir_pdf")):
             if target not in normalized:
                 normalized[target] = pdf
                 break
