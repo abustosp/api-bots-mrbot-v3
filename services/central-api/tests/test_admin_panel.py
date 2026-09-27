@@ -31,7 +31,7 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "loadKeys" not in cuerpo
     for endpoint in (
         "/admin/users",
-        "/admin/api-keys",
+        "/api-keys/rotate",
         "/admin/jobs",
         "/admin/records",
         "/admin/jobs/metrics",
@@ -42,23 +42,31 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "sessionStorage" in cuerpo
     assert "mrbot_admin_token" in cuerpo
     assert "valor_unica_vez" in cuerpo
-    assert "API key (prefijo) y acciones" in cuerpo
+    # Columna API Key simple como en V1: una línea con campo, Ver, Copiar y Guardar.
+    assert "<th>API Key</th>" in cuerpo
     assert "<th>User ID</th>" in cuerpo
     assert 'data-action="copy-user-id"' in cuerpo
     assert "<code>${esc(user.id)}</code>" in cuerpo
-    assert "userKeyPreview" in cuerpo
-    assert "Copiar API key" in cuerpo
-    assert "/api-keys/${encodeURIComponent(keyId)}/reveal" in cuerpo
-    assert 'data-action="key-copy"' in cuerpo
-    assert "copyApiKeyToClipboard(button.dataset.user, button.dataset.key)" in cuerpo
-    assert 'key.revelable && key.owner_enabled' in cuerpo
-    assert "Reemplace para habilitar la copia" in cuerpo
-    for accion in ("key-replace", "key-edit", "key-revoke", "key-restore"):
+    assert "function userKeyCell(user, enabled)" in cuerpo
+    assert 'find((key) => key.estado === "activa")' in cuerpo
+    assert 'class="key-input" type="password" data-key-input=' in cuerpo
+    for accion in ("key-view", "key-copy", "key-save"):
         assert f'data-action="{accion}" ${{ids}}' in cuerpo
+    assert ">Ver</button>" in cuerpo and ">Copiar</button>" in cuerpo and ">Guardar</button>" in cuerpo
+    assert "/api-keys/${encodeURIComponent(keyId)}/reveal" in cuerpo
+    assert "copyApiKeyToClipboard(button.dataset.user, button.dataset.key)" in cuerpo
+    assert "key.revelable && enabled" in cuerpo
+    assert "/api-keys/rotate`" in cuerpo
+    assert "valor_fijo: valor" in cuerpo
+    assert "(vacío = aleatoria)" in cuerpo
+    # Sin historial ni botones de la versión anterior.
+    for viejo in ("userKeyPreview", "key-replace", "key-revoke", "key-restore", "key-edit",
+                  "Emitir y revelar clave", "api-key-reveal", "issued-api-key",
+                  "revealApiKey", "clearRevealedApiKey", "window.confirm(\"Se emitirá"):
+        assert viejo not in cuerpo, viejo
     assert 'data-action="user-toggle"' in cuerpo
     assert "Desactivar" in cuerpo and "Activar" in cuerpo
-    assert "Emitir y revelar clave" in cuerpo
-    assert "La clave nunca se guarda en texto plano" in cuerpo
+    assert "La clave se guarda cifrada, nunca en texto plano" in cuerpo
     assert 'value="habilitado">Activo' in cuerpo
     assert 'value="deshabilitado">Desactivado' in cuerpo
     assert "credential-detail" in cuerpo
@@ -74,21 +82,7 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "/admin/table-catalog" in cuerpo
     assert 'id="new-api-key"' in cuerpo
     assert 'id="new-api-key" type="password" minlength="3"' in cuerpo
-    assert 'id="api-key-reveal"' in cuerpo
-    assert 'id="toggle-issued-api-key"' in cuerpo
-    assert 'id="copy-issued-api-key"' in cuerpo
-    assert 'id="clear-issued-api-key"' in cuerpo
-    assert "revealApiKey(data.valor_unica_vez" in cuerpo
-    assert 'data-action="key-replace"' in cuerpo
-    assert "window.confirm(\"Se emitirá una nueva clave y se revocará la actual." in cuerpo
-    assert "/api-keys/rotate`" in cuerpo
-    assert "Deja vacío para generar una aleatoria alfanumérica" in cuerpo
-    assert "valor_fijo: replacementSecret" in cuerpo
-    assert "newSecret = \"\"" in cuerpo
     assert 'cache: "no-store"' in cuerpo
-    assert "navigator.clipboard.writeText(state.revealedApiKey)" in cuerpo
-    assert "clearRevealedApiKey(); state.token = \"\"" in cuerpo
-    assert 'if (view !== "users") clearRevealedApiKey();' in cuerpo
     assert "las claves cortas son débiles" in cuerpo
     assert 'id="new-state"' in cuerpo
     assert 'id="new-send-credentials"' in cuerpo

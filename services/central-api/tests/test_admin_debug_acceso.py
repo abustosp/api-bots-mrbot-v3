@@ -617,7 +617,7 @@ def test_panel_expone_tablas_claves_y_credenciales() -> None:
     assert 'data-panel="keys"' not in cuerpo
     for endpoint in (
         "/admin/users",
-        "/admin/api-keys",
+        "/api-keys/rotate",
         "/admin/jobs",
         "/admin/records",
         "/admin/table-catalog",

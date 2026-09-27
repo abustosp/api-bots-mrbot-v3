@@ -48,8 +48,10 @@ class ApiKey(Base):
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    key_prefix: Mapped[str] = mapped_column(sa.String(16), nullable=False, unique=True)
-    verifier_hmac: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
+    # Únicos solo entre claves activas (0018): un valor revocado puede volver
+    # a asignarse. Ver índices parciales en ``__table_args__``.
+    key_prefix: Mapped[str] = mapped_column(sa.String(16), nullable=False)
+    verifier_hmac: Mapped[str] = mapped_column(sa.Text, nullable=False)
     encrypted_value: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     label: Mapped[str | None] = mapped_column(sa.String(120))
     scopes: Mapped[object] = mapped_column(
@@ -79,9 +81,17 @@ class ApiKey(Base):
             name="api_keys_lifetime",
         ),
         sa.Index("ix_api_keys_user_id", "user_id"),
+        sa.Index("ix_api_keys_key_prefix", "key_prefix"),
         sa.Index(
-            "ix_api_keys_active",
+            "uq_api_keys_active_prefix",
             "key_prefix",
+            unique=True,
+            postgresql_where=sa.text("revoked_at IS NULL"),
+        ),
+        sa.Index(
+            "uq_api_keys_active_verifier",
+            "verifier_hmac",
+            unique=True,
             postgresql_where=sa.text("revoked_at IS NULL"),
         ),
     )

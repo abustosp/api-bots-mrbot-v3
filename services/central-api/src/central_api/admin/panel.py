@@ -135,11 +135,11 @@ th, td { padding: 12px 11px; border-bottom: 1px solid var(--line); text-align: l
 th { color: var(--muted); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; }
 tr:last-child td { border-bottom: 0; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.user-key-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0; }
-.user-key-item + .user-key-item { border-top: 1px dashed var(--line); }
-.user-key-meta { width: 100%; color: var(--muted); font-size: 12px; }
-.user-id { display: flex; align-items: center; gap: 6px; }
-.user-id code { font-size: 12px; word-break: break-all; }
+.user-id { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.user-id code { font-size: 12px; }
+.key-cell { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.key-cell .key-input { width: 210px; min-width: 140px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-strong); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.key-cell .key-input:focus { outline: 3px solid rgba(224,82,45,.16); border-color: var(--accent); }
 .code { display: block; padding: 10px; overflow-x: auto; border-radius: 10px; color: #fff; background: #332b28; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
 .bot-sections { display: grid; gap: 14px; margin-top: 18px; }
 .bot-section { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--panel-strong); }
@@ -203,11 +203,10 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="users">
-        <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3. Para depuración se admite un nombre sin mail (p. ej. abp). Cada clave muestra su prefijo y sus acciones: copiar (se descifra al momento), reemplazar (vacío = aleatoria), editar, revocar o restaurar. La clave nunca se guarda en texto plano.</p>
+        <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3. Para depuración se admite un nombre sin mail (p. ej. abp). En la columna API Key: «Ver» la muestra, «Copiar» la copia y «Guardar» reemplaza la clave por lo que escribas (vacío = aleatoria). La clave se guarda cifrada, nunca en texto plano.</p>
         <form id="users-filter" class="toolbar"><div class="field wide"><label for="users-email">Buscar por email o usuario</label><input id="users-email" name="email" type="search" placeholder="cliente@example.com o abp"></div><div class="field"><label for="users-state">Estado</label><select id="users-state"><option value="">Todos</option><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><button class="button primary" type="submit">Buscar</button></form>
         <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-plan">Plan</label><select id="new-plan"><option>free</option><option>basico</option><option>pro</option><option>empresa</option></select></div><div class="field"><label for="new-api-key">API key (mínimo 3; las claves cortas son débiles)</label><input id="new-api-key" type="password" minlength="3" placeholder="Vacío = generar automáticamente; mínimo 3 caracteres" autocomplete="new-password"></div><div class="field"><label for="new-state">Estado inicial</label><select id="new-state"><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" minlength="3" maxlength="500" required></div></div><div class="form-actions"><label class="checkbox-inline"><input id="new-send-credentials" type="checkbox"> Enviar credenciales por email</label><button class="button primary" type="submit">Crear usuario</button></div></form></div></details>
-        <div class="card hidden" id="api-key-reveal" role="status" aria-live="polite"><strong id="api-key-reveal-title">API key recién emitida</strong><p class="muted">El valor se borra de esta tarjeta al cambiar de vista o cerrar sesión. Luego puedes volver a copiarlo con «Copiar API key» en la fila del usuario.</p><div class="toolbar"><div class="field wide"><label for="issued-api-key">API key</label><input id="issued-api-key" type="password" readonly autocomplete="off"></div><button class="button secondary" type="button" id="toggle-issued-api-key">Mostrar</button><button class="button secondary" type="button" id="copy-issued-api-key">Copiar</button><button class="button danger" type="button" id="clear-issued-api-key">Ocultar y borrar</button></div></div>
-        <div class="table-wrap"><table><thead><tr><th>User ID</th><th>Email / usuario</th><th>Nombre</th><th>Plan</th><th>API key (prefijo) y acciones</th><th>Estado</th><th>Créditos</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="8" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>User ID</th><th>Email / usuario</th><th>Nombre</th><th>Plan</th><th>API Key</th><th>Estado</th><th>Créditos</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="8" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="jobs">
@@ -245,7 +244,7 @@ details > .details-body { padding: 0 14px 14px; }
   "use strict";
   const TOKEN_KEY = "mrbot_admin_token";
   const initialView = "dashboard";
-  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOptions: [], activeTableOption: -1, moduleOptions: [], moduleOptionsLoaded: false, revealedApiKey: "" };
+  const state = { token: sessionStorage.getItem(TOKEN_KEY) || "", view: initialView, tableCatalog: [], tableOptions: [], activeTableOption: -1, moduleOptions: [], moduleOptionsLoaded: false };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
@@ -256,9 +255,7 @@ details > .details-body { padding: 0 14px 14px; }
   function flash(message, kind = "ok") { const node = $("#flash"); node.textContent = message; node.className = `flash show ${kind}`; window.clearTimeout(flash.timer); flash.timer = window.setTimeout(() => { node.className = "flash"; }, 7000); }
   function loginError(message) { const node = $("#login-error"); node.textContent = message; node.className = `flash show error`; }
   function showLoggedIn(logged) { $("#login-screen").classList.toggle("hidden", logged); $("#panel-screen").classList.toggle("hidden", !logged); $("#main-nav").classList.toggle("hidden", !logged); $("#user-box").classList.toggle("hidden", !logged); }
-  function clearRevealedApiKey() { state.revealedApiKey = ""; const input = $("#issued-api-key"); if (input) { input.value = ""; input.type = "password"; } const card = $("#api-key-reveal"); if (card) card.classList.add("hidden"); const toggle = $("#toggle-issued-api-key"); if (toggle) toggle.textContent = "Mostrar"; }
-  function revealApiKey(value, title) { state.revealedApiKey = String(value || ""); const input = $("#issued-api-key"); input.value = state.revealedApiKey; input.type = "password"; $("#api-key-reveal-title").textContent = title || "API key recién emitida"; $("#toggle-issued-api-key").textContent = "Mostrar"; $("#api-key-reveal").classList.toggle("hidden", !state.revealedApiKey); if (state.revealedApiKey) $("#api-key-reveal").scrollIntoView({ behavior: "smooth", block: "nearest" }); }
-  function logout(message = "") { clearRevealedApiKey(); state.token = ""; sessionStorage.removeItem(TOKEN_KEY); showLoggedIn(false); $("#admin-token").value = ""; if (message) loginError(message); }
+  function logout(message = "") { state.token = ""; sessionStorage.removeItem(TOKEN_KEY); showLoggedIn(false); $("#admin-token").value = ""; if (message) loginError(message); }
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", `Bearer ${state.token}`);
@@ -271,7 +268,7 @@ details > .details-body { padding: 0 14px 14px; }
     if (!response.ok) throw new Error(data.detail || data.message || `HTTP ${response.status}`);
     return data;
   }
-  function setView(view) { if (view !== "users") clearRevealedApiKey(); state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
   function cellValue(value) {
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "object") return payloadView(value, "Ver datos");
@@ -559,22 +556,18 @@ details > .details-body { padding: 0 14px 14px; }
       $("#dashboard-audit").innerHTML = audit.eventos?.length ? audit.eventos.map((event) => `<div style="margin:8px 0"><strong>${esc(event.action)}</strong><br><span class="muted">${esc(date(event.occurred_at))} · ${esc(event.actor_id)}</span></div>`).join("") : "No hay eventos recientes.";
     } catch (error) { flash(error.message, "error"); }
   }
-  function userKeyPreview(keys) {
-    const items = Array.isArray(keys) ? keys : [];
-    return items.length
-      ? items.map((key) => {
-        const label = key.estado === "activa" ? "Activa" : key.estado === "expirada" ? "Expirada" : "Revocada";
-        const ids = `data-key="${esc(key.id)}" data-user="${esc(key.user_id || "")}"`;
-        const copiar = key.estado === "activa" && key.revelable && key.owner_enabled
-          ? `<button type="button" class="button secondary small" data-action="key-copy" ${ids}>Copiar API key</button>`
-          : key.estado === "activa" && !key.revelable ? `<span class="muted">Reemplace para habilitar la copia</span>` : "";
-        const acciones = key.estado === "activa"
-          ? `<button type="button" class="button primary small" data-action="key-replace" ${ids}>Reemplazar</button><button type="button" class="button secondary small" data-action="key-edit" ${ids}>Editar</button><button type="button" class="button danger small" data-action="key-revoke" ${ids}>Revocar</button>`
-          : `<button type="button" class="button secondary small" data-action="key-restore" ${ids}>Restaurar</button>`;
-        const meta = `Scopes: ${esc((key.scopes || []).join(", ") || "—")} · Expira: ${esc(key.expira_en ? date(key.expira_en) : "nunca")} · Emitida: ${esc(date(key.emitida_en))}`;
-        return `<div class="user-key-item"><code>${esc(key.prefijo || "—")}</code> <span class="status ${key.estado === "activa" ? "status-good" : "status-bad"}">${label}</span>${copiar}${acciones}<span class="user-key-meta">${meta}</span></div>`;
-      }).join("")
-      : `<span class="muted">Sin clave</span>`;
+  // Como en V1: una sola clave por usuario (la activa más reciente), con Ver,
+  // Copiar y un campo para editarla. El historial revocado no se muestra.
+  function activeKey(keys) {
+    return (Array.isArray(keys) ? keys : []).find((key) => key.estado === "activa") || null;
+  }
+  function userKeyCell(user, enabled) {
+    const key = activeKey(user.claves_api);
+    const ids = `data-user="${esc(user.id)}" data-key="${esc(key ? key.id : "")}"`;
+    const canReveal = Boolean(key && key.revelable && enabled);
+    const input = `<input class="key-input" type="password" data-key-input="${esc(user.id)}" placeholder="${key ? (canReveal ? "••••••••" : "nueva API key (vacío = aleatoria)") : "sin clave (vacío = aleatoria)"}" autocomplete="off" aria-label="API key de ${esc(user.email)}">`;
+    const ver = canReveal ? `<button type="button" class="button secondary small" data-action="key-view" ${ids}>Ver</button><button type="button" class="button secondary small" data-action="key-copy" ${ids}>Copiar</button>` : "";
+    return `<div class="key-cell">${input}${ver}<button type="button" class="button primary small" data-action="key-save" ${ids}>Guardar</button></div>`;
   }
   async function loadUsers(event) {
     if (event) event.preventDefault();
@@ -584,8 +577,7 @@ details > .details-body { padding: 0 14px 14px; }
       const rows = data.usuarios || [];
       $("#users-table").innerHTML = rows.length ? rows.map((user) => {
         const enabled = user.estado === "habilitado";
-        const userKeys = (user.claves_api || []).map((key) => ({ ...key, user_id: user.id, owner_enabled: enabled }));
-        return `<tr><td><div class="user-id"><code>${esc(user.id)}</code><button type="button" class="button secondary small" data-action="copy-user-id" data-id="${esc(user.id)}" title="Copiar user ID">Copiar</button></div></td><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${userKeyPreview(userKeys)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.saldo_creditos ?? "—")}</td><td class="actions"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button><button type="button" class="button secondary small" data-action="issue-key" data-id="${esc(user.id)}">Emitir y revelar clave</button></td></tr>`;
+        return `<tr><td><div class="user-id"><code>${esc(user.id)}</code><button type="button" class="button secondary small" data-action="copy-user-id" data-id="${esc(user.id)}" title="Copiar user ID">Copiar</button></div></td><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${userKeyCell(user, enabled)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.saldo_creditos ?? "—")}</td><td class="actions"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button></td></tr>`;
       }).join("") : `<tr><td colspan="8" class="empty">No hay usuarios para ese filtro.</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
   }
@@ -605,14 +597,14 @@ details > .details-body { padding: 0 14px 14px; }
       const credenciales = data.credenciales || {};
       $("#create-user-form").reset();
       flash(`Usuario creado: ${data.usuario?.email || payload.email}`);
-      if (credenciales.valor_unica_vez) {
-        revealApiKey(credenciales.valor_unica_vez, "API key del usuario recién creado");
-      } else if (credenciales.solicitado && credenciales.enviadas) {
+      if (credenciales.solicitado && credenciales.enviadas) {
         flash(`Usuario creado y credenciales enviadas a ${credenciales.destino}.`, "ok");
       } else if (credenciales.solicitado) {
         flash(`Usuario creado, pero no se enviaron credenciales: ${credenciales.motivo}.`, "error");
       }
       await loadUsers();
+      const nuevo = data.usuario?.id ? keyInput(data.usuario.id) : null;
+      if (nuevo && credenciales.valor_unica_vez) { nuevo.value = credenciales.valor_unica_vez; nuevo.type = "text"; }
     } catch (error) { flash(error.message, "error"); }
   }
   async function writeClipboard(value) {
@@ -643,45 +635,41 @@ details > .details-body { padding: 0 14px 14px; }
     if (motivo.length < 3 || motivo.length > 500) { flash("El motivo debe tener entre 3 y 500 caracteres.", "error"); return null; }
     return motivo;
   }
-  async function replaceKey(userId, keyId) {
-    let newSecret = window.prompt("Ingresa una nueva API key (mínimo 3 caracteres). Deja vacío para generar una aleatoria alfanumérica:", "");
-    if (newSecret === null) return;
-    const replacementSecret = newSecret.trim();
-    if (replacementSecret && (replacementSecret.length < 3 || /\s/.test(replacementSecret))) { flash("La API key debe tener al menos 3 caracteres y no contener espacios.", "error"); return; }
-    if (!window.confirm("Se emitirá una nueva clave y se revocará la actual. Confirma que tienes autorización y guardaste el valor en un lugar seguro.")) return;
-    const motivo = askReason("Motivo para reemplazar la clave", "rotación desde panel V3"); if (motivo === null) return;
-    try {
-      const issued = await api(`/admin/users/${encodeURIComponent(userId)}/api-keys/rotate`, { method: "POST", body: JSON.stringify({ key_id: keyId, periodo_gracia_horas: 0, motivo, valor_fijo: replacementSecret }) });
-      newSecret = "";
-      await loadUsers();
-      revealApiKey(issued.valor_unica_vez, "Nueva API key");
-      flash("Clave reemplazada. También puedes copiarla después con «Copiar API key».", "ok");
-    } catch (error) {
-      flash(`No se pudo completar la rotación: ${error.message}. La clave anterior continúa activa si la emisión fue rechazada.`, "error");
-    }
+  const keyInput = (userId) => document.querySelector(`input[data-key-input="${CSS.escape(userId)}"]`);
+  async function revealKey(userId, keyId) {
+    const data = await api(`/admin/users/${encodeURIComponent(userId)}/api-keys/${encodeURIComponent(keyId)}/reveal`, { method: "POST" });
+    const value = String(data.api_key || "");
+    if (!value) throw new Error("La API no devolvió una clave recuperable.");
+    return value;
   }
-  async function changeKey(action, keyId) {
-    const motivo = askReason("Motivo del cambio", "cambio desde panel V3"); if (motivo === null) return;
+  // "Ver" alterna mostrar/ocultar la clave dentro del mismo campo, como en V1.
+  async function toggleKeyView(button) {
+    const input = keyInput(button.dataset.user); if (!input) return;
+    if (input.type === "text") { input.type = "password"; input.value = ""; button.textContent = "Ver"; return; }
+    input.value = await revealKey(button.dataset.user, button.dataset.key);
+    input.type = "text"; button.textContent = "Ocultar";
+  }
+  // "Guardar" reemplaza la clave activa por el valor del campo (vacío = aleatoria).
+  // Sin clave activa, emite una nueva. Como en V1, sin confirmaciones extra.
+  async function saveKey(button) {
+    const userId = button.dataset.user; const keyId = button.dataset.key;
+    const input = keyInput(userId);
+    const valor = (input ? input.value : "").trim();
+    if (valor && (valor.length < 3 || /\s/.test(valor))) { flash("La API key debe tener al menos 3 caracteres y no contener espacios.", "error"); return; }
+    button.disabled = true;
     try {
-      if (action === "key-edit") {
-        const scopesRaw = window.prompt("Scopes separados por coma (vacío = sin cambios de scopes):", "");
-        if (scopesRaw === null) return;
-        const expira = window.prompt("Expiración ISO (vacío = sin cambios):", "");
-        if (expira === null) return;
-        const body = { motivo };
-        if (scopesRaw.trim()) body.scopes = scopesRaw.split(",").map((s) => s.trim()).filter(Boolean);
-        if (expira.trim()) body.expira_en = expira.trim();
-        await api(`/admin/api-keys/${encodeURIComponent(keyId)}`, { method: "PATCH", body: JSON.stringify(body) });
-        flash("Clave actualizada.");
-      } else if (action === "key-revoke") {
-        await api(`/admin/api-keys/${encodeURIComponent(keyId)}/revoke`, { method: "POST", body: JSON.stringify({ motivo }) });
-        flash("Clave revocada.");
-      } else if (action === "key-restore") {
-        await api(`/admin/api-keys/${encodeURIComponent(keyId)}/restore`, { method: "POST", body: JSON.stringify({ motivo }) });
-        flash("Clave restaurada.");
-      } else return;
+      const data = keyId
+        ? await api(`/admin/users/${encodeURIComponent(userId)}/api-keys/rotate`, { method: "POST", body: JSON.stringify({ key_id: keyId, periodo_gracia_horas: 0, motivo: "edición desde panel", valor_fijo: valor }) })
+        : await api(`/admin/users/${encodeURIComponent(userId)}/api-keys`, { method: "POST", body: JSON.stringify({ scopes: [], motivo: "emisión desde panel", valor_fijo: valor }) });
       await loadUsers();
-    } catch (error) { flash(error.message, "error"); }
+      const nuevo = keyInput(userId);
+      if (nuevo) { nuevo.value = data.valor_unica_vez || ""; nuevo.type = "text"; }
+      const ver = document.querySelector(`button[data-action="key-view"][data-user="${CSS.escape(userId)}"]`);
+      if (ver) ver.textContent = "Ocultar";
+      flash(valor ? "API key actualizada." : "API key aleatoria generada y guardada.", "ok");
+    } catch (error) {
+      flash(`No se pudo guardar la API key: ${error.message}`, "error");
+    } finally { button.disabled = false; }
   }
   async function userAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return;
@@ -696,9 +684,8 @@ details > .details-body { padding: 0 14px 14px; }
       catch (error) { flash(error.message, "error"); }
       return;
     }
-    if (action === "key-replace") { await replaceKey(button.dataset.user, button.dataset.key); return; }
-    if (action === "key-edit" || action === "key-revoke" || action === "key-restore") { await changeKey(action, button.dataset.key); return; }
-    if (action === "issue-key") { const motivo = askReason("Motivo para emitir la clave", "emisión desde panel V3"); if (motivo === null) return; const valor_fijo = window.prompt("Valor fijo opcional (mínimo 3 caracteres y sin espacios; vacío = aleatoria):", ""); if (valor_fijo === null) return; try { const data = await api(`/admin/users/${encodeURIComponent(userId)}/api-keys`, { method: "POST", body: JSON.stringify({ scopes: [], motivo, valor_fijo: valor_fijo.trim() }) }); await loadUsers(); revealApiKey(data.valor_unica_vez, "API key recién emitida"); flash("Clave emitida. También puedes copiarla después con «Copiar API key».", "ok"); } catch (error) { flash(error.message, "error"); } return; }
+    if (action === "key-view") { try { await toggleKeyView(button); } catch (error) { flash(error.message, "error"); } return; }
+    if (action === "key-save") { await saveKey(button); return; }
     if (action !== "user-toggle") return;
     const enabled = button.dataset.enabled === "true"; const motivo = askReason(`Motivo para ${enabled ? "desactivar" : "activar"} el usuario`, "cambio desde panel V3"); if (motivo === null) return;
     try { await api(`/admin/users/${encodeURIComponent(userId)}/${enabled ? "disable" : "enable"}`, { method: "POST", body: JSON.stringify({ motivo }) }); flash("Estado de usuario actualizado."); await loadUsers(); } catch (error) { flash(error.message, "error"); }
@@ -763,9 +750,6 @@ details > .details-body { padding: 0 14px 14px; }
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction);
-  $("#toggle-issued-api-key").addEventListener("click", () => { const input = $("#issued-api-key"); const visible = input.type === "password"; input.type = visible ? "text" : "password"; $("#toggle-issued-api-key").textContent = visible ? "Ocultar" : "Mostrar"; });
-  $("#copy-issued-api-key").addEventListener("click", async () => { if (!state.revealedApiKey) return; try { await navigator.clipboard.writeText(state.revealedApiKey); flash("API key copiada al portapapeles."); } catch (_) { $("#issued-api-key").type = "text"; $("#issued-api-key").select(); flash("No se pudo acceder al portapapeles. Selecciona y copia la clave manualmente.", "error"); } });
-  $("#clear-issued-api-key").addEventListener("click", () => { clearRevealedApiKey(); flash("API key ocultada y borrada de la pestaña."); });
   $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table-select").addEventListener("change", () => loadExecutions());
   $("#executions-table-search").addEventListener("focus", () => { $("#executions-table-search").select(); openTableOptions(); });
   $("#executions-table-search").addEventListener("input", (event) => { $("#executions-table-select").value = ""; openTableOptions(event.target.value); });

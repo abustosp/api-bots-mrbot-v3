@@ -476,8 +476,8 @@ def test_motivo_fuera_de_usuarios_sigue_exigiendo_10_caracteres(copy_panel) -> N
 
 def test_panel_claves_api_pide_motivo_de_3_a_500(copy_panel) -> None:
     html = copy_panel.get("/admin/").text
-    assert 'askReason("Motivo para reemplazar la clave"' in html
-    assert 'askReason("Motivo del cambio"' in html
+    # Guardar la API key no pide motivo (como V1); el panel envía uno fijo válido.
+    assert 'motivo: "edición desde panel"' in html
     assert "${message} (3-500 caracteres):" in html
     assert "El motivo debe tener entre 3 y 500 caracteres." in html
     assert "(10-500 caracteres)" not in html.split("Motivo del forzado")[0]

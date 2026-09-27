@@ -144,13 +144,19 @@ def _firmar_clave(valor: str) -> str:
 
 
 def emitir_clave(
-    user_id: str, scopes: list[str], expira_en: str, valor_fijo: str = ""
+    user_id: str,
+    scopes: list[str],
+    expira_en: str,
+    valor_fijo: str = "",
+    reemplaza: str = "",
 ) -> tuple[ApiKeyMeta, str]:
     """Crea una clave, guarda solo verificador+prefijo y devuelve el valor único.
 
     Con ``valor_fijo`` se conserva el valor literal en vez de generar uno
     aleatorio. Debe tener al menos 3 caracteres sin espacios y un verificador
-    HMAC único.
+    HMAC único entre las claves activas. Una clave revocada no bloquea su
+    valor, y ``reemplaza`` (la clave que se rota) tampoco: así un usuario puede
+    volver a su valor anterior (p. ej. ``abp``).
     """
     if valor_fijo:
         valor = valor_fijo.strip()
@@ -162,7 +168,10 @@ def emitir_clave(
     else:
         valor = "mrk_" + secrets.token_urlsafe(32)
     verificador = _firmar_clave(valor)
-    if any(k.verificador_hmac == verificador for k in API_KEYS.values()):
+    if any(
+        k.verificador_hmac == verificador and not k.revocada and k.id != reemplaza
+        for k in API_KEYS.values()
+    ):
         raise HTTPException(status_code=409, detail="valor de clave ya registrado")
     try:
         from central_api.security.api_key_vault import (
@@ -536,6 +545,9 @@ async def _rotar_api_key_pg(
             )
             expires_at = anterior_pg.expires_at
             anterior_pg.revoked_at = ahora
+            # Revocar primero: si el valor nuevo es el mismo que el actual, el
+            # índice único parcial (solo activas) lo permite recién ahora.
+            await sesion.flush()
             sesion.add(
                 ApiKey(
                     id=new_key_uuid,
@@ -1039,7 +1051,7 @@ async def rotar_clave_api(
     # inválido. El secreto se devuelve únicamente en esta respuesta no-cache.
     valor_fijo = body.valor_fijo.strip() or _nueva_clave_alfanumerica()
     meta, valor = emitir_clave(
-        user_id, anterior.scopes, anterior.expira_en, valor_fijo
+        user_id, anterior.scopes, anterior.expira_en, valor_fijo, reemplaza=anterior.id
     )
     try:
         await _rotar_api_key_pg(usuario, anterior, meta, valor)
@@ -1186,6 +1198,7 @@ async def _actualizar_clave_pg(
     habría dos claves activas para el mismo reemplazo.
     """
     from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
 
     from central_api.db import db_configurado, nueva_sesion
     from central_api.models.identity import ApiKey
@@ -1227,6 +1240,11 @@ async def _actualizar_clave_pg(
             await sesion.flush()
     except HTTPException:
         raise
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="el valor de esta clave ya está activo en otra clave",
+        ) from None
     except Exception:  # noqa: BLE001 - transacción revertida por nueva_sesion
         raise HTTPException(status_code=503, detail="Servicio no disponible") from None
 
@@ -1400,6 +1418,14 @@ async def restaurar_clave_api(
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = await _meta_clave(key_id)
+    if meta.revocada and any(
+        k.id != meta.id and not k.revocada and k.verificador_hmac == meta.verificador_hmac
+        for k in API_KEYS.values()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="el valor de esta clave ya está activo en otra clave",
+        )
     await _actualizar_clave_pg(key_id, revocada=False)
     meta.revocada = False
     log_event(
