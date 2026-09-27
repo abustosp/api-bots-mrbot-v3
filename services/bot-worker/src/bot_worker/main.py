@@ -1105,6 +1105,16 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 except PresignError as exc:
                     raise ArtifactUploadError(str(exc)) from exc
 
+            plugin_catalogo = get_plugin(env.plugin or env.bot)
+            declarados = {
+                spec.nombre: (tuple(spec.content_types), int(spec.max_bytes))
+                for spec in getattr(
+                    getattr(plugin_catalogo, "manifest", None),
+                    "artefactos_produce",
+                    (),
+                )
+                or ()
+            }
             runtime = BotRuntime(
                 job_id=job.job_id,
                 work_dir=workdir,
@@ -1115,7 +1125,11 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 credentials=credentials,
                 proxy=proxy_cfg,
                 artifact_store=ArtifactStore(  # type: ignore[arg-type]
-                    workdir, slots, presign=_presign, http_client=client
+                    workdir,
+                    slots,
+                    presign=_presign,
+                    http_client=client,
+                    declarados=declarados,
                 ),
                 event_sink=_HttpEventSink(
                     client, settings.central_url, job.job_id,
