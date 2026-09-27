@@ -168,7 +168,9 @@ class PagoDevolucionesPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(SERVICIO_ARCA)
+                servicio = await sesion.open_service(
+                    SERVICIO_ARCA, portal="pago_devoluciones"
+                )
                 cuit_objetivo = (
                     entrada.representado_cuit or runtime.credentials.cuit_representante
                 )
