@@ -53,7 +53,7 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotResult = Any  # type: ignore[assignment,misc]
     BotRuntime = Any  # type: ignore[assignment,misc]
 
-SERVICIO_ARCA = "CONVENIO MULTILATERAL - SIFERE WEB"
+SERVICIO_ARCA = "CONVENIO MULTILATERAL – SIFERE WEB - CONSULTAS"
 ID_ARTEFACTO_CSV = "sifere_jurisdiccion_csv"
 
 

@@ -42,6 +42,16 @@ class SiferePortal(PortalArca):
             )
         await self.paso("entrar_al_portal", self._resolver_entry_point())
         selector, ambito = await self._buscar_selector_cuit()
+        if selector is None and "portalcf.cloud.afip.gob.ar" in await self._url():
+            # El click del catálogo puede disparar el SSO sin abrir el popup
+            # en Chromium. Entrar por mainMenu.do evita la redirección HTTP
+            # de la raíz COMARB y conserva la sesión del mismo contexto.
+            await self.paso(
+                "navegar_sifere",
+                self.abrir_url(f"{BASE_COMARB}/mainMenu.do", timeout_ms=30_000),
+            )
+            await self.paso("resolver_entry_point", self._resolver_entry_point())
+            selector, ambito = await self._buscar_selector_cuit()
         if selector is None:
             raise TargetUnavailableError(
                 "el portal SIFERE no mostró el selector de representado",
@@ -59,15 +69,52 @@ class SiferePortal(PortalArca):
                 ) from exc
         if not await self._clickear(
             (
-                ambito.get_by_role("button", name=re.compile(r"^Seleccionar$", re.I)),
+                ambito.get_by_role("button", name=re.compile(r"Seleccionar", re.I)),
+                ambito.get_by_text("Seleccionar", exact=True),
+                ambito.locator("button:has-text('Seleccionar')"),
                 ambito.locator("input[type='submit'][value*='Seleccionar' i]"),
+                ambito.locator("input[type='button'][value*='Seleccionar' i]"),
             ),
             total_ms=6_000,
         ):
-            raise TargetUnavailableError(
-                "el portal SIFERE no confirmó la selección del representado",
-                diagnostic_code="sifere_seleccionar_missing",
-            )
+            try:
+                enviado = await selector.evaluate(
+                    "select => {"
+                    "const form = select.form;"
+                    "if (!form) return false;"
+                    "if (typeof form.requestSubmit === 'function') form.requestSubmit();"
+                    "else form.submit();"
+                    "return true;"
+                    "}"
+                )
+            except Exception:
+                enviado = False
+            if not enviado:
+                try:
+                    diagnostico = await selector.evaluate(
+                        "select => {"
+                        "const form = select.form;"
+                        "const controls = Array.from(document.querySelectorAll("
+                        "'button,input[type=submit],input[type=button],input[type=image],a'"
+                        ")).map(el => ({"
+                        "tag: el.tagName.toLowerCase(),"
+                        "type: el.getAttribute('type') || '',"
+                        "label: (el.innerText || el.value || el.title || '').trim().slice(0, 80)"
+                        "})).filter(el => /seleccionar|continuar|ingresar|aceptar|entrar|submit/i.test(el.label));"
+                        "return JSON.stringify({form: Boolean(form), form_controls: form ? form.querySelectorAll('button,input, a').length : 0, in_frame: window !== window.top, labels: controls});"
+                        "}"
+                    )
+                except Exception as exc:
+                    diagnostico = type(exc).__name__
+                raise TargetUnavailableError(
+                    f"el portal SIFERE no confirmó la selección del representado ({diagnostico})",
+                    diagnostic_code="sifere_seleccionar_missing",
+                )
+            try:
+                await ambito.wait_for_load_state("domcontentloaded", timeout=12_000)
+            except Exception:
+                pass
+            await self._esperar(2_500)
         await self._esperar(2_500)
         self._representado_listo = True
 
