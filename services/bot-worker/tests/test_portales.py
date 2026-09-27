@@ -110,7 +110,9 @@ def test_registro_de_portales() -> None:
     assert portal_para("sct") is SctPortal
     assert portal_para("SRT") is SrtPortal
     assert portal_para("desconocido") is None
-    assert set(PORTALES) == {"consulta_pagos_vep", "sct", "sifere", "siper", "srt"}
+    # Registro por descubrimiento: los ports ya verificados deben seguir presentes.
+    assert {"consulta_pagos_vep", "sct", "sifere", "siper", "srt"} <= set(PORTALES)
+    assert "base" not in PORTALES and "recaptcha" not in PORTALES
     assert portal_para("consulta_pagos_vep") is ConsultaPagosVepPortal
     assert portal_para("siper") is SiperPortal
 
