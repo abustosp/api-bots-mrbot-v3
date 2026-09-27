@@ -21,9 +21,14 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert respuesta.status_code == 200
     assert respuesta.headers["content-type"].startswith("text/html")
     cuerpo = respuesta.text
-    for vista in ("dashboard", "users", "keys", "jobs", "executions", "fleet", "audit"):
+    for vista in ("dashboard", "users", "jobs", "executions", "fleet", "audit"):
         assert f'data-view="{vista}"' in cuerpo
         assert f'data-panel="{vista}"' in cuerpo
+    # La gestión de claves vive en Usuarios: ya no hay pestaña ni sección propia.
+    assert 'data-view="keys"' not in cuerpo
+    assert 'data-panel="keys"' not in cuerpo
+    assert 'id="keys-table"' not in cuerpo
+    assert "loadKeys" not in cuerpo
     for endpoint in (
         "/admin/users",
         "/admin/api-keys",
@@ -37,19 +42,23 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "sessionStorage" in cuerpo
     assert "mrbot_admin_token" in cuerpo
     assert "valor_unica_vez" in cuerpo
-    assert "API key (prefijo)" in cuerpo
+    assert "API key (prefijo) y acciones" in cuerpo
+    assert "<th>User ID</th>" in cuerpo
+    assert 'data-action="copy-user-id"' in cuerpo
+    assert "<code>${esc(user.id)}</code>" in cuerpo
     assert "userKeyPreview" in cuerpo
-    assert 'data-action="copy-user-key"' in cuerpo
     assert "Copiar API key" in cuerpo
     assert "/api-keys/${encodeURIComponent(keyId)}/reveal" in cuerpo
     assert 'data-action="key-copy"' in cuerpo
-    assert "copyApiKeyToClipboard(button.dataset.user, keyId)" in cuerpo
+    assert "copyApiKeyToClipboard(button.dataset.user, button.dataset.key)" in cuerpo
     assert 'key.revelable && key.owner_enabled' in cuerpo
-    assert "Reemite para habilitar copia" in cuerpo
+    assert "Reemplace para habilitar la copia" in cuerpo
+    for accion in ("key-replace", "key-edit", "key-revoke", "key-restore"):
+        assert f'data-action="{accion}" ${{ids}}' in cuerpo
     assert 'data-action="user-toggle"' in cuerpo
     assert "Desactivar" in cuerpo and "Activar" in cuerpo
     assert "Emitir y revelar clave" in cuerpo
-    assert "la clave completa solo se revela una vez" in cuerpo
+    assert "La clave nunca se guarda en texto plano" in cuerpo
     assert 'value="habilitado">Activo' in cuerpo
     assert 'value="deshabilitado">Desactivado' in cuerpo
     assert "credential-detail" in cuerpo

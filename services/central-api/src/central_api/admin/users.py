@@ -700,6 +700,8 @@ async def listar_usuarios(
             "prefijo": str(prefix),
             "estado": estado_clave,
             "emitida_en": created_at.isoformat() if created_at else "",
+            "scopes": list(scopes or []),
+            "expira_en": expires_at.isoformat() if expires_at else "",
             "revelable": bool(revelable),
         }
     for clave in API_KEYS.values():
@@ -712,6 +714,8 @@ async def listar_usuarios(
             "prefijo": clave.prefijo,
             "estado": "revocada" if clave.revocada else "activa",
             "emitida_en": clave.emitida_en,
+            "scopes": list(clave.scopes),
+            "expira_en": clave.expira_en,
             "revelable": bool(clave.valor_cifrado),
         }
     usuarios = list(usuarios_por_id.values())
@@ -1126,6 +1130,107 @@ def _vista_clave_admin(meta: ApiKeyMeta) -> dict:
     return vista
 
 
+async def _meta_clave(key_id: str) -> ApiKeyMeta:
+    """Clave del cache o, si no está, hidratada desde PostgreSQL; 404 si no existe."""
+    meta = API_KEYS.get(key_id)
+    if meta is not None:
+        return meta
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey
+
+    if db_configurado():
+        try:
+            key_uuid = uuid.UUID(key_id)
+        except (ValueError, TypeError, AttributeError):
+            key_uuid = None
+        if key_uuid is not None:
+            try:
+                async with nueva_sesion() as sesion:
+                    row = await sesion.get(ApiKey, key_uuid)
+            except Exception:  # noqa: BLE001 - error DB sanitizado
+                raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+            if row is not None:
+                meta = await _api_key_pg_por_id(str(row.user_id), key_id)
+                if meta is not None:
+                    API_KEYS[key_id] = meta
+                    if meta.user_id not in USERS:
+                        usuario = await _usuario_pg_por_id(meta.user_id)
+                        if usuario is not None:
+                            USERS[meta.user_id] = usuario
+                    return meta
+    raise HTTPException(status_code=404, detail="clave no encontrada")
+
+
+def _parse_expira(valor: str) -> datetime | None:
+    if not valor:
+        return None
+    try:
+        fecha = datetime.fromisoformat(valor.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="expira_en inválida") from None
+    return fecha if fecha.tzinfo else fecha.replace(tzinfo=timezone.utc)
+
+
+async def _actualizar_clave_pg(
+    key_id: str,
+    *,
+    revocada: bool | None = None,
+    scopes: list[str] | None = None,
+    expira_en: str | None = None,
+) -> None:
+    """Aplica en PostgreSQL el cambio de la clave; sin base es un no-op.
+
+    La autenticación lee ``revoked_at``, ``expires_at`` y ``scopes`` de la
+    fila: si el cambio quedara solo en memoria, una clave revocada seguiría
+    autenticando. Restaurar falla con 409 si la clave fue reemplazada, porque
+    habría dos claves activas para el mismo reemplazo.
+    """
+    from sqlalchemy import select
+
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey
+
+    if not db_configurado():
+        return
+    try:
+        key_uuid = uuid.UUID(key_id)
+    except (ValueError, TypeError, AttributeError):
+        return
+    expires_at = _parse_expira(expira_en) if expira_en else None
+    try:
+        async with nueva_sesion() as sesion:
+            row = (
+                await sesion.execute(
+                    select(ApiKey).where(ApiKey.id == key_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            if revocada is True and row.revoked_at is None:
+                row.revoked_at = utcnow()
+            elif revocada is False and row.revoked_at is not None:
+                reemplazo = (
+                    await sesion.execute(
+                        select(ApiKey.id).where(ApiKey.replaces_key_id == key_uuid)
+                    )
+                ).first()
+                if reemplazo is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="la clave fue reemplazada; no se puede restaurar",
+                    )
+                row.revoked_at = None
+            if scopes is not None:
+                row.scopes = list(scopes)
+            if expira_en is not None:
+                row.expires_at = expires_at
+            await sesion.flush()
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 - transacción revertida por nueva_sesion
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+
+
 @router.get("/api-keys")
 async def listar_claves_api(
     response: Response,
@@ -1224,7 +1329,7 @@ async def listar_claves_api(
 
 
 @router.patch("/api-keys/{key_id}")
-def editar_clave_api(
+async def editar_clave_api(
     key_id: str,
     body: EditarClaveBody,
     authorization: str | None = Header(default=None),
@@ -1233,14 +1338,18 @@ def editar_clave_api(
     """Edita scopes, expiración o estado de una clave con motivo auditado."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
-    meta = API_KEYS.get(key_id)
-    if meta is None:
-        raise HTTPException(status_code=404, detail="clave no encontrada")
+    meta = await _meta_clave(key_id)
     anterior = {
         "scopes": list(meta.scopes),
         "expira_en": meta.expira_en,
         "revocada": meta.revocada,
     }
+    await _actualizar_clave_pg(
+        key_id,
+        revocada=body.revocada,
+        scopes=body.scopes,
+        expira_en=body.expira_en,
+    )
     if body.scopes is not None:
         meta.scopes = list(body.scopes)
     if body.expira_en is not None:
@@ -1260,7 +1369,7 @@ def editar_clave_api(
 
 
 @router.post("/api-keys/{key_id}/revoke")
-def revocar_clave_api(
+async def revocar_clave_api(
     key_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
@@ -1269,9 +1378,8 @@ def revocar_clave_api(
     """Revoca una clave sin borrar evidencia, con motivo auditado."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
-    meta = API_KEYS.get(key_id)
-    if meta is None:
-        raise HTTPException(status_code=404, detail="clave no encontrada")
+    meta = await _meta_clave(key_id)
+    await _actualizar_clave_pg(key_id, revocada=True)
     meta.revocada = True
     log_event(
         "user.api_key.revoked", actor_id=actor, target_type="api_key",
@@ -1282,7 +1390,7 @@ def revocar_clave_api(
 
 
 @router.post("/api-keys/{key_id}/restore")
-def restaurar_clave_api(
+async def restaurar_clave_api(
     key_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
@@ -1291,9 +1399,8 @@ def restaurar_clave_api(
     """Restaura una clave revocada con motivo auditado."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
-    meta = API_KEYS.get(key_id)
-    if meta is None:
-        raise HTTPException(status_code=404, detail="clave no encontrada")
+    meta = await _meta_clave(key_id)
+    await _actualizar_clave_pg(key_id, revocada=False)
     meta.revocada = False
     log_event(
         "user.api_key.restored", actor_id=actor, target_type="api_key",

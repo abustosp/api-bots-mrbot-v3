@@ -611,9 +611,10 @@ def test_panel_expone_tablas_claves_y_credenciales() -> None:
     respuesta = cliente.get("/admin/")
     assert respuesta.status_code == 200
     cuerpo = respuesta.text
-    for vista in ("dashboard", "users", "keys", "jobs", "executions", "fleet", "audit"):
+    for vista in ("dashboard", "users", "jobs", "executions", "fleet", "audit"):
         assert f'data-view="{vista}"' in cuerpo
         assert f'data-panel="{vista}"' in cuerpo
+    assert 'data-panel="keys"' not in cuerpo
     for endpoint in (
         "/admin/users",
         "/admin/api-keys",

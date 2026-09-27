@@ -121,8 +121,11 @@ No existe una sección ni una ruta independiente `/admin/tables`. El explorador
 no refleja tablas arbitrarias ni expone secretos. La consola incluye estas vistas:
 
 - **Resumen:** métricas de jobs, estado de la flota y últimas acciones.
-- **Usuarios:** búsqueda, alta, habilitación/deshabilitación y emisión de
-  claves API, cuyo valor se muestra una sola vez.
+- **Usuarios:** búsqueda, alta, habilitación/deshabilitación, user ID copiable
+  y gestión completa de claves API en la fila de cada usuario: copiar (se
+  descifra al momento), reemplazar (vacío = aleatoria), editar scopes y
+  vencimiento, revocar y restaurar. No hay una sección aparte de claves; los
+  cambios se persisten en PostgreSQL. El motivo acepta de 3 a 500 caracteres.
 - **Jobs:** filtros, métricas, detalle y cancelación de ejecuciones.
 - **Tablas / registros:** selección de tablas PostgreSQL canónicas, tablas
   físicas por bot y vistas históricas V1/V2. Conserva request, response,
