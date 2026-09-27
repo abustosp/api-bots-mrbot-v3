@@ -156,7 +156,9 @@ class ConsultaPagosVepPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(self._servicio)
+                servicio = await sesion.open_service(
+                    self._servicio, portal="consulta_pagos_vep"
+                )
                 await servicio.seleccionar_representado(entrada.representado_cuit)
                 datos, artefactos = await self._consultar(
                     servicio, entrada, runtime

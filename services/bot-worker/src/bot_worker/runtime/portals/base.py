@@ -198,8 +198,9 @@ class PortalArca:
             descarga = await info.value
             await descarga.save_as(str(destino))
         except Exception as exc:
+            detalle = str(exc) if isinstance(exc, TargetUnavailableError) else type(exc).__name__
             raise TargetUnavailableError(
-                "el portal no entregó la descarga esperada",
+                f"el portal no entregó la descarga esperada ({detalle[:120]})",
                 diagnostic_code="portal_download_missing",
             ) from exc
         if not destino.exists() or destino.stat().st_size == 0:

@@ -12,11 +12,13 @@ Cada portal se registra por nombre de bot y se pide desde el plugin con
 from __future__ import annotations
 
 from .base import PortalArca
+from .consulta_pagos_vep import ConsultaPagosVepPortal
 from .sct import SctPortal
 from .siper import SiperPortal
 from .srt import SrtPortal
 
 PORTALES: dict[str, type[PortalArca]] = {
+    "consulta_pagos_vep": ConsultaPagosVepPortal,
     "sct": SctPortal,
     "siper": SiperPortal,
     "srt": SrtPortal,
@@ -28,4 +30,12 @@ def portal_para(bot: str) -> type[PortalArca] | None:
     return PORTALES.get(str(bot or "").strip().lower())
 
 
-__all__ = ["PORTALES", "PortalArca", "SctPortal", "SiperPortal", "SrtPortal", "portal_para"]
+__all__ = [
+    "PORTALES",
+    "ConsultaPagosVepPortal",
+    "PortalArca",
+    "SctPortal",
+    "SiperPortal",
+    "SrtPortal",
+    "portal_para",
+]
