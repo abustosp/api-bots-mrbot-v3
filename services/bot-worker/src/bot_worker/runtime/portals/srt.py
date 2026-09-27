@@ -25,10 +25,94 @@ class SrtPortal(PortalArca):
 
     nombre = "srt"
 
+    def __init__(self, page: Any, **kwargs: Any) -> None:
+        super().__init__(page, **kwargs)
+        self._preparado = False
+
+    async def preparar(self) -> None:
+        """Deja la página de consulta lista (port del preámbulo de V2).
+
+        V2 abría el servicio desde Clave Fiscal, clickeaba "Ingresar" cuando el
+        contribuyente lo pedía y recién después navegaba a la consulta. Sin ese
+        preámbulo la página no trae el campo de CUIT.
+        """
+        await self._click_ingresar_temporal()
+        await self.abrir_consulta()
+
+    async def _click_ingresar_temporal(self) -> bool:
+        """Click en "Ingresar" de la selección de representado (solo algunos CUIT)."""
+        objetivo = await self._primero_visible(
+            (
+                self.page.locator("a[onclick*='LoguearRespresentado']"),
+                self.page.locator("a[onclick*='LoguearRepresentado']"),
+                self.page.locator("a.btn-success[onclick*='Loguear']"),
+            ),
+            total_ms=2_000,
+        )
+        if objetivo is None:
+            return False
+        try:
+            await objetivo.click(timeout=5_000)
+        except Exception:
+            return False
+        await self._esperar(1_500)
+        return True
+
     async def abrir_consulta(self) -> None:
-        """Navega a la consulta de alícuotas dentro del portal SRT."""
-        await self.abrir_url(ALICUOTAS_URL)
-        await self._esperar(1_000)
+        """Abre la consulta de alícuotas dentro del portal SRT.
+
+        Port de ``_open_srt_query_page`` de V2: primero se busca el enlace de la
+        consulta en el portal (mantiene la sesión SSO que abrió Clave Fiscal) y
+        solo como respaldo se navega directo a la URL. Navegar directo sin la
+        sesión del portal devuelve ``/ErrorValidate.aspx``.
+        """
+        enlace = await self._primero_visible(
+            (
+                self.page.get_by_role("link", name=re.compile(r"consulta\s+de\s+al[ií]cuotas", re.I)),
+                self.page.get_by_role("tab", name=re.compile(r"al[ií]cuotas", re.I)),
+                self.page.locator("a", has_text=re.compile(r"al[ií]cuotas", re.I)),
+                self.page.get_by_role("button", name=re.compile(r"al[ií]cuotas", re.I)),
+            ),
+            total_ms=8_000,
+        )
+        if enlace is not None:
+            try:
+                await enlace.click(timeout=6_000)
+                await self._esperar(1_500)
+            except Exception:
+                pass
+        if "ErrorValidate" in await self._url() or await self._campo_cuit() is None:
+            await self.abrir_url(ALICUOTAS_URL)
+            await self._esperar(1_000)
+
+    async def _campo_cuit(self) -> Any | None:
+        return await self._primero_visible(
+            (
+                self.page.locator("#txtCuilCuit"),
+                self.page.locator("input[id*='cuit' i], input[name*='cuit' i]"),
+                self.page.locator("input[type='number']"),
+            ),
+            total_ms=3_000,
+        )
+
+    async def _pista_de_pagina(self) -> str:
+        """Ruta y cantidad de elementos clave: orienta sin exponer la página."""
+        from urllib.parse import urlparse
+
+        url = urlparse(await self._url())
+        partes = [f"host={url.netloc}", f"ruta={url.path[:40]}"]
+        for selector, etiqueta in (
+            ("#txtCuilCuit", "txtCuilCuit"),
+            ("input[type='number']", "input_number"),
+            ("iframe", "iframes"),
+            ("#btnConsultar", "btnConsultar"),
+            ("a[onclick*='Loguear']", "loguear"),
+        ):
+            try:
+                partes.append(f"{etiqueta}={await self.page.locator(selector).count()}")
+            except Exception:
+                partes.append(f"{etiqueta}=?")
+        return " ".join(partes)
 
     async def consultar_cuit(self, cuit: str) -> dict[str, Any]:
         """Consulta la alícuota ART del CUIT y devuelve las tablas del portal."""
@@ -38,10 +122,14 @@ class SrtPortal(PortalArca):
                 "CUIT inválido para la consulta SRT",
                 diagnostic_code="srt_cuit_invalid",
             )
+        if not self._preparado:
+            await self.preparar()
+            self._preparado = True
         await self._limpiar_consulta_previa()
         if not await self._ingresar_cuit(digits):
+            pista = await self._pista_de_pagina()
             raise TargetUnavailableError(
-                "no se pudo ingresar el CUIT en el portal SRT",
+                f"no se pudo ingresar el CUIT en el portal SRT ({pista})",
                 diagnostic_code="srt_cuit_input_failed",
             )
         # reCAPTCHA de la consulta (port de _detect_and_solve_captcha).

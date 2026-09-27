@@ -183,7 +183,6 @@ class SrtPlugin:
                 await runtime.cancellation.raise_if_cancelled()
                 servicio = await sesion.open_service(
                     self._servicio_nombre,
-                    url=self._alicuotas_url,
                     portal="srt",
                     hosts_permitidos=tuple(self.manifest.hosts_permitidos or ()),
                 )
