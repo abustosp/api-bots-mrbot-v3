@@ -5,7 +5,8 @@
   el prefijo y el verificador HMAC, nunca el valor.
 - Los ajustes de crédito son entradas compensatorias del ledger con motivo
   obligatorio; nunca una actualización opaca del saldo.
-- Toda operación exige motivo de 10 a 500 caracteres y genera auditoría.
+- Toda operación exige motivo de 3 a 500 caracteres (el mismo mínimo que la
+  API key) y genera auditoría.
 """
 
 from __future__ import annotations
@@ -24,7 +25,12 @@ from dataclasses import asdict, dataclass, field
 from fastapi import APIRouter, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from central_api.admin._common import enmascarar, require_admin, validar_motivo
+from central_api.admin._common import (
+    MOTIVO_MINIMO_IDENTIDAD,
+    enmascarar,
+    require_admin,
+    validar_motivo,
+)
 from central_api.admin.audit import log_event
 from central_api.admin.notifications import enviar_credenciales_email
 from central_api.models.base import new_uuid7
@@ -241,7 +247,7 @@ class CrearUsuarioBody(BaseModel):
         default=None,
         description="Alias compatible con V1/V2 para solicitar envío por email.",
     )
-    motivo: str = Field(default="", description="Justificación de 10 a 500 caracteres")
+    motivo: str = Field(default="", description="Justificación de 3 a 500 caracteres")
 
 
 class MotivoBody(BaseModel):
@@ -567,7 +573,7 @@ async def crear_usuario(
     """
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     email = _normalizar_identidad(body.email)
     if any(u.email == email for u in USERS.values()):
         raise HTTPException(status_code=409, detail="identidad ya registrada")
@@ -793,7 +799,7 @@ async def _cambiar_estado(
     user_id: str, estado: str, motivo_raw: str, actor: str, request_id: str,
     accion: str,
 ) -> dict:
-    motivo = validar_motivo(motivo_raw)
+    motivo = validar_motivo(motivo_raw, minimo=MOTIVO_MINIMO_IDENTIDAD)
     usuario = USERS.get(user_id)
     if usuario is None:
         usuario = await _usuario_pg_por_id(user_id)
@@ -859,7 +865,7 @@ async def emitir_clave_api(
     """Emite una clave y la revela una única vez; la auditoría guarda el prefijo."""
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     usuario = USERS.get(user_id)
     if usuario is None:
         usuario = await _usuario_pg_por_id(user_id)
@@ -1005,7 +1011,7 @@ async def rotar_clave_api(
     """Emite una clave nueva y revoca la anterior; audita ambos IDs."""
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     usuario = USERS.get(user_id)
     if usuario is None:
         usuario = await _usuario_pg_por_id(user_id)
@@ -1064,7 +1070,7 @@ def asignar_plan(
 ) -> dict:
     """Asigna un plan dejando rastro del anterior y el nuevo con fecha efectiva."""
     actor = require_admin(authorization)
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     usuario = USERS.get(user_id)
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
@@ -1087,7 +1093,7 @@ def ajustar_creditos(
 ) -> dict:
     """Crea una entrada compensatoria de créditos con saldos previo/posterior."""
     actor = require_admin(authorization)
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     entrada = aplicar_credito(user_id, body.delta, motivo, actor)
     log_event(
         "user.credit.adjusted", actor_id=actor, target_type="user", target_id=user_id,
@@ -1226,7 +1232,7 @@ def editar_clave_api(
 ) -> dict:
     """Edita scopes, expiración o estado de una clave con motivo auditado."""
     actor = require_admin(authorization)
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = API_KEYS.get(key_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="clave no encontrada")
@@ -1262,7 +1268,7 @@ def revocar_clave_api(
 ) -> dict:
     """Revoca una clave sin borrar evidencia, con motivo auditado."""
     actor = require_admin(authorization)
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = API_KEYS.get(key_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="clave no encontrada")
@@ -1284,7 +1290,7 @@ def restaurar_clave_api(
 ) -> dict:
     """Restaura una clave revocada con motivo auditado."""
     actor = require_admin(authorization)
-    motivo = validar_motivo(body.motivo)
+    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = API_KEYS.get(key_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="clave no encontrada")

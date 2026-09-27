@@ -552,7 +552,10 @@ Los ajustes de crédito son entradas compensatorias en `credit_ledger`.
 
 No se actualiza un saldo de manera opaca.
 
-Toda operación exige un campo de razón de 10 a 500 caracteres.
+Toda operación exige un campo de razón de 10 a 500 caracteres. Excepción: las
+operaciones de usuarios y claves API (alta, estado, emisión, reemplazo, edición,
+revocación, restauración, plan y créditos) aceptan de 3 a 500, el mismo mínimo
+que la API key.
 
 La razón se escapa y se registra inmutablemente.
 

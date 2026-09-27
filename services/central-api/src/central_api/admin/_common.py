@@ -47,16 +47,28 @@ def require_admin(authorization: str | None) -> str:
     return "admin:token"
 
 
-def validar_motivo(motivo: str | None, *, obligatorio: bool = True) -> str:
-    """Valida el motivo de una operación sensible (10 a 500 caracteres)."""
+MOTIVO_MINIMO = 10
+MOTIVO_MINIMO_IDENTIDAD = 3
+MOTIVO_MAXIMO = 500
+
+
+def validar_motivo(
+    motivo: str | None, *, obligatorio: bool = True, minimo: int = MOTIVO_MINIMO
+) -> str:
+    """Valida el motivo de una operación sensible (``minimo`` a 500 caracteres).
+
+    Por defecto exige 10 caracteres. Las operaciones de usuarios y claves API
+    usan ``MOTIVO_MINIMO_IDENTIDAD`` (3), el mismo mínimo que la API key.
+    """
     texto = (motivo or "").strip()
     if not texto:
         if obligatorio:
             raise HTTPException(status_code=400, detail="motivo obligatorio")
         return ""
-    if not 10 <= len(texto) <= 500:
+    if not minimo <= len(texto) <= MOTIVO_MAXIMO:
         raise HTTPException(
-            status_code=400, detail="motivo debe tener entre 10 y 500 caracteres"
+            status_code=400,
+            detail=f"motivo debe tener entre {minimo} y {MOTIVO_MAXIMO} caracteres",
         )
     return texto
 

@@ -419,3 +419,64 @@ def test_claves_api_lista_clave_pg_para_copiar_sin_exponer_ciphertext(
     )
     assert reveal.status_code == 200, reveal.text
     assert reveal.json() == {"success": True, "api_key": cleartext}
+
+
+def test_motivo_de_claves_api_acepta_3_caracteres_como_la_clave(copy_panel) -> None:
+    """Reemplazar, emitir y crear usan el mismo mínimo de 3 que la API key."""
+    created = copy_panel.post(
+        "/admin/users",
+        json={"email": "motivo-corto@example.com", "api_key": "abp", "motivo": "abc"},
+        headers=_admin_headers(),
+    )
+    assert created.status_code == 201, created.text
+    user_id = created.json()["usuario"]["id"]
+    key_id = created.json()["credenciales"]["clave"]["id"]
+
+    corto = copy_panel.post(
+        f"/admin/users/{user_id}/api-keys/rotate",
+        json={"key_id": key_id, "motivo": "ab", "valor_fijo": ""},
+        headers=_admin_headers(),
+    )
+    assert corto.status_code == 400
+    assert corto.json()["detail"] == "motivo debe tener entre 3 y 500 caracteres"
+
+    rotated = copy_panel.post(
+        f"/admin/users/{user_id}/api-keys/rotate",
+        json={"key_id": key_id, "motivo": "  rot  ", "valor_fijo": ""},
+        headers=_admin_headers(),
+    )
+    assert rotated.status_code == 200, rotated.text
+    nuevo = rotated.json()["valor_unica_vez"]
+    assert len(nuevo) == 48 and nuevo.isalnum()
+
+    issued = copy_panel.post(
+        f"/admin/users/{user_id}/api-keys",
+        json={"motivo": "new", "valor_fijo": ""},
+        headers=_admin_headers(),
+    )
+    assert issued.status_code == 201, issued.text
+
+    largo = copy_panel.post(
+        f"/admin/api-keys/{rotated.json()['clave']['id']}/revoke",
+        json={"motivo": "x" * 501},
+        headers=_admin_headers(),
+    )
+    assert largo.status_code == 400
+
+
+def test_motivo_fuera_de_usuarios_sigue_exigiendo_10_caracteres(copy_panel) -> None:
+    from central_api.admin._common import validar_motivo
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        validar_motivo("abc")
+    assert exc.value.detail == "motivo debe tener entre 10 y 500 caracteres"
+    assert validar_motivo("abc", minimo=3) == "abc"
+
+
+def test_panel_claves_api_pide_motivo_de_3_a_500(copy_panel) -> None:
+    html = copy_panel.get("/admin/").text
+    assert "Motivo para reemplazar la clave (3-500 caracteres)" in html
+    assert "Motivo del cambio (3-500 caracteres)" in html
+    assert "(10-500 caracteres)" not in html.split("Motivo del forzado")[0]
+    assert 'id="new-reason" type="text" value="alta desde panel V3" minlength="3" maxlength="500"' in html
