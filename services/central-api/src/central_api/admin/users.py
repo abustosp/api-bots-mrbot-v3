@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import string
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
@@ -48,7 +49,7 @@ class AdminUser:
 
 @dataclass
 class ApiKeyMeta:
-    """Metadatos públicos de una clave API (jamás el valor)."""
+    """Metadatos y sobre cifrado de una clave API (nunca el valor en claro)."""
 
     id: str
     user_id: str
@@ -58,6 +59,7 @@ class ApiKeyMeta:
     expira_en: str = ""
     revocada: bool = False
     emitida_en: str = ""
+    valor_cifrado: str | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -81,6 +83,12 @@ CREDIT_LEDGER: list[CreditEntry] = []
 
 def _nuevo_id() -> str:
     return str(uuid.uuid4())
+
+
+def _nueva_clave_alfanumerica(longitud: int = 48) -> str:
+    """Genera un secreto al azar solo con letras ASCII y dígitos."""
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(longitud))
 
 
 def _normalizar_email(email: str) -> str:
@@ -119,6 +127,8 @@ def _vista_usuario(usuario: AdminUser) -> dict:
 def _vista_clave(meta: ApiKeyMeta) -> dict:
     datos = asdict(meta)
     datos.pop("verificador_hmac", None)
+    datos.pop("valor_cifrado", None)
+    datos["revelable"] = bool(meta.valor_cifrado)
     return datos
 
 
@@ -148,6 +158,20 @@ def emitir_clave(
     verificador = _firmar_clave(valor)
     if any(k.verificador_hmac == verificador for k in API_KEYS.values()):
         raise HTTPException(status_code=409, detail="valor de clave ya registrado")
+    try:
+        from central_api.security.api_key_vault import (
+            ApiKeyVaultNotConfigured,
+            encrypt_api_key,
+        )
+
+        try:
+            valor_cifrado = encrypt_api_key(valor)
+        except ApiKeyVaultNotConfigured:
+            # Los stores puramente efímeros siguen disponibles para desarrollo.
+            # Toda escritura PostgreSQL falla cerrada si no puede cifrar.
+            valor_cifrado = None
+    except Exception:
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
     meta = ApiKeyMeta(
         id=str(new_uuid7()),
         user_id=user_id,
@@ -159,6 +183,7 @@ def emitir_clave(
         scopes=list(scopes),
         expira_en=expira_en or "",
         emitida_en=utcnow().isoformat(),
+        valor_cifrado=valor_cifrado,
     )
     API_KEYS[meta.id] = meta
     return meta, valor
@@ -302,6 +327,7 @@ async def _filas_identidad_pg() -> tuple[list[tuple], list[tuple]]:
                         ApiKey.expires_at,
                         ApiKey.revoked_at,
                         ApiKey.created_at,
+                        ApiKey.encrypted_value.is_not(None),
                     ).order_by(ApiKey.created_at.desc())
                 )
             ).all()
@@ -337,10 +363,44 @@ async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
     )
 
 
+async def _api_key_pg_por_id(user_id: str, key_id: str) -> ApiKeyMeta | None:
+    """Hidrata metadatos de una clave persistida sin revelar su valor."""
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey
+
+    if not db_configurado():
+        return None
+    try:
+        user_uuid = uuid.UUID(user_id)
+        key_uuid = uuid.UUID(key_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    try:
+        async with nueva_sesion() as sesion:
+            row = await sesion.get(ApiKey, key_uuid)
+    except Exception:  # noqa: BLE001 - error DB sanitizado
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    if row is None or row.user_id != user_uuid:
+        return None
+    return ApiKeyMeta(
+        id=str(row.id),
+        user_id=str(row.user_id),
+        prefijo=str(row.key_prefix),
+        # El HMAC persistido usa el formato canónico de autenticación, no se
+        # utiliza para comparar una clave nueva en claro en el proceso admin.
+        verificador_hmac=str(row.verifier_hmac),
+        scopes=list(row.scopes or []),
+        expira_en=row.expires_at.isoformat() if row.expires_at else "",
+        revocada=row.revoked_at is not None,
+        emitida_en=row.created_at.isoformat() if row.created_at else "",
+        valor_cifrado=row.encrypted_value,
+    )
+
+
 async def _persistir_api_key_pg(
     usuario: AdminUser, meta: ApiKeyMeta, valor: str
 ) -> None:
-    """Persiste selector y HMAC, nunca el secreto literal de la API key."""
+    """Persiste selector, HMAC y ciphertext, nunca la API key en claro."""
     from sqlalchemy.exc import IntegrityError
 
     from central_api.db import db_configurado, nueva_sesion
@@ -351,6 +411,15 @@ async def _persistir_api_key_pg(
     settings = get_settings()
     if not settings.api_key_hmac_secret:
         raise HTTPException(status_code=503, detail="Servicio no disponible")
+    valor_cifrado = meta.valor_cifrado
+    if not valor_cifrado:
+        try:
+            from central_api.security.api_key_vault import encrypt_api_key
+
+            valor_cifrado = encrypt_api_key(valor)
+        except Exception:  # noqa: BLE001 - persistir sin cifrado queda prohibido
+            raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+        meta.valor_cifrado = valor_cifrado
     try:
         user_uuid = uuid.UUID(usuario.id)
         key_uuid = uuid.UUID(meta.id)
@@ -388,6 +457,7 @@ async def _persistir_api_key_pg(
                     user_id=user_uuid,
                     key_prefix=selector,
                     verifier_hmac=verifier,
+                    encrypted_value=valor_cifrado,
                     scopes=list(meta.scopes),
                     expires_at=expires_at,
                 )
@@ -398,6 +468,87 @@ async def _persistir_api_key_pg(
     except IntegrityError:
         raise HTTPException(status_code=409, detail="valor de clave ya registrado") from None
     except Exception:  # noqa: BLE001 - no filtrar DSN ni datos internos
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+
+
+async def _rotar_api_key_pg(
+    usuario: AdminUser,
+    anterior: ApiKeyMeta,
+    nueva: ApiKeyMeta,
+    valor: str,
+) -> None:
+    """Revoca la clave anterior e inserta la nueva en una sola transacción."""
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey, User
+
+    if not db_configurado():
+        return
+    settings = get_settings()
+    if not settings.api_key_hmac_secret:
+        raise HTTPException(status_code=503, detail="Servicio no disponible")
+    try:
+        from central_api.api.dependencies import _selector_y_secreto
+        from central_api.security.api_keys import fingerprint_secret
+        from central_api.security.api_key_vault import encrypt_api_key
+
+        selector, secreto = _selector_y_secreto(valor)
+        verifier = fingerprint_secret(settings.api_key_hmac_secret, secreto)
+        encrypted_value = encrypt_api_key(valor)
+        user_uuid = uuid.UUID(usuario.id)
+        old_key_uuid = uuid.UUID(anterior.id)
+        new_key_uuid = uuid.UUID(nueva.id)
+    except Exception:  # noqa: BLE001 - no filtrar claves ni datos criptográficos
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+
+    try:
+        async with nueva_sesion() as sesion:
+            cuenta = await sesion.get(User, user_uuid)
+            if cuenta is None or not cuenta.habilitado:
+                raise HTTPException(status_code=409, detail="el usuario no está activo")
+            resultado = await sesion.execute(
+                select(ApiKey)
+                .where(ApiKey.id == old_key_uuid, ApiKey.user_id == user_uuid)
+                .with_for_update()
+            )
+            anterior_pg = resultado.scalar_one_or_none()
+            if anterior_pg is None:
+                raise HTTPException(status_code=404, detail="clave anterior no encontrada")
+            ahora = utcnow()
+            if (
+                anterior_pg.revoked_at is not None
+                or (anterior_pg.expires_at is not None and anterior_pg.expires_at <= ahora)
+            ):
+                raise HTTPException(status_code=409, detail="la clave anterior no está activa")
+            # La fila de PostgreSQL es autoritativa si el cache del proceso quedó
+            # desactualizado. La clave nueva conserva los permisos y vencimiento.
+            nueva.scopes = list(anterior_pg.scopes or [])
+            nueva.expira_en = (
+                anterior_pg.expires_at.isoformat() if anterior_pg.expires_at else ""
+            )
+            expires_at = anterior_pg.expires_at
+            anterior_pg.revoked_at = ahora
+            sesion.add(
+                ApiKey(
+                    id=new_key_uuid,
+                    user_id=user_uuid,
+                    key_prefix=selector,
+                    verifier_hmac=verifier,
+                    encrypted_value=encrypted_value,
+                    scopes=list(nueva.scopes),
+                    expires_at=expires_at,
+                    replaces_key_id=old_key_uuid,
+                )
+            )
+            await sesion.flush()
+        nueva.valor_cifrado = encrypted_value
+    except HTTPException:
+        raise
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="valor de clave ya registrado") from None
+    except Exception:  # noqa: BLE001 - transacción revertida por nueva_sesion
         raise HTTPException(status_code=503, detail="Servicio no disponible") from None
 
 
@@ -534,7 +685,7 @@ async def listar_usuarios(
             # El estado persistido es canónico tras reinicios o cambios externos.
             usuario.estado = "habilitado" if habilitado else "deshabilitado"
         claves_por_usuario[uid] = {}
-    for key_id, user_id, prefix, scopes, expires_at, revoked_at, created_at in filas_claves:
+    for key_id, user_id, prefix, scopes, expires_at, revoked_at, created_at, revelable in filas_claves:
         uid = str(user_id)
         expirada = expires_at is not None and expires_at <= ahora
         estado_clave = "revocada" if revoked_at is not None else ("expirada" if expirada else "activa")
@@ -543,6 +694,7 @@ async def listar_usuarios(
             "prefijo": str(prefix),
             "estado": estado_clave,
             "emitida_en": created_at.isoformat() if created_at else "",
+            "revelable": bool(revelable),
         }
     for clave in API_KEYS.values():
         # PostgreSQL es la fuente canónica cuando la misma clave existe en
@@ -554,6 +706,7 @@ async def listar_usuarios(
             "prefijo": clave.prefijo,
             "estado": "revocada" if clave.revocada else "activa",
             "emitida_en": clave.emitida_en,
+            "revelable": bool(clave.valor_cifrado),
         }
     usuarios = list(usuarios_por_id.values())
     if email:
@@ -735,8 +888,114 @@ async def emitir_clave_api(
     }
 
 
+@router.post("/users/{user_id}/api-keys/{key_id}/reveal")
+async def revelar_clave_api(
+    user_id: str,
+    key_id: str,
+    response: Response,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    """Revela una clave activa al administrador para permitir copiarla.
+
+    El ciphertext nunca se entrega al navegador. Solo se devuelve el secreto
+    tras autorización, validación de vigencia/HMAC y registro de auditoría.
+    """
+    actor = require_admin(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from central_api.db import db_configurado, nueva_sesion
+
+    if db_configurado():
+        from sqlalchemy import select
+
+        from central_api.models.identity import ApiKey, User
+
+        try:
+            key_uuid = uuid.UUID(key_id)
+            user_uuid = uuid.UUID(user_id)
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=404, detail="clave no encontrada") from None
+        try:
+            async with nueva_sesion() as sesion:
+                fila = (
+                    await sesion.execute(
+                        select(ApiKey, User.habilitado)
+                        .join(User, User.id == ApiKey.user_id)
+                        .where(ApiKey.id == key_uuid, ApiKey.user_id == user_uuid)
+                    )
+                ).first()
+        except Exception:  # noqa: BLE001 - error DB sanitizado
+            raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+        if fila is None:
+            raise HTTPException(status_code=404, detail="clave no encontrada")
+        row, usuario_habilitado = fila
+        if (
+            not usuario_habilitado
+            or row.revoked_at is not None
+            or (row.expires_at is not None and row.expires_at <= utcnow())
+        ):
+            raise HTTPException(status_code=409, detail="la clave no está activa")
+        ciphertext = row.encrypted_value
+        verifier = row.verifier_hmac
+        persistent = True
+    else:
+        usuario = USERS.get(user_id)
+        meta = API_KEYS.get(key_id)
+        if usuario is None or meta is None or meta.user_id != user_id:
+            raise HTTPException(status_code=404, detail="clave no encontrada")
+        if usuario.estado != "habilitado" or meta.revocada:
+            raise HTTPException(status_code=409, detail="la clave no está activa")
+        if meta.expira_en:
+            try:
+                expires_at = datetime.fromisoformat(meta.expira_en.replace("Z", "+00:00"))
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+            except ValueError:
+                raise HTTPException(status_code=409, detail="la clave no está activa") from None
+            if expires_at <= utcnow():
+                raise HTTPException(status_code=409, detail="la clave no está activa")
+        ciphertext = meta.valor_cifrado
+        verifier = meta.verificador_hmac
+        persistent = False
+
+    if not ciphertext:
+        raise HTTPException(
+            status_code=409,
+            detail="esta clave fue emitida antes del cifrado recuperable; emita una nueva",
+        )
+    try:
+        from central_api.security.api_key_vault import decrypt_api_key
+
+        api_key = decrypt_api_key(ciphertext)
+        if persistent:
+            from central_api.api.dependencies import _selector_y_secreto
+            from central_api.security.api_keys import fingerprint_secret
+
+            hmac_secret = get_settings().api_key_hmac_secret
+            if not hmac_secret:
+                raise ValueError("HMAC de API keys no configurado")
+            _, secret = _selector_y_secreto(api_key)
+            actual_verifier = fingerprint_secret(hmac_secret, secret)
+        else:
+            actual_verifier = _firmar_clave(api_key)
+    except Exception:  # noqa: BLE001 - no exponer errores ni secretos criptográficos
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    if not hmac.compare_digest(actual_verifier, verifier):
+        raise HTTPException(status_code=503, detail="Servicio no disponible")
+
+    log_event(
+        "user.api_key.revealed",
+        actor_id=actor,
+        target_type="api_key",
+        target_id=key_id,
+        request_id=request_id or "",
+        metadata={"user_id": user_id},
+    )
+    return {"success": True, "api_key": api_key}
+
+
 @router.post("/users/{user_id}/api-keys/rotate")
-def rotar_clave_api(
+async def rotar_clave_api(
     user_id: str,
     body: RotarClaveBody,
     response: Response,
@@ -747,17 +1006,36 @@ def rotar_clave_api(
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     motivo = validar_motivo(body.motivo)
-    if user_id not in USERS:
+    usuario = USERS.get(user_id)
+    if usuario is None:
+        usuario = await _usuario_pg_por_id(user_id)
+        if usuario is not None:
+            USERS[user_id] = usuario
+    if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
     anterior = API_KEYS.get(body.key_id)
+    if anterior is None:
+        anterior = await _api_key_pg_por_id(user_id, body.key_id)
+        if anterior is not None:
+            API_KEYS[body.key_id] = anterior
     if anterior is None or anterior.user_id != user_id:
         raise HTTPException(status_code=404, detail="clave anterior no encontrada")
+    if anterior.revocada:
+        raise HTTPException(status_code=409, detail="la clave anterior no está activa")
     # Emitir primero permite validar la clave nueva antes de revocar la actual.
     # La operación queda en un único endpoint para que el panel no deje dos
     # claves activas por un fallo entre requests.
+    # El campo vacío es una solicitud de generación, no un valor de clave
+    # inválido. El secreto se devuelve únicamente en esta respuesta no-cache.
+    valor_fijo = body.valor_fijo.strip() or _nueva_clave_alfanumerica()
     meta, valor = emitir_clave(
-        user_id, anterior.scopes, anterior.expira_en, body.valor_fijo
+        user_id, anterior.scopes, anterior.expira_en, valor_fijo
     )
+    try:
+        await _rotar_api_key_pg(usuario, anterior, meta, valor)
+    except Exception:
+        API_KEYS.pop(meta.id, None)
+        raise
     anterior.revocada = True
     log_event(
         "user.api_key.rotated", actor_id=actor, target_type="api_key",

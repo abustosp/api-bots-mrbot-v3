@@ -475,6 +475,9 @@ La central y `packages/mrbot-contracts` son la fuente de constantes. El check es
 Las transiciones no se garantizan solo con checks de fila. El servicio ejecuta `UPDATE ... WHERE status IN (...)` dentro de transacción y agrega `job_events` en la misma transacción. Pruebas de integración ejercen el diagrama de estados del plan maestro §8.
 ## 8. DDL de referencia PostgreSQL 17
 El siguiente DDL es la referencia de la migración inicial. Los UUID se reciben desde la aplicación, por lo que no hay `DEFAULT` de secuencia ni extensión requerida. En Alembic se descompone en revisiones, pero el resultado final debe ser equivalente.
+
+`api_keys.encrypted_value` guarda, para las claves emitidas desde la migración 0017, un sobre híbrido cifrado con la clave pública RSA de la central: RSA-OAEP-SHA256 protege la clave Fernet aleatoria y Fernet cifra la API key completa. La privada correspondiente (`RSA_PRIVATE_KEY`) solo se usa en la central para emitir y revelar claves autorizadas. El vault actual admite una sola clave RSA configurada y verifica su huella, por lo que no se debe rotar sin antes planificar una migración/re-encriptado de los sobres existentes. Los registros históricos con `encrypted_value IS NULL` no se pueden recuperar desde su HMAC, por lo que deben reemitirse para habilitar la acción de copia.
+
 ```sql
 CREATE TABLE users (     id uuid NOT NULL,
     email text NOT NULL,     habilitado boolean NOT NULL DEFAULT false,
@@ -482,7 +485,7 @@ CREATE TABLE users (     id uuid NOT NULL,
 ); CREATE UNIQUE INDEX uq_users_email_lower ON users (lower(email));
 CREATE TABLE api_keys (     id uuid NOT NULL,
     user_id uuid NOT NULL,     key_prefix varchar(16) NOT NULL,
-    verifier_hmac text NOT NULL,     label varchar(120),
+    verifier_hmac text NOT NULL,     encrypted_value text,     label varchar(120),
     scopes jsonb NOT NULL DEFAULT '[]'::jsonb,     expires_at timestamptz,
     revoked_at timestamptz,     replaces_key_id uuid,
     last_used_at timestamptz,     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,

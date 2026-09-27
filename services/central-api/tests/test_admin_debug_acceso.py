@@ -261,6 +261,7 @@ def test_usuarios_persistidos_se_hidratan_y_su_estado_se_alterna(admin, monkeypa
                     None,
                     persisted["revoked_at"],
                     datetime.now(timezone.utc),
+                    False,
                 )
             ],
         )
@@ -448,6 +449,41 @@ def test_rotar_clave_personalizada_revoca_la_anterior_solo_si_emite(admin, monke
     ).status_code == 401
     assert cliente.get(
         "/api/v3/bots", headers={"X-API-Key": "clave-nueva"}
+    ).status_code == 200
+
+
+def test_rotar_clave_vacia_genera_secreto_alfanumerico(admin) -> None:
+    import re
+
+    cliente = TestClient(create_app())
+    usuario = _crear_usuario(cliente, "rotacion-aleatoria@example.com").json()["usuario"]
+    inicial = cliente.post(
+        f"/admin/users/{usuario['id']}/api-keys",
+        json={
+            "scopes": ["jobs:create"],
+            "motivo": "emisión de clave para rotación aleatoria",
+            "valor_fijo": "clave-inicial",
+        },
+        headers=_headers(),
+    )
+    assert inicial.status_code == 201
+    key_id = inicial.json()["clave"]["id"]
+
+    rotada = cliente.post(
+        f"/admin/users/{usuario['id']}/api-keys/rotate",
+        json={
+            "key_id": key_id,
+            "motivo": "generar automáticamente clave de rotación",
+            "valor_fijo": "",
+        },
+        headers=_headers(),
+    )
+    assert rotada.status_code == 200
+    nueva = rotada.json()["valor_unica_vez"]
+    assert re.fullmatch(r"[A-Za-z0-9]{48}", nueva)
+    assert admin.API_KEYS[key_id].revocada is True
+    assert cliente.get(
+        "/api/v3/bots", headers={"X-API-Key": nueva}
     ).status_code == 200
 
 

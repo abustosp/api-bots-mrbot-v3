@@ -39,6 +39,9 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "valor_unica_vez" in cuerpo
     assert "API key (prefijo)" in cuerpo
     assert "userKeyPreview" in cuerpo
+    assert 'data-action="copy-user-key"' in cuerpo
+    assert "Copiar API key" in cuerpo
+    assert "/api-keys/${encodeURIComponent(button.dataset.key)}/reveal" in cuerpo
     assert 'data-action="user-toggle"' in cuerpo
     assert "Desactivar" in cuerpo and "Activar" in cuerpo
     assert "Emitir y revelar clave" in cuerpo
@@ -66,7 +69,8 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert 'data-action="key-replace"' in cuerpo
     assert "window.confirm(\"Se emitirá una nueva clave y se revocará la actual." in cuerpo
     assert "/api-keys/rotate`" in cuerpo
-    assert "valor_fijo: newSecret.trim()" in cuerpo
+    assert "Deja vacío para generar una aleatoria alfanumérica" in cuerpo
+    assert "valor_fijo: replacementSecret" in cuerpo
     assert "newSecret = \"\"" in cuerpo
     assert 'cache: "no-store"' in cuerpo
     assert "navigator.clipboard.writeText(state.revealedApiKey)" in cuerpo

@@ -2,7 +2,8 @@
 
 ``users`` contiene exactamente ``id`` (UUIDv4), ``email`` y ``habilitado``:
 sin ``fecha_ultimo_reset``/``created_at``/``updated_at``, sin contadores de
-cuota y sin secreto de clave (viven en ``api_keys`` y en los ledgers).
+cuota y sin secretos en claro. ``api_keys`` contiene HMAC de verificación y,
+para claves emitidas tras 0017, un ciphertext RSA híbrido recuperable.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class User(Base):
 
 
 class ApiKey(Base):
-    """Credencial rotableseparada de la identidad; solo guarda HMAC versionado."""
+    """Clave rotada con HMAC de verificación y ciphertext recuperable opcional."""
 
     __tablename__ = "api_keys"
 
@@ -49,6 +50,7 @@ class ApiKey(Base):
     )
     key_prefix: Mapped[str] = mapped_column(sa.String(16), nullable=False, unique=True)
     verifier_hmac: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
+    encrypted_value: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     label: Mapped[str | None] = mapped_column(sa.String(120))
     scopes: Mapped[object] = mapped_column(
         JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
@@ -67,6 +69,10 @@ class ApiKey(Base):
     )
 
     __table_args__ = (
+        sa.CheckConstraint(
+            "encrypted_value IS NULL OR btrim(encrypted_value) <> ''",
+            name="api_keys_encrypted_value",
+        ),
         sa.CheckConstraint("jsonb_typeof(scopes) = 'array'", name="api_keys_scopes"),
         sa.CheckConstraint(
             "expires_at IS NULL OR expires_at > created_at",

@@ -81,7 +81,7 @@ def _nueva_api_key() -> str:
     return f"mbk_{new_key_id()}_{new_secret()}"
 
 
-def _key_row_values(api_key: str) -> tuple[str, str]:
+def _key_row_values(api_key: str) -> tuple[str, str, str]:
     key_id, secret = _selector_y_secreto(api_key)
     hmac_secret = get_settings().api_key_hmac_secret
     if not hmac_secret:
@@ -89,7 +89,16 @@ def _key_row_values(api_key: str) -> tuple[str, str]:
             status_code=503,
             detail="La configuración segura de API keys no está disponible",
         )
-    return key_id, fingerprint_secret(hmac_secret, secret)
+    try:
+        from central_api.security.api_key_vault import encrypt_api_key
+
+        ciphertext = encrypt_api_key(api_key)
+    except Exception:  # noqa: BLE001 - no persistir claves sin cifrado RSA
+        raise HTTPException(
+            status_code=503,
+            detail="La custodia cifrada de API keys no está disponible",
+        ) from None
+    return key_id, fingerprint_secret(hmac_secret, secret), ciphertext
 
 
 def _registrar_en_memoria(
@@ -116,7 +125,7 @@ async def _crear_usuario_pg(identidad: str, api_key: str) -> str:
     from sqlalchemy import func, select
     from sqlalchemy.exc import IntegrityError
 
-    key_prefix, verifier = _key_row_values(api_key)
+    key_prefix, verifier, ciphertext = _key_row_values(api_key)
     try:
         async with nueva_sesion() as sesion:
             existente = (
@@ -133,6 +142,7 @@ async def _crear_usuario_pg(identidad: str, api_key: str) -> str:
                 user_id=cuenta.id,
                 key_prefix=key_prefix,
                 verifier_hmac=verifier,
+                encrypted_value=ciphertext,
                 scopes=[],
             )
             sesion.add(key_row)
@@ -170,7 +180,7 @@ async def _emitir_y_revocar_pg(
 ) -> None:
     from sqlalchemy import func, update
 
-    key_prefix, verifier = _key_row_values(api_key)
+    key_prefix, verifier, ciphertext = _key_row_values(api_key)
     async with nueva_sesion() as sesion:
         await sesion.execute(
             update(ApiKey)
@@ -182,6 +192,7 @@ async def _emitir_y_revocar_pg(
                 user_id=uuid.UUID(user_id),
                 key_prefix=key_prefix,
                 verifier_hmac=verifier,
+                encrypted_value=ciphertext,
                 scopes=[],
             )
         )
@@ -198,7 +209,7 @@ async def _rotar_pg_y_enviar_email(
     """Rota en una transacción y revierte si el proveedor no acepta el email."""
     from sqlalchemy import func, update
 
-    key_prefix, verifier = _key_row_values(api_key)
+    key_prefix, verifier, ciphertext = _key_row_values(api_key)
     try:
         async with nueva_sesion() as sesion:
             await sesion.execute(
@@ -211,6 +222,7 @@ async def _rotar_pg_y_enviar_email(
                     user_id=uuid.UUID(user_id),
                     key_prefix=key_prefix,
                     verifier_hmac=verifier,
+                    encrypted_value=ciphertext,
                     scopes=[],
                 )
             )
