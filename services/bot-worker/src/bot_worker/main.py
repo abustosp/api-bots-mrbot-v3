@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -72,6 +73,10 @@ from bot_worker.scheduler.supervisor import (
 )
 
 log = logging.getLogger("bot_worker.api")
+# Un diagnostic_code es un identificador fijo del código (p. ej.
+# "arca_login_rejected"). Cualquier otra cosa se descarta: podría ser texto
+# del sitio externo o un secreto interpolado.
+_DIAGNOSTIC_CODE_RE = re.compile(r"[a-z][a-z0-9_]{2,63}")
 
 # Reintentos de registro durante el arranque para fallos de red temporales.
 # Cinco intentos en total, con una espera creciente entre ellos.
@@ -394,13 +399,18 @@ def _resultado_error_de_bot(exc: ErrorDeBot) -> tuple[str, dict[str, Any]]:
     """Conserva la categoría pública de un error esperado de plugin.
 
     El diagnóstico del error puede contener detalles del sitio externo. Solo
-    se conserva el nombre de clase para diagnóstico interno, nunca el mensaje.
+    se conserva el nombre de clase y, si existe, el ``diagnostic_code`` fijo
+    (identificador de código, nunca texto libre del sitio) para diagnóstico.
     """
-    return exc.categoria, {
+    resultado: dict[str, Any] = {
         "result": "ERROR",
         "data": {},
         "internal": type(exc).__name__,
     }
+    codigo = getattr(exc, "diagnostic_code", None)
+    if isinstance(codigo, str) and _DIAGNOSTIC_CODE_RE.fullmatch(codigo):
+        resultado["diagnostic_code"] = codigo
+    return exc.categoria, resultado
 
 
 async def _register_once(
@@ -1210,7 +1220,13 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 "artifacts": bot_result.get("artifacts", []),
                 "error": (
                     None if outcome == "completado"
-                    else {"error_code": category or "unexpected"}
+                    else {
+                        "error_code": category or "unexpected",
+                        **(
+                            {"diagnostic_code": bot_result["diagnostic_code"]}
+                            if bot_result.get("diagnostic_code") else {}
+                        ),
+                    }
                 ),
                 "assignment_attempt": job.attempt,
                 "event_id": idempotency_key(job.job_id, job.attempt),
