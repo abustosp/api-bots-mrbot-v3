@@ -198,13 +198,20 @@ def test_usuario_lista_prefijo_y_cambia_estado_activo_desactivado(admin, monkeyp
     )
     assert emitida.status_code == 201
     assert emitida.json()["valor_unica_vez"] == "abp"
+    assert emitida.json()["clave"]["prefijo"].startswith("manual-")
+    assert emitida.json()["clave"]["prefijo"] != "abp"
     assert emitida.headers["cache-control"] == "private, no-store"
+
+    # La credencial funciona en la API, pero sus listados solo exponen el ID opaco.
+    autorizada = cliente.get("/api/v3/bots", headers={"X-API-Key": "abp"})
+    assert autorizada.status_code == 200
 
     listado = cliente.get("/admin/users", headers=_headers())
     assert listado.status_code == 200
     assert listado.headers["cache-control"] == "private, no-store"
     fila = next(item for item in listado.json()["usuarios"] if item["id"] == user_id)
-    assert fila["claves_api"][0]["prefijo"] == "abp"
+    assert fila["claves_api"][0]["prefijo"].startswith("manual-")
+    assert fila["claves_api"][0]["prefijo"] != "abp"
     assert fila["claves_api"][0]["estado"] == "activa"
     assert "verificador_hmac" not in repr(fila)
     assert "valor_unica_vez" not in repr(fila)

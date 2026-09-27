@@ -151,7 +151,10 @@ def emitir_clave(
     meta = ApiKeyMeta(
         id=str(new_uuid7()),
         user_id=user_id,
-        prefijo=valor[:8],
+        # Una clave manual de hasta 8 caracteres quedaría expuesta completa
+        # si se usara como prefijo visible. Para esos valores mostramos un
+        # identificador HMAC no reversible, nunca el secreto.
+        prefijo=(valor[:8] if len(valor) > 8 else f"manual-{verificador[:8]}"),
         verificador_hmac=verificador,
         scopes=list(scopes),
         expira_en=expira_en or "",
@@ -542,6 +545,10 @@ async def listar_usuarios(
             "emitida_en": created_at.isoformat() if created_at else "",
         }
     for clave in API_KEYS.values():
+        # PostgreSQL es la fuente canónica cuando la misma clave existe en
+        # ambos stores. No sustituir su selector opaco por metadata de memoria.
+        if clave.id in claves_por_usuario.get(clave.user_id, {}):
+            continue
         claves_por_usuario.setdefault(clave.user_id, {})[clave.id] = {
             "id": clave.id,
             "prefijo": clave.prefijo,
