@@ -10,6 +10,7 @@ from bot_worker.bots.errors import TargetUnavailableError
 from bot_worker.runtime.portals import PORTALES, portal_para
 from bot_worker.runtime.portals.base import PortalArca, solo_digitos
 from bot_worker.runtime.portals.sct import FORMATOS, PESTANAS, SctPortal
+from bot_worker.runtime.portals.siper import SiperPortal
 from bot_worker.runtime.portals.srt import ALICUOTAS_URL, SrtPortal
 
 CUIT = "20123456789"
@@ -108,7 +109,8 @@ def test_registro_de_portales() -> None:
     assert portal_para("sct") is SctPortal
     assert portal_para("SRT") is SrtPortal
     assert portal_para("desconocido") is None
-    assert set(PORTALES) == {"sct", "srt"}
+    assert set(PORTALES) == {"sct", "siper", "srt"}
+    assert portal_para("siper") is SiperPortal
 
 
 def test_solo_digitos_y_seleccion_de_representado_por_combo() -> None:

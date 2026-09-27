@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from .base import PortalArca
 from .sct import SctPortal
+from .siper import SiperPortal
 from .srt import SrtPortal
 
 PORTALES: dict[str, type[PortalArca]] = {
     "sct": SctPortal,
+    "siper": SiperPortal,
     "srt": SrtPortal,
 }
 
@@ -26,4 +28,4 @@ def portal_para(bot: str) -> type[PortalArca] | None:
     return PORTALES.get(str(bot or "").strip().lower())
 
 
-__all__ = ["PORTALES", "PortalArca", "SctPortal", "SrtPortal", "portal_para"]
+__all__ = ["PORTALES", "PortalArca", "SctPortal", "SiperPortal", "SrtPortal", "portal_para"]

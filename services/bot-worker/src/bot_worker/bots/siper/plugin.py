@@ -48,6 +48,12 @@ from bot_worker.bots.errors import (
 from bot_worker.bots.siper.schema import ENTRADAS, esquema_entrada
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
 
+#: Punto de entrada del padrón PUC (SIPER); V2 entraba directo por URL.
+URL_PADRON = (
+    "https://seti.afip.gob.ar/padron-puc-consulta-internet/"
+    "ResponsiveIndexInternetAction.do"
+)
+
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
 except ImportError:  # pragma: no cover - solo para tipado estatico
@@ -175,7 +181,13 @@ class SiperRealPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(self._servicio_nombre)
+                # V2 entraba al padrón por URL (login con system=padron-puc-...);
+                # el servicio no siempre figura en el catálogo de Clave Fiscal.
+                servicio = await sesion.open_service(
+                    self._servicio_nombre,
+                    url=URL_PADRON,
+                    portal="siper",
+                )
                 await servicio.seleccionar_representado(entrada.representado_cuit)
                 datos, artefactos = await self._capturar(
                     servicio, entrada, runtime
@@ -213,7 +225,11 @@ class SiperRealPlugin:
             await runtime.cancellation.raise_if_cancelled()
             nombre = nombre_captura_siper(entrada.representado_cuit, vista)
             destino = runtime.artifact_store.resolve(nombre)
-            resumen = await servicio.capturar_vista(vista=vista, destino=destino)
+            resumen = await servicio.capturar_vista(
+                vista=vista,
+                destino=destino,
+                representado_cuit=entrada.representado_cuit,
+            )
             fila: dict[str, Any] = {
                 "vista": vista,
                 "archivo": destino.name,
