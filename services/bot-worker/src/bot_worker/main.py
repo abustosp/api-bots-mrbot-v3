@@ -77,6 +77,7 @@ log = logging.getLogger("bot_worker.api")
 # "arca_login_rejected"). Cualquier otra cosa se descarta: podría ser texto
 # del sitio externo o un secreto interpolado.
 _DIAGNOSTIC_CODE_RE = re.compile(r"[a-z][a-z0-9_]{2,63}")
+_CLASS_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 
 # Reintentos de registro durante el arranque para fallos de red temporales.
 # Cinco intentos en total, con una espera creciente entre ellos.
@@ -410,6 +411,11 @@ def _resultado_error_de_bot(exc: ErrorDeBot) -> tuple[str, dict[str, Any]]:
     codigo = getattr(exc, "diagnostic_code", None)
     if isinstance(codigo, str) and _DIAGNOSTIC_CODE_RE.fullmatch(codigo):
         resultado["diagnostic_code"] = codigo
+    # Tipo de la excepción original (p. ej. TimeoutError de Playwright): es un
+    # nombre de clase, nunca su mensaje, así que no arrastra texto del sitio.
+    causa = exc.__cause__
+    if causa is not None and _CLASS_NAME_RE.fullmatch(type(causa).__name__):
+        resultado["cause"] = type(causa).__name__
     return exc.categoria, resultado
 
 
@@ -1226,6 +1232,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                             {"diagnostic_code": bot_result["diagnostic_code"]}
                             if bot_result.get("diagnostic_code") else {}
                         ),
+                        **({"cause": bot_result["cause"]} if bot_result.get("cause") else {}),
                     }
                 ),
                 "assignment_attempt": job.attempt,

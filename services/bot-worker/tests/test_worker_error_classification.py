@@ -65,3 +65,23 @@ def test_login_rechazado_conserva_su_codigo() -> None:
 def test_diagnostic_code_que_no_es_identificador_se_descarta(malo: str) -> None:
     _, resultado = _resultado_error_de_bot(TargetUnavailableError("x", diagnostic_code=malo))
     assert "diagnostic_code" not in resultado
+
+
+def test_tipo_de_la_causa_se_reporta_sin_su_mensaje() -> None:
+    class TimeoutError(Exception):  # imita playwright._impl._errors.TimeoutError
+        pass
+
+    try:
+        try:
+            raise TimeoutError("Locator 'cell' con datos del sitio y cuit 20123456789")
+        except TimeoutError as causa:
+            raise TargetUnavailableError("x", diagnostic_code="ccma_unclassified_exception") from causa
+    except TargetUnavailableError as error:
+        _, resultado = _resultado_error_de_bot(error)
+    assert resultado["cause"] == "TimeoutError"
+    assert "20123456789" not in str(resultado) and "Locator" not in str(resultado)
+
+
+def test_sin_causa_no_agrega_campo() -> None:
+    _, resultado = _resultado_error_de_bot(TargetUnavailableError("x"))
+    assert "cause" not in resultado
