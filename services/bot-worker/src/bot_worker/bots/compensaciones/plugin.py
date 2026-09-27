@@ -52,10 +52,6 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotRuntime = Any  # type: ignore[assignment,misc]
 
 SERVICIO_ARCA = "SISTEMA DE CUENTAS"
-URL_COMPENSACIONES = (
-    "https://ctacte.cloud.afip.gob.ar/contribuyente/scripts/vue/"
-    "consultaCompensacionesAfectaciones/index.html"
-)
 FORMATOS = (
     ("XLS", "excel", "compensaciones.xls"),
     ("CSV", "csv", "compensaciones.csv"),
@@ -157,51 +153,6 @@ class CompensacionesPlugin:
         except ValueError as exc:
             raise InvalidInputError(f"entrada invalida: {exc}") from exc
 
-    async def _consultar(
-        self, pagina: Any, entrada: CompensacionesConsultarInput
-    ) -> str:
-        """Abre el submodulo, filtra por fechas y dispara CONSULTAR (port V2)."""
-        await pagina.goto(URL_COMPENSACIONES, wait_until="domcontentloaded")
-        fechas = pagina.locator("input[name='fecha']")
-        if await fechas.count() >= 2:
-            await fechas.nth(0).click()
-            await fechas.nth(0).fill(entrada.fecha_desde)
-            await fechas.nth(1).click()
-            await fechas.nth(1).fill(entrada.fecha_hasta)
-        else:
-            raise TargetUnavailableError(
-                "no se encontraron los campos de fecha en Compensaciones"
-            )
-        await pagina.get_by_role(
-            "button", name=re.compile(r"CONSULTAR", re.I)
-        ).first.click()
-        try:
-            await pagina.wait_for_load_state("networkidle", timeout=10_000)
-        except Exception:
-            pass
-        await pagina.wait_for_timeout(1_200)
-        contenido = await pagina.content()
-        if re.search(r"No\s+se\s+encontraron\s+resultados", contenido, re.I):
-            return "sin_resultados"
-        return "con_resultados"
-
-    async def _exportar(
-        self, pagina: Any, formato: str, destino_nombre: str, runtime: BotRuntime
-    ) -> str:
-        """Exporta un formato via el boton Exportar (port de V2)."""
-        destino = runtime.artifact_store.resolve(destino_nombre)
-        await pagina.get_by_role(
-            "button", name=re.compile(r"Exportar", re.I)
-        ).first.click()
-        await pagina.wait_for_timeout(350)
-        async with pagina.expect_download(timeout=30_000) as info_descarga:
-            await pagina.get_by_role(
-                "button", name=re.compile(rf"\b{formato}\b", re.I)
-            ).first.click()
-        descarga = await info_descarga.value
-        await descarga.save_as(str(destino))
-        return destino.name
-
     async def execute(self, payload: Any, runtime: BotRuntime) -> BotResult:
         """Ejecuta la consulta y retorna ``BotResult`` tipado."""
         from bot_worker.runtime.context import BotResult
@@ -230,11 +181,23 @@ class CompensacionesPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                pagina = await sesion.open_service(self._servicio)
+                servicio = await sesion.open_service(
+                    self._servicio, portal="compensaciones"
+                )
+                cuit_representante = re.sub(
+                    r"\D", "", runtime.credentials.cuit_representante
+                )
+                cuit_representado = re.sub(r"\D", "", entrada.representado_cuit)
+                if cuit_representado != cuit_representante:
+                    await servicio.seleccionar_representado(
+                        entrada.representado_cuit
+                    )
                 await runtime.event_sink.progress(
                     phase="CONSULTA", percent=45, message="Consultando compensaciones"
                 )
-                estado = await self._consultar(pagina, entrada)
+                estado = await servicio.consultar(
+                    entrada.fecha_desde, entrada.fecha_hasta
+                )
                 datos: dict[str, Any] = {
                     "operacion": "consultar",
                     "representado_cuit": entrada.representado_cuit,
@@ -255,7 +218,8 @@ class CompensacionesPlugin:
                     nombre = nombre_descarga(
                         entrada.representado_cuit, formato, slot
                     )
-                    await self._exportar(pagina, formato, nombre, runtime)
+                    destino = runtime.artifact_store.resolve(nombre)
+                    await servicio.exportar(formato, destino)
                     resumen: dict[str, Any] = {"archivo": nombre}
                     if entrada.subir:
                         try:
