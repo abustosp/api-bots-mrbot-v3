@@ -110,7 +110,7 @@ def test_registro_de_portales() -> None:
     assert portal_para("sct") is SctPortal
     assert portal_para("SRT") is SrtPortal
     assert portal_para("desconocido") is None
-    assert set(PORTALES) == {"consulta_pagos_vep", "sct", "siper", "srt"}
+    assert set(PORTALES) == {"consulta_pagos_vep", "sct", "sifere", "siper", "srt"}
     assert portal_para("consulta_pagos_vep") is ConsultaPagosVepPortal
     assert portal_para("siper") is SiperPortal
 

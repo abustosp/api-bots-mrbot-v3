@@ -14,12 +14,14 @@ from __future__ import annotations
 from .base import PortalArca
 from .consulta_pagos_vep import ConsultaPagosVepPortal
 from .sct import SctPortal
+from .sifere import SiferePortal
 from .siper import SiperPortal
 from .srt import SrtPortal
 
 PORTALES: dict[str, type[PortalArca]] = {
     "consulta_pagos_vep": ConsultaPagosVepPortal,
     "sct": SctPortal,
+    "sifere": SiferePortal,
     "siper": SiperPortal,
     "srt": SrtPortal,
 }
@@ -35,6 +37,7 @@ __all__ = [
     "ConsultaPagosVepPortal",
     "PortalArca",
     "SctPortal",
+    "SiferePortal",
     "SiperPortal",
     "SrtPortal",
     "portal_para",

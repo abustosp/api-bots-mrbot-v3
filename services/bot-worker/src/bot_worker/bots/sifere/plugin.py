@@ -161,7 +161,7 @@ class SiferePlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(self._servicio_nombre)
+                servicio = await sesion.open_service(self._servicio_nombre, portal="sifere")
                 await servicio.seleccionar_representado(entrada.representado_cuit)
                 datos, artefactos = await self._consultar(
                     servicio, entrada, runtime
