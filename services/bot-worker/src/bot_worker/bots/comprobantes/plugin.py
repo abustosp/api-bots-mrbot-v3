@@ -109,12 +109,18 @@ def filtrar_csv_por_rango(
     with io.StringIO(_leer_planilla(origen), newline="") as fh:
         lector = csv.DictReader(fh)
         if lector.fieldnames is None:
-            raise ValueError("csv sin encabezado")
+            raise TargetUnavailableError(
+                "la planilla del portal no tiene encabezado",
+                diagnostic_code="portal_csv_unexpected_format",
+            )
         columna = next(
             (c for c in COLUMNAS_FECHA if c in lector.fieldnames), None
         )
         if columna is None:
-            raise ValueError("csv sin columna de fecha conocida")
+            raise TargetUnavailableError(
+                "la planilla del portal no trae columna de fecha conocida",
+                diagnostic_code="portal_csv_unexpected_format",
+            )
         filas = list(lector)
         campos = lector.fieldnames
     # ``DictReader`` acumula en la clave ``None`` los campos que sobran (pasa
