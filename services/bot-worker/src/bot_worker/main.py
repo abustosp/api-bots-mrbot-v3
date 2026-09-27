@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from bot_worker.bots.errors import ArtifactUploadError, ErrorDeBot
+from bot_worker.bots.errors import ArtifactUploadError, Categoria, ErrorDeBot
 from bot_worker.bots.registry import get_plugin
 from bot_worker.config import PROTOCOL_VERSION, WorkerConfig, WorkerSettings, parse_args
 from bot_worker.schemas import BotSchemaDocument, get_schema_document
@@ -78,6 +78,13 @@ log = logging.getLogger("bot_worker.api")
 # del sitio externo o un secreto interpolado.
 _DIAGNOSTIC_CODE_RE = re.compile(r"[a-z][a-z0-9_]{2,63}")
 _CLASS_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+# Excepciones que delatan un defecto propio del plugin (API inexistente o mal
+# usada) y no una caída del sitio del organismo.
+_CAUSAS_DEFECTO_INTERNO = frozenset(
+    {"AttributeError", "TypeError", "NameError", "NotImplementedError"}
+)
+# Diagnósticos genéricos que sí se pueden reemplazar por el defecto interno.
+_DIAGNOSTICOS_GENERICOS = frozenset({"target_unavailable_unclassified"})
 
 # Reintentos de registro durante el arranque para fallos de red temporales.
 # Cinco intentos en total, con una espera creciente entre ellos.
@@ -414,9 +421,24 @@ def _resultado_error_de_bot(exc: ErrorDeBot) -> tuple[str, dict[str, Any]]:
     # Tipo de la excepción original (p. ej. TimeoutError de Playwright): es un
     # nombre de clase, nunca su mensaje, así que no arrastra texto del sitio.
     causa = exc.__cause__
+    causa_nombre = ""
     if causa is not None and _CLASS_NAME_RE.fullmatch(type(causa).__name__):
-        resultado["cause"] = type(causa).__name__
-    return exc.categoria, resultado
+        causa_nombre = type(causa).__name__
+        resultado["cause"] = causa_nombre
+    categoria = exc.categoria
+    if (
+        categoria == Categoria.TARGET_UNAVAILABLE
+        and causa_nombre in _CAUSAS_DEFECTO_INTERNO
+        and (not codigo or codigo in _DIAGNOSTICOS_GENERICOS)
+    ):
+        # Un error de programación propio (por ejemplo, una API de servicio que
+        # el plugin espera y el runtime no implementa) no debe reportarse como
+        # caída del organismo: se clasifica como defecto interno y queda
+        # trazado, sin texto del sitio ni credenciales.
+        log.exception("plugin incompatible con el servicio (redactado)")
+        categoria = Categoria.INTERNAL
+        resultado["diagnostic_code"] = "plugin_service_api_mismatch"
+    return categoria, resultado
 
 
 async def _register_once(

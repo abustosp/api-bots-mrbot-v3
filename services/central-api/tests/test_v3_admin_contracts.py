@@ -151,6 +151,19 @@ def test_normalizacion_de_descargas_respeta_campos_del_worker() -> None:
     assert siper["incluir_detalle"] is True
     assert siper["incluir_categorias"] is False
     assert "detalle_minio" not in siper and "categorias_minio" not in siper
+    sct = normalize_v2_payload(
+        "sct",
+        "consultar",
+        {
+            "cuit_representado": "20123456789",
+            "vencimientos_csv_minio": True,
+            "deudas_pdf_minio": True,
+            "deudas_excel_minio": False,
+        },
+    )
+    assert sct["secciones"] == ["deudas", "vencimientos"]
+    assert sct["formatos"] == ["csv", "pdf"]
+    assert not [k for k in sct if k.endswith("_minio")]
 
 
 def test_alias_v2_plano_crea_registro_sin_credencial_en_payload(monkeypatch) -> None:

@@ -106,6 +106,33 @@ def normalize_v2_payload(
             if legacy in normalized:
                 normalized.setdefault(current, normalized.pop(legacy))
 
+    if bot == "sct":
+        # V1 pedía salidas por sección y formato con nueve banderas; el worker
+        # recibe dos listas. Se traduce solo lo pedido y se descartan las
+        # banderas para no romper el esquema con ``extra=forbid``.
+        secciones: list[str] = []
+        formatos: list[str] = []
+        for prefijo, seccion in (
+            ("vencimientos", "vencimientos"),
+            ("deudas", "deudas"),
+            ("ddjj_pendientes", "ddjj_pendientes"),
+        ):
+            for sufijo, formato in (
+                ("excel", "xlsx"),
+                ("xlsx", "xlsx"),
+                ("csv", "csv"),
+                ("pdf", "pdf"),
+            ):
+                bandera = f"{prefijo}_{sufijo}_minio"
+                if bandera not in normalized:
+                    continue
+                if bool(normalized.pop(bandera)):
+                    secciones.append(seccion)
+                    formatos.append(formato)
+        if secciones:
+            normalized.setdefault("secciones", sorted(set(secciones)))
+            normalized.setdefault("formatos", sorted(set(formatos)))
+
     if "pdf" in normalized:
         pdf = normalized.pop("pdf")
         for target in (("pdf",) if bot == "compensaciones" else ("incluir_pdf", "subir_pdf")):
