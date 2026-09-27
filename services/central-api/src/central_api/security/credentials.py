@@ -98,6 +98,14 @@ def normalize_v2_payload(
     if bot == "rcel" and "nombre_rcel" in normalized:
         normalized.setdefault("representado_nombre", normalized.pop("nombre_rcel"))
 
+    if bot == "siper":
+        for legacy, current in (
+            ("detalle_minio", "incluir_detalle"),
+            ("categorias_minio", "incluir_categorias"),
+        ):
+            if legacy in normalized:
+                normalized.setdefault(current, normalized.pop(legacy))
+
     if "pdf" in normalized:
         pdf = normalized.pop("pdf")
         for target in (("pdf",) if bot == "compensaciones" else ("incluir_pdf", "subir_pdf")):

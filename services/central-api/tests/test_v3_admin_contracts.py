@@ -145,6 +145,12 @@ def test_normalizacion_de_descargas_respeta_campos_del_worker() -> None:
     rcel = normalize_v2_payload("rcel", "descargar", {"nombre_rcel": "Prueba"})
     assert rcel["representado_nombre"] == "Prueba"
     assert "nombre_rcel" not in rcel
+    siper = normalize_v2_payload(
+        "siper", "consultar", {"detalle_minio": True, "categorias_minio": False}
+    )
+    assert siper["incluir_detalle"] is True
+    assert siper["incluir_categorias"] is False
+    assert "detalle_minio" not in siper and "categorias_minio" not in siper
 
 
 def test_alias_v2_plano_crea_registro_sin_credencial_en_payload(monkeypatch) -> None:
