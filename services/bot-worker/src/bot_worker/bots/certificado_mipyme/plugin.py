@@ -31,7 +31,6 @@ registro.
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import datetime
 from typing import Any, Mapping
 
@@ -142,44 +141,6 @@ class CertificadoMipymePlugin:
         except ValueError as exc:
             raise InvalidInputError(f"entrada invalida: {exc}") from exc
 
-    async def _seleccionar_representado(
-        self, pagina: Any, representado_cuit: str
-    ) -> None:
-        """Elige el representado en el combobox (port de V2)."""
-        combobox = pagina.get_by_role(
-            "combobox", name="Ingrese al menos 3 caracteres"
-        )
-        await combobox.wait_for(state="visible", timeout=10_000)
-        await combobox.click()
-        await pagina.wait_for_timeout(1_500)
-        opciones = pagina.locator(
-            "[role='option'], li[role='option'], .MuiAutocomplete-option"
-        )
-        for _ in range(5):
-            total = await opciones.count()
-            if total > 0:
-                for i in range(total):
-                    texto = await opciones.nth(i).inner_text()
-                    if representado_cuit in texto:
-                        await opciones.nth(i).click()
-                        return
-                await opciones.first.click()
-                return
-            await pagina.wait_for_timeout(500)
-        await combobox.fill(representado_cuit)
-        await pagina.wait_for_timeout(1_500)
-        total = await opciones.count()
-        if total == 0:
-            raise TargetUnavailableError(
-                "no se pudo seleccionar el representado en el combo"
-            )
-        for i in range(total):
-            texto = await opciones.nth(i).inner_text()
-            if representado_cuit in texto:
-                await opciones.nth(i).click()
-                return
-        await opciones.first.click()
-
     async def execute(self, payload: Any, runtime: BotRuntime) -> BotResult:
         """Descarga el certificado y retorna ``BotResult`` tipado."""
         from bot_worker.runtime.context import BotResult
@@ -203,38 +164,18 @@ class CertificadoMipymePlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                pagina = await sesion.open_service(self._servicio)
-                await self._seleccionar_representado(
-                    pagina, entrada.representado_cuit
+                servicio = await sesion.open_service(
+                    self._servicio, portal="certificado_mipyme"
                 )
-                try:
-                    boton = pagina.get_by_role("button", name="Seleccionar")
-                    await boton.wait_for(state="visible", timeout=5_000)
-                    await boton.click()
-                except Exception:
-                    pass
-                await pagina.wait_for_load_state("networkidle")
-                await pagina.wait_for_timeout(2_000)
-                contenido = await pagina.content()
-                if "No se encuentra habilitado" in contenido:
-                    raise TargetUnavailableError(
-                        "no se encuentra habilitado el servicio de Certificado MiPyME"
-                    )
+                await servicio.seleccionar_representado(entrada.representado_cuit)
                 await runtime.event_sink.progress(
                     phase="CONSULTA",
                     percent=45,
                     message="Descargando certificado",
                 )
-                enlace = pagina.get_by_role(
-                    "link", name=re.compile(r"Descargar Certificado MiPyME", re.I)
-                )
-                await enlace.wait_for(state="visible", timeout=15_000)
                 nombre = nombre_certificado(entrada.representado_cuit)
                 destino = runtime.artifact_store.resolve(nombre)
-                async with pagina.expect_download(timeout=30_000) as info_descarga:
-                    await enlace.click()
-                descarga = await info_descarga.value
-                await descarga.save_as(str(destino))
+                await servicio.descargar_certificado(destino)
         except ErrorDeBot:
             raise
         except Exception as exc:

@@ -15,12 +15,13 @@ respecto de V2:
 - Sin credenciales en logs: el error es categoria + diagnostico
   redactado (``sin_secretos``); usuario y clave nunca se interpolan.
 
-La sesion de navegador se obtiene de ``runtime.browser_factory``
-con la interfaz minima documentada abajo; el plugin nunca importa
-Playwright directo. El objeto ``servicio`` expone:
+La sesión usa ``runtime.browser_factory.new_context()`` y una implementación
+AGIP propia; no pasa por la autenticación ni los adaptadores ARCA. El plugin
+nunca importa Playwright directo. La sesión expone:
 
-- ``ingresar(usuario)``: login en ClaveCiudad con el usuario del
-  sobre sellado (o el CUIT de las credenciales fiscales).
+- ``login(url)``: abre la portada de ClaveCiudad.
+- ``ingresar(usuario, cuit_representado)``: autentica y abre Gestión-AR
+  para el contribuyente solicitado.
 - ``consultar_retper(desde_mmyyyy, hasta_mmyyyy, destino)``:
   aplica el rango y guarda el reporte en ``destino``.
 """
@@ -44,6 +45,7 @@ from bot_worker.bots.errors import (
 )
 from bot_worker.bots.retper_iibb_agip.schema import ENTRADAS, esquema_entrada
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from bot_worker.bots.retper_iibb_agip.session import AgipSession
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -115,7 +117,7 @@ class RetperIibbAgipPlugin:
         artefactos_produce=(
             ArtifactSpec(
                 nombre="retper_agip_reporte",
-                content_types=("text/csv", "application/pdf", "text/html"),
+                content_types=("application/zip",),
                 max_bytes=52_428_800,
                 obligatorio=False,
             ),
@@ -127,7 +129,7 @@ class RetperIibbAgipPlugin:
         costo_creditos_sugerido=2,
         idempotency_class="CONTINUACION",
         browser_instances_max=1,
-        hosts_permitidos=("claveciudad.agip.gob.ar",),
+        hosts_permitidos=("claveciudad.agip.gob.ar", "login.buenosaires.gob.ar"),
     )
 
     def __init__(
@@ -175,7 +177,8 @@ class RetperIibbAgipPlugin:
         operacion, entrada = payload
         if runtime.credentials is None:
             raise CredentialsRejectedError("el plugin requiere credenciales fiscales")
-        secretos = [runtime.credentials.clave]
+        usuario = entrada.usuario or self._usuario or runtime.credentials.cuit_representante
+        secretos = [runtime.credentials.clave, usuario]
         await runtime.cancellation.raise_if_cancelled()
         await runtime.event_sink.progress(
             phase="LOGIN", percent=10, message="Iniciando sesion AGIP"
@@ -183,17 +186,25 @@ class RetperIibbAgipPlugin:
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
         try:
-            async with runtime.browser_factory.arca_session(
-                credentials=runtime.credentials,
-                proxy=runtime.proxy,
-                deadline=runtime.deadline,
-                cancellation=runtime.cancellation,
-            ) as sesion:
-                await sesion.login(url=self._login_url)
-                await runtime.cancellation.raise_if_cancelled()
-                usuario = self._usuario or runtime.credentials.cuit_representante
-                await sesion.ingresar(usuario=sin_secretos(usuario, []))
-                datos, artefactos = await self._consultar(sesion, entrada, runtime)
+            context_factory = getattr(runtime.browser_factory, "new_context", None)
+            if context_factory is None:
+                raise TargetUnavailableError(
+                    "BrowserFactory no admite contextos web independientes",
+                    diagnostic_code="agip_browser_context_unavailable",
+                )
+            async with context_factory() as (_, context):
+                page = await context.new_page()
+                sesion = AgipSession(runtime.credentials, page=page)
+                try:
+                    await sesion.login(url=self._login_url)
+                    await runtime.cancellation.raise_if_cancelled()
+                    await sesion.ingresar(
+                        usuario=usuario,
+                        cuit_representado=entrada.representado_cuit,
+                    )
+                    datos, artefactos = await self._consultar(sesion, entrada, runtime)
+                finally:
+                    await sesion.close()
         except ErrorDeBot:
             raise
         except Exception as exc:
@@ -220,10 +231,14 @@ class RetperIibbAgipPlugin:
             entrada.periodo_desde,
             entrada.periodo_hasta,
             entrada.denominacion,
-            "csv",
+            "zip",
         )
         destino = runtime.artifact_store.resolve(nombre)
-        await sesion.consultar_retper(desde_mmyyyy=desde, hasta_mmyyyy=hasta, destino=destino)
+        await sesion.consultar_retper(
+            desde_mmyyyy=desde,
+            hasta_mmyyyy=hasta,
+            destino=destino,
+        )
         datos: dict[str, Any] = {
             "operacion": "consultar",
             "representado_cuit": entrada.representado_cuit,

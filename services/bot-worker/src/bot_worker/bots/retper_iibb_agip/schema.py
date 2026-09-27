@@ -55,6 +55,7 @@ class RetperIibbAgipConsultarInput(_Base):
         min_length=11,
         max_length=14,
     )
+    usuario: str | None = Field(default=None, min_length=1, max_length=256)
     denominacion: str = Field(min_length=1, max_length=256)
     periodo_desde: str = Field(
         validation_alias=AliasChoices("periodo_desde", "desde"),
@@ -107,6 +108,7 @@ def esquema_entrada() -> dict[str, Any]:
         "properties": {
             "operacion": {"type": "string", "enum": ["consultar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "usuario": {"type": "string", "minLength": 1, "maxLength": 256},
             "denominacion": {"type": "string", "minLength": 1},
             "periodo_desde": {"type": "string", "pattern": PERIODO_PATTERN},
             "periodo_hasta": {"type": "string", "pattern": PERIODO_PATTERN},
