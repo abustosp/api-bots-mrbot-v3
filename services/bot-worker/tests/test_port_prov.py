@@ -207,6 +207,9 @@ class _Sesion:
     async def generar_pdf(self, destino_pdf: Path) -> None:
         Path(destino_pdf).write_bytes(b"%PDF-1.4\n" + b"x" * 200)
 
+    async def close(self) -> None:
+        pass
+
 
 class _Fabrica:
     def __init__(self, sesion: _Sesion, pagina: _PaginaArba | None = None) -> None:
@@ -401,7 +404,15 @@ def test_execute_arba_sin_archivos(tmp_path: Path) -> None:
     asyncio.run(_ir())
 
 
-def test_execute_agip_y_misiones(tmp_path: Path) -> None:
+def test_execute_agip_y_misiones(tmp_path: Path, monkeypatch: Any) -> None:
+    # AGIP y Misiones no son ARCA: cada plugin construye su propia sesión sobre
+    # un contexto de navegador. Se reemplazan esas clases por la sesión falsa.
+    import bot_worker.bots.retper_iibb_agip.plugin as mod_agip
+    import bot_worker.bots.retper_iibb_misiones.plugin as mod_mis
+
+    monkeypatch.setattr(mod_agip, "AgipSession", lambda *a, **k: _Sesion())
+    monkeypatch.setattr(mod_mis, "MisionesSession", lambda *a, **k: _Sesion())
+
     async def _ir() -> None:
         agip = RetperIibbAgipPlugin()
         paga = await agip.validate({
