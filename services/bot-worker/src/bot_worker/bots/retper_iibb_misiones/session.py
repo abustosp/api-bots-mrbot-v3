@@ -503,7 +503,8 @@ class MisionesSession:
             self._captcha_solver, "enabled", False
         ):
             raise CaptchaUnsolvableError(
-                "Misiones presento un CAPTCHA sin un resolvedor habilitado"
+                "Misiones presento un CAPTCHA sin un resolvedor habilitado",
+                diagnostic_code="misiones_captcha_sin_resolvedor",
             )
         try:
             sitekey = await self._page.evaluate(
@@ -519,10 +520,21 @@ class MisionesSession:
                 }"""
             )
             if not sitekey:
-                raise CaptchaUnsolvableError("No se encontro el sitekey de reCAPTCHA en Misiones")
-            token = await self._captcha_solver.solve_recaptcha(
-                sitekey=str(sitekey), url=self._page.url
-            )
+                raise CaptchaUnsolvableError(
+                    "No se encontro el sitekey de reCAPTCHA en Misiones",
+                    diagnostic_code="misiones_captcha_sin_sitekey",
+                )
+            try:
+                token = await self._captcha_solver.solve_recaptcha(
+                    sitekey=str(sitekey), url=self._page.url
+                )
+            except Exception as exc:
+                # El proveedor puede caerse o quedarse sin saldo: se conserva
+                # solo el tipo de excepcion, nunca su texto ni la clave.
+                raise CaptchaUnsolvableError(
+                    f"el proveedor de CAPTCHA no resolvio el desafio ({type(exc).__name__})",
+                    diagnostic_code="misiones_captcha_proveedor",
+                ) from exc
             inyectado = await self._page.evaluate(
                 """token => {
                     let campo = document.querySelector(
@@ -565,13 +577,19 @@ class MisionesSession:
                 token,
             )
             if not inyectado:
-                raise CaptchaUnsolvableError("No se pudo insertar el token reCAPTCHA de Misiones")
+                raise CaptchaUnsolvableError(
+                    "No se pudo insertar el token reCAPTCHA de Misiones",
+                    diagnostic_code="misiones_captcha_inyeccion",
+                )
             await asyncio.sleep(1.2)
             return True
         except CaptchaUnsolvableError:
             raise
-        except Exception:
-            raise CaptchaUnsolvableError("No se pudo resolver el CAPTCHA de Misiones") from None
+        except Exception as exc:
+            raise CaptchaUnsolvableError(
+                f"No se pudo resolver el CAPTCHA de Misiones ({type(exc).__name__})",
+                diagnostic_code="misiones_captcha_etapa_desconocida",
+            ) from exc
 
     async def _hay_captcha(self) -> bool:
         for selector in (

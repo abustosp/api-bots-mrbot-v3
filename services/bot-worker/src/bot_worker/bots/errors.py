@@ -39,9 +39,19 @@ class ErrorDeBot(Exception):
     categoria = Categoria.INTERNAL
     reintentable = False
 
-    def __init__(self, diagnostico: str) -> None:
+    def __init__(
+        self, diagnostico: str, *, diagnostic_code: str | None = None
+    ) -> None:
+        """``diagnostic_code`` es opcional y debe ser un identificador fijo.
+
+        Nunca se construye con texto libre del portal: el codigo elige el
+        mensaje operativo y permite distinguir etapas del mismo flujo
+        (por ejemplo, captcha sin resolvedor frente a proveedor caido).
+        """
         super().__init__(diagnostico)
         self.diagnostico = diagnostico
+        if diagnostic_code is not None:
+            self.diagnostic_code = diagnostic_code
 
 
 class InvalidInputError(ErrorDeBot):
@@ -63,11 +73,6 @@ class CredentialsRejectedError(ErrorDeBot):
     categoria = Categoria.CREDENTIALS_REJECTED
     reintentable = False
 
-    def __init__(self, diagnostico: str, *, diagnostic_code: str | None = None) -> None:
-        super().__init__(diagnostico)
-        if diagnostic_code is not None:
-            self.diagnostic_code = diagnostic_code
-
 
 class CaptchaUnsolvableError(ErrorDeBot):
     """El proveedor de CAPTCHA agoto intentos o el desafio cambio."""
@@ -88,10 +93,9 @@ class TargetUnavailableError(ErrorDeBot):
         *,
         diagnostic_code: str = "target_unavailable_unclassified",
     ) -> None:
-        super().__init__(diagnostico)
+        super().__init__(diagnostico, diagnostic_code=diagnostic_code)
         # Código fijo de diagnóstico interno. Nunca sustituirlo por el texto
         # libre de una excepción, respuesta HTML, URL o credencial.
-        self.diagnostic_code = diagnostic_code
 
 
 class BrowserCrashedError(ErrorDeBot):
