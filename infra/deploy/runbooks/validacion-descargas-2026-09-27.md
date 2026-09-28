@@ -182,4 +182,21 @@ V1 `/vep/consulta-pagos` valida contra el modelo histórico (`clave_representant
 subida de Misiones, que estaban en `false`); y el archivo privado de reintento de
 MiPyME conservaba la ruta sin `/api/v3` y `subir: false` (ya corregido).
 
+## Cruce con las bases históricas (28/09/2026, tarde)
+
+Para los bots con credenciales rechazadas se cruzaron las tres bases de
+`/home/abp/Desktop/databases` (`conciliabot1`, `api2`, `mrbot1`), siempre en solo
+lectura y sin volcar credenciales.
+
+| Bot | Historial | Reintentos de hoy | Conclusión |
+|---|---|---|---|
+| `liquidacion_granos.consultar` | 41 éxitos, 8 pares distintos, todos entre el 25/02/2026 y el 02/04/2026. Ningún par de esos 8 CUIT tiene clave más nueva en otra tabla. | Con las 8 claves históricas: `arca_login_credentials_rejected`. Con 6 pares que sí tuvieron éxito reciente (10/09 a 27/09) en otros bots: el login ARCA pasa y luego 5 fallan con `arca_service_not_visible` y 1 con `represented_cuit_not_selectable`. Con 4 combinaciones de representante vigente y representado histórico de granos: 1 `represented_cuit_not_selectable` y 3 `arca_service_not_visible`. | El bot funciona: el bloqueo es la asignación del servicio *Liquidación Primaria de Granos* a la cuenta y la delegación del representado, no la implementación. Hace falta una clave nueva de un CUIT con el servicio asignado. |
+| `retper_iibb_agip.consultar` | 0 éxitos y 39 errores: 30 "la contraseña es incorrecta", 5 timeouts de clic y 4 credenciales inválidas. | 6 pares distintos de la base: 1 `agip_account_not_found` y 5 `agip_waf_blocked`. | Se confirma que AGIP entra con **usuario y clave de ClaveCiudad** (no Clave Fiscal ARCA): el flujo del portal es `login.buenosaires.gob.ar` con `#email` y `#password-text-field`, y el historial ya mostraba rechazos de contraseña, no de formato. El bloqueo actual es del WAF de AGIP sobre la IP del worker, más la falta de una cuenta ClaveCiudad válida en las bases. |
+| `retper_iibb_misiones.consultar` | 0 éxitos y 13 errores, todos "no se pudo resolver captcha en login". | El CAPTCHA del login ahora se resuelve (el portal usa reCAPTCHA v2 con `data-sitekey` propio). Con la credencial indicada por el usuario para el período 202608, el portal responde `misiones_login_usuario_incorrecto`; igual resultado con el par más reciente de la base. | El login de ATM usa el CUIT de 11 dígitos como usuario (`input[name=username]`, `maxlength=11`). El portal rechaza ese usuario, así que la cuenta no está registrada en la extranet de ATM o el identificador no es ese CUIT. |
+
+Los diagnósticos del CAPTCHA de Misiones ahora distinguen la etapa que falla
+(`misiones_captcha_sin_resolvedor`, `_sin_sitekey`, `_proveedor`, `_inyeccion`,
+`_etapa_desconocida`) en lugar de un único mensaje genérico, y `ErrorDeBot` acepta
+`diagnostic_code` en cualquier categoría.
+
 La suite completa pasó con 521 pruebas y 12 subpruebas; 9 quedaron omitidas.
