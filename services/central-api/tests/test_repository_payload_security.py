@@ -29,3 +29,10 @@ def test_assert_no_secretos_acepta_payload_anidado_no_sensible() -> None:
 def test_assert_no_secretos_acepta_payload_vacio_y_none() -> None:
     assert_no_secretos({}, "request_payload")
     assert_no_secretos(None, "request_payload")
+
+
+def test_sin_nul_limpia_textos_y_claves_anidadas() -> None:
+    from central_api.repositories.jobs import _sin_nul
+
+    sucio = {"a\x00": ["x\x00y", {"k": "PK\x03\x04\x00"}], "n": 3}
+    assert _sin_nul(sucio) == {"a": ["xy", {"k": "PK\x03\x04"}], "n": 3}

@@ -228,3 +228,19 @@ def test_plugin_lee_csv_portal_iva_windows_1252(tmp_path: Path) -> None:
 
     assert PortalIvaPlugin._contar_filas(archivo) == 1
     assert PortalIvaPlugin._muestra(archivo)[0]["denominación"] == "compra"
+
+
+def test_csv_zipeado_se_extrae_plano(tmp_path) -> None:
+    import zipfile
+
+    from bot_worker.runtime.portals.portal_iva import _extraer_csv_si_es_zip
+
+    destino = tmp_path / "ventas.csv"
+    with zipfile.ZipFile(destino, "w") as z:
+        z.writestr("comprobantes_periodo_202609_ventas.csv", "Fecha;Tipo\n01/09/2026;1\n")
+    _extraer_csv_si_es_zip(destino)
+    assert destino.read_text() == "Fecha;Tipo\n01/09/2026;1\n"
+
+    # Un CSV plano queda intacto.
+    _extraer_csv_si_es_zip(destino)
+    assert destino.read_text().startswith("Fecha;Tipo")

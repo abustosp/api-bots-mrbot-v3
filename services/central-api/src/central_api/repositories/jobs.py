@@ -159,6 +159,17 @@ WHERE id = :worker_id
 )
 
 
+def _sin_nul(valor: Any) -> Any:
+    """Quita U+0000 de claves y textos anidados (JSONB lo rechaza)."""
+    if isinstance(valor, str):
+        return valor.replace("\x00", "")
+    if isinstance(valor, dict):
+        return {_sin_nul(k): _sin_nul(v) for k, v in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [_sin_nul(v) for v in valor]
+    return valor
+
+
 class JobRepository:
     """Persistencia de la agregacion ``jobs`` con ambito por usuario."""
 
@@ -410,8 +421,11 @@ class JobRepository:
         """
         if attempt < 1:
             raise RepositoryError("assignment_attempt debe ser mayor que cero")
+        # JSONB no admite U+0000: un bot que devuelva bytes binarios en su
+        # JSON dejaría el callback en 503 perpetuo y el job colgado.
+        payload = _sin_nul(dict(payload))
         assert_no_secretos(payload, "job_results.payload")
-        summary_value = dict(summary or {})
+        summary_value = _sin_nul(dict(summary or {}))
         assert_no_secretos(summary_value, "job_results.summary")
         prepared_artifacts = [self._prepare_artifact(item) for item in artifacts]
         expected_prefix = f"jobs/{job_id}/{attempt}/"

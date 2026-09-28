@@ -254,6 +254,7 @@ class PortalIvaPortal(PortalArca):
                 )
 
         await self.capturar_descarga(destino, descargar_csv, espera_ms=45_000)
+        _extraer_csv_si_es_zip(destino)
         await self._volver_al_menu()
         return destino
 
@@ -326,6 +327,27 @@ class PortalIvaPortal(PortalArca):
                 await self.abrir_url(f"{LIVA_BASE}/menuPresentacion.do", timeout_ms=15_000)
             except Exception:
                 return
+
+
+def _extraer_csv_si_es_zip(destino: Path) -> None:
+    """Portal IVA entrega el CSV dentro de un ZIP: lo deja plano en ``destino``.
+
+    Sin esto el artefacto ``text/csv`` sería binario y la muestra JSON
+    arrastraría bytes NUL que PostgreSQL rechaza.
+    """
+    import zipfile
+
+    if not zipfile.is_zipfile(destino):
+        return
+    with zipfile.ZipFile(destino) as archivo:
+        csvs = [n for n in archivo.namelist() if n.lower().endswith(".csv")]
+        if not csvs:
+            raise TargetUnavailableError(
+                "el ZIP de Portal IVA no trae CSV",
+                diagnostic_code="portal_csv_unexpected_format",
+            )
+        contenido = archivo.read(csvs[0])
+    destino.write_bytes(contenido)
 
 
 def _periodo_opcional(value: str) -> str:
