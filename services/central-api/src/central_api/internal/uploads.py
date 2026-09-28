@@ -89,7 +89,14 @@ async def presign_artifact(
             raise HTTPException(status_code=403, detail="sin asignación viva para el job")
     elif job.worker_node != worker_node or job.status not in ("ASIGNADO", "CORRIENDO"):
         raise HTTPException(status_code=403, detail="sin asignación viva para el job")
-    object_key = f"jobs/{job_id}/{job.assignment_attempt}/{body.artifact_id}"
+    # Sufijo único por subida: un mismo artifact_id puede cubrir varios
+    # archivos (un libro por período, un PDF por plan). Con clave fija cada
+    # archivo pisaría al anterior en el bucket y el resultado chocaría con
+    # ``uq_job_artifacts_object_key``.
+    object_key = (
+        f"jobs/{job_id}/{job.assignment_attempt}/{body.artifact_id}/"
+        f"{uuid.uuid4().hex[:12]}"
+    )
     expires_at = datetime.now(timezone.utc) + timedelta(
         seconds=ARTIFACT_URL_TTL_SECONDS
     )

@@ -195,6 +195,7 @@ class DeclaracionEnLineaPlugin:
         )
         detalle: list[dict[str, Any]] = []
         artefactos: list[dict[str, Any]] = []
+        sin_ddjj: list[str] = []
         total = len(periodos)
         for indice, periodo in enumerate(periodos):
             await runtime.cancellation.raise_if_cancelled()
@@ -204,11 +205,18 @@ class DeclaracionEnLineaPlugin:
             destino_vep = runtime.artifact_store.resolve(
                 f"vep_{representado}_{periodo}.pdf"
             )
-            resultado = await servicio.consultar_periodo(
-                periodo=periodo,
-                destino_ddjj=destino_ddjj,
-                destino_vep=destino_vep,
-            )
+            try:
+                resultado = await servicio.consultar_periodo(
+                    periodo=periodo,
+                    destino_ddjj=destino_ddjj,
+                    destino_vep=destino_vep,
+                )
+            except TargetUnavailableError as exc:
+                # Como V2: un período sin DDJJ generada se saltea y se informa.
+                if getattr(exc, "diagnostic_code", "") != "declaracion_en_linea_period_not_found":
+                    raise
+                sin_ddjj.append(periodo)
+                continue
             registro: dict[str, Any] = {
                 "periodo": periodo,
                 "ddjj": destino_ddjj.name,
@@ -243,11 +251,17 @@ class DeclaracionEnLineaPlugin:
             if not destino_vep.is_file() or destino_vep.stat().st_size == 0:
                 registro["vep"] = ""
             detalle.append(registro)
+        if not detalle:
+            raise TargetUnavailableError(
+                "no se encontró ninguna DDJJ generada en el rango solicitado",
+                diagnostic_code="declaracion_en_linea_period_not_found",
+            )
         datos: dict[str, Any] = {
             "representado_cuit": representado,
             "periodo_desde": entrada.periodo_desde,
             "periodo_hasta": entrada.periodo_hasta,
             "periodos_consultados": len(detalle),
+            "periodos_sin_ddjj": sin_ddjj,
         }
         if getattr(entrada, "incluir_json", True):
             datos["detalle"] = detalle

@@ -131,3 +131,27 @@ def test_planilla_con_codificacion_local_se_filtra(tmp_path: Path) -> None:
 
     assert conservadas == 2
     assert "Cañerías" in destino.read_text(encoding="utf-8")
+
+
+def test_mismo_artifact_id_dos_archivos_pide_url_nueva(tmp_path) -> None:
+    import asyncio
+
+    from bot_worker.runtime.context import ArtifactStore
+
+    pedidos: list[str] = []
+
+    async def presign(artifact_id: str, content_type: str, size: int) -> dict:
+        pedidos.append(artifact_id)
+        n = len(pedidos)
+        return {"upload_url": f"http://s3/u{n}", "object_key": f"jobs/j/1/{artifact_id}/{n}"}
+
+    (tmp_path / "a.bin").write_bytes(b"uno")
+    (tmp_path / "b.bin").write_bytes(b"dos")
+    store = ArtifactStore(
+        tmp_path, {}, presign=presign,
+        declarados={"libros_iva.bin": (("application/octet-stream",), 1000)},
+    )
+    r1 = asyncio.run(store.upload("libros_iva_bin", "a.bin"))
+    r2 = asyncio.run(store.upload("libros_iva_bin", "b.bin"))
+    assert len(pedidos) == 2
+    assert r1["object_key"] != r2["object_key"]

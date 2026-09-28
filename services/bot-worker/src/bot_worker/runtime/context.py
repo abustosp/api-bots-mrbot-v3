@@ -159,6 +159,8 @@ class ArtifactStore:
         # Catálogo del manifiesto del plugin: habilita el presign bajo demanda
         # sin depender de que el sobre enumere cada artefacto por bot.
         self._declarados = dict(declarados or {})
+        # artifact_id ya subidos: su URL prefirmada no se reutiliza.
+        self._usados: set[str] = set()
 
     def resolve(self, rel: str) -> Path:
         candidate = (self._work_dir / rel).resolve()
@@ -174,6 +176,16 @@ class ArtifactStore:
         import hashlib
 
         slot = self._slots.get(artifact_id)
+        if slot is not None and artifact_id in self._usados and self._presign is not None:
+            # Segundo archivo del mismo artifact_id: la URL del slot ya se usó
+            # y reutilizarla pisaría el objeto anterior. Se pide una nueva.
+            slot = ArtifactSlot(
+                artifact_id=artifact_id,
+                put_url="",
+                object_key="",
+                max_bytes=slot.max_bytes,
+                content_types=getattr(slot, "content_types", ("application/octet-stream",)),
+            )
         if slot is None:
             limites = _declarado_por_el_manifiesto(artifact_id, self._declarados)
             if limites is None:
@@ -188,6 +200,7 @@ class ArtifactStore:
                 max_bytes=max_bytes,
             )
             self._slots[artifact_id] = slot
+        self._usados.add(artifact_id)
         path = self.resolve(rel_path)
         if not path.is_file() or path.is_symlink():
             raise ValueError("artefacto no es archivo regular de work_dir")
