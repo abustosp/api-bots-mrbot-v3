@@ -113,3 +113,20 @@ Lectura de estos resultados:
   Completar esos bots requiere implementar la automatización de cada portal.
 - `moa` quedó sin bloqueo de datos: se recuperaron despachos reales de las bases y el
   caso ya se envía con ellos; lo que falta es el método de scraping en el runtime.
+
+## Reintentos locales del 28/09/2026
+
+La batería posterior se ejecutó contra la central local y el worker con credenciales
+históricas en archivos privados `0600`. El usuario de pruebas tuvo cuota suficiente.
+Los resultados anteriores de este documento describen corridas anteriores y no
+constituyen el estado actual de cada bot.
+
+| Operación | Comprobación nueva |
+|---|---|
+| `compensaciones.consultar` | Se cambió `subir` de `false` a `true` en los casos privados. Tras un primer intento fallido por selección del representado y timeout del portal, el reintento integrado terminó `COMPLETO` y permitió descargar XLS de 16.896 bytes, con firma y tamaño válidos. El esquema del plugin ya tenía `subir: true` por defecto. |
+| `mis_retenciones_iva_simple.consultar` | Se eligió una alternativa histórica distinta de la principal, que devolvía `OK` sin archivo. La API local completó y permitió descargar CSV de 5.978 bytes para 01/08/2026 a 28/09/2026, validado por tamaño y formato. En el runner aislado se comprobaron además períodos de dos meses entre enero y agosto de 2026, todos con al menos un artefacto. El portal limita cada consulta al último día del mes siguiente al inicio, por lo que un rango anual se divide en tramos en vez de enviarse como una sola consulta. |
+
+Las combinaciones de credenciales y el contenido de los archivos descargados siguen
+fuera de Git. Los reintentos de SIFERE, MiPyME, granos, AGIP y Misiones se registran
+por separado una vez concluidos, sin inferir que un `COMPLETO` sin archivos sea una
+descarga exitosa.
