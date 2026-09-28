@@ -56,6 +56,24 @@ def _patrones_impuesto(label: str, code: str) -> list[re.Pattern[str]]:
     return patrones
 
 
+def _clave_fecha(valor: str) -> tuple[int, int, int]:
+    """dd/mm/aaaa -> (aaaa, mm, dd) para comparar; inválida ordena primero."""
+    m = re.fullmatch(r"\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*", str(valor or ""))
+    if not m:
+        return (0, 0, 0)
+    return (int(m.group(3)), int(m.group(2)), int(m.group(1)))
+
+
+def _recortar_a_hoy(valor: str, hoy: Any = None) -> str:
+    """Devuelve ``valor`` o la fecha de hoy si ``valor`` es posterior."""
+    from datetime import date
+
+    hoy = hoy or date.today()
+    if _clave_fecha(valor) > (hoy.year, hoy.month, hoy.day):
+        return hoy.strftime("%d/%m/%Y")
+    return valor
+
+
 class MisRetencionesPortal(PortalArca):
     """Consulta retenciones/percepciones y descarga el CSV exportado."""
 
@@ -438,6 +456,10 @@ class MisRetencionesPortal(PortalArca):
     async def _seleccionar_rango_fechas(self, desde: str, hasta: str) -> bool:
         if not desde or not hasta:
             return False
+        # El datepicker de ARCA no admite fechas futuras y descarta el valor:
+        # un "hasta" posterior a hoy se recorta a hoy (no hay retenciones futuras).
+        hasta = _recortar_a_hoy(hasta)
+        desde = min(desde, hasta, key=_clave_fecha)
         loc_desde = self.page.locator("#fechaRetencionDesde__input")
         loc_hasta = self.page.locator("#fechaRetencionHasta__input")
         try:

@@ -87,3 +87,13 @@ def test_cuit_invalido_no_intenta_navegar() -> None:
 
 def test_nombre_impuesto_v2_se_resuelve_por_codigo() -> None:
     assert _IMPUESTOS["217"] == "217 - SICORE-IMPTO.A LAS GANANCIAS"
+
+
+def test_recortar_hasta_futuro_a_hoy() -> None:
+    from datetime import date
+
+    from bot_worker.runtime.portals.mis_retenciones import _recortar_a_hoy
+
+    hoy = date(2026, 9, 27)
+    assert _recortar_a_hoy("30/09/2026", hoy) == "27/09/2026"
+    assert _recortar_a_hoy("31/08/2026", hoy) == "31/08/2026"

@@ -214,11 +214,24 @@ class MisRetencionesIvaSimplePlugin:
             entrada.representado_nombre,
         )
         destino = runtime.artifact_store.resolve(f"{base}.csv")
-        await servicio.descargar_csv(
-            destino=destino,
-            desde=entrada.fecha_desde,
-            hasta=entrada.fecha_hasta,
-        )
+        try:
+            await servicio.descargar_csv(
+                destino=destino,
+                desde=entrada.fecha_desde,
+                hasta=entrada.fecha_hasta,
+            )
+        except TargetUnavailableError as exc:
+            # Como V2: sin retenciones en el rango es una respuesta válida.
+            if getattr(exc, "diagnostic_code", "") != "retenciones_no_results":
+                raise
+            return {
+                "operacion": "consultar",
+                "representado_cuit": entrada.representado_cuit,
+                "fecha_desde": entrada.fecha_desde,
+                "fecha_hasta": entrada.fecha_hasta,
+                "filas": 0,
+                "mensaje": "No se encontraron resultados",
+            }, []
         await runtime.event_sink.progress(
             phase="PROCESANDO", percent=65, message="Procesando retenciones"
         )

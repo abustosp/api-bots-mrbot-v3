@@ -234,14 +234,25 @@ class MisRetencionesPlugin:
                     tipo,
                 )
                 destino = runtime.artifact_store.resolve(f"{base}.csv")
-                await servicio.descargar_csv(
-                    impuesto=codigo,
-                    tipo=tipo,
-                    destino=destino,
-                    desde=entrada.fecha_desde,
-                    hasta=entrada.fecha_hasta,
-                    para_aplicativo=entrada.exportar_para_aplicativo,
-                )
+                try:
+                    await servicio.descargar_csv(
+                        impuesto=codigo,
+                        tipo=tipo,
+                        destino=destino,
+                        desde=entrada.fecha_desde,
+                        hasta=entrada.fecha_hasta,
+                        para_aplicativo=entrada.exportar_para_aplicativo,
+                    )
+                except TargetUnavailableError as exc:
+                    # Como V2: sin retenciones en el rango es una respuesta
+                    # válida del portal, no una falla.
+                    if getattr(exc, "diagnostic_code", "") != "retenciones_no_results":
+                        raise
+                    datos["impuestos"][codigo][tipo] = {
+                        "filas": 0,
+                        "mensaje": "No se encontraron resultados",
+                    }
+                    continue
                 await runtime.event_sink.progress(
                     phase="PROCESANDO",
                     percent=65,

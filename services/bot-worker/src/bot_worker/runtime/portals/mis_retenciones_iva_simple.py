@@ -8,7 +8,7 @@ from typing import Any
 
 from bot_worker.bots.errors import TargetUnavailableError
 
-from .mis_retenciones import MisRetencionesPortal
+from .mis_retenciones import MisRetencionesPortal, _clave_fecha, _recortar_a_hoy
 
 _OPERACION_IVA_SIMPLE = "RETENCIONES IMPOSITIVAS"
 
@@ -162,6 +162,9 @@ class MisRetencionesIvaSimplePortal(MisRetencionesPortal):
         )
 
     async def _seleccionar_fechas_iva_simple(self, desde: str, hasta: str) -> None:
+        # El portal no admite fechas futuras: se recorta "hasta" a hoy.
+        hasta = _recortar_a_hoy(hasta)
+        desde = min(desde, hasta, key=_clave_fecha)
         if not _rango_iva_simple_valido(desde, hasta):
             raise TargetUnavailableError(
                 "el rango ingresado no cumple el límite del portal IVA Simple",
