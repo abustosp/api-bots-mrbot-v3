@@ -164,6 +164,8 @@ de esta batería.
 
 Quedan 18 de 19 operaciones completas con archivos descargados y verificados. El
 único fallo es de credenciales, no de implementación.
+El detalle por caso, con tipos y tamaños reales de cada artefacto, queda en
+`validacion-descargas-2026-09-28-consolidado.md`.
 
 La corrida completa con `--concurrency 2` se cortó a los 600 s de reloj del shell
 cuando ya había cubierto 16 de los 19 casos; los tres restantes y los dos de
