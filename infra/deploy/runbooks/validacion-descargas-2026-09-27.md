@@ -199,4 +199,25 @@ Los diagnósticos del CAPTCHA de Misiones ahora distinguen la etapa que falla
 `_etapa_desconocida`) en lugar de un único mensaje genérico, y `ErrorDeBot` acepta
 `diagnostic_code` en cualquier categoría.
 
-La suite completa pasó con 521 pruebas y 12 subpruebas; 9 quedaron omitidas.
+### Defecto encontrado en la normalización V1 de IIBB
+
+Los clientes históricos de AGIP y Misiones mandan el período en `desde`/`hasta`, pero
+la normalización V2 de la central los traducía siempre a `fecha_desde`/`fecha_hasta`,
+que es el contrato de los bots de fechas. El worker de esos dos bots espera
+`periodo_desde`/`periodo_hasta`, así que todo alta por el alias V1 terminaba en
+`ENVELOPE_INVALID` antes de abrir el navegador. La normalización ahora elige el
+destino según el bot (`PERIODO_ALIAS_BOTS`), con test de regresión que fija los dos
+casos: períodos para IIBB y fechas para `mis_retenciones`.
+
+### Estado de Misiones con la credencial indicada
+
+Con el mapeo corregido, el alta por el alias V1 llega al worker y el CAPTCHA del
+portal se resuelve con el proveedor configurado. El portal de ATM responde
+`misiones_login_usuario_incorrecto` (el campo `Usuario` del formulario acepta hasta
+11 dígitos y se envía el CUIT). Queda pendiente confirmar con el usuario si el
+usuario de la extranet de ATM es ese CUIT y si la cuenta tiene Ingresos Brutos
+habilitado: una corrida intermedia sí superó el login y falló después al no
+encontrar el menú de Ingresos Brutos (`misiones_ingresos_brutos_unavailable`), y en
+ese caso la sesión vuelca la pantalla en el `work_dir` del job para diagnóstico.
+
+La suite completa pasó con 522 pruebas y 12 subpruebas; 9 quedaron omitidas.
