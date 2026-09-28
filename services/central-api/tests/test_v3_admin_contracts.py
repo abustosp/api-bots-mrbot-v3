@@ -95,6 +95,40 @@ def test_documentacion_publica_y_admin_son_superficies_distintas(monkeypatch) ->
         get_settings.cache_clear()
 
 
+def test_periodos_iibb_v1_no_se_confunden_con_fechas() -> None:
+    """Los bots de IIBB piden periodos AAAAMM; el resto, fechas dd/mm/aaaa.
+
+    El cliente histórico manda ``desde``/``hasta`` en ambos casos. Si el
+    normalizador los convierte siempre a ``fecha_desde``/``fecha_hasta``, el
+    worker rechaza el sobre de AGIP y Misiones con ``ENVELOPE_INVALID``.
+    """
+    misiones = normalize_v2_payload(
+        "retper_iibb_misiones",
+        "consultar",
+        {"desde": "202608", "hasta": "202608", "denominacion": "Empresa"},
+    )
+    assert misiones["periodo_desde"] == "202608"
+    assert misiones["periodo_hasta"] == "202608"
+    assert "fecha_desde" not in misiones and "fecha_hasta" not in misiones
+
+    agip = normalize_v2_payload(
+        "retper_iibb_agip",
+        "consultar",
+        {"desde": "202501", "hasta": "202508"},
+    )
+    assert agip["periodo_desde"] == "202501"
+    assert agip["periodo_hasta"] == "202508"
+
+    citaciones = normalize_v2_payload(
+        "mis_retenciones",
+        "consultar",
+        {"desde": "01/08/2026", "hasta": "31/08/2026"},
+    )
+    assert citaciones["fecha_desde"] == "01/08/2026"
+    assert citaciones["fecha_hasta"] == "31/08/2026"
+    assert "periodo_desde" not in citaciones
+
+
 def test_cuerpo_v2_plano_separa_credencial_y_normaliza_aliases(monkeypatch) -> None:
     private_pem = _private_pem()
     monkeypatch.setenv("RSA_PRIVATE_KEY", private_pem)

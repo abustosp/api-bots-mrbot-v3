@@ -20,6 +20,10 @@ from central_api.security.rsa_credentials import (
 
 CREDENTIAL_FIELDS = ("clave", "clave_representante", "contrasena")
 CREDENTIAL_TRANSPORT_FIELDS = (*CREDENTIAL_FIELDS, "clave_encriptada")
+# Bots cuyo contrato V3 pide periodos ``AAAAMM`` en ``periodo_desde`` y
+# ``periodo_hasta`` aunque el cliente histórico V1 mande ``desde``/``hasta``.
+# El resto de los bots usa fechas ``dd/mm/aaaa`` en ``fecha_desde``/``fecha_hasta``.
+PERIODO_ALIAS_BOTS = frozenset({"retper_iibb_agip", "retper_iibb_misiones"})
 _CREDENTIAL_CONTEXT_FIELDS = (
     "cuit_representante",
     "cuit_inicio_sesion",
@@ -140,12 +144,17 @@ def normalize_v2_payload(
                 normalized[target] = pdf
                 break
 
-    if "desde" in normalized:
-        normalized.setdefault("fecha_desde", normalized["desde"])
-        normalized.pop("desde", None)
-    if "hasta" in normalized:
-        normalized.setdefault("fecha_hasta", normalized["hasta"])
-        normalized.pop("hasta", None)
+    for origen, destino_fecha, destino_periodo in (
+        ("desde", "fecha_desde", "periodo_desde"),
+        ("hasta", "fecha_hasta", "periodo_hasta"),
+    ):
+        if origen not in normalized:
+            continue
+        destino = (
+            destino_periodo if bot in PERIODO_ALIAS_BOTS else destino_fecha
+        )
+        normalized.setdefault(destino, normalized[origen])
+        normalized.pop(origen, None)
 
     upload_flag = None
     upload_target_by_bot = {

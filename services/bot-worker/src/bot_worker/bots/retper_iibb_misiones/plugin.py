@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
 from bot_worker.bots.errors import (
@@ -211,6 +212,7 @@ class RetperIibbMisionesPlugin:
                     context=context,
                     captcha_solver=captcha_solver,
                     denominacion=entrada.denominacion,
+                    debug_dir=Path(runtime.work_dir) / "debug",
                 )
                 await sesion.login(url=f"{self._base_url}/Extranet/index.php")
                 await runtime.cancellation.raise_if_cancelled()

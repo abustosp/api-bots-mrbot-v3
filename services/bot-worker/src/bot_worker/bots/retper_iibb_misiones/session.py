@@ -98,12 +98,14 @@ class MisionesSession:
         context: Any,
         captcha_solver: Any = None,
         denominacion: str = "",
+        debug_dir: Path | None = None,
     ) -> None:
         self._credentials = credentials
         self._page = page
         self._context = context
         self._captcha_solver = captcha_solver
         self._denominacion = str(denominacion or "").strip()
+        self._debug_dir = Path(debug_dir) if debug_dir else None
         self._logged_in = False
         self._desde = ""
         self._hasta = ""
@@ -192,6 +194,7 @@ class MisionesSession:
             timeout_ms=10_000,
         ):
             await self._raise_si_login_rechazado()
+            await self._volcar_pantalla("misiones_sin_menu_ingresos_brutos")
             raise TargetUnavailableError(
                 "No se pudo abrir Ingresos Brutos en Misiones",
                 diagnostic_code="misiones_ingresos_brutos_unavailable",
@@ -590,6 +593,29 @@ class MisionesSession:
                 f"No se pudo resolver el CAPTCHA de Misiones ({type(exc).__name__})",
                 diagnostic_code="misiones_captcha_etapa_desconocida",
             ) from exc
+
+    async def _volcar_pantalla(self, nombre: str) -> None:
+        """Guarda el HTML y la URL de la pantalla actual para diagnóstico.
+
+        Solo se usa en fallos de navegación del menú: el archivo queda en el
+        ``work_dir`` del job (efímero), nunca en logs ni en el resultado, y se
+        acota el tamaño para no arrastrar respuestas gigantes del portal.
+        """
+        if self._debug_dir is None:
+            return
+        try:
+            html = await self._page.content()
+        except Exception:
+            return
+        try:
+            self._debug_dir.mkdir(parents=True, exist_ok=True)
+            destino = self._debug_dir / f"{nombre}.html"
+            destino.write_text(html[:400_000], encoding="utf-8", errors="ignore")
+            (self._debug_dir / f"{nombre}.url.txt").write_text(
+                str(getattr(self._page, "url", "")), encoding="utf-8"
+            )
+        except Exception:
+            return
 
     async def _hay_captcha(self) -> bool:
         for selector in (

@@ -297,6 +297,7 @@ def test_execute_usa_contexto_comun_y_sesion_dgr(
         browser_factory=_BrowserFactory(),
         proxy=None,
         artifact_store=_ArtifactStore(),
+        work_dir=tmp_path,
     )
     monkeypatch.setattr(plugin_module, "MisionesSession", _SesionMisionesFake)
     plugin = RetperIibbMisionesPlugin()
