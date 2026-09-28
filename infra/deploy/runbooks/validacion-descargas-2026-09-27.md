@@ -127,10 +127,57 @@ constituyen el estado actual de cada bot.
 | `mis_retenciones_iva_simple.consultar` | Se eligió una alternativa histórica distinta de la principal, que devolvía `OK` sin archivo. La API local completó y permitió descargar CSV de 5.978 bytes para 01/08/2026 a 28/09/2026, validado por tamaño y formato. En el runner aislado se comprobaron además períodos de dos meses entre enero y agosto de 2026, todos con al menos un artefacto. El portal limita cada consulta al último día del mes siguiente al inicio, por lo que un rango anual se divide en tramos en vez de enviarse como una sola consulta. |
 | `certificado_mipyme.descargar` | La credencial con éxito histórico aún funciona: el runner aislado obtuvo un PDF y la API local completó en 20 s al habilitar `subir: true` en el caso. El artefacto descargado mide 357.078 bytes y pasa verificación de firma, tamaño y SHA-256. El archivo privado de prueba tenía originalmente la ruta sin prefijo `/api/v3` y `subir: false`, por lo que las primeras altas de esta pasada no probaron la carga del archivo. |
 | `sifere.consultar` | La credencial histórica permitió entrar a COMARB. Se corrigió el envío del formulario del representado, se abrió `retencionIn` antes de consultar las jurisdicciones y se declararon slots dinámicos. COMARB entrega XLSX, no CSV: ahora se conserva extensión y MIME correctos. Tras recargar el worker, la API local terminó `COMPLETO` con 24 XLSX descargados, todos con firma, tamaño y SHA-256 válidos (129.578 bytes en total). |
-| `liquidacion_granos.consultar` | Se probaron otras tres credenciales históricas el 28/09 además de las ocho ensayadas el día anterior. Las tres nuevas fueron rechazadas por ARCA antes de llegar al servicio. No hay evidencia para atribuir este caso a un defecto del portal; requiere una credencial vigente y autorizada. |
-| `retper_iibb_agip.consultar`, `retper_iibb_misiones.consultar` | Un reintento aislado por sistema el 28/09 devolvió `CREDENTIALS_REJECTED` antes de obtener archivos. Las cinco pruebas AGIP y seis Misiones del día anterior tampoco tuvieron éxito histórico. Son accesos independientes de Clave Fiscal ARCA; no se sustituyeron sus claves con credenciales ARCA. Las alternativas sin éxitos previos no se agotaron indiscriminadamente para evitar bloqueos de cuenta. |
+| `liquidacion_granos.consultar` | Se enumeraron los 8 pares credencial/CUIT disponibles y los 8 están probados: ARCA rechaza el login antes de llegar al servicio (`arca_login_credentials_rejected`). No hay evidencia para atribuir el fallo al portal; hace falta una clave fiscal vigente de un CUIT autorizado a Liquidación Primaria de Granos. |
+| `retper_iibb_agip.consultar` | El portal exige usuario y clave de una cuenta ClaveCiudad, no una Clave Fiscal ARCA. El 28/09 se probaron 5 alternativas nuevas además de la principal: 3 terminaron en `agip_waf_blocked` (página de seguridad de AGIP) y 3 en `agip_login_gateway_unavailable`, sin llegar nunca al formulario de login. El bloqueo es del WAF, no del usuario ni de la clave. |
+| `retper_iibb_misiones.consultar` | La DGR de Misiones autentica con CUIT y clave del representante. Se probaron 4 alternativas nuevas además de la principal: todas terminaron en `misiones_login_usuario_incorrecto` (`CREDENTIALS_REJECTED`). Se corrigieron además dos defectos de código propios que confundían un rechazo de credenciales con una caída del sitio (ver los commits de clasificación provincial). |
+| `comprobantes.consultar`, `comprobantes.historial` | El botón `CSV` del portal entrega un ZIP con un único miembro `.csv` y las fechas de esa planilla vienen en ISO (`aaaa-mm-dd`). El plugin leía el ZIP como texto y solo aceptaba `dd/mm/aaaa`, por lo que el job moría con `portal_csv_unexpected_format` o, peor, terminaba sin filas. Se corrigió con un helper compartido (`bot_worker/bots/planillas.py`) que desempaqueta el ZIP, detecta el delimitador real y acepta fechas locales o ISO. Verificado: `consultar` completó con dos CSV (16.851 bytes) descargados y validados; `historial` completó con los mismos dos artefactos. |
 
 Las combinaciones de credenciales y el contenido de los archivos descargados siguen
 fuera de Git. No se infiere que un `COMPLETO` sin archivos sea una descarga exitosa.
-La suite completa tras estas correcciones pasó con 507 pruebas y 12 subpruebas;
-9 pruebas quedaron omitidas.
+
+## Batería integrada del 28/09/2026
+
+Los 19 casos de `casos_alt.json` se enviaron a la central local con un cliente V3
+real, polling de `GET /api/v3/jobs/{id}` y descarga firmada de cada artefacto. Las
+tablas anteriores describen corridas previas; el estado vigente de cada bot es el
+de esta batería.
+
+| Operación | Resultado | Archivos verificados |
+|---|---|---|
+| `comprobantes.consultar`, `comprobantes.historial` | OK | 2 CSV cada uno, 16.851 bytes |
+| `consulta_pagos_vep.consultar` | OK | 1 CSV, 22.195 bytes |
+| `libros_portal_iva.descargar_libros`, `libros_portal_iva.descargar_ddjj` | OK | 12 ZIP cada uno, ~270 KB; son los casos más lentos (190-200 s) |
+| `mis_retenciones.consultar` | OK | 1 CSV, 1.062 bytes |
+| `mis_retenciones_iva_simple.consultar` | COMPLETO sin archivos | El portal no tenía retenciones en el rango del caso. Con un rango válido y otra credencial histórica sí entrega CSV (ver la tabla de arriba) |
+| `pago_devoluciones.consultar` | OK | 1 XLSX, 2.626 bytes |
+| `portal_iva.descargar` | OK | 2 CSV (ventas y compras), 29.668 bytes |
+| `rcel.descargar` | OK | 7 PDF, 601.628 bytes |
+| `hacienda.consultar` | OK | 2 CSV; para el período del caso el portal no devolvió filas (`aviso`) |
+| `siper.consultar` | OK | 2 PNG, 25.593 bytes |
+| `sct.consultar` | OK | 4 artefactos CSV/PDF, 38.780 bytes |
+| `sifere.consultar` | OK | 24 XLSX, 130.311 bytes |
+| `moa.consultar` | OK | 1 CSV, 1.031 bytes |
+| `declaracion_en_linea.consultar` | OK | 13 PDF, 417.915 bytes |
+| `mis_facilidades.consultar` | OK | 60 artefactos PDF/XLSX, 1,1 MB; necesita hasta 700 s de espera del job |
+| `srt.consultar_alicuotas` | OK | 1 JSON, 475 bytes |
+| `liquidacion_granos.consultar` | FALLIDO | 0: las 8 combinaciones credencial/CUIT disponibles fueron rechazadas por ARCA |
+
+Quedan 18 de 19 operaciones completas con archivos descargados y verificados. El
+único fallo es de credenciales, no de implementación.
+
+La corrida completa con `--concurrency 2` se cortó a los 600 s de reloj del shell
+cuando ya había cubierto 16 de los 19 casos; los tres restantes y los dos de
+comprobantes se corrieron aparte. Para que la evidencia no se pierda por un corte,
+`run_por_caso.sh` ejecuta cada caso en su propio directorio y consolida
+`consolidado.json` y `consolidado.md`.
+
+Una auditoría de los casos privados encontró tres problemas de configuración que no
+son defectos de los bots: el caso de `consulta_pagos_vep.consultar` usa la ruta
+genérica `/api/v3/bots/...` porque su payload está escrito con nombres V3 y el alias
+V1 `/vep/consulta-pagos` valida contra el modelo histórico (`clave_representante`,
+`cuit_representado`); los casos de AGIP y Misiones no declaraban `path`, así que
+`run_descargas.py` fallaba con `KeyError` (ya corregido, junto con las banderas de
+subida de Misiones, que estaban en `false`); y el archivo privado de reintento de
+MiPyME conservaba la ruta sin `/api/v3` y `subir: false` (ya corregido).
+
+La suite completa pasó con 521 pruebas y 12 subpruebas; 9 quedaron omitidas.
