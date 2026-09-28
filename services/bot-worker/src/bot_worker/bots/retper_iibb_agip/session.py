@@ -10,6 +10,10 @@ from typing import Any
 
 from bot_worker.bots.errors import CredentialsRejectedError, TargetUnavailableError
 
+# Mensajes de rechazo de ClaveCiudad. Nunca se copian al diagnóstico: solo
+# eligen un código fijo de diagnóstico.
+_AGIP_SIN_CUENTA_RE = re.compile(r"no existe|cuenta no registrada|sin cuenta", re.I)
+
 _RESULT_EXCEL_BUTTONS = (
     "#tablaRetenciones_botonExcel",
     "#tablaPercepciones_botonExcel",
@@ -60,6 +64,24 @@ _SECTIONS = (
         ),
     },
 )
+
+
+def _codigo_rechazo_login(estado: dict[str, Any]) -> str:
+    """Clasifica el rechazo de ClaveCiudad con un código fijo, sin texto del sitio.
+
+    El portal usa ``#error-email`` cuando el CUIL no tiene cuenta y
+    ``#error-password`` cuando la clave no coincide; distinguirlos permite
+    saber si hay que dar de alta la cuenta o corregir la clave.
+    """
+    error_email = str(estado.get("errorEmail") or "")
+    error_password = str(estado.get("errorPassword") or "")
+    if _AGIP_SIN_CUENTA_RE.search(error_email):
+        return "agip_account_not_found"
+    if error_password:
+        return "agip_password_rejected"
+    if error_email:
+        return "agip_login_rejected"
+    return "agip_representados_missing"
 
 
 def _periodo_valido(periodo: str) -> bool:
@@ -214,14 +236,19 @@ class AgipSession:
         estado = await self._page.evaluate(
             """() => ({
                 representados: Boolean(document.querySelector('select#cuit_representado')),
-                error: ['#error-email', '#error-password'].some(selector => {
-                    const element = document.querySelector(selector);
-                    return Boolean(element && element.textContent.trim());
-                })
+                errorEmail: (document.querySelector('#error-email')?.textContent || '').trim(),
+                errorPassword: (document.querySelector('#error-password')?.textContent || '').trim()
             })"""
         )
-        if estado.get("error") or not estado.get("representados"):
-            raise CredentialsRejectedError("AGIP rechazó el usuario o la clave")
+        if (
+            estado.get("errorEmail")
+            or estado.get("errorPassword")
+            or not estado.get("representados")
+        ):
+            raise CredentialsRejectedError(
+                "AGIP rechazó el usuario o la clave",
+                diagnostic_code=_codigo_rechazo_login(estado),
+            )
 
     async def _select_contributor(self, cuit: str) -> None:
         selector = self._page.locator("select#cuit_representado").first

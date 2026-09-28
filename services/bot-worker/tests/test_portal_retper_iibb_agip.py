@@ -68,24 +68,75 @@ def test_bloqueo_waf_se_reporta_como_bloqueo_externo() -> None:
     assert error.value.diagnostic_code == "agip_waf_blocked"
 
 
+class _BotonAgip:
+    async def click(self) -> None:
+        return None
+
+
+class _PaginaSubmitLogin:
+    """Simula el POST de ClaveCiudad devolviendo el estado indicado."""
+
+    def __init__(self, estado: dict[str, Any]) -> None:
+        self._estado = estado
+
+    def get_by_role(self, *_: Any, **__: Any) -> _BotonAgip:
+        return _BotonAgip()
+
+    async def wait_for_function(self, *_: Any, **__: Any) -> None:
+        return None
+
+    async def evaluate(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return dict(self._estado)
+
+
+def _sesion_agip(page: Any) -> AgipSession:
+    return AgipSession(SimpleNamespace(clave="secreto-ficticio"), page=page)
+
+
 def test_rechazo_inline_de_clave_agip_es_error_de_credenciales() -> None:
-    class _Boton:
-        async def click(self) -> None:
-            return None
+    pagina = _PaginaSubmitLogin(
+        {"representados": False, "errorEmail": "", "errorPassword": ""}
+    )
+    with pytest.raises(CredentialsRejectedError) as error:
+        asyncio.run(_sesion_agip(pagina)._submit_login())
+    assert error.value.diagnostic_code == "agip_representados_missing"
 
-    class _Page:
-        def get_by_role(self, *_: Any, **__: Any) -> _Boton:
-            return _Boton()
 
-        async def wait_for_function(self, *_: Any, **__: Any) -> None:
-            return None
+def test_cuil_sin_cuenta_agip_se_clasifica_como_cuenta_inexistente() -> None:
+    pagina = _PaginaSubmitLogin(
+        {
+            "representados": False,
+            "errorEmail": "No existe una cuenta registrada con este CUIL.",
+            "errorPassword": "",
+        }
+    )
+    with pytest.raises(CredentialsRejectedError) as error:
+        asyncio.run(_sesion_agip(pagina)._submit_login())
+    assert error.value.diagnostic_code == "agip_account_not_found"
+    # El mensaje del portal no viaja en el error: solo el codigo fijo.
+    assert "No existe" not in str(error.value)
+    assert "CUIL" not in str(error.value)
 
-        async def evaluate(self, *_: Any, **__: Any) -> dict[str, bool]:
-            return {"representados": False, "error": True}
 
-    sesion = AgipSession(SimpleNamespace(clave="secreto-ficticio"), page=_Page())
-    with pytest.raises(CredentialsRejectedError):
-        asyncio.run(sesion._submit_login())
+def test_clave_incorrecta_agip_se_clasifica_como_clave_rechazada() -> None:
+    pagina = _PaginaSubmitLogin(
+        {
+            "representados": False,
+            "errorEmail": "",
+            "errorPassword": "La contraseña es incorrecta.",
+        }
+    )
+    with pytest.raises(CredentialsRejectedError) as error:
+        asyncio.run(_sesion_agip(pagina)._submit_login())
+    assert error.value.diagnostic_code == "agip_password_rejected"
+    assert "incorrecta" not in str(error.value)
+
+
+def test_login_agip_con_representados_no_reporta_rechazo() -> None:
+    pagina = _PaginaSubmitLogin(
+        {"representados": True, "errorEmail": "", "errorPassword": ""}
+    )
+    asyncio.run(_sesion_agip(pagina)._submit_login())
 
 
 def test_validate_incluye_usuario_agip_sin_mezclarlo_con_credenciales() -> None:

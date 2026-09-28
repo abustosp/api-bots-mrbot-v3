@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from bot_worker.bots.errors import (
     Categoria,
+    CredentialsRejectedError,
     InvalidInputError,
     TargetUnavailableError,
 )
@@ -56,6 +57,27 @@ def test_login_rechazado_conserva_su_codigo() -> None:
         ArcaLoginError("pantalla con datos", diagnostic_code="arca_login_still_on_auth_page")
     )
     assert resultado["diagnostic_code"] == "arca_login_still_on_auth_page"
+
+
+def test_rechazo_de_credenciales_sin_codigo_no_inventa_diagnostico() -> None:
+    codigo, resultado = _resultado_error_de_bot(CredentialsRejectedError("detalle privado"))
+    assert codigo == Categoria.CREDENTIALS_REJECTED
+    assert resultado == {
+        "result": "ERROR",
+        "data": {},
+        "internal": "CredentialsRejectedError",
+    }
+
+
+def test_rechazo_de_credenciales_con_codigo_fijo_llega_a_la_central() -> None:
+    codigo, resultado = _resultado_error_de_bot(
+        CredentialsRejectedError(
+            "cuenta sin alta en ClaveCiudad", diagnostic_code="agip_account_not_found"
+        )
+    )
+    assert codigo == Categoria.CREDENTIALS_REJECTED
+    assert resultado["diagnostic_code"] == "agip_account_not_found"
+    assert "cuenta sin alta" not in str(resultado)
 
 
 @pytest.mark.parametrize(

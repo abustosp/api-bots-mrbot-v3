@@ -9,10 +9,13 @@ from typing import Any
 
 import pytest
 
-from bot_worker.bots.errors import CredentialsRejectedError
+from bot_worker.bots.errors import CredentialsRejectedError, TargetUnavailableError
 from bot_worker.bots.retper_iibb_misiones import plugin as plugin_module
 from bot_worker.bots.retper_iibb_misiones.plugin import RetperIibbMisionesPlugin
-from bot_worker.bots.retper_iibb_misiones.session import MisionesSession
+from bot_worker.bots.retper_iibb_misiones.session import (
+    MisionesSession,
+    _codigo_rechazo_login,
+)
 
 CUIT_FICTICIO = "20123456789"
 
@@ -69,6 +72,132 @@ def test_mensaje_de_usuario_incorrecto_se_reconoce_como_rechazo() -> None:
         context=object(),
     )
     assert asyncio.run(session._hay_error_de_login()) is True
+
+
+MENSAJE_USUARIO = "El nombre de usuario introducido no es correcto."
+MENSAJE_USUARIO_CLAVE = (
+    "El nombre de usuario o la contraseña introducidos no son correctos"
+)
+
+
+class _LocatorMisiones:
+    """Locator mínimo: cuenta y texto configurables por selector."""
+
+    def __init__(self, *, texto: str = "", cuenta: int = 0) -> None:
+        self._texto = texto
+        self._cuenta = cuenta
+
+    async def count(self) -> int:
+        return self._cuenta
+
+    async def fill(self, *_: Any, **__: Any) -> None:
+        return None
+
+    async def click(self, *_: Any, **__: Any) -> None:
+        return None
+
+    async def is_visible(self) -> bool:
+        return False
+
+    async def inner_text(self) -> str:
+        return self._texto
+
+    async def text_content(self) -> str:
+        return self._texto
+
+    @property
+    def first(self) -> "_LocatorMisiones":
+        return self
+
+    def nth(self, *_: Any) -> "_LocatorMisiones":
+        return self
+
+
+class _PaginaMisiones:
+    """Página ATM falsa: expone formulario, cuerpo con mensaje y sin menús."""
+
+    def __init__(self, texto_cuerpo: str) -> None:
+        self._texto = texto_cuerpo
+
+    def _cuenta(self, selector: str) -> int:
+        if selector == "input[type='password']":
+            return 1
+        if selector == "button:has-text('INGRESE CON CLAVE FISCAL')":
+            return 1
+        return 0
+
+    def locator(self, selector: str) -> _LocatorMisiones:
+        if selector == "body":
+            return _LocatorMisiones(texto=self._texto, cuenta=1)
+        return _LocatorMisiones(cuenta=self._cuenta(selector))
+
+    def get_by_role(self, role: str, **kwargs: Any) -> _LocatorMisiones:
+        nombre = getattr(kwargs.get("name"), "pattern", "")
+        if role == "button" and "INGRESE" in nombre:
+            return _LocatorMisiones(cuenta=1)
+        if role == "textbox":
+            return _LocatorMisiones(cuenta=1)
+        return _LocatorMisiones()
+
+    async def evaluate(self, *_: Any, **__: Any) -> bool:
+        return False
+
+    async def wait_for_load_state(self, *_: Any, **__: Any) -> None:
+        return None
+
+
+def _sesion_misiones(pagina: Any) -> MisionesSession:
+    return MisionesSession(
+        SimpleNamespace(cuit_representante=CUIT_FICTICIO, clave="clave-ficticia"),
+        page=pagina,
+        context=object(),
+    )
+
+
+def test_codigo_de_rechazo_distingue_usuario_de_usuario_clave() -> None:
+    assert _codigo_rechazo_login(MENSAJE_USUARIO) == "misiones_login_usuario_incorrecto"
+    assert (
+        _codigo_rechazo_login(MENSAJE_USUARIO_CLAVE)
+        == "misiones_login_usuario_o_clave_incorrectos"
+    )
+    assert _codigo_rechazo_login("Bienvenido a la extranet") is None
+
+
+def test_rechazo_de_atm_se_clasifica_aunque_falle_el_envio() -> None:
+    """El diálogo de ATM bloquea el clic del botón: igual es rechazo, no caída."""
+    sesion = _sesion_misiones(_PaginaMisiones(MENSAJE_USUARIO))
+    with pytest.raises(CredentialsRejectedError) as error:
+        asyncio.run(sesion.ingresar())
+    assert error.value.diagnostic_code == "misiones_login_usuario_incorrecto"
+    assert MENSAJE_USUARIO not in str(error.value)
+
+
+def test_rechazo_tardio_no_se_reporta_como_menu_ingresos_brutos() -> None:
+    """Si el mensaje aparece después de networkidle, gana el rechazo."""
+
+    class _SesionTardia(MisionesSession):
+        async def _enviar_login(self) -> bool:
+            return True
+
+        async def _codigo_error_de_login(self) -> str | None:
+            self.chequeos = getattr(self, "chequeos", 0) + 1
+            return None if self.chequeos < 2 else "misiones_login_usuario_o_clave_incorrectos"
+
+    sesion = _SesionTardia(
+        SimpleNamespace(cuit_representante=CUIT_FICTICIO, clave="clave-ficticia"),
+        page=_PaginaMisiones(MENSAJE_USUARIO_CLAVE),
+        context=object(),
+    )
+    with pytest.raises(CredentialsRejectedError) as error:
+        asyncio.run(sesion.ingresar())
+    assert error.value.diagnostic_code == "misiones_login_usuario_o_clave_incorrectos"
+
+
+def test_sin_mensaje_de_rechazo_el_menu_faltante_sigue_siendo_caida_del_sitio() -> None:
+    sesion = _sesion_misiones(_PaginaMisiones("Extranet ATM"))
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion.ingresar())
+    assert error.value.diagnostic_code == "misiones_login_submit_unavailable"
 
 
 def test_esquema_acepta_denominacion_normalizada_por_central() -> None:

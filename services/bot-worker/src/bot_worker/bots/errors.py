@@ -52,10 +52,21 @@ class InvalidInputError(ErrorDeBot):
 
 
 class CredentialsRejectedError(ErrorDeBot):
-    """El organismo rechazo las credenciales fiscales o faltan en runtime."""
+    """El organismo rechazo las credenciales fiscales o faltan en runtime.
+
+    ``diagnostic_code`` es opcional y debe ser un identificador fijo del
+    codigo (nunca texto libre del portal). Permite distinguir, por ejemplo,
+    una cuenta inexistente de una clave incorrecta sin exponer mensajes del
+    sitio externo.
+    """
 
     categoria = Categoria.CREDENTIALS_REJECTED
     reintentable = False
+
+    def __init__(self, diagnostico: str, *, diagnostic_code: str | None = None) -> None:
+        super().__init__(diagnostico)
+        if diagnostic_code is not None:
+            self.diagnostic_code = diagnostic_code
 
 
 class CaptchaUnsolvableError(ErrorDeBot):

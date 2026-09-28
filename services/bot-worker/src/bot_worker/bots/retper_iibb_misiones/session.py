@@ -27,6 +27,32 @@ RETPER_REPORT_DOWNLOAD_URL = (
     "https://extranet.atmisiones.gob.ar/Framework/Funciones/reporte.php"
 )
 
+# Mensajes de rechazo de la extranet ATM. Nunca se copian al diagnóstico:
+# solo eligen un código fijo de diagnóstico.
+_MISIONES_USUARIO_CLAVE_INCORRECTOS = (
+    "el nombre de usuario o la contraseña introducidos no son correctos",
+    "el usuario o la contraseña no son correctos",
+    "usuario o contraseña incorrectos",
+    "clave o usuario incorrectos",
+)
+_MISIONES_USUARIO_INCORRECTO = (
+    "el nombre de usuario introducido no es correcto",
+)
+
+
+def _codigo_rechazo_login(texto: str) -> str | None:
+    """Traduce el mensaje de rechazo de ATM a un código fijo de diagnóstico.
+
+    Distingue usuario inexistente de usuario/clave incorrectos. Devuelve
+    ``None`` si el texto no contiene un mensaje conocido de rechazo.
+    """
+    normalizado = (texto or "").lower()
+    if any(m in normalizado for m in _MISIONES_USUARIO_CLAVE_INCORRECTOS):
+        return "misiones_login_usuario_o_clave_incorrectos"
+    if any(m in normalizado for m in _MISIONES_USUARIO_INCORRECTO):
+        return "misiones_login_usuario_incorrecto"
+    return None
+
 
 async def _click_first(candidates: Sequence[Any], timeout_ms: int = 5000) -> bool:
     for locator in candidates:
@@ -142,6 +168,7 @@ class MisionesSession:
 
         captcha_resuelto_antes = await self._resolver_captcha_si_aparece()
         if not await self._enviar_login():
+            await self._raise_si_login_rechazado()
             raise TargetUnavailableError(
                 "No se pudo enviar el ingreso a Misiones",
                 diagnostic_code="misiones_login_submit_unavailable",
@@ -155,8 +182,7 @@ class MisionesSession:
             await self._enviar_login()
             await self._wait_network_idle()
 
-        if await self._hay_error_de_login():
-            raise CredentialsRejectedError("Misiones rechazo el CUIT o la clave fiscal")
+        await self._raise_si_login_rechazado()
 
         if not await _click_first(
             [
@@ -165,6 +191,7 @@ class MisionesSession:
             ],
             timeout_ms=10_000,
         ):
+            await self._raise_si_login_rechazado()
             raise TargetUnavailableError(
                 "No se pudo abrir Ingresos Brutos en Misiones",
                 diagnostic_code="misiones_ingresos_brutos_unavailable",
@@ -420,31 +447,49 @@ class MisionesSession:
             # El sitio mantiene peticiones de fondo en algunas pantallas.
             return
 
-    async def _hay_error_de_login(self) -> bool:
+    async def _codigo_error_de_login(self) -> str | None:
+        """Código fijo de rechazo si el portal mostró un mensaje de login.
+
+        Nunca devuelve el texto del portal: solo el identificador del tipo de
+        rechazo (usuario inexistente vs usuario/clave incorrectos).
+        """
         try:
-            texto = (await self._page.locator("body").inner_text()).strip().lower()
-            if any(
-                mensaje in texto
-                for mensaje in (
-                    "el nombre de usuario introducido no es correcto",
-                    "el nombre de usuario o la contraseña introducidos no son correctos",
-                    "el usuario o la contraseña no son correctos",
-                    "usuario o contraseña incorrectos",
-                    "clave o usuario incorrectos",
-                )
-            ):
-                return True
+            texto = (await self._page.locator("body").inner_text()).strip()
         except Exception:
-            pass
+            texto = ""
+        codigo = _codigo_rechazo_login(texto)
+        if codigo:
+            return codigo
         try:
-            errores = self._page.locator(".alert-danger, .error, [class*='error']")
+            # Solo cajas de error explícitas: ``[class*='error']`` daría
+            # falsos positivos con nodos ajenos al login (p. ej. el widget
+            # de reCAPTCHA usa ``grecaptcha-error``).
+            errores = self._page.locator(".alert-danger, .error")
             for indice in range(await errores.count()):
                 item = errores.nth(indice)
                 if await item.is_visible() and (await item.text_content() or "").strip():
-                    return True
+                    return "misiones_login_rejected"
         except Exception:
-            return False
-        return False
+            return None
+        return None
+
+    async def _raise_si_login_rechazado(self) -> None:
+        """Convierte un rechazo mostrado por ATM en error de credenciales.
+
+        ATM responde con un diálogo de error y deja la página en el login. Sin
+        este chequeo, el fallo siguiente (envío del formulario o menú
+        Ingresos Brutos) se reportaría como caída del organismo en lugar de
+        credencial rechazada.
+        """
+        codigo = await self._codigo_error_de_login()
+        if codigo:
+            raise CredentialsRejectedError(
+                "Misiones rechazo el CUIT o la clave fiscal",
+                diagnostic_code=codigo,
+            )
+
+    async def _hay_error_de_login(self) -> bool:
+        return await self._codigo_error_de_login() is not None
 
     async def _resolver_captcha_si_aparece(self) -> bool:
         if not await self._hay_captcha():
