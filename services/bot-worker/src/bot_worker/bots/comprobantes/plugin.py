@@ -51,6 +51,12 @@ from bot_worker.bots.errors import (
     TargetUnavailableError,
     sin_secretos,
 )
+from bot_worker.bots.planillas import (
+    COLUMNAS_FECHA,
+    leer_texto_planilla,
+    materializar_csv_descargado,
+)
+from bot_worker.bots.planillas import filtrar_csv_por_rango as _filtrar_compartido
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
 
 try:
@@ -62,7 +68,6 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "MIS COMPROBANTES"
 ID_ARTEFACTO_EMITIDOS = "emitidos_csv"
 ID_ARTEFACTO_RECIBIDOS = "recibidos_csv"
-COLUMNAS_FECHA = ("Fecha", "Fecha de Emisión", "Fecha de Emision")
 
 
 def nombre_base_archivo(
@@ -77,19 +82,8 @@ def nombre_base_archivo(
 
 
 def _leer_planilla(ruta: Path) -> str:
-    """Texto de una planilla del organismo, tolerando codificaciones locales.
-
-    Los CSV de ARCA no siempre vienen en UTF-8 (hay exportes en cp1252); sin
-    esta tolerancia el filtrado falla con ``UnicodeDecodeError`` y el job
-    termina como caída del portal.
-    """
-    crudo = Path(ruta).read_bytes()
-    for codec in ("utf-8-sig", "cp1252", "latin-1"):
-        try:
-            return crudo.decode(codec)
-        except UnicodeDecodeError:
-            continue
-    return crudo.decode("utf-8", errors="replace")
+    """Texto de una planilla del organismo, tolerando codificaciones locales."""
+    return leer_texto_planilla(Path(ruta))
 
 
 def filtrar_csv_por_rango(
@@ -97,49 +91,23 @@ def filtrar_csv_por_rango(
 ) -> int:
     """Filtra un CSV de comprobantes por rango inclusive (port de V2).
 
-    Detecta la columna de fecha (``Fecha`` o ``Fecha de Emisión``),
-    conserva las filas dentro de ``[desde, hasta]`` en formato
-    ``dd/mm/aaaa`` y escribe el resultado en ``destino``. Retorna la
-    cantidad de filas conservadas. Funcion pura, sin red ni secretos.
+    Delega en :mod:`bot_worker.bots.planillas`, que detecta el delimitador real
+    de la planilla y acepta fechas locales o ISO. Un archivo que no sea una
+    planilla reconocible se reporta como formato inesperado del portal.
     """
-    from datetime import datetime
-
-    inicio = datetime.strptime(normalizar_fecha(desde), "%d/%m/%Y").date()
-    fin = datetime.strptime(normalizar_fecha(hasta), "%d/%m/%Y").date()
-    with io.StringIO(_leer_planilla(origen), newline="") as fh:
-        lector = csv.DictReader(fh)
-        if lector.fieldnames is None:
-            raise TargetUnavailableError(
-                "la planilla del portal no tiene encabezado",
-                diagnostic_code="portal_csv_unexpected_format",
-            )
-        columna = next(
-            (c for c in COLUMNAS_FECHA if c in lector.fieldnames), None
+    try:
+        return _filtrar_compartido(
+            Path(origen),
+            Path(destino),
+            normalizar_fecha(desde),
+            normalizar_fecha(hasta),
+            columnas_fecha=COLUMNAS_FECHA,
         )
-        if columna is None:
-            raise TargetUnavailableError(
-                "la planilla del portal no trae columna de fecha conocida",
-                diagnostic_code="portal_csv_unexpected_format",
-            )
-        filas = list(lector)
-        campos = lector.fieldnames
-    # ``DictReader`` acumula en la clave ``None`` los campos que sobran (pasa
-    # cuando un importe viene con coma decimal sin comillas): se descartan para
-    # que el CSV filtrado conserve solo las columnas del encabezado.
-    filas = [{k: v for k, v in fila.items() if k is not None} for fila in filas]
-    conservadas = []
-    for fila in filas:
-        try:
-            dia = datetime.strptime(fila[columna].strip(), "%d/%m/%Y").date()
-        except (ValueError, AttributeError):
-            continue
-        if inicio <= dia <= fin:
-            conservadas.append(fila)
-    with open(destino, "w", encoding="utf-8", newline="") as fh:
-        escritor = csv.DictWriter(fh, fieldnames=campos, extrasaction="ignore")
-        escritor.writeheader()
-        escritor.writerows(conservadas)
-    return len(conservadas)
+    except ValueError as exc:
+        raise TargetUnavailableError(
+            str(exc),
+            diagnostic_code="portal_csv_unexpected_format",
+        ) from exc
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -354,6 +322,9 @@ class ComprobantesPlugin:
             await runtime.event_sink.progress(
                 phase="PROCESANDO", percent=65, message=f"Filtrando {tipo}"
             )
+            # El botón ``CSV`` del portal entrega un ZIP con el CSV adentro en
+            # producción; el archivo directo también se acepta.
+            materializar_csv_descargado(crudo)
             filas = filtrar_csv_por_rango(
                 crudo, final, entrada.fecha_desde, entrada.fecha_hasta
             )

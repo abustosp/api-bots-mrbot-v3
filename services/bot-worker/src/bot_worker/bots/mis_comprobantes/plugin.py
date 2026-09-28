@@ -26,10 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import shutil
-import tempfile
-import zipfile
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -44,6 +40,8 @@ from bot_worker.bots.errors import (
     TargetUnavailableError,
     sin_secretos,
 )
+from bot_worker.bots.planillas import COLUMNAS_FECHA, materializar_csv_descargado
+from bot_worker.bots.planillas import filtrar_csv_por_rango as _filtrar_compartido
 from bot_worker.bots.mis_comprobantes.schema import (
     ENTRADAS,
     esquema_entrada,
@@ -61,7 +59,6 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "MIS COMPROBANTES"
 ID_ARTEFACTO_EMITIDOS = "emitidos_csv"
 ID_ARTEFACTO_RECIBIDOS = "recibidos_csv"
-COLUMNAS_FECHA = ("Fecha", "Fecha de Emisión", "Fecha de Emision")
 
 
 def nombre_base_archivo(
@@ -80,81 +77,16 @@ def filtrar_csv_por_rango(
 ) -> int:
     """Filtra un CSV de comprobantes por rango inclusive (port de V2).
 
-    Detecta la columna de fecha (``Fecha`` o ``Fecha de Emisión``),
-    conserva las filas dentro de ``[desde, hasta]`` en formato
-    ``dd/mm/aaaa`` y escribe el resultado en ``destino``. Retorna la
-    cantidad de filas conservadas. Funcion pura, sin red ni secretos.
+    Delega en :mod:`bot_worker.bots.planillas`, que tolera el delimitador real
+    del portal y fechas locales o ISO. Funcion pura, sin red ni secretos.
     """
-    inicio = datetime.strptime(normalizar_fecha(desde), "%d/%m/%Y").date()
-    fin = datetime.strptime(normalizar_fecha(hasta), "%d/%m/%Y").date()
-    with open(origen, "r", encoding="utf-8-sig", newline="") as fh:
-        muestra = fh.read(8192)
-        fh.seek(0)
-        try:
-            dialecto = csv.Sniffer().sniff(muestra, delimiters=";,\t|")
-            delimitador = dialecto.delimiter
-        except csv.Error:
-            delimitador = ";" if ";" in muestra else ","
-        lector = csv.DictReader(fh, delimiter=delimitador)
-        if lector.fieldnames is None:
-            raise ValueError("csv sin encabezado")
-        columna = next(
-            (c for c in COLUMNAS_FECHA if c in lector.fieldnames), None
-        )
-        if columna is None:
-            raise ValueError("csv sin columna de fecha conocida")
-        filas = list(lector)
-        campos = lector.fieldnames
-
-    def parsear_fecha(valor: str) -> Any:
-        texto = str(valor or "").strip()
-        for formato in ("%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y"):
-            try:
-                return datetime.strptime(texto, formato).date()
-            except ValueError:
-                continue
-        return None
-
-    conservadas = []
-    for fila in filas:
-        dia = parsear_fecha(fila.get(columna, ""))
-        if dia is None:
-            continue
-        if inicio <= dia <= fin:
-            conservadas.append(fila)
-    with open(destino, "w", encoding="utf-8", newline="") as fh:
-        escritor = csv.DictWriter(fh, fieldnames=campos, delimiter=delimitador)
-        escritor.writeheader()
-        escritor.writerows(conservadas)
-    return len(conservadas)
-
-
-def materializar_csv_descargado(origen: Path) -> None:
-    """Convierte en CSV una descarga directa o el ZIP que entrega ARCA.
-
-    El botón ``CSV`` de Mis Comprobantes entrega un ZIP en producción. Algunas
-    instalaciones de ARCA entregan el CSV directo, por lo que se aceptan ambos
-    formatos. El miembro se copia a un temporal dentro del mismo directorio y
-    luego se reemplaza de forma atómica para no leer un archivo parcialmente
-    escrito.
-    """
-    if not zipfile.is_zipfile(origen):
-        return
-    with zipfile.ZipFile(origen) as archivo_zip:
-        miembros = [
-            miembro
-            for miembro in archivo_zip.infolist()
-            if not miembro.is_dir() and miembro.filename.lower().endswith(".csv")
-        ]
-        if not miembros:
-            raise ValueError("descarga ZIP sin archivo CSV")
-        miembro = miembros[0]
-        with archivo_zip.open(miembro) as entrada, tempfile.NamedTemporaryFile(
-            mode="wb", dir=origen.parent, prefix=f".{origen.stem}-", suffix=".tmp", delete=False
-        ) as temporal:
-            shutil.copyfileobj(entrada, temporal)
-            temporal_path = Path(temporal.name)
-    temporal_path.replace(origen)
+    return _filtrar_compartido(
+        Path(origen),
+        Path(destino),
+        normalizar_fecha(desde),
+        normalizar_fecha(hasta),
+        columnas_fecha=COLUMNAS_FECHA,
+    )
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
