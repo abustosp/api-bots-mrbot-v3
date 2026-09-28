@@ -430,6 +430,13 @@ class MisRetencionesPortal(PortalArca):
 
     async def _seleccionar_tipo(self, tipo: str) -> bool:
         contenedor = self.page.locator("#tipoOperacion")
+        for intento in range(3):
+            if await self._click_tipo(contenedor, tipo, forzar=intento > 0):
+                return True
+            await self._esperar(600)
+        return False
+
+    async def _click_tipo(self, contenedor: Any, tipo: str, *, forzar: bool) -> bool:
         try:
             await contenedor.wait_for(state="visible", timeout=5_000)
             etiquetas = contenedor.locator("label")
@@ -443,11 +450,19 @@ class MisRetencionesPortal(PortalArca):
                 patron = re.compile(re.escape(tipo or ""), re.I)
             objetivo = etiquetas.filter(has_text=patron)
             if await objetivo.count():
-                await objetivo.first.click(timeout=3_000)
+                # Con una sola opción el portal la trae marcada y deshabilita
+                # el clic: si ya está elegida, no hay nada que hacer.
+                radio = objetivo.first.locator("input")
+                try:
+                    if await radio.count() and await radio.first.is_checked():
+                        return True
+                except Exception:
+                    pass
+                await objetivo.first.click(timeout=3_000, force=forzar)
                 return True
             opcion = contenedor.get_by_label(patron)
             if await opcion.count():
-                await opcion.first.check(timeout=3_000)
+                await opcion.first.check(timeout=3_000, force=forzar)
                 return True
         except Exception:
             return False
@@ -479,7 +494,19 @@ class MisRetencionesPortal(PortalArca):
         # El segundo datepicker depende del primero en la SPA. Esperar a que
         # Angular actualice sus límites evita que descarte el valor de ``hasta``.
         await self._esperar(500)
-        return await self._setear_fecha(loc_hasta, hasta)
+        if not await self._setear_fecha(loc_hasta, hasta):
+            return False
+        # Al fijar "hasta" el datepicker puede reescribir "desde" (lo vimos
+        # invertido día/mes). Se verifica y se recarga una vez.
+        await self._esperar(300)
+        try:
+            if (await loc_desde.input_value()).strip() != desde:
+                await self._setear_fecha(loc_desde, desde)
+                await self._esperar(300)
+                return (await loc_desde.input_value()).strip() == desde
+        except Exception:
+            pass
+        return True
 
     async def _setear_fecha(self, campo: Any, valor: str) -> bool:
         for intento in range(3):
@@ -592,6 +619,17 @@ class MisRetencionesPortal(PortalArca):
             ),
             total_ms=10_000,
         ):
+            # La SPA puede mostrar el botón antes de renderizar el cartel de
+            # "sin resultados": se confirma con el texto final de la página.
+            try:
+                texto = await self.page.locator("body").inner_text(timeout=3_000)
+            except Exception:
+                texto = ""
+            if re.search(r"no se encontraron resultados|no hay resultados para tu consulta", texto, re.I):
+                raise TargetUnavailableError(
+                    "Mis Retenciones no devolvió resultados exportables",
+                    diagnostic_code="retenciones_no_results",
+                )
             raise TargetUnavailableError(
                 "no se encontró la opción de exportación de Mis Retenciones",
                 diagnostic_code="retenciones_export_button_missing",
@@ -723,6 +761,14 @@ class MisRetencionesPortal(PortalArca):
             try:
                 sin_resultados = self.page.locator("#modal-sinresultados, #mensajeSinResultados")
                 if await sin_resultados.count() and await sin_resultados.first.is_visible(timeout=200):
+                    return "no_results"
+            except Exception:
+                pass
+            # El cartel de la página de resultados convive con elementos de la
+            # tabla vacía: se mira antes que los selectores de resultados.
+            try:
+                body = (await self.page.locator("body").inner_text(timeout=300)) or ""
+                if re.search(r"no se encontraron resultados|no hay resultados para tu consulta", body, re.I):
                     return "no_results"
             except Exception:
                 pass

@@ -47,6 +47,7 @@ from bot_worker.bots.errors import (
 from bot_worker.bots.mis_retenciones.schema import (
     ENTRADAS,
     IMPUESTOS_VALIDOS,
+    TIPOS_POR_IMPUESTO,
     esquema_entrada,
     normalizar_fecha,
 )
@@ -226,6 +227,10 @@ class MisRetencionesPlugin:
             await runtime.cancellation.raise_if_cancelled()
             datos["impuestos"][codigo] = {}
             for tipo in entrada.tipos:
+                # Sin impuestos explícitos se recorren todos: cada impuesto
+                # admite solo algunos tipos (216 y 787 no tienen percepción).
+                if tipo not in TIPOS_POR_IMPUESTO.get(codigo, (tipo,)):
+                    continue
                 base = nombre_base_archivo(
                     entrada.representado_cuit,
                     entrada.fecha_desde,
