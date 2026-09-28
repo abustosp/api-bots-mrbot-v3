@@ -165,7 +165,12 @@ class AgipSession:
                     "AGIP bloqueó el acceso del worker en su página de seguridad",
                     diagnostic_code="agip_waf_blocked",
                 )
-            await self._page.get_by_role("button", name="Iniciar sesión").click()
+            await self._page.get_by_role("button", name="Iniciar sesión").click(
+                # La navegación la confirma el wait_for_function de abajo: en
+                # el portal medido el clic tardaba ~26s sólo por esperar el
+                # settle de la navegación y rozaba el timeout por defecto.
+                no_wait_after=True,
+            )
             await self._page.wait_for_function(
                 "() => location.href.includes('login.buenosaires.gob.ar') "
                 "&& Boolean(document.querySelector('#zocial-mail, #email'))",
@@ -218,8 +223,10 @@ class AgipSession:
         )
 
     async def _submit_login(self) -> None:
-        await self._page.get_by_role("button", name="Iniciar sesión").click()
         try:
+            await self._page.get_by_role("button", name="Iniciar sesión").click(
+                no_wait_after=True
+            )
             await self._page.wait_for_function(
                 """() => document.querySelector('select#cuit_representado') !== null
                 || ['#error-email', '#error-password'].some(selector => {

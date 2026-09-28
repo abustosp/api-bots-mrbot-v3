@@ -412,7 +412,10 @@ class MisionesSession:
         try:
             boton = self._page.locator("#btn_ingresar")
             if await boton.count() > 0:
-                await boton.click(timeout=10_000, force=True)
+                # El POST lo sincroniza _wait_network_idle; esperar además el
+                # settle de la navegación hacía fallar el envío con un timeout
+                # de 10s aunque el portal sí hubiera respondido.
+                await boton.click(timeout=10_000, force=True, no_wait_after=True)
                 return True
         except Exception:
             pass

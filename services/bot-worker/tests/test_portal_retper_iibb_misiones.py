@@ -83,9 +83,16 @@ MENSAJE_USUARIO_CLAVE = (
 class _LocatorMisiones:
     """Locator mínimo: cuenta y texto configurables por selector."""
 
-    def __init__(self, *, texto: str = "", cuenta: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        texto: str = "",
+        cuenta: int = 0,
+        registro: list[dict[str, Any]] | None = None,
+    ) -> None:
         self._texto = texto
         self._cuenta = cuenta
+        self._registro = registro
 
     async def count(self) -> int:
         return self._cuenta
@@ -93,8 +100,9 @@ class _LocatorMisiones:
     async def fill(self, *_: Any, **__: Any) -> None:
         return None
 
-    async def click(self, *_: Any, **__: Any) -> None:
-        return None
+    async def click(self, **kwargs: Any) -> None:
+        if self._registro is not None:
+            self._registro.append(kwargs)
 
     async def is_visible(self) -> bool:
         return False
@@ -116,20 +124,25 @@ class _LocatorMisiones:
 class _PaginaMisiones:
     """Página ATM falsa: expone formulario, cuerpo con mensaje y sin menús."""
 
-    def __init__(self, texto_cuerpo: str) -> None:
+    def __init__(self, texto_cuerpo: str, *, boton_ingresar: bool = False) -> None:
         self._texto = texto_cuerpo
+        self._boton_ingresar = boton_ingresar
+        self.clicks: list[dict[str, Any]] = []
 
     def _cuenta(self, selector: str) -> int:
         if selector == "input[type='password']":
             return 1
         if selector == "button:has-text('INGRESE CON CLAVE FISCAL')":
             return 1
+        if selector == "#btn_ingresar" and self._boton_ingresar:
+            return 1
         return 0
 
     def locator(self, selector: str) -> _LocatorMisiones:
         if selector == "body":
             return _LocatorMisiones(texto=self._texto, cuenta=1)
-        return _LocatorMisiones(cuenta=self._cuenta(selector))
+        registro = self.clicks if selector == "#btn_ingresar" else None
+        return _LocatorMisiones(cuenta=self._cuenta(selector), registro=registro)
 
     def get_by_role(self, role: str, **kwargs: Any) -> _LocatorMisiones:
         nombre = getattr(kwargs.get("name"), "pattern", "")
@@ -198,6 +211,13 @@ def test_sin_mensaje_de_rechazo_el_menu_faltante_sigue_siendo_caida_del_sitio() 
     with pytest.raises(TargetUnavailableError) as error:
         asyncio.run(sesion.ingresar())
     assert error.value.diagnostic_code == "misiones_login_submit_unavailable"
+
+
+def test_envio_de_login_misiones_no_espera_la_navegacion_del_clic() -> None:
+    pagina = _PaginaMisiones(MENSAJE_USUARIO, boton_ingresar=True)
+    sesion = _sesion_misiones(pagina)
+    assert asyncio.run(sesion._enviar_login()) is True
+    assert pagina.clicks[0].get("no_wait_after") is True
 
 
 def test_esquema_acepta_denominacion_normalizada_por_central() -> None:

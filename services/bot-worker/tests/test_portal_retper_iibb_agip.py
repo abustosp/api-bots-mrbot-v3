@@ -69,8 +69,12 @@ def test_bloqueo_waf_se_reporta_como_bloqueo_externo() -> None:
 
 
 class _BotonAgip:
-    async def click(self) -> None:
-        return None
+    def __init__(self, registro: dict[str, Any] | None = None) -> None:
+        self._registro = registro
+
+    async def click(self, **kwargs: Any) -> None:
+        if self._registro is not None:
+            self._registro.update(kwargs)
 
 
 class _PaginaSubmitLogin:
@@ -78,9 +82,10 @@ class _PaginaSubmitLogin:
 
     def __init__(self, estado: dict[str, Any]) -> None:
         self._estado = estado
+        self.click_kwargs: dict[str, Any] = {}
 
     def get_by_role(self, *_: Any, **__: Any) -> _BotonAgip:
-        return _BotonAgip()
+        return _BotonAgip(self.click_kwargs)
 
     async def wait_for_function(self, *_: Any, **__: Any) -> None:
         return None
@@ -137,6 +142,51 @@ def test_login_agip_con_representados_no_reporta_rechazo() -> None:
         {"representados": True, "errorEmail": "", "errorPassword": ""}
     )
     asyncio.run(_sesion_agip(pagina)._submit_login())
+
+
+def test_clicks_de_login_agip_no_esperan_la_navegacion() -> None:
+    class _PaginaPortada:
+        def __init__(self) -> None:
+            self.click_kwargs: dict[str, Any] = {}
+
+        def get_by_role(self, *_: Any, **__: Any) -> _BotonAgip:
+            return _BotonAgip(self.click_kwargs)
+
+        async def evaluate(self, *_: Any, **__: Any) -> bool:
+            return False
+
+        async def wait_for_function(self, *_: Any, **__: Any) -> None:
+            return None
+
+    portada = _PaginaPortada()
+    asyncio.run(_sesion_agip(portada)._open_login_gateway())
+    assert portada.click_kwargs.get("no_wait_after") is True
+
+    submit = _PaginaSubmitLogin(
+        {"representados": True, "errorEmail": "", "errorPassword": ""}
+    )
+    asyncio.run(_sesion_agip(submit)._submit_login())
+    assert submit.click_kwargs.get("no_wait_after") is True
+
+
+def test_click_de_login_agip_que_expira_es_timeout_del_sitio() -> None:
+    class _BotonQueExpira:
+        async def click(self, **_: Any) -> None:
+            raise TimeoutError("Timeout 30000ms exceeded")
+
+    class _Pagina:
+        def get_by_role(self, *_: Any, **__: Any) -> _BotonQueExpira:
+            return _BotonQueExpira()
+
+        async def wait_for_function(self, *_: Any, **__: Any) -> None:
+            return None
+
+        async def evaluate(self, *_: Any, **__: Any) -> dict[str, Any]:
+            return {}
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(_sesion_agip(_Pagina())._submit_login())
+    assert error.value.diagnostic_code == "agip_login_timeout"
 
 
 def test_validate_incluye_usuario_agip_sin_mezclarlo_con_credenciales() -> None:
