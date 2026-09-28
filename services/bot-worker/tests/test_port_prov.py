@@ -30,7 +30,7 @@ from bot_worker.bots.retper_iibb_misiones.plugin import (
     _period_to_site_format,
 )
 from bot_worker.bots.sct.plugin import SctPlugin, nombre_reporte_sct
-from bot_worker.bots.sifere.plugin import SiferePlugin, nombre_csv_sifere
+from bot_worker.bots.sifere.plugin import SiferePlugin, nombre_excel_sifere
 from bot_worker.bots.srt.plugin import SrtPlugin, es_respuesta_sin_datos
 from bot_worker.runtime.context import (
     ArtifactSlot,
@@ -263,7 +263,7 @@ def test_helpers_puros_provinciales() -> None:
     assert CUIT in base and "MISIONES" in base
     assert _looks_like_pdf(b"%PDF-1.4\n" + b"x" * 200) is True
     assert _looks_like_pdf(b"no-es-pdf") is False
-    assert nombre_csv_sifere(CUIT, "202401", 901).endswith(".csv")
+    assert nombre_excel_sifere(CUIT, "202401", 901).endswith(".xlsx")
     assert es_respuesta_sin_datos("No tiene afiliación vigente") is not None
     assert es_respuesta_sin_datos("alicuota 1,5 vigente") is None
     assert nombre_reporte_sct(CUIT, "deudas", "csv").endswith(".csv")
@@ -448,8 +448,8 @@ def test_execute_sifere_srt_sct(tmp_path: Path) -> None:
             "periodo": "202401", "jurisdicciones": [901, 902],
         })
         rts = _runtime(tmp_path, _Fabrica(_Sesion(_ServicioSifere())), {
-            "sifere_jurisdiccion_csv_901": _slot("sifere_jurisdiccion_csv_901"),
-            "sifere_jurisdiccion_csv_902": _slot("sifere_jurisdiccion_csv_902"),
+            "sifere_jurisdiccion_xlsx_901": _slot("sifere_jurisdiccion_xlsx_901"),
+            "sifere_jurisdiccion_xlsx_902": _slot("sifere_jurisdiccion_xlsx_902"),
         })
         ress = await sif.execute(pays, rts)
         assert ress.result == "OK" and len(ress.artifacts) == 2

@@ -19,6 +19,7 @@ URL_RETENCIONES = (
     "&juris={juris}&cuitAgente=&mesDesde={mes}&anioDesde={anio}"
     "&mesHasta={mes}&anioHasta={anio}"
 )
+URL_INICIO_RETENCIONES = BASE_COMARB + "/srcRetencion.do?method=retencionIn"
 
 
 class SiferePortal(PortalArca):
@@ -29,6 +30,7 @@ class SiferePortal(PortalArca):
     def __init__(self, page: Any, **kwargs: Any) -> None:
         super().__init__(page, **kwargs)
         self._representado_listo = False
+        self._retenciones_abiertas = False
 
     # ------------------------------------------------------------------
 
@@ -67,7 +69,23 @@ class SiferePortal(PortalArca):
                     "no se pudo elegir el CUIT representado en SIFERE",
                     diagnostic_code="represented_cuit_not_selectable",
                 ) from exc
-        if not await self._clickear(
+        try:
+            enviado = await selector.evaluate(
+                "select => {"
+                "const form = select.form;"
+                "if (!form) return false;"
+                # Avoid Playwright waiting for a slow navigation triggered by
+                # click(), and let evaluate() resolve before navigation starts.
+                "setTimeout(() => {"
+                "if (typeof form.requestSubmit === 'function') form.requestSubmit();"
+                "else form.submit();"
+                "}, 0);"
+                "return true;"
+                "}"
+            )
+        except Exception:
+            enviado = False
+        if not enviado and not await self._clickear(
             (
                 ambito.get_by_role("button", name=re.compile(r"Seleccionar", re.I)),
                 ambito.get_by_text("Seleccionar", exact=True),
@@ -78,43 +96,29 @@ class SiferePortal(PortalArca):
             total_ms=6_000,
         ):
             try:
-                enviado = await selector.evaluate(
+                diagnostico = await selector.evaluate(
                     "select => {"
                     "const form = select.form;"
-                    "if (!form) return false;"
-                    "if (typeof form.requestSubmit === 'function') form.requestSubmit();"
-                    "else form.submit();"
-                    "return true;"
+                    "const controls = Array.from(document.querySelectorAll("
+                    "'button,input[type=submit],input[type=button],input[type=image],a'"
+                    ")).map(el => ({"
+                    "tag: el.tagName.toLowerCase(),"
+                    "type: el.getAttribute('type') || '',"
+                    "label: (el.innerText || el.value || el.title || '').trim().slice(0, 80)"
+                    "})).filter(el => /seleccionar|continuar|ingresar|aceptar|entrar|submit/i.test(el.label));"
+                    "return JSON.stringify({form: Boolean(form), form_controls: form ? form.querySelectorAll('button,input, a').length : 0, in_frame: window !== window.top, labels: controls});"
                     "}"
                 )
-            except Exception:
-                enviado = False
-            if not enviado:
-                try:
-                    diagnostico = await selector.evaluate(
-                        "select => {"
-                        "const form = select.form;"
-                        "const controls = Array.from(document.querySelectorAll("
-                        "'button,input[type=submit],input[type=button],input[type=image],a'"
-                        ")).map(el => ({"
-                        "tag: el.tagName.toLowerCase(),"
-                        "type: el.getAttribute('type') || '',"
-                        "label: (el.innerText || el.value || el.title || '').trim().slice(0, 80)"
-                        "})).filter(el => /seleccionar|continuar|ingresar|aceptar|entrar|submit/i.test(el.label));"
-                        "return JSON.stringify({form: Boolean(form), form_controls: form ? form.querySelectorAll('button,input, a').length : 0, in_frame: window !== window.top, labels: controls});"
-                        "}"
-                    )
-                except Exception as exc:
-                    diagnostico = type(exc).__name__
-                raise TargetUnavailableError(
-                    f"el portal SIFERE no confirmó la selección del representado ({diagnostico})",
-                    diagnostic_code="sifere_seleccionar_missing",
-                )
-            try:
-                await ambito.wait_for_load_state("domcontentloaded", timeout=12_000)
-            except Exception:
-                pass
-            await self._esperar(2_500)
+            except Exception as exc:
+                diagnostico = type(exc).__name__
+            raise TargetUnavailableError(
+                f"el portal SIFERE no confirmó la selección del representado ({diagnostico})",
+                diagnostic_code="sifere_seleccionar_missing",
+            )
+        try:
+            await ambito.wait_for_load_state("domcontentloaded", timeout=12_000)
+        except Exception:
+            pass
         await self._esperar(2_500)
         self._representado_listo = True
 
@@ -174,6 +178,15 @@ class SiferePortal(PortalArca):
                 diagnostic_code="sifere_periodo_invalido",
             )
         anio, mes = texto[:4], texto[4:]
+        # Struts inicializa su colección de jurisdicciones al abrir la pantalla
+        # retencionIn. Entrar directamente a method=retencion provoca
+        # "Failed to obtain specified collection" aunque el SSO sea válido.
+        if not self._retenciones_abiertas:
+            await self.paso(
+                "abrir_retenciones",
+                self.abrir_url(URL_INICIO_RETENCIONES),
+            )
+            self._retenciones_abiertas = True
         url = URL_RETENCIONES.format(juris=codigo, mes=mes, anio=anio)
         await self.paso("abrir_jurisdiccion", self.abrir_url(url))
         await self._esperar(1_200)

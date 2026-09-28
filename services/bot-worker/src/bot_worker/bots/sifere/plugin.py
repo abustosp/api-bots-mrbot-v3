@@ -54,14 +54,14 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotRuntime = Any  # type: ignore[assignment,misc]
 
 SERVICIO_ARCA = "CONVENIO MULTILATERAL – SIFERE WEB - CONSULTAS"
-ID_ARTEFACTO_CSV = "sifere_jurisdiccion_csv"
+ID_ARTEFACTO_XLSX = "sifere_jurisdiccion_xlsx"
 
 
-def nombre_csv_sifere(cuit: str, periodo: str, jurisdiccion: int) -> str:
+def nombre_excel_sifere(cuit: str, periodo: str, jurisdiccion: int) -> str:
     """Replica el patron de nombres V2 ``'{fin} - SIFERE - ...'``."""
     digitos = re.sub(r"\D", "", cuit or "")
     fin = digitos[-1:] if digitos else "X"
-    return f"{fin} - SIFERE - {periodo} - {jurisdiccion} - {digitos}.csv"
+    return f"{fin} - SIFERE - {periodo} - {jurisdiccion} - {digitos}.xlsx"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -87,8 +87,10 @@ class SiferePlugin:
         esquema_entrada=esquema_entrada(),
         artefactos_produce=(
             ArtifactSpec(
-                nombre="sifere_jurisdiccion.csv",
-                content_types=("text/csv",),
+                # Familia sin extensión: el plugin emite un ID por jurisdicción
+                # (sifere_jurisdiccion_xlsx_901, etc.).
+                nombre="sifere_jurisdiccion",
+                content_types=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",),
                 max_bytes=52_428_800,
                 obligatorio=False,
             ),
@@ -180,7 +182,7 @@ class SiferePlugin:
     async def _consultar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Consulta cada jurisdiccion y sube sus CSV por slot."""
+        """Consulta cada jurisdiccion y sube sus XLSX por slot."""
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Consultando jurisdicciones"
         )
@@ -194,7 +196,7 @@ class SiferePlugin:
         total = len(entrada.jurisdicciones)
         for indice, codigo in enumerate(entrada.jurisdicciones):
             await runtime.cancellation.raise_if_cancelled()
-            nombre = nombre_csv_sifere(
+            nombre = nombre_excel_sifere(
                 entrada.representado_cuit, entrada.periodo, codigo
             )
             destino = runtime.artifact_store.resolve(nombre)
@@ -214,7 +216,7 @@ class SiferePlugin:
                 )
                 try:
                     referencia = await runtime.artifact_store.upload(
-                        f"{ID_ARTEFACTO_CSV}_{codigo}", destino.name
+                        f"{ID_ARTEFACTO_XLSX}_{codigo}", destino.name
                     )
                 except ValueError as exc:
                     raise ArtifactUploadError(str(exc)) from exc
