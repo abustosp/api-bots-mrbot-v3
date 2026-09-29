@@ -130,6 +130,7 @@ services:
       TLS_CLIENT_KEY_FILE: /certs/central-client.key
       TLS_REQUIRE_PEER: "1"
       TLS_EXPECTED_PEER_CN: worker-local-01
+      APOC_BASE_PATH: ${APOC_BASE_PATH:-/var/lib/mrbot/FacturasApocrifas.txt}
     secrets:
       - database_url
       - api_key_hmac_secret
@@ -146,6 +147,9 @@ services:
       - capmonster_srt_key
     volumes:
       - ../certs:/certs:ro
+      # Tabla de apócrifos de AFIP: se descarga sola y se refresca cada 7 días.
+      # Sin volumen propio, el tmpfs de /tmp la perdería en cada reinicio.
+      - apoc_base:/var/lib/mrbot
     ports:
       - "127.0.0.1:8000:8000"
     labels:
@@ -365,6 +369,7 @@ networks:
     # necesita seguir las URLs GET prefirmadas para descargar artefactos.
 
 volumes:
+  apoc_base:
   postgres_data:
   minio_data:
 

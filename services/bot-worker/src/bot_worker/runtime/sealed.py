@@ -21,7 +21,11 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 # Debe coincidir con central_api.security.sealed: límite del JSON en claro.
 # Se valida además el tamaño del blob Fernet antes de descifrar para acotar memoria.
 MAX_SEALED_SECTION_BYTES = 4_194_304
-_FERNET_MAX_BYTES = 57 + 4 * math.ceil((MAX_SEALED_SECTION_BYTES + 1) / 16)
+# Fernet agrega versión, timestamp, IV, padding y HMAC: el sobre cifrado mide a
+# lo sumo el texto plano más 57 bytes (con un bloque extra por el padding) y la
+# representación base64 lo infla un tercio. El cálculo anterior usaba la fórmula
+# del cifrado RSA, que daba un tope de ~1 MB y rechazaba la tabla APOC de 1,7 MB.
+_FERNET_MAX_BYTES = MAX_SEALED_SECTION_BYTES + 57 + 16
 _FERNET_MAX_B64_BYTES = 4 * math.ceil(_FERNET_MAX_BYTES / 3)
 
 class SealedEnvelopeError(ValueError):
