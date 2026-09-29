@@ -125,6 +125,20 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
   `.txt`, si hay más de uno o si el contenido no parece la tabla. Confirmado el
   29/09/2026.
 
+### Operación en este entorno
+
+- La caché vive en el volumen Docker `apoc_base` montado en `/var/lib/mrbot`; el
+  compose base define `APOC_BASE_PATH=/var/lib/mrbot/FacturasApocrifas.txt`.
+- Al recrear el contenedor de la central en este entorno hay que usar **los dos**
+  archivos compose: `-f infra/compose/docker-compose.yml -f
+  /home/abp/.jcode/scratch/v3pc/docker-compose.pc.yml` (y `COMPOSE_PROJECT_NAME=mrbot-pc`).
+  Recrear solo con el archivo base pierde el montaje del código y los secretos
+  locales, y la central queda apuntando a otra base (`OperationalError`, `/ready`
+  en false) aunque los contenedores parezcan sanos.
+- Cómo comprobar que quedó bien: `curl -s http://127.0.0.1:8000/ready` debe devolver
+  `"ready":true`, y `docker inspect` del contenedor debe mostrar el volumen
+  `mrbot-pc_apoc_base` en `/var/lib/mrbot`.
+
 ### Provisión del sobre y worker
 
 - La central envía el texto solo al bot `apoc`, dentro de la sección `service` del
