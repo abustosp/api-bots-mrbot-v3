@@ -70,7 +70,7 @@ disco, sin confiar en el resumen del runner. Observado:
 | `mis_comprobantes.consultar` | 2 CSV | 2.998 y 13.853 | encabezado `Fecha de Emisión;Tipo de Comprobante;...` | válidos |
 | `mis_comprobantes.historial` | 2 CSV | 2.998 y 13.853 | mismo encabezado y mismo SHA-256 que la operación anterior | válidos |
 | `liquidacion_granos.consultar` (control negativo) | — | — | falla con `CREDENTIALS_REJECTED` y sin artefactos | clasificación correcta |
-| `liquidacion_granos.consultar` (rango pedido) | 5 XLSX + 74 PDF | 2.899.933 | XLSX abiertos hoja por hoja: 65/7/2/2/5 filas; PDF con cabecera `%PDF-1.4`; SHA-256 y tamaño declarado coincidentes en los 79 | válidos |
+| `liquidacion_granos.consultar` (rango pedido) | 5 XLSX + 74 PDF | 2.899.933 | XLSX abiertos hoja por hoja: 65/7/2/2/5 filas; PDF con cabecera `%PDF-1.4`; SHA-256 y tamaño declarado coincidentes en los 79; el bucket del almacenamiento tiene exactamente esos 79 objetos bajo el intento 1 y su suma de bytes coincide con lo que declara la API | válidos |
 
 La verificación de las operaciones sin archivos se repitió leyendo el payload del job
 en la API: `facturometro.consultar` devolvió `monto` y `tope` reales, y
