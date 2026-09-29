@@ -327,6 +327,10 @@ _V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
     "descarga_csv_ventas": _boolean(),
     "descarga_csv_compras": _boolean(),
     "carga_minio": _boolean(default=True),
+    "pv": (
+        bool | None,
+        Field(default=None, description="Capa extra de compatibilidad."),
+    ),
     "carga_json": _boolean(),
     "minio_upload": _boolean(default=True),
     "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
@@ -431,7 +435,7 @@ _V2_OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
     ("pago_devoluciones", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "proxy_request", "carga_minio"),
     ("portal_iva", "descargar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "periodo", "operaciones_ng_o_e", "prorrateo_global", "prorrateo_asignacion_directa", "prorrateo_ambos", "importacion_definitiva_bienes", "importacion_servicios", "regimen_turiva", "bienes_usados", "ninguna_anteriores", "descarga_csv_ventas", "descarga_csv_compras", "carga_minio", "proxy_request"),
     ("rcel", "descargar"): ("clave_encriptada", "desde", "hasta", "cuit_representante", "nombre_rcel", "representado_cuit", "clave", "minio_upload", "proxy_request"),
-    ("retper_iibb_agip", "consultar"): ("clave_encriptada", "usuario", "clave", "cuit_representado", "denominacion", "desde", "hasta", "proxy_request", "carga_minio"),
+    ("retper_iibb_agip", "consultar"): ("clave_encriptada", "usuario", "clave", "cuit_representado", "denominacion", "desde", "hasta", "proxy_request", "pv", "carga_minio"),
     ("retper_iibb_misiones", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "desde", "hasta", "denominacion", "proxy_request", "carga_minio"),
     ("sct", "consultar"): ("clave_encriptada", "cuit_login", "clave", "cuit_representado", "proxy_request", "vencimientos_excel_minio", "vencimientos_csv_minio", "vencimientos_pdf_minio", "deudas_excel_minio", "deudas_csv_minio", "deudas_pdf_minio", "ddjj_pendientes_excel_minio", "ddjj_pendientes_csv_minio", "ddjj_pendientes_pdf_minio"),
     ("sifere", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "periodo", "representado_nombre", "proxy_request", "jurisdicciones", "carga_minio"),
@@ -810,6 +814,8 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
         return "contenido-de-archivo-de-ejemplo"
     if field_name in {"representado_nombre", "denominacion"}:
         return "Empresa de ejemplo"
+    if field_name == "pv":
+        return False
     if isinstance(default, bool):
         return default
     if field_name == "archivo_nombre":

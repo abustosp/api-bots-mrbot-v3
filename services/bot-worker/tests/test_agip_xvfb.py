@@ -1,6 +1,6 @@
-"""Variante del bot AGIP con pantalla virtual (Xvfb) y el atributo ``vp``.
+"""Variante del bot AGIP con pantalla virtual (Xvfb) y el atributo ``pv``.
 
-Cubre tres piezas: la elección por ``vp`` en el registro, el esquema de entrada
+Cubre tres piezas: la elección por ``pv`` en el registro, el esquema de entrada
 (``null``/ausente no cambian nada) y las opciones de lanzamiento de la fábrica
 cuando el manifiesto pide pantalla virtual. Todo con dobles: no abre navegadores
 ni Xvfb reales.
@@ -44,16 +44,16 @@ PAYLOAD_MINIMO = {
     ],
 )
 def test_vp_se_interpreta_solo_con_verdadero_explicito(valor: Any, esperado: bool) -> None:
-    payload = {} if valor is None and valor is not False else {"vp": valor}
+    payload = {} if valor is None and valor is not False else {"pv": valor}
     if valor is None:
-        payload = {"vp": None}
+        payload = {"pv": None}
     assert registry.pide_pantalla_virtual(payload) is esperado
 
 
 def test_vp_ausente_o_payload_raro_no_activa_la_variante() -> None:
     assert registry.pide_pantalla_virtual({}) is False
     assert registry.pide_pantalla_virtual(None) is False
-    assert registry.pide_pantalla_virtual("vp") is False
+    assert registry.pide_pantalla_virtual("pv") is False
 
 
 def test_la_variante_esta_registrada_y_solo_cambia_el_modo() -> None:
@@ -74,10 +74,10 @@ def test_la_variante_esta_registrada_y_solo_cambia_el_modo() -> None:
     "payload, esperado",
     [
         ({}, BASE),
-        ({"vp": False}, BASE),
-        ({"vp": None}, BASE),
-        ({"vp": True}, VARIANTE),
-        ({"vp": "true"}, VARIANTE),
+        ({"pv": False}, BASE),
+        ({"pv": None}, BASE),
+        ({"pv": True}, VARIANTE),
+        ({"pv": "true"}, VARIANTE),
     ],
 )
 def test_eleccion_del_plugin_por_payload(payload: dict, esperado: str) -> None:
@@ -86,7 +86,7 @@ def test_eleccion_del_plugin_por_payload(payload: dict, esperado: str) -> None:
 
 
 def test_si_la_variante_no_existe_se_usa_el_bot_normal() -> None:
-    plugin = registry.get_plugin_para_payload("liquidacion_granos", {"vp": True})
+    plugin = registry.get_plugin_para_payload("liquidacion_granos", {"pv": True})
     assert plugin is not None and plugin.manifest.nombre == "liquidacion_granos"
 
 
@@ -94,15 +94,15 @@ def test_si_la_variante_no_existe_se_usa_el_bot_normal() -> None:
     "datos, esperado",
     [
         ({}, False),
-        ({"vp": None}, False),
-        ({"vp": False}, False),
-        ({"vp": True}, True),
-        ({"vp": "true"}, True),
+        ({"pv": None}, False),
+        ({"pv": False}, False),
+        ({"pv": True}, True),
+        ({"pv": "true"}, True),
     ],
 )
 def test_el_esquema_acepta_vp_sin_romper_el_default(datos: dict, esperado: bool) -> None:
     entrada = RetperIibbAgipConsultarInput.model_validate({**PAYLOAD_MINIMO, **datos})
-    assert entrada.vp is esperado
+    assert entrada.pv is esperado
 
 
 def test_un_campo_desconocido_sigue_rechazandose() -> None:

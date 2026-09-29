@@ -302,6 +302,7 @@ _V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
     "descarga_recibidos": (bool, Field(default=False, validation_alias=AliasChoices("descarga_recibidos", "recibidos"))),
     "descarga_csv_ventas": _boolean(), "descarga_csv_compras": _boolean(),
     "carga_minio": _boolean(default=True), "carga_json": _boolean(), "minio_upload": _boolean(default=True),
+    "pv": (bool | None, Field(default=None)),
     "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
     "usuario": _string(max_length=256), "denominacion": _string(max_length=256),
     "nombre_rcel": _string(max_length=256), "medio_pago": _string(),
@@ -402,6 +403,7 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "subir_archivos": "Solicitar la generación y carga de los archivos de resultado.",
     "subir": "Solicitar la carga del archivo de resultado.",
     "proxy_request": "Configuración opcional de proxy para la solicitud.",
+    "pv": "Capa extra de compatibilidad.",
     "archivo_nombre": (
         "Nombre del archivo de entrada TXT que el cliente envió. Solo lo usa el "
         "bot para localizar la entrada temporal, no para nombrar archivos subidos."
@@ -486,6 +488,8 @@ def _example_value(name: str, bot: str, operation: str, default: Any) -> Any:
         return "contenido-de-archivo-de-ejemplo"
     if name in {"representado_nombre", "denominacion"}:
         return "Empresa de ejemplo"
+    if name == "pv":
+        return False
     if isinstance(default, bool):
         return default
     if name == "archivo_nombre":

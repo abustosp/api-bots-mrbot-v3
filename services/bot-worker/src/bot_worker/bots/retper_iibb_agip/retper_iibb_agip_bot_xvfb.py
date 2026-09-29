@@ -8,7 +8,7 @@ que con una pantalla el flujo completo consulta y descarga. Esta variante corre
 artefactos) y lo único que cambia es el modo del navegador: la fábrica levanta un
 Xvfb si hace falta y lanza Chromium con interfaz.
 
-Se elige solo cuando el pedido trae ``vp`` en verdadero
+Se elige solo cuando el pedido trae ``pv`` en verdadero
 (``bots.registry.get_plugin_para_payload``); con el atributo ausente, ``null`` o
 ``false`` el job sigue por el camino de siempre.
 """

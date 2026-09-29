@@ -65,7 +65,7 @@ class BotManifest:
     canal_navegador: str = ""
     #: Corre el navegador con pantalla virtual (Xvfb): la fábrica levanta un
     #: display si hace falta y lanza Chromium con interfaz. Apagado por defecto;
-    #: lo activa la variante ``_xvfb`` del bot cuando el pedido trae ``vp``.
+    #: lo activa la variante ``_xvfb`` del bot cuando el pedido trae ``pv``.
     pantalla_virtual: bool = False
 
     def to_status_dict(self) -> dict[str, Any]:
@@ -224,7 +224,7 @@ def get_plugin(nombre: str) -> BotPlugin | None:
 
 
 def pide_pantalla_virtual(payload: Any) -> bool:
-    """True si el pedido activa la variante con Xvfb mediante ``vp``.
+    """True si el pedido activa la variante con Xvfb mediante ``pv``.
 
     Acepta solo valores explícitos de verdad: ausente, ``None`` y ``False``
     mantienen el camino de siempre, para no cambiarle el comportamiento a los
@@ -232,7 +232,7 @@ def pide_pantalla_virtual(payload: Any) -> bool:
     """
     if not isinstance(payload, Mapping):
         return False
-    valor = payload.get("vp")
+    valor = payload.get("pv")
     if isinstance(valor, str):
         return valor.strip().lower() in {"1", "true", "si", "yes", "on"}
     return bool(valor)
@@ -243,7 +243,7 @@ def get_plugin_para_payload(nombre: str, payload: Any) -> BotPlugin | None:
 
     La convención es de plataforma: cualquier bot que registre un plugin
     ``<bot>_xvfb`` obtiene la alternativa con pantalla virtual cuando el pedido
-    trae ``vp`` en verdadero. Si la variante no está registrada, se usa el bot
+    trae ``pv`` en verdadero. Si la variante no está registrada, se usa el bot
     normal y nada cambia.
     """
     if pide_pantalla_virtual(payload):
