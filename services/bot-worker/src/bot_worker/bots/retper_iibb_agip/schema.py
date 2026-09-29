@@ -69,6 +69,9 @@ class RetperIibbAgipConsultarInput(_Base):
     )
     incluir_json: bool = True
     subir_archivo: bool = True
+    #: Alternativa con pantalla virtual (Xvfb). Ausente o ``null`` significa el
+    #: camino de siempre; solo un valor verdadero elige la variante ``_xvfe``.
+    vp: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -78,6 +81,11 @@ class RetperIibbAgipConsultarInput(_Base):
             for clave in ("representado_cuit", "cuit"):
                 if clave in datos and datos[clave] is not None:
                     datos[clave] = limpiar_cuit(datos[clave])
+            if datos.get("vp") is None:
+                # ``null`` explícito se trata como apagado, igual que ausente.
+                datos["vp"] = False
+            if isinstance(datos.get("vp"), str):
+                datos["vp"] = datos["vp"].strip().lower() in {"1", "true", "si", "yes", "on"}
         return datos
 
     @model_validator(mode="after")
@@ -114,5 +122,6 @@ def esquema_entrada() -> dict[str, Any]:
             "periodo_hasta": {"type": "string", "pattern": PERIODO_PATTERN},
             "incluir_json": {"type": "boolean"},
             "subir_archivo": {"type": "boolean"},
+            "vp": {"type": "boolean"},
         },
     }

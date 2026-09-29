@@ -128,14 +128,15 @@ def _playwright_proxy_dict(proxy: Any) -> dict[str, str] | None:
     return out
 
 
-def _entorno_navegador() -> dict[str, str]:
+def _entorno_navegador(display: str | None = None) -> dict[str, str]:
     """Entorno del proceso con los directorios XDG en un tmpfs escribible.
 
     El binario completo de Chromium escribe configuración y caché fuera del
     perfil temporal; con la raíz de solo lectura (el worker la usa) y un HOME
     sin permiso de escritura falla al lanzar. Playwright ya ubica el perfil en
     ``/tmp``: acá se hace lo mismo con el resto, sin tocar la identidad del
-    navegador.
+    navegador. Con ``display`` se agrega el display virtual para el modo con
+    interfaz.
     """
     import os
     import tempfile
@@ -154,7 +155,90 @@ def _entorno_navegador() -> dict[str, str]:
         except OSError:  # pragma: no cover - sin permiso se deja el entorno igual
             continue
         entorno[variable] = str(destino)
+    if display:
+        entorno["DISPLAY"] = display
     return entorno
+
+
+#: Xvfb levantados por este proceso (reusados entre sesiones del worker).
+_DISPLAYS: dict[str, object] = {}
+
+
+def _display_libre() -> str:
+    """Primer display virtual libre (se mira el socket del X server)."""
+    import os
+    from pathlib import Path
+
+    for numero in range(99, 130):
+        if not Path(f"/tmp/.X11-unix/X{numero}").exists():
+            return f":{numero}"
+    raise BrowserUnavailableError("no hay display virtual libre")
+
+
+def _asegurar_display() -> str:
+    """Devuelve el display a usar, levantando Xvfb si hace falta.
+
+    Si el entorno ya trae ``DISPLAY`` se respeta (no se levanta nada y tampoco
+    se cierra). Si no, se arranca un Xvfb propio, se espera su socket y se anota
+    para reusarlo en las próximas sesiones del mismo proceso y cerrarlo al
+    terminar el worker.
+    """
+    import os
+    import subprocess
+    import time
+    from pathlib import Path
+
+    actual = (os.environ.get("DISPLAY") or "").strip()
+    if actual:
+        return actual
+    for display, proceso in _DISPLAYS.items():
+        if proceso.poll() is None:  # type: ignore[attr-defined]
+            return display
+    display = _display_libre()
+    try:
+        proceso = subprocess.Popen(
+            ["Xvfb", display, "-screen", "0", "1366x768x24", "-nolisten", "tcp"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        raise BrowserUnavailableError(
+            "no se pudo arrancar Xvfb para la pantalla virtual"
+        ) from exc
+    socket = Path(f"/tmp/.X11-unix/X{display.lstrip(':')}")
+    limite = time.monotonic() + 10
+    while time.monotonic() < limite:
+        if socket.exists():
+            break
+        if proceso.poll() is not None:
+            raise BrowserUnavailableError(
+                f"Xvfb {display} termino al arrancar (codigo {proceso.returncode})"
+            )
+        time.sleep(0.1)
+    else:
+        proceso.terminate()
+        raise BrowserUnavailableError(f"Xvfb {display} no expuso su socket a tiempo")
+    _DISPLAYS[display] = proceso
+    log.info("pantalla virtual lista en %s", display)
+    return display
+
+
+def _cerrar_displays() -> None:
+    """Termina los Xvfb propios (el worker no debe dejar procesos colgados)."""
+    for display, proceso in list(_DISPLAYS.items()):
+        try:
+            if proceso.poll() is None:  # type: ignore[attr-defined]
+                proceso.terminate()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - el cierre nunca debe romper el apagado
+            pass
+        _DISPLAYS.pop(display, None)
+
+
+#: Los displays propios se cierran al terminar el proceso, incluso si el worker
+#: se apaga de golpe (atexit corre en el cierre ordenado).
+import atexit  # noqa: E402
+
+atexit.register(_cerrar_displays)
 
 
 class PlaywrightBrowserFactory:
@@ -167,11 +251,15 @@ class PlaywrightBrowserFactory:
         captcha_profiles: Any = None,
         stealth: bool = False,
         canal: str = "",
+        pantalla_virtual: bool = False,
     ) -> None:
         self._proxy = proxy
-        self._headless = True if headless else True  # headless no negociable
+        # Headless por defecto para todos los bots; la variante ``_xvfe`` es la
+        # única que pide explícitamente una pantalla virtual.
+        self._headless = True if headless else True
         self._stealth = bool(stealth)
         self._canal = str(canal or "")
+        self._pantalla_virtual = bool(pantalla_virtual)
         self._solvers = _solvers_from_profiles(captcha_profiles)
         self.launch_count = 0
         self.crash_count = 0
@@ -207,6 +295,12 @@ class PlaywrightBrowserFactory:
                     opciones["channel"] = self._canal
                     # El binario completo necesita directorios escribibles.
                     opciones["env"] = _entorno_navegador()
+                if self._pantalla_virtual:
+                    # Modo con interfaz sobre un display virtual: la fábrica
+                    # levanta el Xvfb si el entorno no trae uno.
+                    display = _asegurar_display()
+                    opciones["headless"] = False
+                    opciones["env"] = _entorno_navegador(display)
                 if self._stealth:
                     opciones["args"] = list(STEALTH_LAUNCH_ARGS)
                 browser = await playwright.chromium.launch(**opciones)
@@ -419,6 +513,7 @@ def build_browser_factory(
     captcha_profiles: Any = None,
     stealth: bool = False,
     canal: str = "",
+    pantalla_virtual: bool = False,
 ) -> Any:
     """Devuelve la fábrica real si hay Playwright, o el stub dev.
 
@@ -433,6 +528,7 @@ def build_browser_factory(
             captcha_profiles=captcha_profiles,
             stealth=stealth,
             canal=canal,
+            pantalla_virtual=pantalla_virtual,
         )
     log.warning(
         "sin playwright instalado: fábrica stub solo para desarrollo, "
@@ -449,4 +545,7 @@ __all__ = [
     "STEALTH_LAUNCH_ARGS",
     "STEALTH_CONTEXT_DEFAULTS",
     "STEALTH_INIT_SCRIPT",
+    "_asegurar_display",
+    "_cerrar_displays",
+    "_display_libre",
 ]

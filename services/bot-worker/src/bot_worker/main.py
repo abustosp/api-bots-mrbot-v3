@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from bot_worker.bots.errors import ArtifactUploadError, Categoria, ErrorDeBot
-from bot_worker.bots.registry import get_plugin
+from bot_worker.bots.registry import get_plugin, get_plugin_para_payload
 from bot_worker.config import PROTOCOL_VERSION, WorkerConfig, WorkerSettings, parse_args
 from bot_worker.schemas import BotSchemaDocument, get_schema_document
 from bot_worker.reporting.central import (
@@ -1157,7 +1157,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 )
                 or ()
             }
-            base_plugin = get_plugin(env.plugin or env.bot)
+            base_plugin = get_plugin_para_payload(env.plugin or env.bot, env.payload)
             assert base_plugin is not None  # validado en admision
             manifiesto = getattr(base_plugin, "manifest", None)
             runtime = BotRuntime(
@@ -1186,6 +1186,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                     captcha_profile,
                     stealth=bool(getattr(manifiesto, "stealth", False)),
                     canal=str(getattr(manifiesto, "canal_navegador", "") or ""),
+                    pantalla_virtual=bool(getattr(manifiesto, "pantalla_virtual", False)),
                 ),
                 cancellation=cancellation,
             )

@@ -63,6 +63,10 @@ class BotManifest:
     #: binario completo en lugar del shell recortado que se elige por defecto en
     #: headless). Vacío significa el comportamiento por defecto.
     canal_navegador: str = ""
+    #: Corre el navegador con pantalla virtual (Xvfb): la fábrica levanta un
+    #: display si hace falta y lanza Chromium con interfaz. Apagado por defecto;
+    #: lo activa la variante ``_xvfe`` del bot cuando el pedido trae ``vp``.
+    pantalla_virtual: bool = False
 
     def to_status_dict(self) -> dict[str, Any]:
         """Proyeccion para /internal/v1/bots y registro en la central."""
@@ -144,6 +148,9 @@ from bot_worker.bots.rcel.plugin import RcelPlugin  # noqa: E402
 from bot_worker.bots.retper_iibb_agip.plugin import (  # noqa: E402
     RetperIibbAgipPlugin,
 )
+from bot_worker.bots.retper_iibb_agip.retper_iibb_agip_bot_xvfe import (  # noqa: E402
+    RetperIibbAgipXvfePlugin,
+)
 from bot_worker.bots.retper_iibb_misiones.plugin import (  # noqa: E402
     RetperIibbMisionesPlugin,
 )
@@ -204,9 +211,45 @@ def _build_registry(plugins: tuple[BotPlugin, ...]) -> dict[str, BotPlugin]:
 
 REGISTRY: dict[str, BotPlugin] = _build_registry(_PLUGINS)
 
+#: Variantes por modo de un bot del catálogo (por ejemplo ``<bot>_xvfe``). No son
+#: bots nuevos: no entran en ``list_manifests`` ni en la paridad con el catálogo
+#: público, y solo se eligen desde ``get_plugin_para_payload``.
+_VARIANTES: tuple[BotPlugin, ...] = (RetperIibbAgipXvfePlugin(),)  # type: ignore[arg-type]
+VARIANTES: dict[str, BotPlugin] = _build_registry(_VARIANTES)
+
 
 def get_plugin(nombre: str) -> BotPlugin | None:
-    """Devuelve el plugin por nombre canonico o ``None`` si no existe."""
+    """Devuelve el plugin por nombre canónico, o la variante si es su nombre."""
+    return REGISTRY.get(nombre) or VARIANTES.get(nombre)
+
+
+def pide_pantalla_virtual(payload: Any) -> bool:
+    """True si el pedido activa la variante con Xvfb mediante ``vp``.
+
+    Acepta solo valores explícitos de verdad: ausente, ``None`` y ``False``
+    mantienen el camino de siempre, para no cambiarle el comportamiento a los
+    clientes que no mandan el atributo.
+    """
+    if not isinstance(payload, Mapping):
+        return False
+    valor = payload.get("vp")
+    if isinstance(valor, str):
+        return valor.strip().lower() in {"1", "true", "si", "yes", "on"}
+    return bool(valor)
+
+
+def get_plugin_para_payload(nombre: str, payload: Any) -> BotPlugin | None:
+    """Plugin del job: variante ``<bot>_xvfe`` cuando el pedido pide Xvfb.
+
+    La convención es de plataforma: cualquier bot que registre un plugin
+    ``<bot>_xvfe`` obtiene la alternativa con pantalla virtual cuando el pedido
+    trae ``vp`` en verdadero. Si la variante no está registrada, se usa el bot
+    normal y nada cambia.
+    """
+    if pide_pantalla_virtual(payload):
+        variante = VARIANTES.get(f"{nombre}_xvfe")
+        if variante is not None:
+            return variante
     return REGISTRY.get(nombre)
 
 
