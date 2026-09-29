@@ -44,7 +44,7 @@ perimetral del organismo (AGIP), que se detalla al final del documento.
 | `portal_iva.gestionar` | Excluida | importa libros y después descarga: tiene efecto de carga |
 | `portal_iva.importar` | Excluida | carga de archivos, fuera del alcance pedido |
 | `rcel.descargar` | OK | 7 PDF, 601.628 bytes |
-| `retper_iibb_agip.consultar` | Bloqueada por el perímetro del organismo | El login con usuario de ClaveCiudad funciona, pero el hop de sesión `lb.agip.gob.ar/gestionArciba/cc/redir` (submit del propio portal, posterior al login) responde HTTP 500 con la página de bloqueo del appliance (`Web Page Blocked!`, con `Attack ID 20000051` y la IP del egress que informa la propia pagina, que no se publica aca por ser un dato de red del operador); sin ese hop no hay camino al reporte, así que el rango 202506-202601 no llegó a pedirse y no hay ZIP ni SHA-256 que verificar. El filtro distingue la identidad del navegador: el mismo `curl` al mismo hop, en el mismo instante y desde la misma IP, recibe la respuesta normal con UA de Chrome (409) o de curl (409) y la página de bloqueo con UA `HeadlessChrome`. Detalle en `agip_evidencia_2026-09-29.md` |
+| `retper_iibb_agip.consultar` | Bloqueada por el perímetro del organismo | El login con usuario de ClaveCiudad funciona, pero el hop de sesión `lb.agip.gob.ar/gestionArciba/cc/redir` (submit del propio portal, posterior al login) responde HTTP 500 con la página de bloqueo del appliance (`Web Page Blocked!`, con `Attack ID 20000051` y la IP del egress que informa la propia pagina, que no se publica aca por ser un dato de red del operador); sin ese hop no hay camino al reporte, así que el rango 202506-202601 no llegó a pedirse y no hay ZIP ni SHA-256 que verificar. El filtro distingue la identidad del navegador: el mismo `curl` al mismo hop, en el mismo instante y desde la misma IP, recibe la respuesta normal con UA de Chrome (409) o de curl (409) y la página de bloqueo con UA `HeadlessChrome`. Detalle en `agip_evidencia_2026-09-29.md`. Corrida de cierre por la API pública con el código final: `01a0ed8e-c255`, 75 s, `attempts=1`, 0 artefactos, `agip_waf_blocked` |
 | `retper_iibb_misiones.consultar` | OK | 1 XLSX de 3.723 bytes y 1 PDF de 140.615 bytes |
 | `sct.consultar` | OK | 4 artefactos CSV/PDF, 38.780 bytes |
 | `sifere.consultar` | OK | 24 XLSX, 130.311 bytes |
@@ -146,6 +146,38 @@ Lo que sí quedó arreglado en el bot (`0fae68f`):
 como decisión del usuario, junto con las alternativas que dependen de él (correr
 el navegador en modo con interfaz bajo Xvfb, salir por otra red, o pedir que
 AGIP habilite el acceso). Evidencia cruda en `agip_evidencia_2026-09-29.md`.
+
+### Cierre del intento de aceptación (14:25 UTC)
+
+Corrida real por la API pública, con el par provisto y el código final desplegado:
+job `01a0ed8e-c255-7475-883b-80f2a3f4b9fe`, `FALLIDO` en 75 s, `attempts=1/3`, 0
+artefactos, `TARGET_UNAVAILABLE` / `agip_waf_blocked` con `TimeoutError` como causa
+y 3 renovaciones de lease durante las ventanas de reintento. El runbook del arnés
+no imprime las claves; el detalle sale de la base y del log del worker.
+
+Comparación antes/después del arreglo de lease con todos los jobs de AGIP del día:
+
+| Momento | Jobs | Intentos por job | Causa del fallo |
+|---|---|---|---|
+| 13:46-14:01 (antes) | `01a0ed6a`, `01a0ed6b`, `01a0ed6e`, `01a0ed78` | 1, 3, 3, 3 | `lease_expired` en los tres reencolados y un `agip_waf_blocked` |
+| 14:03-14:25 (después) | `01a0ed7a`, `01a0ed80`, `01a0ed83`, `01a0ed8e` | 1, 1, 1, 1 | solo del organismo: `agip_service_unavailable` y `agip_waf_blocked` |
+
+Qué se probó contra qué, para no dejar el resultado en “no se pudo”:
+
+| Requisito de la operación | Verificación | Resultado observado |
+|---|---|---|
+| Autenticar con usuario de ClaveCiudad | Job real por API con el par provisto | el portal acepta las credenciales y el flujo avanza hasta el hop de sesión |
+| Llegar al servicio de Ret/Per de Gestión-AR | Navegación real del portal | bloqueado por el appliance en `lb.agip.gob.ar/gestionArciba/cc/redir` (HTTP 500 + `Web Page Blocked!`) |
+| Descargar el reporte del rango 202506-202601 | Job real por API | no alcanzado: sin ese hop el rango no se pide, 0 artefactos |
+| Distinguir bloqueo de caída y reintentar por ventanas | 4 corridas posteriores al arreglo | 4 reintentos hasta pasar la portada y dos diagnósticos separados según el comportamiento del appliance |
+| No degradar el despacho | Serie de jobs del día | `attempts=1` en todas las corridas posteriores al arreglo, con renovaciones de lease registradas |
+
+Límite de diseño que cierra el análisis: el worker corre **siempre** headless
+(`runtime/browser.py`: `headless no negociable`) y, aunque la imagen trae Xvfb, el
+código rechaza el modo con interfaz. Con el appliance filtrando justamente la
+identidad headless, no hay camino soportado dentro del diseño actual: las salidas
+dependen del usuario (otra red de salida, habilitación en AGIP, o una decisión de
+producto de cambiar ese invariante).
 
 ## Trazabilidad de los requisitos
 
