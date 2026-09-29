@@ -236,16 +236,23 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
   imágenes. Consecuencia: el camino de firma, subida por URL prefirmada, descarga y
   verificación de SHA-256 se ejercitó de punta a punta, pero **no** la validación de
   firma de un servidor S3 real. Esto aplica a los artefactos de todas las corridas de
-  esta sesión, incluidas las 31 operaciones ya verificadas.
+  esta sesión, incluidas las 31 operaciones ya verificadas. Operación del reemplazo:
+  el emulador corre como contenedor `mrbot-pc-minio-emu` (imagen ya presente en la
+  máquina) con alias de red `minio` en `mrbot-pc_storage` y publicación
+  `127.0.0.1:9000`; el bucket `mrbot` se crea con
+  `curl -X PUT http://127.0.0.1:9000/mrbot`. Para volver al estado previo alcanza
+  `docker rm -f mrbot-pc-minio-emu`; si algún día se consiguen las imágenes, el
+  camino soportado es `docker compose --profile local-storage up -d minio minio-init`.
 - **Reinicio del worker con jobs en vuelo**: el worker genera un `instance_nonce`
   nuevo en cada arranque (`bot_worker/main.py`) y la central exige que
   `jobs.worker_id` coincida con la identidad canónica del nodo
   (`internal/job_access.py`). Un job asignado antes de un reinicio queda sin poder
   reportar: `/events`, `/artifacts/presign` y `/result` devuelven 403 `asignación de
-  otro worker`. Observado el 29/09 con los jobs `01a0ed6d-409c-7e1a-91b2-fac04f64f6bc`
-  y `01a0ed6e-7932-71e2-821d-c9e98b2d4a99` (subida 201/200 antes del reinicio, 403
-  después; el primero quedó `FALLIDO` con `files: []` y `data: null`). Los recupera la
-  política de lease vencido; en despliegues conviene drenar antes de reiniciar. Los
-  objetos ya subidos por un job que después falla quedan **huérfanos** en el bucket,
-  sin limpieza automática.
+  otro worker`. Observado el 29/09 en `01a0ed6d-409c-7e1a-91b2-fac04f64f6bc` (cuatro
+  presign 201 y PUT 200, reinicio, y a partir de ahí 403 en todo, job `FALLIDO` con
+  `files: []` y `data: null`) y en `01a0ed6e-7932-71e2-821d-c9e98b2d4a99`, creado diez
+  segundos después del reinicio durante el cambio de identidad: `/events` y `/result`
+  respondieron 409 y luego 403. Los recupera la política de lease vencido; en
+  despliegues conviene **drenar antes de reiniciar**. Los objetos ya subidos por un job
+  que después falla quedan **huérfanos** en el bucket, sin limpieza automática.
 
