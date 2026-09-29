@@ -17,6 +17,7 @@ from bot_worker.bots.retper_iibb_agip.session import (
     _empaquetar_descargas,
     _periodo_valido,
 )
+from bot_worker.runtime.context import JobCancelled
 
 CUIT_FICTICIO = "20123456789"
 
@@ -581,7 +582,11 @@ class _SesionAgipQueFalla:
 
 
 def _runtime_reintento(
-    tmp_path: Path, *, deadline: Any = None, avisos: list[tuple[int, int, int]] | None = None
+    tmp_path: Path,
+    *,
+    deadline: Any = None,
+    avisos: list[str] | None = None,
+    cancelacion: Any = None,
 ) -> Any:
     """Runtime minimo para ejercitar el reintento de sesion del plugin."""
 
@@ -614,7 +619,7 @@ def _runtime_reintento(
 
     return SimpleNamespace(
         credentials=SimpleNamespace(cuit_representante="", clave="secreto-ficticio"),
-        cancellation=_Cancellation(),
+        cancellation=cancelacion or _Cancellation(),
         event_sink=_Sink(),
         deadline=deadline or SimpleNamespace(remaining_seconds=lambda: 600),
         browser_factory=_BrowserFactory(),
@@ -722,6 +727,41 @@ def test_sesion_sin_deadline_no_reintenta(
 
     assert error.value.diagnostic_code == "agip_waf_blocked"
     assert _SesionAgipQueFalla.intentos == 1
+
+
+def test_sesion_cancelada_entre_intentos_corta(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """La cancelacion se revisa antes de cada intento (libera el slot)."""
+
+    esperas: list[int] = []
+
+    async def _esperar(ms: int) -> None:
+        esperas.append(ms)
+
+    class _CancelacionQueCorta:
+        llamadas = 0
+
+        async def raise_if_cancelled(self) -> None:
+            type(self).llamadas += 1
+            # 1: arranque del execute. 2: primer intento. 3: antes del segundo.
+            if type(self).llamadas >= 3:
+                raise JobCancelled("cancelacion solicitada")
+
+    _SesionAgipQueFalla.intentos = 0
+    _SesionAgipQueFalla.fallos = [
+        TargetUnavailableError("bloqueo", diagnostic_code="agip_waf_blocked")
+    ]
+    monkeypatch.setattr(plugin_module, "AgipSession", _SesionAgipQueFalla)
+    monkeypatch.setattr(plugin_module, "_esperar", _esperar)
+    runtime = _runtime_reintento(tmp_path, cancelacion=_CancelacionQueCorta())
+    plugin = RetperIibbAgipPlugin()
+
+    with pytest.raises(JobCancelled):
+        asyncio.run(plugin.execute(_entrada_agip(), runtime))
+
+    assert _SesionAgipQueFalla.intentos == 1
+    assert esperas == [5_000]
 
 
 def test_error_no_reintentable_no_se_reintenta(

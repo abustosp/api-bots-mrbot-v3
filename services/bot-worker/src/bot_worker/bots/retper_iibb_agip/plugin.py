@@ -269,6 +269,9 @@ class RetperIibbAgipPlugin:
                     )
                 await avisar(indice, total, espera)
                 await _esperar(espera)
+            # Un job cancelado durante el backoff corta aca y libera el slot del
+            # worker sin esperar a que termine el intento en curso.
+            await runtime.cancellation.raise_if_cancelled()
             try:
                 datos, artefactos = await self._sesion_consultar(
                     runtime, entrada, usuario=usuario, secretos=secretos
