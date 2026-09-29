@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import io
+import os
 import time
 import zipfile
 from pathlib import Path
@@ -40,50 +42,59 @@ async def client_for(body=None, error=False):
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-@pytest.mark.asyncio
-async def test_download_when_missing(setup_cache, monkeypatch):
-    client = await client_for(archive())
-    assert await apoc_base.download_and_cache(client) == "public-table"
+def test_download_when_missing(setup_cache):
+    async def correr():
+        client = await client_for(archive())
+        return await apoc_base.download_and_cache(client)
+
+    assert asyncio.run(correr()) == "public-table"
     assert setup_cache.read_text() == "public-table"
     assert apoc_base.read_cached_text() == "public-table"
 
 
-@pytest.mark.asyncio
-async def test_refresh_when_old(setup_cache, monkeypatch):
+def test_refresh_when_old(setup_cache, monkeypatch):
     setup_cache.write_text("old")
-    old = time.time() - 8 * 86400
-    import os
-    os.utime(setup_cache, (old, old))
-    client = await client_for(archive(text="new"))
-    original_download = apoc_base.download_and_cache
-    async def download():
-        return await original_download(client)
-    monkeypatch.setattr(apoc_base, "download_and_cache", download)
-    assert await apoc_base.refresh_if_needed() is True
+    viejo = time.time() - 8 * 86400
+    os.utime(setup_cache, (viejo, viejo))
+
+    async def correr():
+        client = await client_for(archive(text="new"))
+        original = apoc_base.download_and_cache
+
+        async def descargar():
+            return await original(client)
+
+        monkeypatch.setattr(apoc_base, "download_and_cache", descargar)
+        return await apoc_base.refresh_if_needed()
+
+    assert asyncio.run(correr()) is True
     assert setup_cache.read_text() == "new"
 
 
-@pytest.mark.asyncio
-async def test_does_not_refresh_fresh(setup_cache, monkeypatch):
+def test_does_not_refresh_fresh(setup_cache, monkeypatch):
     setup_cache.write_text("fresh")
-    monkeypatch.setattr(apoc_base, "download_and_cache", lambda: pytest.fail("unexpected download"))
-    assert await apoc_base.refresh_if_needed() is False
+    monkeypatch.setattr(
+        apoc_base, "download_and_cache", lambda: pytest.fail("unexpected download")
+    )
+    assert asyncio.run(apoc_base.refresh_if_needed()) is False
 
 
-@pytest.mark.asyncio
-async def test_network_failure_preserves_stale_cache(setup_cache, monkeypatch):
+def test_network_failure_preserves_stale_cache(setup_cache, monkeypatch):
     setup_cache.write_text("stale")
-    old = time.time() - 8 * 86400
-    import os
-    os.utime(setup_cache, (old, old))
-    def handler(request):
-        raise httpx.ConnectError("offline", request=request)
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    original_download = apoc_base.download_and_cache
-    async def download():
-        return await original_download(client)
-    monkeypatch.setattr(apoc_base, "download_and_cache", download)
-    assert await apoc_base.refresh_if_needed() is False
+    viejo = time.time() - 8 * 86400
+    os.utime(setup_cache, (viejo, viejo))
+
+    async def correr():
+        client = await client_for(error=True)
+        original = apoc_base.download_and_cache
+
+        async def descargar():
+            return await original(client)
+
+        monkeypatch.setattr(apoc_base, "download_and_cache", descargar)
+        return await apoc_base.refresh_if_needed()
+
+    assert asyncio.run(correr()) is False
     assert apoc_base.read_cached_text() == "stale"
 
 
@@ -92,11 +103,23 @@ def test_zip_without_expected_member_fails_cleanly():
         apoc_base._extract(archive("other.txt"))
 
 
-def test_provision_includes_cached_text(setup_cache, monkeypatch):
+def test_provision_includes_cached_text_for_apoc(setup_cache, monkeypatch):
     setup_cache.write_text("cached")
     apoc_base._cached_text = None
-    assert dispatcher.provisioned_section()["apoc_base_text"] == "cached"
+    seccion = dispatcher.provisioned_section("apoc")
+    # El plugin la lee de ``service`` (configure()), no del nivel superior.
+    assert seccion["service"]["apoc_base_text"] == "cached"
+    assert "apoc_base_text" not in seccion
+
+
+def test_provision_omits_base_for_other_bots(setup_cache):
+    """La tabla pesa más de un megabyte: no viaja en el sobre de otros bots."""
+    setup_cache.write_text("cached")
+    apoc_base._cached_text = None
+    for bot in (None, "ccma", "mis_comprobantes"):
+        seccion = dispatcher.provisioned_section(bot)
+        assert "apoc_base_text" not in seccion.get("service", {})
 
 
 def test_provision_omits_missing_cache(setup_cache):
-    assert "apoc_base_text" not in dispatcher.provisioned_section()
+    assert "apoc_base_text" not in dispatcher.provisioned_section("apoc")["service"]

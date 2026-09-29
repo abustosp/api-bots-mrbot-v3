@@ -38,10 +38,15 @@ def _limpio(valor: str) -> str | None:
     return texto
 
 
-def provisioned_section() -> dict:
+def provisioned_section(bot: str | None = None) -> dict:
     """Datos que el worker necesita y ya no tiene en entorno: proxy,
     claves de captcha y endpoints de servicio. Salen de los secretos de la
-    central y viajan solo dentro del sobre sellado."""
+    central y viajan solo dentro del sobre sellado.
+
+    ``bot`` limita los datos voluminosos: la tabla de apócrifos de AFIP pesa
+    más de un megabyte y solo la necesita el plugin ``apoc``, así que no debe
+    viajar en el sobre de todos los jobs.
+    """
     settings = get_settings()
     section: dict = {
         "proxy": None,
@@ -57,9 +62,11 @@ def provisioned_section() -> dict:
             "cuit_api_key": _limpio(settings.cuit_service_api_key),
         },
     }
-    apoc_base = read_cached_text()
-    if apoc_base is not None:
-        section["apoc_base_text"] = apoc_base
+    if bot == "apoc":
+        apoc_base = read_cached_text()
+        if apoc_base is not None:
+            # El plugin la lee de la sección ``service`` (configure()).
+            section["service"]["apoc_base_text"] = apoc_base
     if settings.proxy_enabled and settings.proxy_host:
         section["proxy"] = {
             "mode": settings.proxy_mode,
@@ -164,7 +171,7 @@ def build_envelope(
 
     settings = get_settings()
     sensitive = {"credentials": job.credentials}
-    sensitive.update(provisioned_section())
+    sensitive.update(provisioned_section(job.bot))
     expires_at = default_expiry(settings.worker_ack_lease_seconds)
     envelope: dict = {
         "protocol_version": 1,  # mrbot_contracts.version.PROTOCOL_VERSION
