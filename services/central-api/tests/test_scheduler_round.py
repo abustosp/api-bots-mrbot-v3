@@ -18,6 +18,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from central_api.scheduler import loop as loop_mod  # noqa: E402
+from central_api.repositories.jobs import expired_job_action  # noqa: E402
 
 
 class _Ajustes:
@@ -29,6 +30,24 @@ class _Ajustes:
 
 def _job() -> SimpleNamespace:
     return SimpleNamespace(id="job-1", status="PENDIENTE", worker_node=None)
+
+
+def test_claim_next_job_ignora_cache_pendiente_no_canonica(monkeypatch) -> None:
+    """Una entrada vieja en memoria no debe bloquear IDs PENDIENTE de PG."""
+    vieja = SimpleNamespace(id="stale", status="PENDIENTE", created_at=0)
+    actual = SimpleNamespace(id="durable", status="PENDIENTE", created_at=1)
+    monkeypatch.setattr(loop_mod, "JOBS", {"stale": vieja, "durable": actual})
+
+    assert loop_mod.claim_next_job(["durable"]) is actual
+    assert loop_mod.claim_next_job([]) is None
+
+
+def test_reaper_no_reejecuta_corriendo_ni_resultados_persistidos() -> None:
+    """Solo ASIGNADO sin acuse es repetible; resultados durable se reconcilian."""
+    assert expired_job_action("ASIGNADO", 1, 3) == "requeue"
+    assert expired_job_action("ASIGNADO", 3, 3) == "fail"
+    assert expired_job_action("CORRIENDO", 1, 3) == "fail"
+    assert expired_job_action("CORRIENDO", 1, 3, has_result=True) == "reconcile"
 
 
 def test_round_acota_claims_fallidos_sin_worker(monkeypatch) -> None:

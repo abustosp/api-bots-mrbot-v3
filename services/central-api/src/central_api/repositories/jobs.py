@@ -170,6 +170,22 @@ def _sin_nul(valor: Any) -> Any:
     return valor
 
 
+def expired_job_action(
+    status: str, attempts: int, max_attempts: int, has_result: bool = False
+) -> str:
+    """Policy for an expired lease, avoiding replay of possibly completed work.
+
+    An unacknowledged assignment is safe to retry. Once execution started, an
+    absent result is ambiguous, so fail closed rather than repeat side effects.
+    A durable result is reconciled, never rerun.
+    """
+    if has_result:
+        return "reconcile"
+    if status == "ASIGNADO" and attempts < max_attempts:
+        return "requeue"
+    return "fail"
+
+
 class JobRepository:
     """Persistencia de la agregacion ``jobs`` con ambito por usuario."""
 
@@ -690,13 +706,126 @@ class JobRepository:
         )
 
     async def expired_leases(self, *, batch_size: int = 100) -> list[UUID]:
-        """Lista jobs con lease vencido para recuperacion condicionada."""
+        """Compatibilidad: lista únicamente identificadores de leases vencidas."""
         rows = (
             await self._session.execute(
                 REAP_EXPIRED_SQL, {"batch_size": batch_size}
             )
         ).all()
         return [UUID(str(r[0])) for r in rows]
+
+    async def recover_expired_leases(
+        self, *, batch_size: int = 100
+    ) -> dict[str, Any]:
+        """Recupera leases bajo row-lock y transacción, una sola vez por intento.
+
+        ASIGNADO no fue aceptado por el worker y puede volver a PENDIENTE si
+        quedan intentos. CORRIENDO es ambiguo sin resultado durable y termina
+        FALLIDO, para no repetir una operación que quizá ya produjo efectos.
+        Si ya existe un resultado, se reconcilia su estado en vez de relanzarlo.
+        Jobs terminales nunca entran en la selección.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        rows = (
+            await self._session.execute(
+                select(Job)
+                .where(
+                    Job.status.in_(("ASIGNADO", "CORRIENDO")),
+                    Job.lease_expires_at.is_not(None),
+                    Job.lease_expires_at < now,
+                )
+                .order_by(Job.lease_expires_at.asc(), Job.id.asc())
+                .with_for_update(skip_locked=True)
+                .limit(batch_size)
+            )
+        ).scalars().all()
+
+        outcome: dict[str, Any] = {
+            "requeued": [], "failed": [], "reconciled": []
+        }
+        final_status: dict[str, str] = {}
+        for job in rows:
+            worker_id = job.worker_id
+            previous_status = str(job.status)
+            previous = await self._session.get(JobResult, job.id)
+            action = expired_job_action(
+                previous_status,
+                int(job.attempts or 0),
+                int(job.max_attempts or 0),
+                has_result=previous is not None,
+            )
+            if action == "reconcile" and previous is not None:
+                job.status = (
+                    "COMPLETO"
+                    if previous.result in ("OK", "PARCIAL")
+                    else "FALLIDO"
+                )
+                job.result = str(previous.result)
+                job.finished_at = job.finished_at or previous.received_at
+                outcome["reconciled"].append(job.id)
+                final_status[str(job.id)] = str(job.status)
+                event_type = "COMPLETADO" if job.status == "COMPLETO" else "FALLIDO"
+            elif action == "requeue":
+                job.status = "PENDIENTE"
+                job.worker_id = None
+                job.assigned_at = None
+                job.started_at = None
+                job.lease_expires_at = None
+                job.error_code = None
+                job.error_message = None
+                outcome["requeued"].append(job.id)
+                event_type = "REINTENTO"
+            else:
+                job.status = "FALLIDO"
+                job.result = "ERROR"
+                job.finished_at = now
+                job.error_code = "lease_expired"
+                job.error_message = (
+                    "Lease vencida sin resultado durable; no se reejecutó "
+                    "para evitar duplicar efectos."
+                )
+                job.lease_expires_at = None
+                job.worker_id = None
+                self._session.add(
+                    JobResult(
+                        job_id=job.id,
+                        attempt=max(1, int(job.attempts or 0)),
+                        result="ERROR",
+                        payload={"error_code": "lease_expired"},
+                        summary={"retry": False, "reason": "lease_expired"},
+                    )
+                )
+                outcome["failed"].append(job.id)
+                event_type = "FALLIDO"
+
+            job.lease_expires_at = None
+            if worker_id is not None:
+                await self._session.execute(
+                    text(
+                        "UPDATE workers SET running_jobs = GREATEST(0, running_jobs - 1) "
+                        "WHERE id = :worker_id"
+                    ),
+                    {"worker_id": str(worker_id)},
+                )
+            self._session.add(
+                JobEvent(
+                    id=new_uuid7(),
+                    job_id=job.id,
+                    attempt=max(0, int(job.attempts or 0)),
+                    event_type=event_type,
+                    event_key=f"lease-reaper:{job.attempts}",
+                    payload={
+                        "reason": "lease_expired",
+                        "previous_status": previous_status,
+                    },
+                )
+            )
+
+        await self._session.flush()
+        outcome["final_status"] = final_status
+        return outcome
 
 
 class IdempotencyConflict(RepositoryError):

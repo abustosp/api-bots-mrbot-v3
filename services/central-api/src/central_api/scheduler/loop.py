@@ -21,7 +21,6 @@ from mrbot_contracts.version import PROTOCOL_VERSION
 from central_api.db import db_configurado, nueva_sesion
 from central_api.scheduler import circuit_breaker, dispatcher
 from central_api.scheduler import reaper as reaper_mod
-from central_api.scheduler.claim import leases_vencidas_db
 from central_api.scheduler.selector import select_worker
 from central_api.settings import get_settings
 from central_api.store import ADMIN_NODES, JOBS, WORKERS, Job, utcnow
@@ -31,27 +30,122 @@ from central_api.worker_nodes import merge_nodes
 
 
 async def reap_pg_vencidas() -> list[str]:
-    """Recupera leases vencidas de PostgreSQL hacia el reaper en memoria.
+    """Recupera leases vencidas canónicamente en PostgreSQL.
 
-    Con base configurada los vencimientos canónicos viven en PG
-    (``JobRepository.expired_leases``); los IDs presentes en memoria se
-    procesan con la misma semántica W-2/W-4. Best-effort: nunca rompe la
-    vuelta del scheduler.
+    ASIGNADO sin acuse vuelve a PENDIENTE si quedan intentos. CORRIENDO sin
+    resultado durable termina FALLIDO para evitar repetir efectos ambiguos.
+    Filas terminales no se seleccionan. Las entradas cacheadas se sincronizan
+    después del commit para liberar las reservas locales.
     """
     if not db_configurado():
         return []
     try:
+        from central_api.repositories.jobs import JobRepository
+
         async with nueva_sesion() as sesion:
-            ids = await leases_vencidas_db(sesion)
-    except Exception:  # noqa: BLE001 - sin base, solo memoria
+            outcome = await JobRepository(sesion).recover_expired_leases(
+                batch_size=get_settings().scheduler_batch_size
+            )
+    except Exception as exc:  # noqa: BLE001 - best-effort, never kill scheduler
+        log.warning("reaper PostgreSQL falló: %s", type(exc).__name__)
         return []
-    ahora = utcnow()
-    for jid in ids:
-        texto = str(jid)
-        lease = reaper_mod.LEASES.get(texto)
-        if lease is not None:
-            lease["expires_at"] = min(lease["expires_at"], ahora)
-    return [str(jid) for jid in ids]
+    recovered = [
+        (str(job_id), status)
+        for status in ("requeued", "failed", "reconciled")
+        for job_id in outcome[status]
+    ]
+    for job_id, status in recovered:
+        reaper_mod.clear_lease(job_id)
+        cached = JOBS.get(job_id)
+        if cached is not None:
+            cached.status = (
+                "PENDIENTE" if status == "requeued"
+                else outcome["final_status"].get(job_id, "FALLIDO")
+                if status == "reconciled" else "FALLIDO"
+            )
+            cached.worker_node = None
+    if recovered:
+        log.info(
+            "reaper PostgreSQL: %s reencolados, %s fallidos sin replay, %s reconciliados",
+            len(outcome["requeued"]), len(outcome["failed"]),
+            len(outcome["reconciled"]),
+        )
+    return [job_id for job_id, _ in recovered]
+
+
+async def hydrate_pending_jobs(batch_size: int = 100) -> list[str]:
+    """Carga desde PostgreSQL la cola canónica que no vive en ``JOBS``.
+
+    La cache local es solo de trabajo, no autoridad: después de recrear la
+    central los jobs PENDIENTE siguen en PG y se deben volver a seleccionar.
+    Credenciales se descifran únicamente en memoria para el despacho sellado.
+    """
+    if not db_configurado():
+        return []
+    from sqlalchemy import select
+
+    from central_api.models.execution import Job as PersistedJob
+
+    try:
+        async with nueva_sesion() as sesion:
+            rows = (
+                await sesion.execute(
+                    select(PersistedJob)
+                    .where(PersistedJob.status == "PENDIENTE")
+                    .order_by(
+                        PersistedJob.priority.asc(),
+                        PersistedJob.created_at.asc(),
+                        PersistedJob.id.asc(),
+                    )
+                    .limit(batch_size)
+                )
+            ).scalars().all()
+    except Exception as exc:  # noqa: BLE001 - scheduler retries next poll
+        log.warning("no se pudo leer cola PostgreSQL: %s", type(exc).__name__)
+        return []
+
+    eligible: list[str] = []
+    for row in rows:
+        job_id = str(row.id)
+        cached = JOBS.get(job_id)
+        if cached is None:
+            credentials: dict = {}
+            if row.credential_ciphertext:
+                try:
+                    from central_api.security.rsa_credentials import (
+                        decrypt_configured_credential,
+                    )
+
+                    credentials = {
+                        "clave": decrypt_configured_credential(
+                            str(row.credential_ciphertext)
+                        )
+                    }
+                except Exception as exc:  # noqa: BLE001 - fail closed per job
+                    log.warning(
+                        "job PENDIENTE no hidratado por credencial inválida (%s)",
+                        type(exc).__name__,
+                    )
+                    continue
+            cached = Job(
+                id=job_id,
+                bot=str(row.bot),
+                operation=str(row.operation),
+                payload=dict(row.request_payload or {}),
+                credentials=credentials,
+                credential_metadata=dict(row.credential_metadata or {}),
+                status="PENDIENTE",
+                assignment_attempt=int(row.attempts or 0),
+                created_at=row.created_at,
+            )
+            JOBS[job_id] = cached
+        else:
+            # PostgreSQL decides eligibility; discard a stale in-memory state.
+            cached.status = "PENDIENTE"
+            cached.worker_node = None
+            cached.assignment_attempt = int(row.attempts or 0)
+        eligible.append(job_id)
+    return eligible
 
 def has_schedulable_work() -> bool:
     """``EXISTS`` barato: hay PENDIENTE sin cancelación pedida (nunca count)."""
@@ -60,12 +154,21 @@ def has_schedulable_work() -> bool:
     )
 
 
-def claim_next_job() -> Job | None:
-    """Reclama el PENDIENTE más antiguo elegible (análogo a ``SKIP LOCKED``)."""
+def claim_next_job(eligible_ids: list[str] | None = None) -> Job | None:
+    """Elige solo jobs canónicos si PostgreSQL proporcionó IDs elegibles."""
+    eligible_rank = (
+        {job_id: index for index, job_id in enumerate(eligible_ids)}
+        if eligible_ids is not None else None
+    )
     candidates = [
-        job for job in JOBS.values() if job.status == "PENDIENTE"
+        job for job in JOBS.values()
+        if job.status == "PENDIENTE"
+        and (eligible_rank is None or job.id in eligible_rank)
     ]
-    candidates.sort(key=lambda j: (j.created_at, j.id))
+    if eligible_rank is not None:
+        candidates.sort(key=lambda job: eligible_rank[job.id])
+    else:
+        candidates.sort(key=lambda j: (j.created_at, j.id))
     return candidates[0] if candidates else None
 
 
@@ -188,20 +291,29 @@ async def scheduler_round() -> dict:
     """Una vuelta de claims hasta ``scheduler_batch_size`` (con cesión)."""
     settings = get_settings()
     outcome = {"asignados": 0, "vacíos": 0, "sin_claim": 0}
+    eligible_ids = None
+    if db_configurado():
+        await reap_pg_vencidas()
+        eligible_ids = await hydrate_pending_jobs(settings.scheduler_batch_size)
     #: Rondas consecutivas sin progreso. Solo una entrega confirmada la
     #: reinicia: un claim exitoso no es progreso, porque puede morir en la
     #: reserva (sin worker con cupo o con PostgreSQL caído).
     sin_progreso = 0
     for _ in range(settings.scheduler_batch_size):
-        job = claim_next_job()
+        job = (
+            claim_next_job(eligible_ids)
+            if eligible_ids is not None else claim_next_job()
+        )
         if job is None:
-            if not has_schedulable_work():
+            if (eligible_ids is not None and not eligible_ids) or not has_schedulable_work():
                 break  # cola realmente vacía: dormir
             sin_progreso += 1
             outcome["vacíos"] += 1
             if sin_progreso >= settings.scheduler_max_empty_rounds:
                 break  # contención sostenida: ceder el turno
             continue
+        if eligible_ids is not None:
+            eligible_ids.remove(job.id)
         worker, token, lease_id, expira = await claim_and_reserve(job)
         if worker is None:
             # Sin worker con cupo (o con el claim PostgreSQL caído) el job no se
@@ -228,8 +340,6 @@ async def scheduler_loop(replica_id: str = "") -> None:
     settings = get_settings()
     while settings.scheduler_enabled:
         await scheduler_round()
-        if db_configurado():
-            await reap_pg_vencidas()
         reaper_mod.reap_expired(utcnow())
         await asyncio.sleep(settings.scheduler_poll_interval_ms / 1000.0)
 
