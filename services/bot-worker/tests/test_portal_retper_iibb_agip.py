@@ -68,6 +68,175 @@ def test_bloqueo_waf_se_reporta_como_bloqueo_externo() -> None:
     assert error.value.diagnostic_code == "agip_waf_blocked"
 
 
+class _BotonQueCuenta:
+    def __init__(self, estado: dict[str, Any]) -> None:
+        self._estado = estado
+
+    async def click(self, **_: Any) -> None:
+        self._estado["clics"] += 1
+
+
+class _PortadaConBloqueo:
+    """Portada AGIP falsa que responde bloqueada las veces indicadas.
+
+    ``bloqueos[i]`` dice si la página viva lleva el marcador del perímetro
+    antes del clic ``i``. Cuenta navegaciones, esperas y clics.
+    """
+
+    def __init__(self, bloqueos: list[bool]) -> None:
+        self._bloqueos = list(bloqueos)
+        self.estado: dict[str, Any] = {"gotos": [], "esperas": [], "clics": 0}
+
+    async def goto(self, url: str, **_: Any) -> None:
+        self.estado["gotos"].append(url)
+
+    async def wait_for_timeout(self, milisegundos: int) -> None:
+        self.estado["esperas"].append(milisegundos)
+
+    async def wait_for_function(self, *_: Any, **__: Any) -> None:
+        return None
+
+    async def evaluate(self, *_: Any) -> bool:
+        return self._bloqueos.pop(0) if self._bloqueos else False
+
+    def get_by_role(self, *_: Any, **__: Any) -> _BotonQueCuenta:
+        return _BotonQueCuenta(self.estado)
+
+
+PORTADA_AGIP = "https://claveciudad.agip.gob.ar/"
+
+
+def test_portada_sin_bloqueo_no_reintenta() -> None:
+    pagina = _PortadaConBloqueo([False])
+    sesion = _sesion_agip(pagina)
+    asyncio.run(sesion.login(PORTADA_AGIP))
+    asyncio.run(sesion._abrir_login_de_portada())
+    assert pagina.estado["gotos"] == [PORTADA_AGIP]
+    assert pagina.estado["esperas"] == []
+    assert pagina.estado["clics"] == 1
+
+
+def test_portada_bloqueada_se_reintenta_y_recupera() -> None:
+    pagina = _PortadaConBloqueo([True, False])
+    sesion = _sesion_agip(pagina)
+    asyncio.run(sesion.login(PORTADA_AGIP))
+    asyncio.run(sesion._abrir_login_de_portada())
+    # Un reintento: espera creciente y navegación nueva antes del clic.
+    assert pagina.estado["esperas"] == [5_000]
+    assert pagina.estado["gotos"] == [PORTADA_AGIP, PORTADA_AGIP]
+    assert pagina.estado["clics"] == 1
+
+
+def test_portada_bloqueada_persistente_reporta_bloqueo_externo() -> None:
+    pagina = _PortadaConBloqueo([True, True, True, True, True])
+    sesion = _sesion_agip(pagina)
+    asyncio.run(sesion.login(PORTADA_AGIP))
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion._abrir_login_de_portada())
+    assert error.value.diagnostic_code == "agip_waf_blocked"
+    assert pagina.estado["esperas"] == [5_000, 10_000, 15_000, 15_000]
+    assert pagina.estado["gotos"] == [PORTADA_AGIP] * 5
+    assert pagina.estado["clics"] == 0
+
+
+def test_reintento_de_portada_avisa_al_job_para_conservar_la_lease() -> None:
+    pagina = _PortadaConBloqueo([True, True, False])
+    avisos: list[tuple[int, int, int]] = []
+
+    async def _avisar(intento: int, total: int, espera_ms: int) -> None:
+        avisos.append((intento, total, espera_ms))
+
+    sesion = AgipSession(
+        SimpleNamespace(clave="secreto-ficticio"),
+        page=pagina,
+        avisar_reintento=_avisar,
+    )
+    asyncio.run(sesion.login(PORTADA_AGIP))
+    asyncio.run(sesion._abrir_login_de_portada())
+    # Un aviso por cada espera, con el tope de intentos y el backoff vigente.
+    assert avisos == [(1, 5, 5_000), (2, 5, 10_000)]
+    assert pagina.estado["clics"] == 1
+
+
+class _PaginaServicioFiltrada:
+    """Servicio que queda en la página del filtro perimetral de AGIP."""
+
+    async def wait_for_selector(self, selector: str, **_: Any) -> None:
+        if selector == "#fechaDesdeCo":
+            raise TimeoutError("Timeout 60000ms exceeded")
+        return None
+
+    async def evaluate(self, *_: Any) -> bool:
+        return True
+
+
+def test_servicio_filtrado_no_se_reporta_como_timeout_del_sitio() -> None:
+    sesion = _sesion_agip(_PaginaServicioFiltrada())
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion._open_service(CUIT_FICTICIO))
+    assert error.value.diagnostic_code == "agip_waf_blocked"
+
+
+class _PaginaSinResultados:
+    """Espera de resultados que nunca se cumple."""
+
+    def __init__(self, bloqueada: bool) -> None:
+        self._bloqueada = bloqueada
+
+    async def wait_for_function(self, *_: Any, **__: Any) -> None:
+        raise TimeoutError("Timeout 60000ms exceeded")
+
+    async def evaluate(self, *_: Any, **__: Any) -> bool:
+        return self._bloqueada
+
+
+def test_resultados_filtrados_se_reportan_como_bloqueo_externo() -> None:
+    sesion = _sesion_agip(_PaginaSinResultados(True))
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion._esperar_resultados())
+    assert error.value.diagnostic_code == "agip_waf_blocked"
+
+
+def test_resultados_sin_bloqueo_siguen_siendo_timeout_del_sitio() -> None:
+    sesion = _sesion_agip(_PaginaSinResultados(False))
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion._esperar_resultados())
+    assert error.value.diagnostic_code == "agip_results_timeout"
+
+
+def test_cuit_representado_invalido_no_llega_al_portal() -> None:
+    sesion = AgipSession(SimpleNamespace(clave="secreto-ficticio"), page=object())
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion.ingresar(usuario="cuenta@example.invalid", cuit_representado="123"))
+    assert error.value.diagnostic_code == "agip_represented_cuit_invalid"
+
+
+class _SelectorSinOpcion:
+    """Select de representados donde el CUIT pedido no existe."""
+
+    @property
+    def first(self) -> "_SelectorSinOpcion":
+        return self
+
+    async def wait_for(self, **_: Any) -> None:
+        return None
+
+    async def select_option(self, **_: Any) -> None:
+        raise TimeoutError("no existe una opción con ese value")
+
+
+class _PaginaSinRepresentado:
+    def locator(self, *_: Any, **__: Any) -> _SelectorSinOpcion:
+        return _SelectorSinOpcion()
+
+
+def test_cuit_no_representado_se_reporta_como_no_seleccionable() -> None:
+    sesion = _sesion_agip(_PaginaSinRepresentado())
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion._select_contributor(CUIT_FICTICIO))
+    assert error.value.diagnostic_code == "agip_represented_cuit_not_selectable"
+
+
 class _BotonAgip:
     def __init__(self, registro: dict[str, Any] | None = None) -> None:
         self._registro = registro
@@ -189,6 +358,34 @@ def test_click_de_login_agip_que_expira_es_timeout_del_sitio() -> None:
     assert error.value.diagnostic_code == "agip_login_timeout"
 
 
+def test_avisar_reintento_reporta_progreso_y_no_tumba_la_corrida() -> None:
+    class _SinkRegistrador:
+        def __init__(self) -> None:
+            self.eventos: list[dict[str, Any]] = []
+
+        async def progress(self, **kwargs: Any) -> None:
+            self.eventos.append(kwargs)
+
+    class _SinkQueFalla:
+        async def progress(self, **_: Any) -> None:
+            raise RuntimeError("transporte caido")
+
+    sink = _SinkRegistrador()
+    aviso = plugin_module._avisar_reintento(SimpleNamespace(event_sink=sink))
+    asyncio.run(aviso(2, 5, 10_000))
+    assert sink.eventos == [
+        {
+            "phase": "LOGIN",
+            "percent": 10,
+            "message": "Reintentando acceso AGIP 2/5 tras 10s de espera",
+        }
+    ]
+
+    # Un sink roto no puede hacer fallar el reintento.
+    aviso_roto = plugin_module._avisar_reintento(SimpleNamespace(event_sink=_SinkQueFalla()))
+    asyncio.run(aviso_roto(1, 5, 5_000))
+
+
 def test_validate_incluye_usuario_agip_sin_mezclarlo_con_credenciales() -> None:
     plugin = RetperIibbAgipPlugin()
     validado = asyncio.run(
@@ -215,9 +412,10 @@ def test_execute_usa_contexto_comun_y_sesion_agip(
     invocaciones: dict[str, Any] = {}
 
     class _SesionAgipFake:
-        def __init__(self, credentials: Any, *, page: Any) -> None:
+        def __init__(self, credentials: Any, *, page: Any, **kwargs: Any) -> None:
             invocaciones["credentials"] = credentials
             invocaciones["page"] = page
+            invocaciones["avisar_reintento"] = kwargs.get("avisar_reintento")
 
         async def login(self, url: str) -> None:
             invocaciones["url"] = url

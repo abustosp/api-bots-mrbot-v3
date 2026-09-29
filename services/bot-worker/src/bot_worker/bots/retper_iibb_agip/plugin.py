@@ -106,6 +106,31 @@ def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     return TargetUnavailableError(f"falla del organismo: {texto}")
 
 
+def _avisar_reintento(runtime: Any) -> Any:
+    """Aviso best-effort para conservar la lease del job durante el backoff.
+
+    El perímetro de AGIP bloquea por ventanas; si el reintento espera en
+    silencio, el reaper de la central reencola el job antes de que el plugin
+    responda. Un evento de progreso por intento renueva la lease (y deja el
+    reintento visible). El aviso nunca tumba la corrida.
+    """
+
+    async def _avisar(intento: int, total: int, espera_ms: int) -> None:
+        try:
+            await runtime.event_sink.progress(
+                phase="LOGIN",
+                percent=10,
+                message=(
+                    f"Reintentando acceso AGIP {intento}/{total} "
+                    f"tras {espera_ms // 1000}s de espera"
+                ),
+            )
+        except Exception:
+            return
+
+    return _avisar
+
+
 class RetperIibbAgipPlugin:
     """Retenciones y percepciones IIBB de AGIP (Ciudad BA)."""
 
@@ -129,7 +154,16 @@ class RetperIibbAgipPlugin:
         costo_creditos_sugerido=2,
         idempotency_class="CONTINUACION",
         browser_instances_max=1,
-        hosts_permitidos=("claveciudad.agip.gob.ar", "login.buenosaires.gob.ar"),
+        hosts_permitidos=(
+            # El portal publica la portada y el menú en claveciudad; el
+            # servicio Gestión-AR Agentes de Recaudación vive en lb (el propio
+            # ``ir_servicio`` del portal hace submit a
+            # ``lb.agip.gob.ar/gestionArciba/cc/redir``). El login con usuario
+            # viaja a login.buenosaires.gob.ar.
+            "claveciudad.agip.gob.ar",
+            "lb.agip.gob.ar",
+            "login.buenosaires.gob.ar",
+        ),
     )
 
     def __init__(
@@ -194,7 +228,11 @@ class RetperIibbAgipPlugin:
                 )
             async with context_factory() as (_, context):
                 page = await context.new_page()
-                sesion = AgipSession(runtime.credentials, page=page)
+                sesion = AgipSession(
+                    runtime.credentials,
+                    page=page,
+                    avisar_reintento=_avisar_reintento(runtime),
+                )
                 try:
                     await sesion.login(url=self._login_url)
                     await runtime.cancellation.raise_if_cancelled()

@@ -14,6 +14,28 @@ from bot_worker.bots.errors import CredentialsRejectedError, TargetUnavailableEr
 # eligen un código fijo de diagnóstico.
 _AGIP_SIN_CUENTA_RE = re.compile(r"no existe|cuenta no registrada|sin cuenta", re.I)
 
+# El perímetro de AGIP publica su propia página de bloqueo (appliance Fortinet:
+# "Web Page Blocked!") y, a veces, corta la conexión, cuando identifica un
+# navegador automatizado. Medido en vivo el 2026-09-29 desde el egress del
+# worker: la portada `claveciudad.agip.gob.ar` se bloquea por ventanas
+# intermitentes (HTTP 500 con esa página) y el gateway del servicio
+# `lb.agip.gob.ar/gestionArciba/cc/redir` de forma estable mientras dura la
+# ventana; el mismo GET con identidad no automatizada desde la misma IP en el
+# mismo instante recibe la respuesta normal del portal (409/200). Reintentar
+# con navegación nueva y espera creciente es lo que recupera el flujo cuando la
+# ventana se abre: no se falsea la identidad del navegador ni se saltea el
+# filtro.
+_MARCA_BLOQUEO_PERIMETRAL = "Web Page Blocked!"
+# Ventanas de reintento. Cada espera queda por debajo del lease del job en la
+# central (20 s de ack y 60 s de job), así que el plugin emite un evento de
+# progreso antes de cada espera: el reaper no reencola el job mientras el
+# backoff transcurre.
+_ESPERAS_PORTADA_MS = (0, 5_000, 10_000, 15_000, 15_000)
+_TIMEOUT_NAVEGACION_MS = 45_000
+_CODIGOS_REINTENTABLES_PORTADA = frozenset(
+    {"agip_waf_blocked", "agip_login_gateway_unavailable"}
+)
+
 _RESULT_EXCEL_BUTTONS = (
     "#tablaRetenciones_botonExcel",
     "#tablaPercepciones_botonExcel",
@@ -122,15 +144,75 @@ def _empaquetar_descargas(archivos: list[Path], destino: Path) -> None:
 class AgipSession:
     """Login de ClaveCiudad y consulta de los reportes Ret/Per AGIP."""
 
-    def __init__(self, credentials: Any, *, page: Any) -> None:
+    def __init__(
+        self,
+        credentials: Any,
+        *,
+        page: Any,
+        avisar_reintento: Any = None,
+    ) -> None:
         self._credentials = credentials
         self._page = page
         self._logged_in = False
         self._representado = ""
+        self._portada_url = ""
+        self._avisar_reintento = avisar_reintento
 
     async def login(self, url: str) -> None:
         """Abre la portada AGIP; el login de usuario se completa en ingresar."""
-        await self._page.goto(url, wait_until="domcontentloaded")
+        self._portada_url = url
+        await self._page.goto(
+            url, wait_until="domcontentloaded", timeout=_TIMEOUT_NAVEGACION_MS
+        )
+
+    async def _pagina_bloqueada(self) -> bool:
+        """True si la página viva es la del filtro perimetral de AGIP."""
+        try:
+            return bool(
+                await self._page.evaluate(
+                    "marca => (document.body?.innerText || '').includes(marca)",
+                    _MARCA_BLOQUEO_PERIMETRAL,
+                )
+            )
+        except Exception:
+            return False
+
+    @staticmethod
+    def _error_bloqueo() -> TargetUnavailableError:
+        return TargetUnavailableError(
+            "AGIP bloqueó el acceso del worker en su página de seguridad",
+            diagnostic_code="agip_waf_blocked",
+        )
+
+    async def _abrir_login_de_portada(self) -> None:
+        """Abre la portada y el login, reintentando el bloqueo intermitente.
+
+        La portada de ClaveCiudad se bloquea por ventanas: cada reintento
+        espera un backoff creciente y vuelve a navegar desde cero (página
+        nueva) antes de repetir el clic. Sin bloqueo, el primer intento no
+        navega de nuevo: ``login`` ya dejó la portada cargada.
+        """
+        ultimo: TargetUnavailableError | None = None
+        total = len(_ESPERAS_PORTADA_MS)
+        for indice, espera in enumerate(_ESPERAS_PORTADA_MS):
+            if indice:
+                if self._avisar_reintento is not None:
+                    await self._avisar_reintento(indice, total, espera)
+                await self._page.wait_for_timeout(espera)
+                if self._portada_url:
+                    await self._page.goto(
+                        self._portada_url,
+                        wait_until="domcontentloaded",
+                        timeout=_TIMEOUT_NAVEGACION_MS,
+                    )
+            try:
+                await self._open_login_gateway()
+                return
+            except TargetUnavailableError as exc:
+                if exc.diagnostic_code not in _CODIGOS_REINTENTABLES_PORTADA:
+                    raise
+                ultimo = exc
+        raise (ultimo or self._error_bloqueo())
 
     async def ingresar(self, usuario: str, cuit_representado: str) -> None:
         """Autentica en ClaveCiudad, selecciona CUIT y abre Gestión-AR."""
@@ -145,7 +227,7 @@ class AgipSession:
                 diagnostic_code="agip_represented_cuit_invalid",
             )
 
-        await self._open_login_gateway()
+        await self._abrir_login_de_portada()
         await self._open_email_login()
         await self._page.locator("#email").fill(usuario)
         await self._page.locator("#password-text-field").fill(clave)
@@ -157,14 +239,8 @@ class AgipSession:
 
     async def _open_login_gateway(self) -> None:
         try:
-            bloqueada = await self._page.evaluate(
-                "() => (document.body?.innerText || '').includes('Web Page Blocked!')"
-            )
-            if bloqueada:
-                raise TargetUnavailableError(
-                    "AGIP bloqueó el acceso del worker en su página de seguridad",
-                    diagnostic_code="agip_waf_blocked",
-                )
+            if await self._pagina_bloqueada():
+                raise self._error_bloqueo()
             await self._page.get_by_role("button", name="Iniciar sesión").click(
                 # La navegación la confirma el wait_for_function de abajo: en
                 # el portal medido el clic tardaba ~26s sólo por esperar el
@@ -179,17 +255,8 @@ class AgipSession:
         except TargetUnavailableError:
             raise
         except Exception as exc:
-            try:
-                bloqueada = await self._page.evaluate(
-                    "() => (document.body?.innerText || '').includes('Web Page Blocked!')"
-                )
-            except Exception:
-                bloqueada = False
-            if bloqueada:
-                raise TargetUnavailableError(
-                    "AGIP bloqueó el acceso del worker en su página de seguridad",
-                    diagnostic_code="agip_waf_blocked",
-                ) from exc
+            if await self._pagina_bloqueada():
+                raise self._error_bloqueo() from exc
             raise TargetUnavailableError(
                 "No se pudo abrir el acceso de ClaveCiudad",
                 diagnostic_code="agip_login_gateway_unavailable",
@@ -311,6 +378,11 @@ class AgipSession:
             )
             await self._page.wait_for_selector("#fechaDesdeCo", state="attached", timeout=60_000)
         except Exception as exc:
+            if await self._pagina_bloqueada():
+                # El portal manda al gateway del servicio
+                # (lb.agip.gob.ar/gestionArciba/cc/redir) y el perímetro lo
+                # bloquea: sin esto se reportaba como timeout del servicio.
+                raise self._error_bloqueo() from exc
             raise TargetUnavailableError(
                 "No se pudo abrir Gestión-AR Agentes de Recaudación",
                 diagnostic_code="agip_service_unavailable",
@@ -391,6 +463,8 @@ class AgipSession:
             )
             return await handle.json_value()
         except Exception as exc:
+            if await self._pagina_bloqueada():
+                raise self._error_bloqueo() from exc
             raise TargetUnavailableError(
                 "AGIP no mostró resultados ni aviso de período sin datos",
                 diagnostic_code="agip_results_timeout",
