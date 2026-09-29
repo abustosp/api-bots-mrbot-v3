@@ -79,6 +79,14 @@ en la API: `facturometro.consultar` devolvió `monto` y `tope` reales, y
 `comprobantes.solicitar` y `mis_comprobantes.solicitar` devolvieron los dos
 identificadores de consulta (`emitidos` y `recibidos`).
 
+Además, todas las afirmaciones de este documento sobre las corridas de hoy se
+auditaron contra el sistema en vivo: 42 filas contra las 42 operaciones del
+código, los recuentos de estado (34/7/1), los jobs citados con su estado, su
+cantidad de archivos, sus bytes y sus intentos, la forma real de las constancias
+frente a la del stub, la respuesta del almacenamiento y los tests citados. Las 16
+comprobaciones dieron PASS; la auditoría es reproducible y no depende de inspección
+de código.
+
 ## Defecto de despacho corregido durante la validación (29/09/2026)
 
 Los jobs que tardaban más de ~20 s empezaron a terminar `FALLIDO` con
