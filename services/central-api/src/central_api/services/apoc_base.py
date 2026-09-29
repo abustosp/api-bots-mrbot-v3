@@ -127,8 +127,19 @@ async def refresh_if_needed() -> bool:
 
 
 async def refresh_loop() -> None:
-    """Initial refresh then periodic checks without blocking job dispatch."""
-    await refresh_if_needed()
+    """Refresco inicial y luego chequeos periódicos sin bloquear el despacho.
+
+    Con la caché al día se espera el intervalo completo (7 días por defecto).
+    Si el archivo falta o quedó vencido (por ejemplo AFIP no respondía al
+    arrancar), se reintenta dentro de una hora en lugar de esperar una semana.
+    """
+    intervalo = max(1, get_settings().apoc_refresh_interval_days) * 86400
+    reintento = min(3600, intervalo)
     while True:
-        await asyncio.sleep(max(1, get_settings().apoc_refresh_interval_days) * 86400)
         await refresh_if_needed()
+        ruta = Path(get_settings().apoc_base_path)
+        try:
+            al_dia = ruta.is_file() and (time.time() - ruta.stat().st_mtime) < intervalo
+        except OSError:
+            al_dia = False
+        await asyncio.sleep(intervalo if al_dia else reintento)

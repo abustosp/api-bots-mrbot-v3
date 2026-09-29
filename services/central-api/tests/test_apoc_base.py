@@ -165,3 +165,40 @@ def test_provision_omits_base_for_other_bots(setup_cache):
 
 def test_provision_omits_missing_cache(setup_cache):
     assert "apoc_base_text" not in dispatcher.provisioned_section("apoc")["service"]
+
+
+def test_refresh_loop_reintenta_pronto_si_falta_la_tabla(setup_cache, monkeypatch):
+    """Sin caché (AFIP caído al arrancar) reintenta en una hora, no en una semana."""
+    dormido: list[float] = []
+
+    async def sin_refresco() -> bool:
+        return False
+
+    async def dormir(segundos: float) -> None:
+        dormido.append(segundos)
+        if len(dormido) >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(apoc_base, "refresh_if_needed", sin_refresco)
+    monkeypatch.setattr(apoc_base.asyncio, "sleep", dormir)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(apoc_base.refresh_loop())
+    assert dormido == [3600, 3600]
+
+
+def test_refresh_loop_espera_la_semana_con_cache_al_dia(setup_cache, monkeypatch):
+    setup_cache.write_text(TABLA)
+    dormido: list[float] = []
+
+    async def sin_refresco() -> bool:
+        return False
+
+    async def dormir(segundos: float) -> None:
+        dormido.append(segundos)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(apoc_base, "refresh_if_needed", sin_refresco)
+    monkeypatch.setattr(apoc_base.asyncio, "sleep", dormir)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(apoc_base.refresh_loop())
+    assert dormido == [7 * 86400]
