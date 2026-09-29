@@ -13,7 +13,7 @@ import logging
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Any
 
@@ -1059,12 +1059,16 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
         workdir = None
         credentials: FiscalCredentials | None = None
         outcome = "fallido"
+        renovacion_lease: asyncio.Task[None] | None = None
         try:
             if job.cancel_requested:
                 cancellation.cancel()
             job.local_state = "PREPARANDO"
             job.started_at = _now_z()
             await _report_started(app, env, job)
+            renovacion_lease = asyncio.create_task(
+                _renovar_lease_periodicamente(app, env, job)
+            )
 
             if env.credentials:
                 credentials = FiscalCredentials(
@@ -1329,6 +1333,10 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 log.warning("resultado sin confirmar; se conserva la tarea")
         finally:
             # Cleanup garantizado: browser via factory, workspace, secreto.
+            if renovacion_lease is not None:
+                renovacion_lease.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await renovacion_lease
             _cancel_tokens.pop(job.key, None)
             cleanup_workdir(workdir)
             credentials = None
@@ -1393,6 +1401,56 @@ async def _drenar_al_apagar(
                 token.cancel()
         log.warning("drenaje vencido: cancelación cooperativa pedida")
         await supervisor.wait_empty(timeout_seconds=10.0)
+
+
+#: Cada cuánto se renueva la lease de un job en curso. La central la
+#: extiende con cada evento válido y el TTL de trabajo es ``JOB_LEASE_SECONDS``
+#: (60 s por defecto), así que 20 s deja margen de sobra.
+_LEASE_RENEW_INTERVAL_SECONDS = 20
+
+
+async def _renovar_lease_periodicamente(
+    app: FastAPI, env: JobEnvelope, job: LocalJob
+) -> None:
+    """Manda ``heartbeat_hint`` mientras el job corre.
+
+    Renueva la lease del intento sin esperar a que el plugin emita progreso:
+    una etapa que calla (descargas largas, armado de ZIP, espera del portal)
+    dejaría vencer la lease y el job se reencolaría o fallaría por
+    ``lease_expired`` aunque el worker esté sano y trabajando.
+    """
+    settings: WorkerConfig = app.state.settings
+    client = getattr(app.state, "http", None)
+    if client is None:
+        return
+    headers = _central_headers(app, _central_node(app))
+    extra: dict[str, Any] = {"headers": headers} if headers else {}
+    intervalo = max(0.05, float(_LEASE_RENEW_INTERVAL_SECONDS))
+    seq = 0
+    try:
+        while True:
+            await asyncio.sleep(intervalo)
+            seq += 1
+            try:
+                await client.post(
+                    f"{settings.central_url.rstrip('/')}/internal/v1/jobs/"
+                    f"{job.job_id}/events",
+                    json={
+                        "event_id": (
+                            f"evt-{job.job_id}-{job.attempt}-hint-{seq}"
+                        ),
+                        "event_type": "heartbeat_hint",
+                        "assignment_attempt": job.attempt,
+                        "assignment_token": env.assignment_token,
+                    },
+                    timeout=3.0,
+                    **extra,
+                )
+            except Exception:
+                log.debug("lease hint descartado (transporte)")
+    except asyncio.CancelledError:
+        # Cancelación cooperativa: el lazo termina cuando _run_job cierra.
+        raise
 
 
 async def _report_started(

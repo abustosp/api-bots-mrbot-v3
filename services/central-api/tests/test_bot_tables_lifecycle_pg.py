@@ -291,7 +291,8 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT status, worker_id::text, attempts, assigned_at IS NOT NULL,"
-                    " lease_expires_at IS NOT NULL, app_version, protocol_version"
+                    " lease_expires_at IS NOT NULL, app_version, protocol_version,"
+                    " lease_expires_at"
                     " FROM jobs WHERE id = %s",
                     (job_id,),
                 )
@@ -339,6 +340,34 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
             )
             assert evt.status_code == 200, evt.text
             assert evt.json()["status"] == "CORRIENDO", evt.text
+
+            # La renovación tiene que quedar escrita en la DB: el reaper en
+            # PostgreSQL mira ``jobs.lease_expires_at`` y no la copia en
+            # memoria, así que un evento válido debe extender la lease de
+            # trabajo (60 s por defecto) por encima de la de asignación.
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT lease_expires_at FROM jobs WHERE id = %s", (job_id,)
+                )
+                lease_tras_started = cur.fetchone()[0]
+            lease_claim = claim_row[7]
+            print(
+                "[4b] lease tras claim=%s | tras started=%s (+%ss)"
+                % (
+                    lease_claim,
+                    lease_tras_started,
+                    (
+                        lease_tras_started - lease_claim
+                        if lease_tras_started and lease_claim
+                        else None
+                    ),
+                )
+            )
+            assert lease_tras_started is not None and lease_claim is not None
+            assert lease_tras_started >= lease_claim + timedelta(seconds=30), (
+                lease_claim,
+                lease_tras_started,
+            )
 
             art_key = f"jobs/{job_id}/1/salida.pdf"
             cuerpo_resultado = {

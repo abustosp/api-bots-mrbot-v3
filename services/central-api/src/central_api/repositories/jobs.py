@@ -9,7 +9,7 @@ vacio es ``ROLLBACK``, nunca exito parcial.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +24,25 @@ from central_api.repositories.base import (
     RepositoryError,
     assert_no_secretos,
 )
+
+#: Tipos de evento que prueban que el worker sigue vivo sobre el job.
+_EVENTOS_QUE_RENUEVAN = ("started", "progress", "heartbeat_hint")
+
+
+def _segundos_de_lease() -> int:
+    """TTL de la lease de trabajo (``JOB_LEASE_SECONDS``, 60 por defecto).
+
+    Sin settings disponibles se usa el valor del contrato: la renovación nunca
+    debe fallar por configuración, porque de ella depende que el reaper no
+    reencole un job que está corriendo bien.
+    """
+    try:
+        from central_api.settings import get_settings
+
+        return max(1, int(get_settings().job_lease_seconds))
+    except Exception:  # pragma: no cover - fallback ante settings roto
+        return 60
+
 
 #: Reclamo atomico job + slot de worker sano (una sola sentencia).
 CLAIM_SQL = text(
@@ -643,6 +662,16 @@ class JobRepository:
                 ),
                 {"worker_id": str(job.worker_id)},
             )
+
+        # El reaper en PostgreSQL mira ``jobs.lease_expires_at``: si la
+        # renovación quedara solo en la copia en memoria, un job que trabaja
+        # bien se reencolaría o fallaría con ``lease_expired`` a los
+        # ``WORKER_ACK_LEASE_SECONDS`` de haber sido asignado.
+        if event_type in _EVENTOS_QUE_RENUEVAN and job.status in (
+            "ASIGNADO",
+            "CORRIENDO",
+        ):
+            job.lease_expires_at = now + timedelta(seconds=_segundos_de_lease())
 
         self._session.add(
             JobEvent(
