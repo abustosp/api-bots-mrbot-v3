@@ -25,7 +25,10 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 SEALED_ALG = "RSA-OAEP-SHA256+Fernet"
-MAX_SEALED_SECTION_BYTES = 1_048_576
+# The APOC AFIP cache is about 1.7 MiB before sealing. Keep a finite 4 MiB
+# plaintext ceiling for it plus metadata; Fernet/base64 make the wire envelope
+# larger, so this is deliberately a strict input bound, not an unbounded mode.
+MAX_SEALED_SECTION_BYTES = 4_194_304
 
 
 class SealedSectionError(ValueError):
@@ -50,7 +53,7 @@ def encrypt_sealed_section(pubkey_pem: str, section: dict[str, Any]) -> dict[str
         "utf-8"
     )
     if len(raw) > MAX_SEALED_SECTION_BYTES:
-        raise SealedSectionError("sección sensible excede 1 MiB")
+        raise SealedSectionError("sección sensible excede 4 MiB")
     try:
         pubkey = serialization.load_pem_public_key(pubkey_pem.encode("utf-8"))
     except (ValueError, TypeError) as exc:

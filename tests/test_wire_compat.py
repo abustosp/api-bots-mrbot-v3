@@ -497,6 +497,37 @@ def test_sobre_sellado_roundtrip_central_a_worker():
     assert sellado_worker.decrypt_sealed_section(privada, sobre) == seccion
 
 
+def test_sobre_sellado_admite_cache_apoc_mayor_a_un_mib():
+    """El cache APOC central (aprox. 1.7 MiB) debe caber en el sobre."""
+    from bot_worker.runtime import sealed as sellado_worker
+    from central_api.security.sealed import (
+        MAX_SEALED_SECTION_BYTES,
+        encrypt_sealed_section,
+    )
+
+    privada, publica = sellado_worker.generate_sealed_keypair()
+    texto = "x" * 1_700_000
+    sobre = encrypt_sealed_section(publica, {"service": {"apoc_base_text": texto}})
+    assert MAX_SEALED_SECTION_BYTES >= 1_700_000
+    assert sellado_worker.decrypt_sealed_section(privada, sobre) == {
+        "service": {"apoc_base_text": texto}
+    }
+
+
+def test_sobre_sellado_rechaza_estrictamente_mas_de_cuatro_mib():
+    """El aumento conserva un límite duro y falla cerrado al excederlo."""
+    from central_api.security.sealed import (
+        MAX_SEALED_SECTION_BYTES,
+        SealedSectionError,
+        encrypt_sealed_section,
+    )
+    from bot_worker.runtime.sealed import generate_sealed_keypair
+
+    _, publica = generate_sealed_keypair()
+    with pytest.raises(SealedSectionError, match="4 MiB"):
+        encrypt_sealed_section(publica, {"value": "x" * MAX_SEALED_SECTION_BYTES})
+
+
 def test_sobre_sellado_falla_cerrado_sin_fugar_secreto():
     """Un sobre corrupto falla sin exponer el secreto en el error."""
     from bot_worker.runtime import sealed as sellado_worker
