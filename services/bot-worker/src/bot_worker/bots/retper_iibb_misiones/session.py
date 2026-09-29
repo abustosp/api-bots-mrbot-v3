@@ -168,7 +168,11 @@ class MisionesSession:
                 diagnostic_code="misiones_login_form_unavailable",
             )
 
-        captcha_resuelto_antes = await self._resolver_captcha_si_aparece()
+        # La extranet de ATM pide el CAPTCHA *después* del primer envío: el
+        # widget se inicializa al enviar el formulario. Resolverlo antes no
+        # registra el token en el JS del portal y el primer POST vuelve con el
+        # diálogo de error genérico ("usuario incorrecto"), aunque el usuario
+        # exista. El flujo del logger histórico es enviar, resolver y reenviar.
         if not await self._enviar_login():
             await self._raise_si_login_rechazado()
             raise TargetUnavailableError(
@@ -177,21 +181,18 @@ class MisionesSession:
             )
         await self._wait_network_idle()
 
-        if not captcha_resuelto_antes and await self._resolver_captcha_si_aparece():
-            # Si el primer envio ya navego o el portal cambio el formulario,
-            # el handler puede no estar disponible. En ese caso se verifica
-            # el resultado de autenticacion abajo, sin inventar otro error.
+        if await self._resolver_captcha_si_aparece():
             await self._enviar_login()
             await self._wait_network_idle()
 
         await self._raise_si_login_rechazado()
 
-        if not await _click_first(
-            [
-                self._page.get_by_role("link", name=re.compile(r"Ingresos\s+Brutos", re.I)),
-                self._page.locator("a:has-text('Ingresos Brutos')"),
-            ],
-            timeout_ms=10_000,
+        if not await self._clickear_en_ambitos(
+            lambda ambito: (
+                ambito.get_by_role("link", name=re.compile(r"Ingresos\s+Brutos", re.I)),
+                ambito.locator("a:has-text('Ingresos Brutos')"),
+            ),
+            total_ms=16_000,
         ):
             await self._raise_si_login_rechazado()
             await self._volcar_pantalla("misiones_sin_menu_ingresos_brutos")
@@ -201,15 +202,17 @@ class MisionesSession:
             )
         await self._wait_network_idle()
 
-        if not await _click_first(
-            [
-                self._page.get_by_role(
-                    "link", name=re.compile(r"Consulta\s+de\s+Ret\./Perc\.", re.I)
+        if not await self._clickear_en_ambitos(
+            lambda ambito: (
+                ambito.get_by_role(
+                    "link", name=re.compile(r"Consulta\s+de\s+Ret\.?/Perc\.?", re.I)
                 ),
-                self._page.locator("a:has-text('Consulta de Ret./Perc.')"),
-            ],
-            timeout_ms=10_000,
+                ambito.locator("a:has-text('Consulta de Ret./Perc.')"),
+                ambito.locator("a:has-text('Ret./Perc.')"),
+            ),
+            total_ms=16_000,
         ):
+            await self._volcar_pantalla("misiones_sin_menu_consulta_retper")
             raise TargetUnavailableError(
                 "No se pudo abrir Consulta de Ret./Perc. en Misiones",
                 diagnostic_code="misiones_consulta_unavailable",
@@ -237,8 +240,10 @@ class MisionesSession:
         if desde_site > hasta_site:
             raise ValueError("El periodo desde no puede superar al periodo hasta")
 
-        desde_ok = await _fill_first([self._page.locator("#periodo_desde")], desde_site, 6000)
-        hasta_ok = await _fill_first([self._page.locator("#periodo_hasta")], hasta_site, 6000)
+        # El formulario de consulta vive dentro de un marco de la extranet:
+        # buscarlo solo en la página principal deja el paso sin efecto.
+        desde_ok = await self._fill_en_ambitos("#periodo_desde", desde_site)
+        hasta_ok = await self._fill_en_ambitos("#periodo_hasta", hasta_site)
         if not desde_ok or not hasta_ok:
             raise TargetUnavailableError(
                 "No se pudieron cargar los periodos de consulta en Misiones",
@@ -249,23 +254,32 @@ class MisionesSession:
 
         destino_xlsx = Path(destino_xlsx)
         destino_xlsx.parent.mkdir(parents=True, exist_ok=True)
-        boton_excel = [
-            self._page.get_by_role("button", name=re.compile(r"Generar\s+Excel", re.I)),
-            self._page.locator("button:has-text('Generar Excel')"),
-            self._page.locator("input[value*='Excel' i]"),
-        ]
-        for locator in boton_excel:
-            try:
-                if await locator.count() == 0:
+        descargado = False
+        for ambito in self._ambitos():
+            botones = [
+                ambito.get_by_role(
+                    "button", name=re.compile(r"Generar\s+Excel", re.I)
+                ),
+                ambito.locator("button:has-text('Generar Excel')"),
+                ambito.locator("input[value*='Excel' i]"),
+            ]
+            for locator in botones:
+                try:
+                    if await locator.count() == 0:
+                        continue
+                    async with self._page.expect_download(
+                        timeout=45_000
+                    ) as descarga_info:
+                        await locator.first.click(timeout=8000)
+                    descarga = await descarga_info.value
+                    await descarga.save_as(str(destino_xlsx))
+                    descargado = True
+                    break
+                except Exception:
                     continue
-                async with self._page.expect_download(timeout=45_000) as descarga_info:
-                    await locator.first.click(timeout=8000)
-                descarga = await descarga_info.value
-                await descarga.save_as(str(destino_xlsx))
+            if descargado:
                 break
-            except Exception:
-                continue
-        else:
+        if not descargado:
             raise TargetUnavailableError(
                 "No se pudo descargar el Excel de Misiones",
                 diagnostic_code="misiones_xlsx_download_missing",
@@ -295,6 +309,10 @@ class MisionesSession:
         )
         if len(usuario) != 11:
             raise CredentialsRejectedError("Falta el CUIT fiscal de la sesion Misiones")
+        # El reporte Oracle espera el período compacto ``AAAAMM``: con
+        # ``AAAA/MM`` su trigger ``afterpform`` falla con ORA-01722.
+        desde_compacto = self._desde.replace("/", "")
+        hasta_compacto = self._hasta.replace("/", "")
 
         cookies = await self._context.cookies("https://extranet.atmisiones.gob.ar")
         cookie_header = "; ".join(
@@ -314,8 +332,8 @@ class MisionesSession:
             "P_CUIT_AGENTE=null&"
             "P_DATOS_CONTRIB=N&"
             "P_C_REGIMEN=null&"
-            f"P_PERIODO_DESDE={self._desde}&"
-            f"P_PERIODO_HASTA={self._hasta}&"
+            f"P_PERIODO_DESDE={desde_compacto}&"
+            f"P_PERIODO_HASTA={hasta_compacto}&"
             "P_SUBTRIBUTO=null&"
             "P_ID_CONTRIBUYENTE=null&"
             "P_TITULO_REPORTE=MIS RETENCIONES/PERCEPCIONES&"
@@ -387,21 +405,24 @@ class MisionesSession:
             headers_pdf["Cookie"] = cookie_header
         if id_session_header:
             headers_pdf["IdSession"] = id_session_header
-        await self._resolver_captcha_si_aparece()
-        descarga = await self._context.request.get(
-            report_url, headers=headers_pdf, timeout=60_000
-        )
-        pdf = await descarga.body()
-        if descarga.status == 200 and self._response_looks_like_captcha(
-            pdf.decode("utf-8", errors="ignore")
-        ):
-            if not await self._resolver_captcha_si_aparece():
-                raise CaptchaUnsolvableError("Misiones solicito un CAPTCHA al descargar el PDF")
+        # El servlet de Oracle Reports responde la primera vez con su propia
+        # página de estado mientras arma el reporte: hay que reintentar hasta
+        # recibir el PDF real.
+        pdf = b""
+        for intento in range(6):
+            await self._resolver_captcha_si_aparece()
             descarga = await self._context.request.get(
                 report_url, headers=headers_pdf, timeout=60_000
             )
             pdf = await descarga.body()
-        if descarga.status != 200 or not _looks_like_pdf(pdf):
+            if descarga.status == 200 and self._response_looks_like_captcha(
+                pdf.decode("utf-8", errors="ignore")
+            ):
+                continue
+            if descarga.status == 200 and _looks_like_pdf(pdf):
+                break
+            await asyncio.sleep(5 if intento < 5 else 0)
+        if not _looks_like_pdf(pdf):
             raise TargetUnavailableError(
                 "Misiones devolvio un PDF invalido",
                 diagnostic_code="misiones_pdf_invalid",
@@ -593,6 +614,73 @@ class MisionesSession:
                 f"No se pudo resolver el CAPTCHA de Misiones ({type(exc).__name__})",
                 diagnostic_code="misiones_captcha_etapa_desconocida",
             ) from exc
+
+    def _ambitos(self) -> list[Any]:
+        """Página y marcos donde puede vivir el menú de la extranet.
+
+        La extranet de ATM arma el menú dentro de ``frame``/``iframe``: buscar
+        solo en la página principal deja el clic sin efecto aunque el enlace
+        exista, que es lo que reportaba ``misiones_ingresos_brutos_unavailable``.
+        """
+        ambitos: list[Any] = [self._page]
+        for marco in list(getattr(self._page, "frames", []) or []):
+            if marco is self._page or marco in ambitos:
+                continue
+            ambitos.append(marco)
+        return ambitos
+
+    async def _clickear_en_ambitos(
+        self, construir: Any, *, total_ms: int = 12_000
+    ) -> bool:
+        """Intenta el clic en la página y en cada marco hasta lograrlo."""
+        ambitos = self._ambitos()
+        if not ambitos:
+            return False
+        por_ambito = max(2_000, total_ms // len(ambitos))
+        for ambito in ambitos:
+            try:
+                candidatos = construir(ambito)
+            except Exception:
+                continue
+            if await _click_first(candidatos, timeout_ms=por_ambito):
+                return True
+        return False
+
+    async def _fill_en_ambitos(
+        self, selector: str, valor: str, *, total_ms: int = 15_000
+    ) -> bool:
+        """Completa un campo buscándolo en la página y en cada marco.
+
+        El formulario de consulta puede montarse después del clic de menú, así
+        que se reintenta hasta agotar ``total_ms`` en vez de fallar al primer
+        intento.
+        """
+        limite = asyncio.get_running_loop().time() + total_ms / 1000
+        while True:
+            for ambito in self._ambitos():
+                try:
+                    campo = ambito.locator(selector)
+                    if await campo.count() == 0:
+                        continue
+                except Exception:
+                    continue
+                if await _fill_first([campo], valor, timeout_ms=4_000):
+                    return True
+            if asyncio.get_running_loop().time() >= limite:
+                return False
+            await asyncio.sleep(0.5)
+
+    async def _sigue_en_login(self) -> bool:
+        """True si la pantalla actual todavía es el formulario de ingreso."""
+        try:
+            if await self._page.locator("input[name='username']").count():
+                return True
+        except Exception:
+            pass
+        try:
+            return "index.php" in str(getattr(self._page, "url", ""))
+        except Exception:
+            return False
 
     async def _volcar_pantalla(self, nombre: str) -> None:
         """Guarda el HTML y la URL de la pantalla actual para diagnóstico.

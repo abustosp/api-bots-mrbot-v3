@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import unquote_plus
 
 import pytest
 
@@ -235,6 +236,87 @@ def test_esquema_acepta_denominacion_normalizada_por_central() -> None:
         )
     )
     assert validado[1].denominacion == "EMPRESA FICTICIA"
+
+
+def test_reporte_pdf_envia_periodo_compacto_y_reintenta_el_servlet(
+    tmp_path: Path,
+) -> None:
+    """El reporte Oracle espera ``AAAAMM`` y responde su página de estado antes del PDF."""
+    enviados: list[str] = []
+    cuerpos: list[bytes] = [
+        b"<HTML><title>Oracle Reports Services - Servlet</title>REP-771</HTML>",
+        b"%PDF-1.4\n" + b"x" * 200,
+    ]
+
+    class _Respuesta:
+        def __init__(self, cuerpo: bytes) -> None:
+            self.status = 200
+            self._cuerpo = cuerpo
+
+        async def text(self) -> str:
+            return '{"id_session":"abc123","formats":["PDF"],"resultado":"OK"}'
+
+        async def body(self) -> bytes:
+            return self._cuerpo
+
+    class _Request:
+        def __init__(self) -> None:
+            self.indice = 0
+
+        async def post(self, url: str, *, data: str, **_: Any) -> _Respuesta:
+            enviados.append(data)
+            return _Respuesta(b"")
+
+        async def get(self, url: str, **_: Any) -> _Respuesta:
+            cuerpo = cuerpos[min(self.indice, len(cuerpos) - 1)]
+            self.indice += 1
+            return _Respuesta(cuerpo)
+
+    class _Contexto:
+        def __init__(self) -> None:
+            self.request = _Request()
+
+        async def cookies(self, url: str) -> list[dict[str, str]]:
+            return [{"name": "sess", "value": "ficticia"}]
+
+    class _Page:
+        url = "https://extranet.atmisiones.gob.ar/Extranet/Aplicaciones/consultas_ret_perc.php"
+
+        async def evaluate(self, script: str) -> Any:
+            if "IdSession" in script:
+                return ""
+            return "Mozilla/5.0 (test)"
+
+        def locator(self, *_: Any) -> Any:
+            class _Vacio:
+                async def count(self) -> int:
+                    return 0
+
+            return _Vacio()
+
+    sesion = MisionesSession(
+        SimpleNamespace(cuit_representante=CUIT_FICTICIO, clave="clave-ficticia"),
+        page=_Page(),
+        context=_Contexto(),
+        denominacion="EMPRESA FICTICIA",
+    )
+    sesion._logged_in = True
+    sesion._desde = "2026/08"
+    sesion._hasta = "2026/09"
+
+    destino = tmp_path / "reporte.pdf"
+    asyncio.run(sesion.generar_pdf(destino_pdf=destino))
+
+    assert destino.read_bytes().startswith(b"%PDF")
+    assert enviados, "el reporte debe haberse solicitado"
+    parametros = unquote_plus(
+        dict(
+            par.split("=", 1) for par in enviados[0].split("&") if "=" in par
+        )["parametros"]
+    )
+    assert "P_PERIODO_DESDE=202608" in parametros
+    assert "P_PERIODO_HASTA=202609" in parametros
+    assert "2026/08" not in parametros and "2026/09" not in parametros
 
 
 def test_execute_usa_contexto_comun_y_sesion_dgr(
