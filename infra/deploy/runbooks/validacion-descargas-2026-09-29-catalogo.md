@@ -4,8 +4,9 @@ Cada operación marcada OK se ejecutó contra la central local con un cliente V3
 alta del job, polling hasta estado terminal, descarga firmada de cada artefacto y
 validación de firma, tamaño y SHA-256. Sin credenciales ni datos de clientes.
 
-Resumen: 42 operaciones del catálogo, 31 verificadas OK con evidencia, 2 verificadas
-solo contra stubs locales, 7 excluidas por alcance y 2 bloqueadas por credenciales.
+Resumen: 42 operaciones del catálogo, 32 verificadas OK con evidencia, 2 verificadas
+solo contra stubs locales, 7 excluidas por alcance y 1 bloqueada por credenciales
+(el detalle de cada estado está en la tabla y sus límites al final del documento).
 
 | operación | estado | evidencia |
 |---|---|---|
@@ -29,7 +30,7 @@ solo contra stubs locales, 7 excluidas por alcance y 2 bloqueadas por credencial
 | `hacienda.consultar` | OK | 2 CSV; el portal no devolvio filas para el período del caso |
 | `libros_portal_iva.descargar_ddjj` | OK | 12 ZIP, 270.042 bytes |
 | `libros_portal_iva.descargar_libros` | OK | 12 ZIP, 270.005 bytes |
-| `liquidacion_granos.consultar` | Bloqueada | ARCA rechaza las 8 claves historicas; con claves vigentes de otros bots el login pasa y falla por servicio no asignado o representado no seleccionable |
+| `liquidacion_granos.consultar` | OK | Job real `COMPLETO` con `attempts=1` (sin reencolados): 26 artefactos (5 XLSX + 21 PDF, 953.861 bytes) en la ventana 2024 y 79 artefactos (5 XLSX + 74 PDF, 2.899.933 bytes) con el rango pedido 01/01/2015-31/12/2025, todos con firma, tamaño y SHA-256 validados. El XLSX de LPG emitidas trae 64 filas de datos (desde 03/08/2015) y el de recibidas 6; LSG no tiene registros para este representado (el portal no los expone) |
 | `mis_comprobantes.consulta` | OK | alias historico de `consultar`; el dispatcher lo traduce |
 | `mis_comprobantes.consultar` | OK | 2 CSV, 16.851 bytes |
 | `mis_comprobantes.historial` | OK | 2 CSV, 16.851 bytes |
@@ -69,11 +70,44 @@ disco, sin confiar en el resumen del runner. Observado:
 | `mis_comprobantes.consultar` | 2 CSV | 2.998 y 13.853 | encabezado `Fecha de Emisión;Tipo de Comprobante;...` | válidos |
 | `mis_comprobantes.historial` | 2 CSV | 2.998 y 13.853 | mismo encabezado y mismo SHA-256 que la operación anterior | válidos |
 | `liquidacion_granos.consultar` (control negativo) | — | — | falla con `CREDENTIALS_REJECTED` y sin artefactos | clasificación correcta |
+| `liquidacion_granos.consultar` (rango pedido) | 5 XLSX + 74 PDF | 2.899.933 | XLSX abiertos hoja por hoja: 65/7/2/2/5 filas; PDF con cabecera `%PDF-1.4`; SHA-256 y tamaño declarado coincidentes en los 79 | válidos |
 
 La verificación de las operaciones sin archivos se repitió leyendo el payload del job
 en la API: `facturometro.consultar` devolvió `monto` y `tope` reales, y
 `comprobantes.solicitar` y `mis_comprobantes.solicitar` devolvieron los dos
 identificadores de consulta (`emitidos` y `recibidos`).
+
+## Defecto de despacho corregido durante la validación (29/09/2026)
+
+Los jobs que tardaban más de ~20 s empezaron a terminar `FALLIDO` con
+`error_code=lease_expired` y los intentos agotados (`attempts` 1 → 2 → 3 en un
+minuto), con artefactos ya subidos y sin resultado: la API devolvía 422
+`metadata de artefacto inválida` cuando los `object_key` quedaban repartidos
+entre varios intentos (`jobs/{job_id}/{attempt}/...`) y luego 403 porque el job
+ya era terminal. Observado con `liquidacion_granos` y `retper_iibb_agip`.
+
+Causa: el reaper en PostgreSQL decide con `jobs.lease_expires_at`, que solo se
+escribía al asignar el job (`WORKER_ACK_LEASE_SECONDS`, 20 s). La renovación por
+evento válido actualizaba únicamente la copia en memoria, así que el trabajo en
+curso se reencolaba aunque el worker estuviera sano.
+
+Arreglo (`832020d`): `repositories/jobs.persist_event` renueva
+`job.lease_expires_at` en la misma transacción del evento para `started`,
+`progress` y `heartbeat_hint`, y el worker manda `heartbeat_hint` cada 20 s
+mientras el job corre, para no depender del progreso del plugin en etapas
+silenciosas (descargas, armado de ZIP, espera del portal).
+
+Evidencia:
+
+- Antes: `01a0ed6d`, `01a0ed6f` y `01a0ed73` con reentrega cada 20 s exactos y
+  presigns cambiando de intento en una sola corrida.
+- Después: `01a0ed7b` (26 artefactos, 60 s) y `01a0ed7c` (79 artefactos, 90 s)
+  terminaron `COMPLETO` con `attempts=1`, es decir sin un solo reencolado.
+- Tests: `services/central-api/tests/test_lease_renewal_pg.py` (4 casos contra
+  PostgreSQL real: `started`, `progress`, `heartbeat_hint` extienden la lease, y
+  el control negativo de un job terminal que no la renueva),
+  `services/bot-worker/tests/test_lease_renewal.py` y una aserción de renovación
+  dentro del ciclo de vida PG.
 
 ## Trazabilidad de los requisitos
 
@@ -191,4 +225,27 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
   contenido no parece la tabla.
 - En este entorno la caché se descargó 3 veces en el día por pruebas, algo esperable
   en desarrollo.
+- **Almacenamiento de artefactos**: la descarga firmada de cada artefacto se validó
+  contra un servidor S3 **emulado** local con el alias de red `minio` y
+  `127.0.0.1:9000`, que es lo que espera la configuración de la central
+  (`OBJECT_STORAGE_ENDPOINT=http://minio:9000`,
+  `OBJECT_STORAGE_PUBLIC_ENDPOINT=http://127.0.0.1:9000`). MinIO real no es obtenible
+  en esta máquina: `dl.min.io` responde 410 (el binario ya no se distribuye por ahí) y
+  el manifiesto en `quay.io/minio/minio` responde 401 sin credenciales; el servicio
+  `minio` del Compose vive detrás del perfil `local-storage` y depende de esas
+  imágenes. Consecuencia: el camino de firma, subida por URL prefirmada, descarga y
+  verificación de SHA-256 se ejercitó de punta a punta, pero **no** la validación de
+  firma de un servidor S3 real. Esto aplica a los artefactos de todas las corridas de
+  esta sesión, incluidas las 31 operaciones ya verificadas.
+- **Reinicio del worker con jobs en vuelo**: el worker genera un `instance_nonce`
+  nuevo en cada arranque (`bot_worker/main.py`) y la central exige que
+  `jobs.worker_id` coincida con la identidad canónica del nodo
+  (`internal/job_access.py`). Un job asignado antes de un reinicio queda sin poder
+  reportar: `/events`, `/artifacts/presign` y `/result` devuelven 403 `asignación de
+  otro worker`. Observado el 29/09 con los jobs `01a0ed6d-409c-7e1a-91b2-fac04f64f6bc`
+  y `01a0ed6e-7932-71e2-821d-c9e98b2d4a99` (subida 201/200 antes del reinicio, 403
+  después; el primero quedó `FALLIDO` con `files: []` y `data: null`). Los recupera la
+  política de lease vencido; en despliegues conviene drenar antes de reiniciar. Los
+  objetos ya subidos por un job que después falla quedan **huérfanos** en el bucket,
+  sin limpieza automática.
 
