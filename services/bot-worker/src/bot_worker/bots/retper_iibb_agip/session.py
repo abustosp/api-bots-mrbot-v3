@@ -422,15 +422,31 @@ class AgipSession:
                 diagnostic_code="agip_period_filter_failed",
             )
 
-    async def _set_periodos(self, desde: str, hasta: str) -> None:
-        await self._set_periodo("#fechaDesdeCo", desde, "desde")
-        await self._set_periodo("#fechaHastaCo", hasta, "hasta")
-        valores = await self._page.evaluate(
+    async def _leer_periodos(self) -> dict[str, Any]:
+        """Valores vivos de los dos campos de período."""
+        return await self._page.evaluate(
             """() => ({
                 desde: document.querySelector('#fechaDesdeCo')?.value ?? null,
                 hasta: document.querySelector('#fechaHastaCo')?.value ?? null
             })"""
         )
+
+    async def _set_periodos(self, desde: str, hasta: str) -> None:
+        campos = (
+            ("#fechaDesdeCo", desde, "desde"),
+            ("#fechaHastaCo", hasta, "hasta"),
+        )
+        for selector, valor, field in campos:
+            await self._set_periodo(selector, valor, field)
+        valores = await self._leer_periodos()
+        if valores.get("desde") != desde or valores.get("hasta") != hasta:
+            # El datepicker de AGIP puede limpiar el otro campo al abrirse: se
+            # reaplica una vez el que no quedó con el valor pedido antes de
+            # reportar el fallo (mismo criterio que la V1).
+            for selector, valor, field in campos:
+                if valores.get(field) != valor:
+                    await self._set_periodo(selector, valor, f"{field}_reaplicado")
+            valores = await self._leer_periodos()
         if valores.get("desde") != desde or valores.get("hasta") != hasta:
             raise TargetUnavailableError(
                 "AGIP no mantuvo el rango de períodos solicitado",

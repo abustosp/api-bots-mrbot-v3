@@ -492,6 +492,65 @@ _ERROR_CREDENCIALES = CredentialsRejectedError(
 )
 
 
+class _PaginaPeriodosAgip:
+    """Datepicker de AGIP: al fijar un campo puede limpiar el otro.
+
+    `siempre=False` limpia solo en la primera pasada (el datepicker se acomoda
+    cuando se reaplica el campo); `siempre=True` limpia en todas.
+    """
+
+    def __init__(self, *, siempre: bool = False) -> None:
+        self.valores: dict[str, Any] = {"#fechaDesdeCo": None, "#fechaHastaCo": None}
+        self.siempre = siempre
+        self.fijados: list[tuple[str, str]] = []
+        self._fijaciones = 0
+
+    async def wait_for_selector(self, selector: str, **_: Any) -> None:
+        return None
+
+    async def evaluate(self, script: str, arg: Any = None) -> Any:
+        if arg is None:
+            return {
+                "desde": self.valores["#fechaDesdeCo"],
+                "hasta": self.valores["#fechaHastaCo"],
+            }
+        selector = arg["selector"]
+        otro = "#fechaHastaCo" if selector == "#fechaDesdeCo" else "#fechaDesdeCo"
+        self.valores[selector] = arg["value"]
+        self.fijados.append((selector, arg["value"]))
+        self._fijaciones += 1
+        if self.siempre or self._fijaciones <= 2:
+            self.valores[otro] = ""
+        return {"actual": self.valores[selector]}
+
+
+def test_periodos_reaplica_el_campo_que_el_datepicker_limpia() -> None:
+    pagina = _PaginaPeriodosAgip(siempre=False)
+    sesion = _sesion_agip(pagina)
+
+    asyncio.run(sesion._set_periodos("01/2026", "02/2026"))
+
+    assert pagina.valores == {"#fechaDesdeCo": "01/2026", "#fechaHastaCo": "02/2026"}
+    # Un intento inicial por campo y una unica reaplicacion del que se limpio.
+    assert pagina.fijados == [
+        ("#fechaDesdeCo", "01/2026"),
+        ("#fechaHastaCo", "02/2026"),
+        ("#fechaDesdeCo", "01/2026"),
+    ]
+
+
+def test_periodos_que_nunca_se_sostienen_reportan_filtro_invalido() -> None:
+    pagina = _PaginaPeriodosAgip(siempre=True)
+    sesion = _sesion_agip(pagina)
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(sesion._set_periodos("01/2026", "02/2026"))
+
+    assert error.value.diagnostic_code == "agip_period_filter_failed"
+    # Un intento inicial por campo y una sola reaplicacion antes de rendirse.
+    assert len(pagina.fijados) == 3
+
+
 class _SesionAgipQueFalla:
     """Sesion AGIP falsa que falla los primeros N intentos y despues responde.
 
