@@ -115,8 +115,14 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
   hay caché, el worker mantiene su camino de fallback (`apoc: false`) con el aviso
   "base APOC no provisionada".
 - Si al arrancar la descarga falla y no hay caché, el bucle reintenta dentro de una
-  hora (no espera los 7 días); con caché al día respeta el intervalo semanal.
-  Confirmado el 29/09/2026.
+  hora (no espera los 7 días); con caché al día respeta el intervalo semanal. Este
+  comportamiento está cubierto por tests del módulo (con reloj simulado); en vivo no
+  se observó disparando ni el temporizador semanal ni el reintento de una hora. Lo
+  que sí se observó en vivo, en el camino de arranque: (a) arranque en frío sin
+  caché, el archivo aparece solo a los pocos segundos del arranque (05:14:56 UTC);
+  (b) arranque con la caché envejecida 8 días, se refresca al arrancar (06:23:29 UTC,
+  mismo tamaño 1.734.993 bytes); (c) archivo fresco, no se re-descarga (misma fecha
+  tras 60 s y tras reiniciar).
 - La caché vive en el volumen Docker `apoc_base` montado en `/var/lib/mrbot`, con
   `APOC_BASE_PATH=/var/lib/mrbot/FacturasApocrifas.txt`, por lo que sobrevive a los
   reinicios del contenedor. Confirmado el 29/09/2026.
@@ -175,4 +181,14 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
   `COMPLETO` en ~0,1 s con `data.apoc = true` y `fecha_condicion`/`fecha_publicacion`
   no nulas. Primera confirmación a las 04:57 y reverificación tras corregir el tope
   del worker.
+
+### Límites de la evidencia
+
+- El temporizador semanal del bucle no se observó disparando en vivo; solo se
+  observó el camino de arranque, que usa la misma función.
+- La validez de los datos proviene de AFIP: si el organismo cambia el formato o el
+  nombre del miembro, la extracción tolera el renombre pero falla limpio si el
+  contenido no parece la tabla.
+- En este entorno la caché se descargó 3 veces en el día por pruebas, algo esperable
+  en desarrollo.
 
