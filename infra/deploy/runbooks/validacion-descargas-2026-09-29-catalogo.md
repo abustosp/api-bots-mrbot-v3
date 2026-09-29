@@ -5,8 +5,8 @@ alta del job, polling hasta estado terminal, descarga firmada de cada artefacto 
 validación de firma, tamaño y SHA-256. Sin credenciales ni datos de clientes.
 
 Resumen: 42 operaciones del catálogo, 32 verificadas OK con evidencia, 2 verificadas
-solo contra stubs locales, 7 excluidas por alcance y 1 bloqueada por credenciales
-(el detalle de cada estado está en la tabla y sus límites al final del documento).
+solo contra stubs locales, 7 excluidas por alcance y 1 bloqueada por el filtro
+perimetral del organismo (AGIP), que se detalla al final del documento.
 
 | operación | estado | evidencia |
 |---|---|---|
@@ -44,7 +44,7 @@ solo contra stubs locales, 7 excluidas por alcance y 1 bloqueada por credenciale
 | `portal_iva.gestionar` | Excluida | importa libros y después descarga: tiene efecto de carga |
 | `portal_iva.importar` | Excluida | carga de archivos, fuera del alcance pedido |
 | `rcel.descargar` | OK | 7 PDF, 601.628 bytes |
-| `retper_iibb_agip.consultar` | Bloqueada | sin cuenta ClaveCiudad para los pares disponibles; el WAF de AGIP bloqueó 5 de 6 intentos |
+| `retper_iibb_agip.consultar` | Bloqueada por el perímetro del organismo | El login con usuario de ClaveCiudad funciona, pero el hop de sesión `lb.agip.gob.ar/gestionArciba/cc/redir` (submit del propio portal, posterior al login) responde HTTP 500 con la página de bloqueo del appliance (`Web Page Blocked!`, con `Attack ID 20000051` y la IP del egress que informa la propia pagina, que no se publica aca por ser un dato de red del operador); sin ese hop no hay camino al reporte, así que el rango 202506-202601 no llegó a pedirse y no hay ZIP ni SHA-256 que verificar. El filtro distingue la identidad del navegador: el mismo `curl` al mismo hop, en el mismo instante y desde la misma IP, recibe la respuesta normal con UA de Chrome (409) o de curl (409) y la página de bloqueo con UA `HeadlessChrome`. Detalle en `agip_evidencia_2026-09-29.md` |
 | `retper_iibb_misiones.consultar` | OK | 1 XLSX de 3.723 bytes y 1 PDF de 140.615 bytes |
 | `sct.consultar` | OK | 4 artefactos CSV/PDF, 38.780 bytes |
 | `sifere.consultar` | OK | 24 XLSX, 130.311 bytes |
@@ -53,9 +53,10 @@ solo contra stubs locales, 7 excluidas por alcance y 1 bloqueada por credenciale
 | `vep_archivo.generar` | Excluida | generación de VEP, fuera del alcance pedido |
 | `vep_ccma.generar` | Excluida | generación de VEP, fuera del alcance pedido |
 
-Las dos operaciones bloqueadas necesitan credenciales que no están en las bases:
-una Clave Fiscal vigente de un CUIT con *Liquidación Primaria de Granos* asignado, y un
-usuario con clave de *ClaveCiudad* para AGIP.
+De las dos operaciones que estaban bloqueadas por falta de credenciales, las dos se
+resolvieron con los pares que pasó el usuario: `liquidacion_granos` quedó verificada
+en vivo y `retper_iibb_agip` llegó hasta el bloqueo perimetral del organismo descrito
+en su propia sección al final del documento (ya no es un problema de credenciales).
 
 ## Verificación independiente (29/09/2026)
 
@@ -111,11 +112,47 @@ Evidencia:
   `services/bot-worker/tests/test_lease_renewal.py` y una aserción de renovación
   dentro del ciclo de vida PG.
 
+## Retenciones AGIP (`retper_iibb_agip`): bloqueo perimetral del organismo
+
+Con el par de credenciales que pasó el usuario el login de ClaveCiudad funciona
+(el bot llega a pedir el reporte), pero el hop de sesión del propio portal,
+`lb.agip.gob.ar/gestionArciba/cc/redir`, responde con la página de bloqueo del
+appliance perimetral: HTTP 500, `Web Page Blocked!` y `Attack ID 20000051` (la
+pagina tambien informa la IP del egress, que no se publica por ser un dato de red
+del operador). Sin ese hop no hay camino al reporte, así que el rango
+202506-202601 no llegó a pedirse: **no hay ZIP ni SHA-256 que verificar**.
+
+El control que separa identidad de red (misma IP, mismo instante, mismo hop)
+mostró que el filtro reacciona a la identidad del navegador y no a la IP:
+
+| Cliente | User-Agent | Respuesta |
+|---|---|---|
+| `curl` | `curl/8.5.0` | 409 Conflict (respuesta normal del portal sin sesión) |
+| `curl` | `Chrome/140.0.0.0` | 409 Conflict |
+| `curl` | `HeadlessChrome/140.0.7339.16` | **500 + página de bloqueo** |
+
+Lo que sí quedó arreglado en el bot (`0fae68f`):
+
+- Reintento acotado por ventanas (5, con espera creciente y navegación nueva),
+  que ya permitió pasar la portada en la corrida de 14:10 tras 4 reintentos.
+- Aviso de progreso antes de cada espera, para que el reaper no reencole el job
+  durante el backoff (con el arreglo de lease, `attempts=1` en todos los intentos).
+- `lb.agip.gob.ar` en `hosts_permitidos`: es el submit real del portal, no una
+  ruta inventada.
+- Diagnósticos separados: `agip_waf_blocked` cuando llega la página del
+  appliance y `agip_service_unavailable` cuando el hop corta la conexión.
+
+**No se falseó la identidad del navegador ni se salteó el filtro**: eso queda
+como decisión del usuario, junto con las alternativas que dependen de él (correr
+el navegador en modo con interfaz bajo Xvfb, salir por otra red, o pedir que
+AGIP habilite el acceso). Evidencia cruda en `agip_evidencia_2026-09-29.md`.
+
 ## Trazabilidad de los requisitos
 
 | Requisito | Verificación | Resultado observado |
 |---|---|---|
-| Probar las operaciones restantes del catálogo | Alta real, polling y descarga firmada por operación | 31 con evidencia de artefacto o payload, 2 contra stub local, 7 excluidas y 2 bloqueadas por credenciales |
+| Probar las operaciones restantes del catálogo | Alta real, polling y descarga firmada por operación | 32 con evidencia de artefacto o payload, 2 contra stub local, 7 excluidas y 1 bloqueada por el perímetro del organismo (AGIP) |
+| Usar las credenciales que pasó el usuario para los dos bloqueos | Jobs reales por API con los pares provistos | `liquidacion_granos` quedó `COMPLETO` con 105 artefactos entre las dos ventanas (26 + 79) y `retper_iibb_agip` llegó hasta el hop de sesión del portal, donde el appliance del organismo le sirve su página de bloqueo |
 | Excluir cargas de archivos, VEP e IVA Simple | Lectura del código de cada operación excluida | `carga_portal_iva.cargar`, `controladores_fiscales.presentar`, `portal_iva.importar`, `portal_iva.gestionar`, `vep_archivo.generar`, `vep_ccma.generar` y `mis_retenciones_iva_simple.consultar` no se ejecutaron |
 | Usar los ejemplos más recientes de las bases | Comparación del timestamp de cada caso contra el máximo con éxito de su tabla | Los ocho casos comparados usan exactamente el máximo (arba 16/09, aportes 28/08, ccma 24/09, facturómetro 26/09, Mis Comprobantes 26/09) |
 | Verificar con evidencia, no con inspección | Bytes leídos por un subagente distinto del que armó los casos | Firma de PDF y ZIP, miembros del ZIP, encabezados de CSV y SHA-256 propios, más control negativo |
