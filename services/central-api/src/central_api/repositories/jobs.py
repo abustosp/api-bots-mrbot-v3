@@ -171,17 +171,24 @@ def _sin_nul(valor: Any) -> Any:
 
 
 def expired_job_action(
-    status: str, attempts: int, max_attempts: int, has_result: bool = False
+    status: str,
+    attempts: int,
+    max_attempts: int,
+    has_result: bool = False,
+    has_artifacts: bool = False,
+    has_success_event: bool = False,
 ) -> str:
-    """Policy for an expired lease, avoiding replay of possibly completed work.
+    """Policy for expired leases, without replaying work with durable effects.
 
-    An unacknowledged assignment is safe to retry. Once execution started, an
-    absent result is ambiguous, so fail closed rather than repeat side effects.
-    A durable result is reconciled, never rerun.
+    A persisted result is reconciled, never rerun. Artifacts or a success event
+    without a result indicate incomplete durable completion and fail closed.
+    Otherwise either active state may be retried, but never beyond max_attempts.
     """
     if has_result:
         return "reconcile"
-    if status == "ASIGNADO" and attempts < max_attempts:
+    if has_artifacts or has_success_event:
+        return "fail"
+    if status in ("ASIGNADO", "CORRIENDO") and attempts < max_attempts:
         return "requeue"
     return "fail"
 
@@ -719,10 +726,9 @@ class JobRepository:
     ) -> dict[str, Any]:
         """Recupera leases bajo row-lock y transacción, una sola vez por intento.
 
-        ASIGNADO no fue aceptado por el worker y puede volver a PENDIENTE si
-        quedan intentos. CORRIENDO es ambiguo sin resultado durable y termina
-        FALLIDO, para no repetir una operación que quizá ya produjo efectos.
-        Si ya existe un resultado, se reconcilia su estado en vez de relanzarlo.
+        ASIGNADO y CORRIENDO vencidos se reencolan solo si quedan intentos y no
+        hay resultado, artefactos ni evento de éxito durable. Si hay resultado,
+        se reconcilia; cualquier otra evidencia durable terminaliza sin replay.
         Jobs terminales nunca entran en la selección.
         """
         from datetime import datetime, timezone
@@ -750,11 +756,32 @@ class JobRepository:
             worker_id = job.worker_id
             previous_status = str(job.status)
             previous = await self._session.get(JobResult, job.id)
+            has_artifacts = (
+                await self._session.execute(
+                    select(JobArtifact.id)
+                    .where(JobArtifact.job_id == job.id)
+                    .limit(1)
+                )
+            ).scalar_one_or_none() is not None
+            has_success_event = (
+                await self._session.execute(
+                    select(JobEvent.id)
+                    .where(
+                        JobEvent.job_id == job.id,
+                        JobEvent.event_type.in_(
+                            ("COMPLETADO", "RESULTADO_RECIBIDO")
+                        ),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none() is not None
             action = expired_job_action(
                 previous_status,
                 int(job.attempts or 0),
                 int(job.max_attempts or 0),
                 has_result=previous is not None,
+                has_artifacts=has_artifacts,
+                has_success_event=has_success_event,
             )
             if action == "reconcile" and previous is not None:
                 job.status = (

@@ -42,11 +42,13 @@ def test_claim_next_job_ignora_cache_pendiente_no_canonica(monkeypatch) -> None:
     assert loop_mod.claim_next_job([]) is None
 
 
-def test_reaper_no_reejecuta_corriendo_ni_resultados_persistidos() -> None:
-    """Solo ASIGNADO sin acuse es repetible; resultados durable se reconcilian."""
+def test_reaper_reintenta_vencidos_sin_efectos_con_tope() -> None:
+    """Reintenta solo sin evidencia durable y dentro del máximo configurado."""
     assert expired_job_action("ASIGNADO", 1, 3) == "requeue"
+    assert expired_job_action("CORRIENDO", 1, 3) == "requeue"
     assert expired_job_action("ASIGNADO", 3, 3) == "fail"
-    assert expired_job_action("CORRIENDO", 1, 3) == "fail"
+    assert expired_job_action("CORRIENDO", 1, 3, has_artifacts=True) == "fail"
+    assert expired_job_action("CORRIENDO", 1, 3, has_success_event=True) == "fail"
     assert expired_job_action("CORRIENDO", 1, 3, has_result=True) == "reconcile"
 
 
