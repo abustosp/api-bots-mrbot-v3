@@ -102,7 +102,9 @@ Evidencia:
 - Antes: `01a0ed6d`, `01a0ed6f` y `01a0ed73` con reentrega cada 20 s exactos y
   presigns cambiando de intento en una sola corrida.
 - Después: `01a0ed7b` (26 artefactos, 60 s) y `01a0ed7c` (79 artefactos, 90 s)
-  terminaron `COMPLETO` con `attempts=1`, es decir sin un solo reencolado.
+  terminaron `COMPLETO` con `attempts=1`, es decir sin un solo reencolado. Los intentos
+  de `retper_iibb_agip` posteriores al arreglo (`01a0ed80`, `01a0ed83`) también quedaron
+  en `attempts=1`: su único fallo es del portal o de la red, no del despacho.
 - Tests: `services/central-api/tests/test_lease_renewal_pg.py` (4 casos contra
   PostgreSQL real: `started`, `progress`, `heartbeat_hint` extienden la lease, y
   el control negativo de un job terminal que no la renueva),
