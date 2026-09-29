@@ -4,9 +4,9 @@ Cada operación marcada OK se ejecutó contra la central local con un cliente V3
 alta del job, polling hasta estado terminal, descarga firmada de cada artefacto y
 validación de firma, tamaño y SHA-256. Sin credenciales ni datos de clientes.
 
-Resumen: 42 operaciones del catálogo, 32 verificadas OK con evidencia, 2 verificadas
-solo contra stubs locales, 7 excluidas por alcance y 1 bloqueada por el filtro
-perimetral del organismo (AGIP), que se detalla al final del documento.
+Resumen: 42 operaciones del catálogo, 34 verificadas OK con evidencia, 7 excluidas por
+alcance y 1 bloqueada por el filtro perimetral del organismo (AGIP), que se detalla
+al final del documento.
 
 | operación | estado | evidencia |
 |---|---|---|
@@ -20,9 +20,9 @@ perimetral del organismo (AGIP), que se detalla al final del documento.
 | `comprobantes.consultar` | OK | 2 CSV, 16.851 bytes |
 | `comprobantes.historial` | OK | 2 CSV, 16.851 bytes |
 | `comprobantes.solicitar` | OK | COMPLETO con ids de consulta (operación asincrónica, sin archivos) |
-| `consulta_cuit.consulta` | OK | alias historico de `consultar`; el dispatcher lo traduce (hereda el alcance del stub de la fila anterior) |
-| `consulta_cuit.consultar` | OK contra stub | El pipeline completo responde con la constancia, pero `CUIT_SERVICE_BASE_URL` apunta al stub local (`origen: stub-local`); falta probarlo contra el servicio real |
-| `consulta_cuit.consultar_masivo` | OK contra stub | Igual que la anterior, con la lista de CUIT; el servicio real no está configurado en este entorno |
+| `consulta_cuit.consulta` | OK | alias historico de `consultar`; el dispatcher lo traduce y la corrida real contra el servicio de constancias devolvio la misma constancia (job `01a0ed9f-1e8e`) |
+| `consulta_cuit.consultar` | OK | Job real `COMPLETO` en 10 s (`01a0ed9d-6bb7`) contra `https://api-constancias-de-inscripcion.mrbot.com.ar`: la respuesta trae `datosGenerales`, `datosMonotributo`, `datosRegimenGeneral` y los errores por seccion, con datos reales del contribuyente y sin la marca `origen: stub-local` que devuelve el stub local |
+| `consulta_cuit.consultar_masivo` | OK | Job real `COMPLETO` en 10 s (`01a0ed9d-9397`): el endpoint masivo devuelve `request_id` y un resultado por CUIT, cada uno con la misma estructura de constancia que la consulta individual |
 | `consulta_pagos_vep.consultar` | OK | 1 CSV de 22.195 bytes |
 | `controladores_fiscales.presentar` | Excluida | presentación de archivos, fuera del alcance pedido |
 | `declaracion_en_linea.consultar` | OK | 13-14 PDF, ~418 KB |
@@ -72,6 +72,7 @@ disco, sin confiar en el resumen del runner. Observado:
 | `mis_comprobantes.historial` | 2 CSV | 2.998 y 13.853 | mismo encabezado y mismo SHA-256 que la operación anterior | válidos |
 | `liquidacion_granos.consultar` (control negativo) | no aplica | no aplica | falla con `CREDENTIALS_REJECTED` y sin artefactos | clasificación correcta |
 | `liquidacion_granos.consultar` (rango pedido) | 5 XLSX + 74 PDF | 2.899.933 | XLSX abiertos hoja por hoja: 65/7/2/2/5 filas; PDF con cabecera `%PDF-1.4`; SHA-256 y tamaño declarado coincidentes en los 79; el bucket del almacenamiento tiene exactamente esos 79 objetos bajo el intento 1 y su suma de bytes coincide con lo que declara la API | válidos |
+| `consulta_cuit.consultar` | JSON de constancia | 2.525 (crudo del servicio) | La respuesta de la API trae la estructura real (`datosGenerales` con 14 campos, `datosMonotributo`, `datosRegimenGeneral` y los tres campos de error) y ninguna marca de stub; el stub local en cambio devuelve otra forma (`cuit`, `denominacion`, `domicilio`, `origen: stub-local`) | válido |
 
 La verificación de las operaciones sin archivos se repitió leyendo el payload del job
 en la API: `facturometro.consultar` devolvió `monto` y `tope` reales, y
@@ -183,7 +184,7 @@ producto de cambiar ese invariante).
 
 | Requisito | Verificación | Resultado observado |
 |---|---|---|
-| Probar las operaciones restantes del catálogo | Alta real, polling y descarga firmada por operación | 32 con evidencia de artefacto o payload, 2 contra stub local, 7 excluidas y 1 bloqueada por el perímetro del organismo (AGIP) |
+| Probar las operaciones restantes del catálogo | Alta real, polling y descarga firmada por operación | 34 con evidencia de artefacto o payload, 7 excluidas y 1 bloqueada por el perímetro del organismo (AGIP) |
 | Usar las credenciales que pasó el usuario para los dos bloqueos | Jobs reales por API con los pares provistos | `liquidacion_granos` quedó `COMPLETO` con 105 artefactos entre las dos ventanas (26 + 79) y `retper_iibb_agip` llegó hasta el hop de sesión del portal, donde el appliance del organismo le sirve su página de bloqueo |
 | Excluir cargas de archivos, VEP e IVA Simple | Lectura del código de cada operación excluida | `carga_portal_iva.cargar`, `controladores_fiscales.presentar`, `portal_iva.importar`, `portal_iva.gestionar`, `vep_archivo.generar`, `vep_ccma.generar` y `mis_retenciones_iva_simple.consultar` no se ejecutaron |
 | Usar los ejemplos más recientes de las bases | Comparación del timestamp de cada caso contra el máximo con éxito de su tabla | Los ocho casos comparados usan exactamente el máximo (arba 16/09, aportes 28/08, ccma 24/09, facturómetro 26/09, Mis Comprobantes 26/09) |
