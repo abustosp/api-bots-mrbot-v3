@@ -238,4 +238,35 @@ sondas de diagnóstico contra el portal real y el logger histórico de V2
 Notas de operación: cada intento consume un CAPTCHA del proveedor configurado, y el
 saldo de la cuenta de pruebas era 4,20 al momento de estas corridas.
 
-La suite completa pasó con 523 pruebas y 12 subpruebas; 9 quedaron omitidas.
+## Cobertura ampliada del catálogo (29/09/2026)
+
+Con cuatro subagentes en paralelo se probaron las operaciones que todavía no tenían
+caso, tomando la combinación con éxito más reciente de las bases históricas. Quedan
+fuera, por pedido explícito, las cargas de archivos, los VEP y IVA Simple.
+
+| Operación | Resultado | Evidencia |
+|---|---|---|
+| `ccma.consultar` | OK | PDF de 105.380 bytes (`incluir_pdf: true`; el default del esquema es `false`, por eso el primer intento completó sin archivos) |
+| `arba.descargar` | OK | ZIP de 4.260 bytes con los tres reportes del período |
+| `aportes_en_linea.descargar` | OK | Planilla de 591.601 bytes que ARCA sirve como HTML con extensión `.xls` |
+| `mis_comprobantes.consultar`, `mis_comprobantes.historial` | OK | 2 CSV por operación (16.851 bytes) |
+| `mis_comprobantes.solicitar`, `comprobantes.solicitar` | OK | COMPLETO sin archivos, que es el resultado esperado de una solicitud asincrónica |
+| `consulta_cuit.consultar`, `consulta_cuit.consultar_masivo` | OK | COMPLETO con datos del servicio de constancias |
+| `apoc.consultar` | OK | COMPLETO con el resultado de la base APOC provisionada |
+| `facturometro.consultar` | OK | Devuelve monto y tope en el JSON (no produce archivos). Otras credenciales históricas del mismo CUIT representado dieron `represented_cuit_not_selectable` |
+| `liquidacion_granos.consultar` | FALLIDO | Credenciales rechazadas por ARCA en las 8 combinaciones disponibles |
+| `retper_iibb_agip.consultar` | FALLIDO | Sin cuenta ClaveCiudad para los pares disponibles; el WAF de AGIP bloqueó 5 de 6 intentos |
+
+Correcciones de código de esta pasada, todas con test y verificadas contra el portal
+real o la central local:
+
+- `normalize_v2_payload` traduce `archivo_historico_minio` a `subir` en Aportes en
+  Línea; antes el cuerpo V1 llegaba crudo al worker (`extra=forbid`) y moría con
+  `ENVELOPE_INVALID`.
+- La operación del sobre manda sobre el default del plugin: `plugin.validate` recibe
+  el verbo canónico y Mis Comprobantes elige el branch correcto entre `consultar`,
+  `historial` y `solicitar`.
+- El facturómetro de Monotributo quedó porteado como portal del worker
+  (`runtime/portals/facturometro.py`), con sus pruebas.
+
+La suite completa pasó con 547 pruebas y 12 subpruebas; 9 quedaron omitidas.
