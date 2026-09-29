@@ -36,15 +36,18 @@ def buscar_en_base(cuit: str, base_text: str) -> dict[str, Any]:
     ignoran vacias, comentarios ``#`` y lineas con menos de 3 campos.
     Funcion pura, sin red ni secretos.
     """
+    objetivo = _normalizar_cuit(cuit)
     for linea in base_text.splitlines():
-        if not linea.strip() or linea.startswith("#"):
+        linea = linea.lstrip("\ufeff").strip()
+        if not linea or linea.startswith("#"):
             continue
-        partes = linea.strip().split(",")
+        partes = linea.split(",")
         if len(partes) < 3:
             continue
-        if partes[0].strip() == cuit:
+        cuit_linea = _normalizar_cuit(partes[0])
+        if len(cuit_linea) == 11 and cuit_linea == objetivo:
             return {
-                "cuit": partes[0].strip(),
+                "cuit": cuit_linea,
                 "fecha_condicion": partes[1].strip(),
                 "fecha_publicacion": partes[2].strip(),
                 "apoc": True,
@@ -55,6 +58,11 @@ def buscar_en_base(cuit: str, base_text: str) -> dict[str, Any]:
         "fecha_publicacion": None,
         "apoc": False,
     }
+
+
+def _normalizar_cuit(valor: str) -> str:
+    """Devuelve solo los digitos del CUIT para comparar ambos formatos."""
+    return "".join(caracter for caracter in valor.strip() if caracter.isdigit())
 
 
 class ApocPlugin:
