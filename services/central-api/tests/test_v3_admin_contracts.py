@@ -129,6 +129,45 @@ def test_periodos_iibb_v1_no_se_confunden_con_fechas() -> None:
     assert "periodo_desde" not in citaciones
 
 
+def test_aportes_en_linea_traduce_la_bandera_de_subida_v1() -> None:
+    """El cuerpo V1 de Aportes en Línea pide la subida con
+    ``archivo_historico_minio``.
+
+    Si el normalizador lo deja pasar tal cual, el worker rechaza el sobre con
+    ``ENVELOPE_INVALID`` (su esquema es ``extra=forbid``) y el alias queda
+    inutilizable para el mismo cuerpo que la API publica en su snapshot V1.
+    """
+    normalizado = normalize_v2_payload(
+        "aportes_en_linea",
+        "descargar",
+        {
+            "cuit_login": "20123456789",
+            "cuit_representado": "20123456789",
+            "archivo_historico_minio": True,
+            "proxy_request": False,
+        },
+    )
+    assert normalizado["subir"] is True
+    assert "archivo_historico_minio" not in normalizado
+    assert "proxy_request" not in normalizado
+    assert normalizado["representado_cuit"] == "20123456789"
+    assert normalizado["cuit_representante"] == "20123456789"
+
+    # ``carga_minio`` sigue siendo el nombre de la bandera en los demás bots.
+    arba = normalize_v2_payload(
+        "arba",
+        "descargar",
+        {
+            "cuit": "20123456789",
+            "periodo": "202608",
+            "denominacion": "Empresa",
+            "carga_minio": False,
+        },
+    )
+    assert arba["subir"] is False
+    assert "carga_minio" not in arba
+
+
 def test_cuerpo_v2_plano_separa_credencial_y_normaliza_aliases(monkeypatch) -> None:
     private_pem = _private_pem()
     monkeypatch.setenv("RSA_PRIVATE_KEY", private_pem)

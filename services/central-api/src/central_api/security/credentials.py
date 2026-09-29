@@ -32,6 +32,11 @@ _CREDENTIAL_CONTEXT_FIELDS = (
     "representado_cuit",
     "usuario",
 )
+# Nombres históricos de la bandera de subida. ``carga_minio`` y
+# ``minio_upload`` los usan varios bots; ``archivo_historico_minio`` es el
+# nombre V1 de Aportes en Línea y sin traducirlo el worker rechaza el cuerpo
+# documentado del alias con ``ENVELOPE_INVALID`` (``extra=forbid``).
+_UPLOAD_FLAG_SOURCES = ("carga_minio", "minio_upload", "archivo_historico_minio")
 
 
 def credential_metadata(
@@ -185,7 +190,7 @@ def normalize_v2_payload(
         "vep_archivo": "subir_pdf",
         "vep_ccma": "subir_pdf",
     }
-    for source in ("carga_minio", "minio_upload"):
+    for source in _UPLOAD_FLAG_SOURCES:
         if source in normalized:
             upload_flag = normalized.pop(source)
             break
