@@ -299,6 +299,22 @@ def unseal_envelope(env: JobEnvelope, privkey_pem: bytes) -> JobEnvelope:
     return merged
 
 
+def validation_payload(env: JobEnvelope) -> dict[str, Any]:
+    """Payload que recibe ``plugin.validate``, con el verbo del sobre.
+
+    La central fija la operación canónica en el sobre y a propósito no la
+    repite en el payload (ver ``central_api.api.bot_payloads``: "la ruta ya
+    fija la operación canónica y el worker la recibe en el envelope"). Los
+    plugins, en cambio, eligen su modelo de entrada leyendo
+    ``payload["operacion"]`` y caen a un default cuando falta. Sin este
+    campo, toda operación que no fuese el default del plugin (por ejemplo
+    ``consulta_cuit/consultar_masivo``, que llegaba como ``cuits`` y se
+    validaba contra el modelo individual) fallaba con ``ENVELOPE_INVALID``.
+    El verbo admisionado del sobre manda sobre cualquier valor del cuerpo.
+    """
+    return {**env.payload, "operacion": env.operation}
+
+
 def envelope_errors(env: JobEnvelope) -> list[str]:
     """Validacion de sobre antes de reservar recursos (422 si falla)."""
     errors: list[str] = []
@@ -1175,7 +1191,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 settings.job_default_timeout_seconds,
             )
             try:
-                validated = await plugin.validate(env.payload)
+                validated = await plugin.validate(validation_payload(env))
                 result = await asyncio.wait_for(
                     plugin.execute(validated, runtime),  # type: ignore[arg-type]
                     timeout=max(1.0, timeout),
