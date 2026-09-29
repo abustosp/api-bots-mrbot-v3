@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     cuit_service_masiva_url: str = Field(default="", alias="CUIT_SERVICE_MASIVA_URL")
     cuit_service_usuario: str = Field(default="", alias="CUIT_SERVICE_USUARIO")
     cuit_service_api_key: str = Field(default="", alias="CUIT_SERVICE_API_KEY")
+    apoc_base_url: str = Field(default="https://servicioscf.afip.gob.ar/facturacion/facturasapocrifas/DownloadFile.aspx", alias="APOC_BASE_URL")
+    apoc_base_path: str = Field(default="/tmp/central-api/FacturasApocrifas.txt", alias="APOC_BASE_PATH")
+    apoc_refresh_interval_days: int = Field(default=7, alias="APOC_REFRESH_INTERVAL_DAYS")
 
     # Panel /admin (plan 05): solo campos nuevos con defecto, nada existente cambia.
     admin_panel_title: str = "MrBot Admin"

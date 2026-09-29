@@ -189,6 +189,9 @@ async def lifespan(app: FastAPI):
                 "no se pudo sembrar el catálogo al arrancar: %s", type(exc).__name__
             )
     tarea_scheduler: asyncio.Task | None = None
+    from central_api.services.apoc_base import refresh_loop as apoc_refresh_loop
+
+    tarea_apoc = asyncio.create_task(apoc_refresh_loop())
     if get_settings().scheduler_enabled:
         from central_api.scheduler.loop import scheduler_loop
 
@@ -196,6 +199,11 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        tarea_apoc.cancel()
+        try:
+            await tarea_apoc
+        except (asyncio.CancelledError, Exception):
+            pass
         if tarea_scheduler is not None:
             tarea_scheduler.cancel()
             try:

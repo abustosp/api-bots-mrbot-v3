@@ -12,6 +12,7 @@ import logging
 import httpx
 
 from central_api.settings import get_settings
+from central_api.services.apoc_base import read_cached_text
 from central_api.store import Job, WorkerEntry
 
 log = logging.getLogger("central_api.scheduler.dispatcher")
@@ -56,6 +57,9 @@ def provisioned_section() -> dict:
             "cuit_api_key": _limpio(settings.cuit_service_api_key),
         },
     }
+    apoc_base = read_cached_text()
+    if apoc_base is not None:
+        section["apoc_base_text"] = apoc_base
     if settings.proxy_enabled and settings.proxy_host:
         section["proxy"] = {
             "mode": settings.proxy_mode,
