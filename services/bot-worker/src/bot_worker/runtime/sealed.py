@@ -11,12 +11,18 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
+# Debe coincidir con central_api.security.sealed: límite del JSON en claro.
+# Se valida además el tamaño del blob Fernet antes de descifrar para acotar memoria.
+MAX_SEALED_SECTION_BYTES = 4_194_304
+_FERNET_MAX_BYTES = 57 + 4 * math.ceil((MAX_SEALED_SECTION_BYTES + 1) / 16)
+_FERNET_MAX_B64_BYTES = 4 * math.ceil(_FERNET_MAX_BYTES / 3)
 
 class SealedEnvelopeError(ValueError):
     """El sobre sellado no pudo abrirse. Sin detalle del contenido."""
@@ -44,8 +50,15 @@ def generate_sealed_keypair() -> tuple[bytes, str]:
 def decrypt_sealed_section(privkey_pem: bytes, sealed: dict[str, Any]) -> dict[str, Any]:
     """Abre la sección sellada con la privada efímera. Falla cerrado."""
     try:
-        enc_key = base64.b64decode(sealed["enc_key_b64"])
-        blob = base64.b64decode(sealed["blob_b64"])
+        enc_key = base64.b64decode(sealed["enc_key_b64"], validate=True)
+        blob_b64 = sealed["blob_b64"]
+        if not isinstance(blob_b64, str) or len(blob_b64) > _FERNET_MAX_B64_BYTES:
+            raise SealedEnvelopeError("sección sensible excede 4 MiB")
+        blob = base64.b64decode(blob_b64, validate=True)
+        if len(blob) > _FERNET_MAX_BYTES:
+            raise SealedEnvelopeError("sección sensible excede 4 MiB")
+    except SealedEnvelopeError:
+        raise
     except (KeyError, TypeError, ValueError) as exc:
         raise SealedEnvelopeError("sobre sellado malformado") from exc
     if sealed.get("alg") != "RSA-OAEP-SHA256+Fernet":
@@ -61,6 +74,10 @@ def decrypt_sealed_section(privkey_pem: bytes, sealed: dict[str, Any]) -> dict[s
             ),
         )
         raw = Fernet(data_key).decrypt(blob)
+        if len(raw) > MAX_SEALED_SECTION_BYTES:
+            raise SealedEnvelopeError("sección sensible excede 4 MiB")
+    except SealedEnvelopeError:
+        raise
     except (ValueError, TypeError, InvalidToken) as exc:
         raise SealedEnvelopeError("sobre sellado inválido") from exc
     try:
@@ -74,6 +91,7 @@ def decrypt_sealed_section(privkey_pem: bytes, sealed: dict[str, Any]) -> dict[s
 
 __all__ = [
     "SealedEnvelopeError",
+    "MAX_SEALED_SECTION_BYTES",
     "generate_sealed_keypair",
     "decrypt_sealed_section",
 ]
