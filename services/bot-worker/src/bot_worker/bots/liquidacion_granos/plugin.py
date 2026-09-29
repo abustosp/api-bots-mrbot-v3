@@ -201,7 +201,12 @@ class LiquidacionGranosPlugin:
                 servicio = await sesion.open_service(
                     SERVICIO_ARCA, portal="liquidacion_granos"
                 )
-                await servicio.seleccionar_representado(entrada.representado_cuit)
+                # El portal de LPG elige al representado por denominación: tras
+                # abrir el servicio muestra "Seleccione la Empresa" con un botón
+                # por representado (no un combo por CUIT).
+                await servicio.seleccionar_representado(
+                    entrada.representado_cuit, entrada.representado_nombre
+                )
                 datos, artefactos = await self._consultar(servicio, entrada, runtime)
         except ErrorDeBot:
             raise
