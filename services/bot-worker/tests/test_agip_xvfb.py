@@ -19,7 +19,7 @@ from bot_worker.bots.retper_iibb_agip.schema import RetperIibbAgipConsultarInput
 from bot_worker.runtime import browser as browser_mod
 
 BASE = "retper_iibb_agip"
-VARIANTE = "retper_iibb_agip_xvfe"
+VARIANTE = "retper_iibb_agip_xvfb"
 
 PAYLOAD_MINIMO = {
     # ``operacion`` no va: el plugin la separa antes de validar el modelo.

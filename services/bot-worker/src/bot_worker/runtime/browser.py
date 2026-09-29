@@ -254,7 +254,7 @@ class PlaywrightBrowserFactory:
         pantalla_virtual: bool = False,
     ) -> None:
         self._proxy = proxy
-        # Headless por defecto para todos los bots; la variante ``_xvfe`` es la
+        # Headless por defecto para todos los bots; la variante ``_xvfb`` es la
         # única que pide explícitamente una pantalla virtual.
         self._headless = True if headless else True
         self._stealth = bool(stealth)

@@ -70,7 +70,7 @@ class RetperIibbAgipConsultarInput(_Base):
     incluir_json: bool = True
     subir_archivo: bool = True
     #: Alternativa con pantalla virtual (Xvfb). Ausente o ``null`` significa el
-    #: camino de siempre; solo un valor verdadero elige la variante ``_xvfe``.
+    #: camino de siempre; solo un valor verdadero elige la variante ``_xvfb``.
     vp: bool = False
 
     @model_validator(mode="before")

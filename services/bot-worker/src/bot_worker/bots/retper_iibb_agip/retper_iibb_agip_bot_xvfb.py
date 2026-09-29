@@ -19,8 +19,8 @@ from dataclasses import replace
 
 from bot_worker.bots.retper_iibb_agip.plugin import RetperIibbAgipPlugin
 
-#: Nombre canónico de esta variante (``<bot>_xvfe``).
-NOMBRE_VARIANTE = "retper_iibb_agip_xvfe"
+#: Nombre canónico de esta variante (``<bot>_xvfb``).
+NOMBRE_VARIANTE = "retper_iibb_agip_xvfb"
 
 
 class RetperIibbAgipXvfePlugin(RetperIibbAgipPlugin):
