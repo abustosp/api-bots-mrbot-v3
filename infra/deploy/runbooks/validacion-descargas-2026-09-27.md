@@ -211,13 +211,31 @@ casos: períodos para IIBB y fechas para `mis_retenciones`.
 
 ### Estado de Misiones con la credencial indicada
 
-Con el mapeo corregido, el alta por el alias V1 llega al worker y el CAPTCHA del
-portal se resuelve con el proveedor configurado. El portal de ATM responde
-`misiones_login_usuario_incorrecto` (el campo `Usuario` del formulario acepta hasta
-11 dígitos y se envía el CUIT). Queda pendiente confirmar con el usuario si el
-usuario de la extranet de ATM es ese CUIT y si la cuenta tiene Ingresos Brutos
-habilitado: una corrida intermedia sí superó el login y falló después al no
-encontrar el menú de Ingresos Brutos (`misiones_ingresos_brutos_unavailable`), y en
-ese caso la sesión vuelca la pantalla en el `work_dir` del job para diagnóstico.
+El caso quedó funcionando de punta a punta. Con la credencial indicada por el
+usuario (`consultar`, período `202608`) la API central terminó `COMPLETO` y se
+descargaron los dos artefactos verificados: XLSX de 3.723 bytes y PDF de 140.615
+bytes.
 
-La suite completa pasó con 522 pruebas y 12 subpruebas; 9 quedaron omitidas.
+Para llegar ahí se corrigieron cuatro defectos propios, todos detectados con las
+sondas de diagnóstico contra el portal real y el logger histórico de V2
+(`api-bots-mrbot-v2/bots_dev/retper_iibb_misiones_capmonster`):
+
+1. **Orden del CAPTCHA**: ATM pide el desafío recién después del primer envío. El
+   flujo que funciona es enviar, resolver e ingresar de nuevo; resolver antes hacía
+   que el portal respondiera con su diálogo genérico de "usuario incorrecto" aunque
+   la cuenta fuera válida.
+2. **Menú dentro de marcos**: el enlace *Ingresos Brutos* y el de *Consulta de
+   Ret./Perc.* viven en un marco de la extranet. La búsqueda ahora recorre la página
+   y todos sus marcos.
+3. **Campos de período en el marco**: `#periodo_desde` y `#periodo_hasta` también
+   están dentro del marco; se completan con reintentos hasta que el formulario
+   aparece.
+4. **Parámetros del reporte PDF**: el servlet de Oracle Reports espera el período
+   compacto `AAAAMM`. Con `AAAA/MM` fallaba con `REP-771 ... ORA-01722: número no
+   válido`. Además, la primera descarga suele devolver su página de estado, así que
+   la sesión reintenta hasta recibir el `%PDF` real.
+
+Notas de operación: cada intento consume un CAPTCHA del proveedor configurado, y el
+saldo de la cuenta de pruebas era 4,20 al momento de estas corridas.
+
+La suite completa pasó con 523 pruebas y 12 subpruebas; 9 quedaron omitidas.
