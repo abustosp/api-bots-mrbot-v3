@@ -56,6 +56,22 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 AGIP_LOGIN_URL_DEFAULT = "https://claveciudad.agip.gob.ar/"
 ID_ARTEFACTO_REPORTE = "retper_agip_reporte"
 
+# Ventanas de reintento de la sesion completa. El perimetro de AGIP bloquea por
+# ventanas: la portada puede pasar y el hop del servicio caer en el mismo
+# intento (o al reves), asi que ademas del reintento de portada que ya hace la
+# sesion se reintenta la sesion entera con contexto nuevo. Las esperas quedan
+# por debajo del lease del job en la central y cada una emite un evento de
+# progreso para que el reaper no reencole el job durante el backoff.
+_ESPERAS_SESION_MS = (0, 5_000, 10_000, 15_000, 15_000)
+_CODIGOS_REINTENTABLES_SESION = frozenset(
+    {
+        "agip_waf_blocked",
+        "agip_service_unavailable",
+        "agip_login_gateway_unavailable",
+        "agip_represented_cuit_not_selectable",
+    }
+)
+
 INVALID_FILENAME_RE = re.compile(r'[\\/:*?"<>|]+')
 
 
@@ -106,7 +122,14 @@ def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     return TargetUnavailableError(f"falla del organismo: {texto}")
 
 
-def _avisar_reintento(runtime: Any) -> Any:
+async def _esperar(ms: int) -> None:
+    """Espera del backoff (indireccion para testear sin dormir de verdad)."""
+    await asyncio.sleep(ms / 1000)
+
+
+def _avisar_reintento(
+    runtime: Any, mensaje: str = "Reintentando acceso AGIP {intento}/{total} tras {espera}s de espera"
+) -> Any:
     """Aviso best-effort para conservar la lease del job durante el backoff.
 
     El perímetro de AGIP bloquea por ventanas; si el reintento espera en
@@ -120,9 +143,8 @@ def _avisar_reintento(runtime: Any) -> Any:
             await runtime.event_sink.progress(
                 phase="LOGIN",
                 percent=10,
-                message=(
-                    f"Reintentando acceso AGIP {intento}/{total} "
-                    f"tras {espera_ms // 1000}s de espera"
+                message=mensaje.format(
+                    intento=intento, total=total, espera=espera_ms // 1000
                 ),
             )
         except Exception:
@@ -210,7 +232,13 @@ class RetperIibbAgipPlugin:
             raise InvalidInputError(f"entrada invalida: {exc}") from exc
 
     async def execute(self, payload: Any, runtime: BotRuntime) -> BotResult:
-        """Ejecuta la consulta y retorna ``BotResult`` tipado."""
+        """Ejecuta la consulta y retorna ``BotResult`` tipado.
+
+        La sesion completa se reintenta con contexto nuevo mientras el error
+        sea de la ventana de bloqueo del portal (``agip_waf_blocked``,
+        ``agip_service_unavailable``) y quede deadline: la portada puede pasar
+        y el hop del servicio caer en el mismo intento, y al reves.
+        """
         from bot_worker.runtime.context import BotResult
 
         operacion, entrada = payload
@@ -224,6 +252,49 @@ class RetperIibbAgipPlugin:
         )
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
+
+        total = len(_ESPERAS_SESION_MS)
+        avisar = _avisar_reintento(
+            runtime,
+            "Reintentando consulta AGIP {intento}/{total} tras {espera}s de espera",
+        )
+        ultimo: ErrorDeBot | None = None
+        datos: Any = None
+        artefactos: list[Any] = []
+        for indice, espera in enumerate(_ESPERAS_SESION_MS):
+            if indice:
+                if runtime.deadline.remaining_seconds() <= 0:
+                    raise ultimo or DeadlineExceededError(
+                        "deadline agotado antes de reintentar la sesion"
+                    )
+                await avisar(indice, total, espera)
+                await _esperar(espera)
+            try:
+                datos, artefactos = await self._sesion_consultar(
+                    runtime, entrada, usuario=usuario, secretos=secretos
+                )
+                break
+            except ErrorDeBot as exc:
+                codigo = getattr(exc, "diagnostic_code", None)
+                if codigo not in _CODIGOS_REINTENTABLES_SESION:
+                    raise
+                ultimo = exc
+        else:
+            raise ultimo or TargetUnavailableError(
+                "AGIP no respondio en ningun intento",
+                diagnostic_code="agip_service_unavailable",
+            )
+
+        await runtime.cancellation.raise_if_cancelled()
+        await runtime.event_sink.progress(
+            phase="FINALIZANDO", percent=90, message="Normalizando resultado"
+        )
+        return BotResult(result="OK", data=datos, artifacts=artefactos)
+
+    async def _sesion_consultar(
+        self, runtime: BotRuntime, entrada: Any, *, usuario: str, secretos: list[str]
+    ) -> tuple[Any, list[Any]]:
+        """Un intento completo: contexto nuevo, login, servicio y consulta."""
         try:
             context_factory = getattr(runtime.browser_factory, "new_context", None)
             if context_factory is None:
@@ -245,19 +316,13 @@ class RetperIibbAgipPlugin:
                         usuario=usuario,
                         cuit_representado=entrada.representado_cuit,
                     )
-                    datos, artefactos = await self._consultar(sesion, entrada, runtime)
+                    return await self._consultar(sesion, entrada, runtime)
                 finally:
                     await sesion.close()
         except ErrorDeBot:
             raise
         except Exception as exc:
             raise _normalizar_error(exc, secretos) from exc
-
-        await runtime.cancellation.raise_if_cancelled()
-        await runtime.event_sink.progress(
-            phase="FINALIZANDO", percent=90, message="Normalizando resultado"
-        )
-        return BotResult(result="OK", data=datos, artifacts=artefactos)
 
     async def _consultar(
         self, sesion: Any, entrada: Any, runtime: BotRuntime

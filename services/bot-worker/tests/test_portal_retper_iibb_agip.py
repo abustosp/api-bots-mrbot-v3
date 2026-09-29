@@ -485,3 +485,200 @@ def test_execute_usa_contexto_comun_y_sesion_agip(
     assert invocaciones["consulta"] == ("01/2026", "01/2026")
     assert invocaciones["closed"] is True
     assert Path(runtime.artifact_store.resolve(resultado.data["archivo"])).is_file()
+
+
+_ERROR_CREDENCIALES = CredentialsRejectedError(
+    "AGIP rechazo el usuario", diagnostic_code="agip_user_not_found"
+)
+
+
+class _SesionAgipQueFalla:
+    """Sesion AGIP falsa que falla los primeros N intentos y despues responde.
+
+    Cada intento del plugin crea una instancia nueva (contexto nuevo), asi que
+    el contador de intentos vive en la clase.
+    """
+
+    intentos = 0
+    fallos: list[Any] = []
+
+    def __init__(self, credentials: Any, *, page: Any, **_: Any) -> None:
+        type(self).intentos += 1
+        self._numero = type(self).intentos
+
+    async def login(self, url: str) -> None:
+        error = type(self).fallos[self._numero - 1] if self._numero <= len(type(self).fallos) else None
+        if error is not None:
+            raise error
+
+    async def ingresar(self, usuario: str, cuit_representado: str) -> None:
+        return None
+
+    async def consultar_retper(self, *, desde_mmyyyy: str, hasta_mmyyyy: str, destino: Path) -> None:
+        destino.write_bytes(b"zip de prueba")
+
+    async def close(self) -> None:
+        return None
+
+
+def _runtime_reintento(
+    tmp_path: Path, *, deadline: Any = None, avisos: list[tuple[int, int, int]] | None = None
+) -> Any:
+    """Runtime minimo para ejercitar el reintento de sesion del plugin."""
+
+    class _Context:
+        async def new_page(self) -> object:
+            return object()
+
+    class _BrowserFactory:
+        def __init__(self) -> None:
+            self.contextos = 0
+
+        @asynccontextmanager
+        async def new_context(self):
+            self.contextos += 1
+            yield object(), _Context()
+
+    class _ArtifactStore:
+        def resolve(self, name: str) -> Path:
+            return tmp_path / name
+
+    class _Sink:
+        async def progress(self, **kwargs: Any) -> None:
+            mensaje = str(kwargs.get("message", ""))
+            if avisos is not None and "Reintentando consulta AGIP" in mensaje:
+                avisos.append(mensaje)
+
+    class _Cancellation:
+        async def raise_if_cancelled(self) -> None:
+            return None
+
+    return SimpleNamespace(
+        credentials=SimpleNamespace(cuit_representante="", clave="secreto-ficticio"),
+        cancellation=_Cancellation(),
+        event_sink=_Sink(),
+        deadline=deadline or SimpleNamespace(remaining_seconds=lambda: 600),
+        browser_factory=_BrowserFactory(),
+        proxy=None,
+        artifact_store=_ArtifactStore(),
+    )
+
+
+def _entrada_agip() -> Any:
+    plugin = RetperIibbAgipPlugin()
+    return asyncio.run(
+        plugin.validate(
+            {
+                "representado_cuit": CUIT_FICTICIO,
+                "usuario": "cuenta@example.invalid",
+                "denominacion": "EMPRESA FICTICIA",
+                "periodo_desde": "202601",
+                "periodo_hasta": "202601",
+                "subir_archivo": False,
+            }
+        )
+    )
+
+
+def test_sesion_reintenta_tras_ventana_bloqueada_y_termina_ok(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    esperas: list[int] = []
+
+    async def _esperar(ms: int) -> None:
+        esperas.append(ms)
+
+    _SesionAgipQueFalla.intentos = 0
+    _SesionAgipQueFalla.fallos = [
+        TargetUnavailableError("bloqueo", diagnostic_code="agip_waf_blocked"),
+        TargetUnavailableError(
+            "servicio", diagnostic_code="agip_service_unavailable"
+        ),
+    ]
+    monkeypatch.setattr(plugin_module, "AgipSession", _SesionAgipQueFalla)
+    monkeypatch.setattr(plugin_module, "_esperar", _esperar)
+    avisos: list[tuple[int, int, int]] = []
+    runtime = _runtime_reintento(tmp_path, avisos=avisos)
+    plugin = RetperIibbAgipPlugin()
+
+    resultado = asyncio.run(plugin.execute(_entrada_agip(), runtime))
+
+    assert resultado.result == "OK"
+    assert _SesionAgipQueFalla.intentos == 3
+    # Un contexto nuevo por intento y el backoff entre intentos (sin dormir).
+    assert runtime.browser_factory.contextos == 3
+    assert esperas == [5_000, 10_000]
+    assert len(avisos) == 2
+
+
+def test_sesion_agotada_reporta_el_ultimo_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    esperas: list[int] = []
+
+    async def _esperar(ms: int) -> None:
+        esperas.append(ms)
+
+    _SesionAgipQueFalla.intentos = 0
+    _SesionAgipQueFalla.fallos = [
+        TargetUnavailableError(
+            f"servicio {indice}", diagnostic_code="agip_service_unavailable"
+        )
+        for indice in range(len(plugin_module._ESPERAS_SESION_MS))
+    ]
+    monkeypatch.setattr(plugin_module, "AgipSession", _SesionAgipQueFalla)
+    monkeypatch.setattr(plugin_module, "_esperar", _esperar)
+    runtime = _runtime_reintento(tmp_path)
+    plugin = RetperIibbAgipPlugin()
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(plugin.execute(_entrada_agip(), runtime))
+
+    assert error.value.diagnostic_code == "agip_service_unavailable"
+    assert _SesionAgipQueFalla.intentos == len(plugin_module._ESPERAS_SESION_MS)
+    assert len(esperas) == len(plugin_module._ESPERAS_SESION_MS) - 1
+
+
+def test_sesion_sin_deadline_no_reintenta(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def _esperar(ms: int) -> None:
+        raise AssertionError("no debe esperar sin deadline")
+
+    restantes = iter((600, 0))
+
+    _SesionAgipQueFalla.intentos = 0
+    _SesionAgipQueFalla.fallos = [
+        TargetUnavailableError("bloqueo", diagnostic_code="agip_waf_blocked")
+    ]
+    monkeypatch.setattr(plugin_module, "AgipSession", _SesionAgipQueFalla)
+    monkeypatch.setattr(plugin_module, "_esperar", _esperar)
+    runtime = _runtime_reintento(
+        tmp_path, deadline=SimpleNamespace(remaining_seconds=lambda: next(restantes))
+    )
+    plugin = RetperIibbAgipPlugin()
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(plugin.execute(_entrada_agip(), runtime))
+
+    assert error.value.diagnostic_code == "agip_waf_blocked"
+    assert _SesionAgipQueFalla.intentos == 1
+
+
+def test_error_no_reintentable_no_se_reintenta(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def _esperar(ms: int) -> None:
+        raise AssertionError("no debe reintentar un rechazo de credenciales")
+
+    _SesionAgipQueFalla.intentos = 0
+    _SesionAgipQueFalla.fallos = [_ERROR_CREDENCIALES]
+    monkeypatch.setattr(plugin_module, "AgipSession", _SesionAgipQueFalla)
+    monkeypatch.setattr(plugin_module, "_esperar", _esperar)
+    runtime = _runtime_reintento(tmp_path)
+    plugin = RetperIibbAgipPlugin()
+
+    with pytest.raises(CredentialsRejectedError):
+        asyncio.run(plugin.execute(_entrada_agip(), runtime))
+
+    assert _SesionAgipQueFalla.intentos == 1
