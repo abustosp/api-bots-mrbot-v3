@@ -15,7 +15,14 @@ from central_api.services import apoc_base
 from central_api.scheduler import dispatcher
 
 
-def archive(member="FacturasApocrifas.txt", text="public-table"):
+TABLA = (
+    "# AFIP - Facturas Apocrifas\n"
+    "20123456789, 2024-01-01, 2024-12-31\n"
+    "20987654321, 2023-06-15, 2023-07-20\n"
+)
+
+
+def archive(member="FacturasApocrifas.txt", text=TABLA):
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as zf:
         zf.writestr(member, "\ufeff" + text)
@@ -47,18 +54,19 @@ def test_download_when_missing(setup_cache):
         client = await client_for(archive())
         return await apoc_base.download_and_cache(client)
 
-    assert asyncio.run(correr()) == "public-table"
-    assert setup_cache.read_text() == "public-table"
-    assert apoc_base.read_cached_text() == "public-table"
+    assert asyncio.run(correr()) == TABLA
+    assert setup_cache.read_text() == TABLA
+    assert apoc_base.read_cached_text() == TABLA
 
 
 def test_refresh_when_old(setup_cache, monkeypatch):
     setup_cache.write_text("old")
     viejo = time.time() - 8 * 86400
     os.utime(setup_cache, (viejo, viejo))
+    nuevo = "# AFIP\n20987654321, 2023-06-15, 2023-07-20\n"
 
     async def correr():
-        client = await client_for(archive(text="new"))
+        client = await client_for(archive(text=nuevo))
         original = apoc_base.download_and_cache
 
         async def descargar():
@@ -68,7 +76,7 @@ def test_refresh_when_old(setup_cache, monkeypatch):
         return await apoc_base.refresh_if_needed()
 
     assert asyncio.run(correr()) is True
-    assert setup_cache.read_text() == "new"
+    assert setup_cache.read_text() == nuevo
 
 
 def test_does_not_refresh_fresh(setup_cache, monkeypatch):
@@ -98,9 +106,43 @@ def test_network_failure_preserves_stale_cache(setup_cache, monkeypatch):
     assert apoc_base.read_cached_text() == "stale"
 
 
-def test_zip_without_expected_member_fails_cleanly():
-    with pytest.raises(ValueError, match="missing expected member"):
-        apoc_base._extract(archive("other.txt"))
+def test_extract_exact_member():
+    assert apoc_base._extract(archive("FacturasApocrifas.txt")) == TABLA
+
+
+def test_extract_renamed_single_txt_member():
+    # AFIP renombra el miembro pero sigue siendo el único .txt: se acepta.
+    assert apoc_base._extract(archive("facturas_apocrifas_20240901.txt")) == TABLA
+
+
+def test_zip_with_no_txt_member():
+    with pytest.raises(ValueError, match="no .txt member"):
+        apoc_base._extract(archive("data.csv"))
+
+
+def test_zip_with_multiple_txt_members_fails_cleanly():
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as zf:
+        zf.writestr("a.txt", "\ufeff" + TABLA)
+        zf.writestr("b.txt", "\ufeff" + TABLA)
+    with pytest.raises(ValueError, match="multiple .txt members"):
+        apoc_base._extract(out.getvalue())
+
+
+def test_not_table_like_content_fails_cleanly():
+    with pytest.raises(ValueError, match="does not look like the apoc table"):
+        apoc_base._extract(archive(text="public-table"))
+
+
+def test_not_table_like_not_cached(setup_cache):
+    async def correr():
+        client = await client_for(archive(text="blah 12345 no AFIP ni filas"))
+        return await apoc_base.download_and_cache(client)
+
+    with pytest.raises(ValueError, match="does not look like the apoc table"):
+        asyncio.run(correr())
+    assert not setup_cache.exists()
+    assert apoc_base.read_cached_text() is None
 
 
 def test_provision_includes_cached_text_for_apoc(setup_cache, monkeypatch):

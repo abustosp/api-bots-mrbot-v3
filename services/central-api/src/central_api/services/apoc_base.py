@@ -5,6 +5,7 @@ import asyncio
 import io
 import logging
 import os
+import re
 import time
 import zipfile
 from pathlib import Path
@@ -17,7 +18,25 @@ log = logging.getLogger(__name__)
 _MAX_DOWNLOAD_BYTES = 2_000_000
 _MAX_TEXT_BYTES = 5_000_000
 _MEMBER = "FacturasApocrifas.txt"
+_DATA_LINE = re.compile(r"^\s*\d{11}\s*,\s*[^,\s]+\s*,\s*[^,\s]+\s*(?:,|$)")
 _cached_text: str | None = None
+
+
+def _looks_like_table(text: str) -> bool:
+    """True si el texto parece la tabla apócrifa (cabecera # AFIP + fila CUIT,fecha,fecha)."""
+    has_header = False
+    has_data = False
+    for raw in text.splitlines():
+        line = raw.lstrip("\ufeff").strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            if "AFIP" in line:
+                has_header = True
+            continue
+        if _DATA_LINE.match(line):
+            has_data = True
+    return has_header and has_data
 
 
 def read_cached_text() -> str | None:
@@ -35,16 +54,26 @@ def _extract(data: bytes) -> str:
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise ValueError("AFIP apoc response is not a ZIP")
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        try:
-            info = archive.getinfo(_MEMBER)
-        except KeyError as exc:
-            raise ValueError("AFIP apoc ZIP is missing expected member") from exc
+        infos = archive.infolist()
+        exact = [info for info in infos if info.filename == _MEMBER]
+        if exact:
+            info = exact[0]
+        else:
+            txt_infos = [info for info in infos if info.filename.lower().endswith(".txt")]
+            if len(txt_infos) == 1:
+                info = txt_infos[0]
+            elif not txt_infos:
+                raise ValueError("AFIP apoc ZIP has no .txt member")
+            else:
+                raise ValueError("AFIP apoc ZIP has multiple .txt members; ambiguous")
         if info.file_size > _MAX_TEXT_BYTES:
             raise ValueError("AFIP apoc text exceeds size limit")
         raw = archive.read(info)
     text = raw.decode("utf-8-sig")
     if not text:
         raise ValueError("AFIP apoc text is empty")
+    if not _looks_like_table(text):
+        raise ValueError("AFIP apoc text does not look like the apoc table")
     return text
 
 
