@@ -4,9 +4,8 @@ Cada operación marcada OK se ejecutó contra la central local con un cliente V3
 alta del job, polling hasta estado terminal, descarga firmada de cada artefacto y
 validación de firma, tamaño y SHA-256. Sin credenciales ni datos de clientes.
 
-Resumen: 42 operaciones del catálogo, 34 verificadas OK con evidencia, 7 excluidas por
-alcance y 1 bloqueada por el filtro perimetral del organismo (AGIP), que se detalla
-al final del documento.
+Resumen: 42 operaciones del catálogo, 35 verificadas OK con evidencia (AGIP con
+intermitencia del portal) y 7 excluidas por alcance.
 
 | operación | estado | evidencia |
 |---|---|---|
@@ -44,7 +43,7 @@ al final del documento.
 | `portal_iva.gestionar` | Excluida | importa libros y después descarga: tiene efecto de carga |
 | `portal_iva.importar` | Excluida | carga de archivos, fuera del alcance pedido |
 | `rcel.descargar` | OK | 7 PDF, 601.628 bytes |
-| `retper_iibb_agip.consultar` | Bloqueada por el perímetro del organismo | El login con usuario de ClaveCiudad funciona, pero el hop de sesión `lb.agip.gob.ar/gestionArciba/cc/redir` (submit del propio portal, posterior al login) responde HTTP 500 con la página de bloqueo del appliance (`Web Page Blocked!`, con `Attack ID 20000051` y la IP del egress que informa la propia pagina, que no se publica aca por ser un dato de red del operador); sin ese hop no hay camino al reporte, así que el rango 202506-202601 no llegó a pedirse y no hay ZIP ni SHA-256 que verificar. El filtro distingue la identidad del navegador: el mismo `curl` al mismo hop, en el mismo instante y desde la misma IP, recibe la respuesta normal con UA de Chrome (409) o de curl (409) y la página de bloqueo con UA `HeadlessChrome`. Detalle en `agip_evidencia_2026-09-29.md`. Corrida de cierre por la API pública con el código final: `01a0ed8e-c255`, 75 s, `attempts=1`, 0 artefactos, `agip_waf_blocked` |
+| `retper_iibb_agip.consultar` | OK, con intermitencia del portal | Job real `COMPLETO` en 30 s (`01a0edbe-27dc`, repetido en `01a0edc4-bb69`) con 1 artefacto ZIP de 13.999 bytes para el rango 202506-202601: 12 entradas, 62.637 bytes descomprimidos, CRC correcto y SHA-256/tamaño coincidentes. Antes fallaba por el perímetro del organismo; el desbloqueo (stealth de la V1 y binario completo de Chromium) está detallado al final del documento. La tasa observada fue 2 corridas buenas de 3: el hop `lb.agip.gob.ar/gestionArciba/cc/redir` cuelga por momentos y conviene reintentar |
 | `retper_iibb_misiones.consultar` | OK | 1 XLSX de 3.723 bytes y 1 PDF de 140.615 bytes |
 | `sct.consultar` | OK | 4 artefactos CSV/PDF, 38.780 bytes |
 | `sifere.consultar` | OK | 24 XLSX, 130.311 bytes |
@@ -121,7 +120,11 @@ Evidencia:
   `services/bot-worker/tests/test_lease_renewal.py` y una aserción de renovación
   dentro del ciclo de vida PG.
 
-## Retenciones AGIP (`retper_iibb_agip`): bloqueo perimetral del organismo
+## Retenciones AGIP (`retper_iibb_agip`): el bloqueo del perímetro (histórico)
+
+> Esta sección describe el bloqueo tal como se midió el 29/09 antes de la
+exploración con stealth. La solución y la evidencia final están en la sección
+"desbloqueada con stealth y binario completo".
 
 Con el par de credenciales que pasó el usuario el login de ClaveCiudad funciona
 (el bot llega a pedir el reporte), pero el hop de sesión del propio portal,
@@ -188,12 +191,57 @@ identidad headless, no hay camino soportado dentro del diseño actual: las salid
 dependen del usuario (otra red de salida, habilitación en AGIP, o una decisión de
 producto de cambiar ese invariante).
 
+## Retenciones AGIP (`retper_iibb_agip`): desbloqueada con stealth y binario completo
+
+Con el par de credenciales que pasó el usuario el login de ClaveCiudad siempre
+funcionó; lo que fallaba era el perímetro del organismo. La exploración pedida
+(en `/tmp/agip`, con copia en `~/.jcode/scratch/agip-exploracion`) midió cuatro
+modos del mismo flujo:
+
+| Modo | Resultado observado |
+|---|---|
+| headless con el shell recortado, sin stealth | HTTP 500 y página `Web Page Blocked!` en la primera navegación |
+| headless con el shell recortado, con stealth de la V1 | login y representado OK; el servicio nunca pide su bootstrap (`gestionArciba/cc/json/consultaLogin`) y el job muere por timeout |
+| headless con el binario completo (`channel=chromium`), con stealth | entra al servicio; el hop `lb.agip.gob.ar/gestionArciba/cc/redir` responde a veces y a veces cuelga |
+| con interfaz (Xvfb), con stealth | flujo completo: consulta del rango 202506-202601 y descarga de 8 archivos (RET, PER, bancarias, aduaneras y sus TXT/SIFERE) más el ZIP |
+
+El hop es intermitente para cualquier cliente (un `curl` desde el host también
+se cuelga por momentos), así que el reintento por ventanas que ya tenía el bot es
+parte de la solución. Lo que quedó implementado en el producto:
+
+- Manifiesto por bot con `stealth` y `canal_navegador` (`bots/registry.py`), y
+  `runtime/browser.py` los aplica al lanzar: argumentos, contexto con identidad
+  argentina y init script portados de la V1, más el canal completo.
+- El binario completo necesita directorios escribibles: con la raíz de solo
+  lectura del worker y `HOME` sin permiso falla al lanzar (reproducido con una
+  sonda). La fábrica le pasa `XDG_CONFIG_HOME`/`XDG_CACHE_HOME`/`XDG_DATA_HOME`
+  apuntando a un tmpfs, sin cambiar la identidad del navegador.
+- `retper_iibb_agip` declara `stealth=True` y `canal_navegador="chromium"`; el
+  resto de los bots conserva el comportamiento por defecto.
+
+Resultado por la API pública, con el rango pedido 202506-202601: **dos corridas
+`COMPLETO` en 30 s con 1 artefacto ZIP de 13.999 bytes cada una** y una tercera
+que quedó colgada en el hop hasta el timeout del arnés (400 s). El ZIP se abrió y
+verificó aparte: 12 entradas, 62.637 bytes descomprimidos, CRC correcto y
+SHA-256/tamaño coincidentes con lo que declara la API (jobs `01a0edbe-27dc` y
+`01a0edc4-bb69`).
+
+Límites que siguen en pie:
+
+- La intermitencia del hop no la arregla el código: la tasa observada fue 2 de 3
+  y conviene reintentar el job cuando el portal cuelga.
+- No se cambió la identidad declarada del navegador por un valor ajeno: se usan
+  los argumentos, el contexto y el init script de la V1, y el navegador sigue
+  siendo headless en cuanto al invariante de la plataforma.
+- La evidencia de esta sección es del entorno local con el S3 emulado, igual que
+  el resto del documento.
+
 ## Trazabilidad de los requisitos
 
 | Requisito | Verificación | Resultado observado |
 |---|---|---|
-| Probar las operaciones restantes del catálogo | Alta real, polling y descarga firmada por operación | 34 con evidencia de artefacto o payload, 7 excluidas y 1 bloqueada por el perímetro del organismo (AGIP) |
-| Usar las credenciales que pasó el usuario para los dos bloqueos | Jobs reales por API con los pares provistos | `liquidacion_granos` quedó `COMPLETO` con 105 artefactos entre las dos ventanas (26 + 79) y `retper_iibb_agip` llegó hasta el hop de sesión del portal, donde el appliance del organismo le sirve su página de bloqueo |
+| Probar las operaciones restantes del catálogo | Alta real, polling y descarga firmada por operación | 35 con evidencia de artefacto o payload y 7 excluidas |
+| Usar las credenciales que pasó el usuario para los dos bloqueos | Jobs reales por API con los pares provistos | `liquidacion_granos` quedó `COMPLETO` con 105 artefactos entre las dos ventanas (26 + 79) y `retper_iibb_agip` entrega el ZIP del rango 202506-202601 (13.999 bytes, 12 entradas) en 30 s, con el stealth de la V1 y el binario completo |
 | Excluir cargas de archivos, VEP e IVA Simple | Lectura del código de cada operación excluida | `carga_portal_iva.cargar`, `controladores_fiscales.presentar`, `portal_iva.importar`, `portal_iva.gestionar`, `vep_archivo.generar`, `vep_ccma.generar` y `mis_retenciones_iva_simple.consultar` no se ejecutaron |
 | Usar los ejemplos más recientes de las bases | Comparación del timestamp de cada caso contra el máximo con éxito de su tabla | Los ocho casos comparados usan exactamente el máximo (arba 16/09, aportes 28/08, ccma 24/09, facturómetro 26/09, Mis Comprobantes 26/09) |
 | Verificar con evidencia, no con inspección | Bytes leídos por un subagente distinto del que armó los casos | Firma de PDF y ZIP, miembros del ZIP, encabezados de CSV y SHA-256 propios, más control negativo |

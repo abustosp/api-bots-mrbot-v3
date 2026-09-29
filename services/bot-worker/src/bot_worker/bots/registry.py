@@ -55,6 +55,14 @@ class BotManifest:
     idempotency_class: Literal["LECTURA", "CONTINUACION", "CARGA", "EFECTO"]
     browser_instances_max: int
     hosts_permitidos: tuple[str, ...]
+    #: Argumentos de lanzamiento e init script que reducen las señales de
+    #: automatización (portado de la V1). No cambia la identidad declarada por
+    #: el navegador: sigue siendo headless.
+    stealth: bool = False
+    #: Canal de Playwright a usar (por ejemplo ``chromium`` para forzar el
+    #: binario completo en lugar del shell recortado que se elige por defecto en
+    #: headless). Vacío significa el comportamiento por defecto.
+    canal_navegador: str = ""
 
     def to_status_dict(self) -> dict[str, Any]:
         """Proyeccion para /internal/v1/bots y registro en la central."""

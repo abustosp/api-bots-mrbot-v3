@@ -1157,6 +1157,9 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 )
                 or ()
             }
+            base_plugin = get_plugin(env.plugin or env.bot)
+            assert base_plugin is not None  # validado en admision
+            manifiesto = getattr(base_plugin, "manifest", None)
             runtime = BotRuntime(
                 job_id=job.job_id,
                 work_dir=workdir,
@@ -1178,11 +1181,14 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                     attempt=job.attempt, worker_node=central_node,
                     service_token=service_token,
                 ),
-                browser_factory=build_browser_factory(proxy_cfg, captcha_profile),
+                browser_factory=build_browser_factory(
+                    proxy_cfg,
+                    captcha_profile,
+                    stealth=bool(getattr(manifiesto, "stealth", False)),
+                    canal=str(getattr(manifiesto, "canal_navegador", "") or ""),
+                ),
                 cancellation=cancellation,
             )
-            base_plugin = get_plugin(env.plugin or env.bot)
-            assert base_plugin is not None  # validado en admision
             # Copia por job: configure() aplica la sección service del
             # sobre sin mutar la instancia compartida del registro.
             plugin = copy.copy(base_plugin)

@@ -164,6 +164,11 @@ class RetperIibbAgipPlugin:
             "lb.agip.gob.ar",
             "login.buenosaires.gob.ar",
         ),
+        # El perímetro del organismo bloquea al shell headless recortado: con el
+        # stealth de la V1 y el binario completo de Chromium el flujo entra y
+        # descarga (medido el 29/09 en /tmp/agip; ver el runbook de validación).
+        stealth=True,
+        canal_navegador="chromium",
     )
 
     def __init__(
