@@ -9,7 +9,7 @@ solo contra stubs locales, 7 excluidas por alcance y 2 bloqueadas por credencial
 
 | operación | estado | evidencia |
 |---|---|---|
-| `apoc.consultar` | OK de lógica | La búsqueda funciona (verificada ejecutando el plugin con una base sintética: devuelve `apoc: true` y fechas). En este entorno la central no provisiona `apoc_base_text`, así que la API responde `apoc: false` por el camino de fallback |
+| `apoc.consultar` | OK | 3 jobs reales por la API terminaron `COMPLETO` con `data.apoc = true` y fechas, resolviendo un CUIT contra la tabla real de AFIP (45.645 líneas provistas). Con la descarga caída y sin caché, la central responde `apoc: false` por el camino de fallback; detalle en «Tabla de apócrifos de AFIP (APOC)» |
 | `aportes_en_linea.descargar` | OK | 1 planilla de 591.601 bytes (ARCA la sirve como HTML con extensión .xls) |
 | `arba.descargar` | OK | 1 ZIP de 4.260 bytes con CP/CT/CB del período |
 | `carga_portal_iva.cargar` | Excluida | carga de archivos, fuera del alcance pedido |
@@ -19,7 +19,7 @@ solo contra stubs locales, 7 excluidas por alcance y 2 bloqueadas por credencial
 | `comprobantes.consultar` | OK | 2 CSV, 16.851 bytes |
 | `comprobantes.historial` | OK | 2 CSV, 16.851 bytes |
 | `comprobantes.solicitar` | OK | COMPLETO con ids de consulta (operación asincrónica, sin archivos) |
-| `consulta_cuit.consulta` | OK | alias historico de `consultar`; el dispatcher lo traduce |
+| `consulta_cuit.consulta` | OK | alias historico de `consultar`; el dispatcher lo traduce (hereda el alcance del stub de la fila anterior) |
 | `consulta_cuit.consultar` | OK contra stub | El pipeline completo responde con la constancia, pero `CUIT_SERVICE_BASE_URL` apunta al stub local (`origen: stub-local`); falta probarlo contra el servicio real |
 | `consulta_cuit.consultar_masivo` | OK contra stub | Igual que la anterior, con la lista de CUIT; el servicio real no está configurado en este entorno |
 | `consulta_pagos_vep.consultar` | OK | 1 CSV de 22.195 bytes |
