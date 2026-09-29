@@ -45,6 +45,8 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotRuntime = Any  # type: ignore[assignment,misc]
 
 SERVICIO_ARCA = "MONOTRIBUTO"
+#: Portal que implementa ``leer_facturometro`` (``runtime/portals``).
+PORTAL_ARCA = "facturometro"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -140,7 +142,9 @@ class FacturometroPlugin:
                 await runtime.event_sink.progress(
                     phase="CONSULTA", percent=45, message="Leyendo facturometro"
                 )
-                servicio = await sesion.open_service(self._servicio)
+                servicio = await sesion.open_service(
+                    self._servicio, portal=PORTAL_ARCA
+                )
                 lectura = await servicio.leer_facturometro(
                     representado_cuit=entrada.representado_cuit,
                 )
