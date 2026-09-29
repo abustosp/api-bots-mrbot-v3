@@ -114,6 +114,16 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
 - Si la descarga falla, se conserva la caché vieja y se registra el aviso; si no
   hay caché, el worker mantiene su camino de fallback (`apoc: false`) con el aviso
   "base APOC no provisionada".
+- Si al arrancar la descarga falla y no hay caché, el bucle reintenta dentro de una
+  hora (no espera los 7 días); con caché al día respeta el intervalo semanal.
+  Confirmado el 29/09/2026.
+- La caché vive en el volumen Docker `apoc_base` montado en `/var/lib/mrbot`, con
+  `APOC_BASE_PATH=/var/lib/mrbot/FacturasApocrifas.txt`, por lo que sobrevive a los
+  reinicios del contenedor. Confirmado el 29/09/2026.
+- La extracción del ZIP tolera que el miembro `.txt` venga con otro nombre, siempre
+  que sea único y que el contenido parezca la tabla, y falla limpio si no hay un
+  `.txt`, si hay más de uno o si el contenido no parece la tabla. Confirmado el
+  29/09/2026.
 
 ### Provisión del sobre y worker
 
@@ -128,8 +138,13 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
 
 - El sobre sellado tenía un tope de 1 MiB que impedía enviar la tabla: el job
   quedaba ASIGNADO sin POST al worker.
-- El tope pasó a 4 MiB con rechazo estricto por encima (commit `0aab3aa`), con el
-  valor en `MAX_SEALED_SECTION_BYTES` y documentado en `security/sealed.py`.
+- El tope pasó a 4 MiB **en claro** en la central con rechazo estricto por encima
+  (commit `0aab3aa`), con el valor en `MAX_SEALED_SECTION_BYTES` y documentado en
+  `security/sealed.py`.
+- Del lado del worker se valida el blob Fernet con la fórmula correcta
+  (`MAX_SEALED_SECTION_BYTES + 57 + 16`, y su base64), porque el cálculo anterior
+  usaba la fórmula de RSA y rechazaba cualquier sección mayor a ~1 MB. Confirmado
+  el 29/09/2026.
 
 ### Verificaciones ya observadas
 
@@ -140,8 +155,10 @@ Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
   demás bots.
 - El plugin resuelve un CUIT de la tabla real con `apoc: true` y sus fechas.
 
-### Pendiente
+### Pendiente (resuelto el 29/09/2026)
 
-- Confirmación del job real por la API tras el arreglo del tope (aún no marcado como
-  verificado).
+- El job real de `apoc.consultar` con un CUIT que figura en la tabla terminó
+  `COMPLETO` en ~0,1 s con `data.apoc = true` y `fecha_condicion`/`fecha_publicacion`
+  no nulas. Primera confirmación a las 04:57 y reverificación tras corregir el tope
+  del worker.
 
