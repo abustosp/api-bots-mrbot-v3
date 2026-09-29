@@ -84,3 +84,64 @@ identificadores de consulta (`emitidos` y `recibidos`).
 | Usar los ejemplos más recientes de las bases | Comparación del timestamp de cada caso contra el máximo con éxito de su tabla | Los ocho casos comparados usan exactamente el máximo (arba 16/09, aportes 28/08, ccma 24/09, facturómetro 26/09, Mis Comprobantes 26/09) |
 | Verificar con evidencia, no con inspección | Bytes leídos por un subagente distinto del que armó los casos | Firma de PDF y ZIP, miembros del ZIP, encabezados de CSV y SHA-256 propios, más control negativo |
 
+## Tabla de apócrifos de AFIP (APOC)
+
+### Origen y forma de los datos
+
+- Fuente pública de AFIP:
+  `https://servicioscf.afip.gob.ar/facturacion/facturasapocrifas/DownloadFile.aspx`.
+- Responde un ZIP de ~500 KB cuyo único miembro es `FacturasApocrifas.txt`.
+- El texto es UTF-8 con BOM, de ~1,7 MB y ~45.600 líneas. Las primeras líneas
+  empiezan con `#` (encabezados) y luego siguen filas de datos con el formato
+  `CUIT,Fecha Condicion Apocrifo, Fecha Publicacion, Descripcion`.
+- No se documentan CUITs ni datos de contribuyentes en este runbook.
+
+### Descarga y caché en la central
+
+Archivo: `services/central-api/src/central_api/services/apoc_base.py`.
+
+- La central descarga la tabla solo si no existe la caché local.
+- La refresca cuando el archivo en disco tiene más de 7 días
+  (`APOC_REFRESH_INTERVAL_DAYS`).
+- La descarga y el refresco corren en una tarea de fondo (`refresh_loop`) que
+  no bloquea el alta de jobs.
+- La ruta se configura con `APOC_BASE_PATH`. En el compose por defecto es
+  `/var/lib/mrbot/FacturasApocrifas.txt`, montada sobre el volumen `apoc_base`
+  para sobrevivir a los reinicios.
+- Antes de reemplazar la caché se valida que el contenido parezca la tabla ("# AFIP"
+  en los encabezados y al menos una fila `CUIT,fecha,fecha`) y que no supere el
+  límite de tamaño.
+- Si la descarga falla, se conserva la caché vieja y se registra el aviso; si no
+  hay caché, el worker mantiene su camino de fallback (`apoc: false`) con el aviso
+  "base APOC no provisionada".
+
+### Provisión del sobre y worker
+
+- La central envía el texto solo al bot `apoc`, dentro de la sección `service` del
+  sobre sellado (`provisioned_section('apoc')` con la clave `apoc_base_text`); no
+  lo incluye en el sobre de los demás bots.
+- El plugin (`services/bot-worker/src/bot_worker/bots/apoc/plugin.py`) compara el
+  CUIT normalizado (solo dígitos), ignora los encabezados `#` y las líneas vacías,
+  y tolera la columna extra (`Descripcion`).
+
+### Tope del sobre sellado
+
+- El sobre sellado tenía un tope de 1 MiB que impedía enviar la tabla: el job
+  quedaba ASIGNADO sin POST al worker.
+- El tope pasó a 4 MiB con rechazo estricto por encima (commit `0aab3aa`), con el
+  valor en `MAX_SEALED_SECTION_BYTES` y documentado en `security/sealed.py`.
+
+### Verificaciones ya observadas
+
+- Descarga sin caché OK (ZIP descomprimido de 1.734.993 bytes).
+- Refresco con un archivo de 8 días OK (por encima del intervalo de 7 días).
+- Archivo fresco (menos de 7 días) no refresca.
+- Provisión con 45.645 líneas para `apoc` y ausente (`apoc_base_text`) para los
+  demás bots.
+- El plugin resuelve un CUIT de la tabla real con `apoc: true` y sus fechas.
+
+### Pendiente
+
+- Confirmación del job real por la API tras el arreglo del tope (aún no marcado como
+  verificado).
+
