@@ -233,6 +233,7 @@ class Ec2Fleet:
         ):
             raise ValueError("registry_user y registry_pass deben configurarse juntos")
 
+        self.last_launch_limit = None
         launch_type = instance_type or self.settings.instance_type
         ram_gib, concurrency = self._instance_runtime(launch_type)
         existing = self.list_managed(states=("pending", "running"))
@@ -311,6 +312,9 @@ class Ec2Fleet:
                 except Exception as exc:
                     code = self._error_code(exc)
                     if code == "VcpuLimitExceeded":
+                        # Cuota de la cuenta agotada: se corta el lote y se deja
+                        # constancia para que el controlador no lo reporte como exito.
+                        self.last_launch_limit = "VcpuLimitExceeded"
                         break
                     if code == "InsufficientInstanceCapacity":
                         continue

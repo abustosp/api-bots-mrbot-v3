@@ -492,3 +492,23 @@ def test_postgres_es_autoridad_de_jobs_activos_y_no_la_cache_desfasada(monkeypat
     finally:
         JOBS.pop("job-fantasma", None)
         EPHEMERAL_WORKERS.pop("i-fantasma", None)
+
+
+def test_cuota_vcpu_agotada_se_registra_como_scale_up_short_y_no_como_exito(monkeypatch):
+    """Hallazgo real: AWS devolvio 4 de 18 por VcpuLimitExceeded y la central
+    registro 'scale_up_launched' 20 veces, ocultando que faltaban 14 workers."""
+    eventos = []
+    monkeypatch.setattr(controller, "_event", lambda action, **kw: eventos.append((action, kw)))
+
+    class SinCuota(FakeFleet):
+        last_launch_limit = "VcpuLimitExceeded"
+
+        def launch(self, count, *a, **k):
+            return []
+
+    monkeypatch.setattr(controller, "_make_fleet", lambda: SinCuota())
+    out = asyncio.run(controller.launch_workers(5, reason="t", dry_run=False))
+    assert out == []
+    acciones = [a for a, _ in eventos]
+    assert "scale_up_short" in acciones and "scale_up_launched" not in acciones
+    assert [kw for a, kw in eventos if a == "scale_up_short"][0]["limit"] == "VcpuLimitExceeded"

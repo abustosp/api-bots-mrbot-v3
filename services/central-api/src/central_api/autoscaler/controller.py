@@ -588,6 +588,16 @@ async def launch_workers(
     else:
         workers = await asyncio.to_thread(fleet.launch, count)
     records = [record for worker in workers if (record := _register_instance(worker)) is not None]
+    limit = getattr(fleet, "last_launch_limit", None)
+    if limit or len(workers) < count:
+        # Pedimos ``count`` y AWS entrego menos (cuota vCPU o capacidad): no es un exito.
+        _event(
+            "scale_up_short",
+            reason=f"se pidieron {count} y AWS entrego {len(workers)}" + (f" ({limit})" if limit else ""),
+            requested=count, launched=len(workers), limit=limit,
+        )
+    if not workers:
+        return []
     if workers:
         LAST_ACTION_AT = utcnow()
         LAST_SCALE_UP_PENDING = (
