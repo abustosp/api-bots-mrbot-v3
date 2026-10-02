@@ -8,6 +8,7 @@ y auditoría según ``plans/05-admin-panel/plan.md``.
 from fastapi import APIRouter
 
 from central_api.admin.audit import router as audit_router
+from central_api.admin.autoscale import router as autoscale_router
 from central_api.admin.fleet import router as fleet_router
 from central_api.admin.jobs import router as jobs_router
 from central_api.admin.panel import router as panel_router
@@ -23,3 +24,4 @@ router.include_router(jobs_router, tags=["admin-jobs"])
 router.include_router(fleet_router, tags=["admin-fleet"])
 router.include_router(billing_router, tags=["admin-billing"])
 router.include_router(audit_router, tags=["admin-audit"])
+router.include_router(autoscale_router, tags=["admin-autoscale"])

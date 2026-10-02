@@ -23,7 +23,7 @@ from mrbot_contracts.version import PROTOCOL_VERSION as CONTRACT_PROTOCOL_VERSIO
 from central_api.db import db_configurado, nueva_sesion
 from central_api.security.worker_auth import mint_service_token, mint_worker_token
 from central_api.settings import get_settings
-from central_api.store import ADMIN_NODES, WORKERS, WorkerEntry, utcnow
+from central_api.store import ADMIN_NODES, EPHEMERAL_WORKERS, WORKERS, WorkerEntry, utcnow
 from central_api.worker_nodes import merge_nodes, node_from_url
 
 
@@ -223,13 +223,20 @@ async def register_worker(body: RegisterBody) -> dict:
             "protocol_version": PROTOCOL_VERSION,
             "motivo": "protocolo incompatible",
         }
+    ephemeral = next(
+        (item for item in EPHEMERAL_WORKERS.values() if item.get("node") == node),
+        None,
+    )
+    draining = bool(ephemeral and ephemeral.get("drain_requested"))
     entry = WORKERS.get(node) or WorkerEntry(node=node)
-    entry.status = "REGISTRANDO"
+    entry.status = "DRENANDO" if draining else "REGISTRANDO"
     entry.capacity = min(max(1, body.capacity), MAX_WORKER_CAPACITY)
     entry.capabilities = body.capabilities
     if body.sealed_pubkey_pem:
         entry.sealed_pubkey_pem = body.sealed_pubkey_pem
     WORKERS[node] = entry
+    if ephemeral is not None:
+        ephemeral["registered_at"] = ephemeral.get("registered_at") or utcnow()
     # Con base configurada el registro canónico vive en PostgreSQL
     # (repositories+models, UUID pleno sin correlativos); la entrada en
     # memoria queda como caché viva con el mismo UUID.
@@ -239,6 +246,21 @@ async def register_worker(body: RegisterBody) -> dict:
         if registrado is not None:
             worker_uuid = registrado
             entry.worker_id = str(registrado)
+            if draining:
+                try:
+                    from sqlalchemy import update
+
+                    from central_api.models.fleet import Worker
+
+                    async with nueva_sesion() as sesion:
+                        await sesion.execute(
+                            update(Worker).where(Worker.id == registrado).values(
+                                status="DRENANDO"
+                            )
+                        )
+                        await sesion.commit()
+                except Exception:  # noqa: BLE001 - local DRENANDO still blocks dispatch
+                    pass
     settings = get_settings()
     signing_key = settings.internal_jwt_signing_key or ""
     if worker_uuid is not None and signing_key:
@@ -307,15 +329,23 @@ async def worker_heartbeat(worker_id: str, body: HeartbeatBody) -> dict:
     if entry is None:
         raise HTTPException(status_code=404, detail="worker no registrado")
     await _sanar_worker_id(entry, node, body.capacity)
-    if entry.status == "DRENANDO":
-        return {"ok": True, "node": entry.node, "status": entry.status}
-    entry.status = body.status
+    ephemeral = next(
+        (item for item in EPHEMERAL_WORKERS.values() if item.get("node") == node),
+        None,
+    )
+    draining = entry.status == "DRENANDO" or bool(
+        ephemeral and ephemeral.get("drain_requested")
+    )
+    entry.status = "DRENANDO" if draining else body.status
     entry.capacity = min(max(1, body.capacity), MAX_WORKER_CAPACITY)
     entry.running_jobs = max(0, body.en_ejecucion)
     entry.last_heartbeat_at = utcnow()
+    if ephemeral is not None:
+        ephemeral["last_heartbeat_at"] = entry.last_heartbeat_at
+        ephemeral["registered_at"] = ephemeral.get("registered_at") or entry.last_heartbeat_at
     # Con base configurada el latido canónico vive en PostgreSQL.
     if db_configurado():
         await _latido_db(
-            _uuid_de(entry), node, body.status, entry.running_jobs, entry.capacity
+            _uuid_de(entry), node, entry.status, entry.running_jobs, entry.capacity
         )
     return {"ok": True, "node": entry.node, "status": entry.status}

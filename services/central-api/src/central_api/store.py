@@ -52,6 +52,11 @@ WORKERS: dict[str, WorkerEntry] = {}  # clave: "ip:port"
 # lo persisten en PostgreSQL. Se suma a WORKER_NODES, nunca lo reemplaza.
 ADMIN_NODES: set[str] = set()
 
+# Instancias que pertenecen al autoscaler. Nunca se mezclan con workers
+# manuales: su clave estable es el ID EC2 y su nodo puede no existir mientras
+# la instancia todavía está arrancando.
+EPHEMERAL_WORKERS: dict[str, dict] = {}
+
 
 def new_job_id() -> str:
     """Genera el ID del job en memoria como UUIDv7 (plan 02 §3.3, I-1/I-2).

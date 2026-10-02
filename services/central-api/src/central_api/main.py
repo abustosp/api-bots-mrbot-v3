@@ -189,6 +189,7 @@ async def lifespan(app: FastAPI):
                 "no se pudo sembrar el catálogo al arrancar: %s", type(exc).__name__
             )
     tarea_scheduler: asyncio.Task | None = None
+    tarea_autoscaler: asyncio.Task | None = None
     from central_api.services.apoc_base import refresh_loop as apoc_refresh_loop
 
     tarea_apoc = asyncio.create_task(apoc_refresh_loop())
@@ -196,6 +197,10 @@ async def lifespan(app: FastAPI):
         from central_api.scheduler.loop import scheduler_loop
 
         tarea_scheduler = asyncio.create_task(scheduler_loop())
+    if get_settings().autoscale_enabled:
+        from central_api.autoscaler.controller import start_loop_task
+
+        tarea_autoscaler = start_loop_task()
     try:
         yield
     finally:
@@ -210,6 +215,10 @@ async def lifespan(app: FastAPI):
                 await tarea_scheduler
             except (asyncio.CancelledError, Exception):
                 pass
+        # Cancela tareas del controller/drain monitor, pero nunca termina EC2.
+        from central_api.autoscaler.controller import shutdown_tasks
+
+        await shutdown_tasks()
         if app.state.db_configurado:
             await cerrar_motor()
 

@@ -141,8 +141,16 @@ def _vista_fila(nodo: str) -> dict:
     terminales = [j for j in JOBS.values() if j.worker_node == nodo and j.status in ("COMPLETO", "FALLIDO")]
     fallidos = sum(1 for j in terminales if j.status == "FALLIDO")
     tasa_error = (fallidos / len(terminales)) if terminales else 0.0
+    from central_api.store import EPHEMERAL_WORKERS
+
+    ephemeral = next(
+        (item for item in EPHEMERAL_WORKERS.values() if item.get("node") == nodo),
+        None,
+    )
     return {
         **base,
+        "origen": "efimero" if ephemeral is not None else base.get("origen"),
+        "instance_id": ephemeral.get("instance_id") if ephemeral else None,
         "protocolo": settings.worker_protocol_version,
         "protocolo_estado": "compatible",
         "bots": list(entrada.capabilities) if entrada else [],

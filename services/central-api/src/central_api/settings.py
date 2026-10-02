@@ -115,6 +115,21 @@ class Settings(BaseSettings):
     job_lease_seconds: int = 60
     max_execution_attempts: int = 3
 
+    # Escalado EC2 efímero. Deshabilitado por defecto para preservar el
+    # comportamiento de los despliegues existentes.
+    autoscale_enabled: bool = Field(default=False, alias="AUTOSCALE_ENABLED")
+    autoscale_dry_run: bool = Field(default=False, alias="AUTOSCALE_DRY_RUN")
+    autoscale_queue_threshold: int = Field(default=10, alias="AUTOSCALE_QUEUE_THRESHOLD")
+    autoscale_up_after_seconds: int = Field(default=20, alias="AUTOSCALE_UP_AFTER_SECONDS")
+    autoscale_max_instances: int = Field(default=4, alias="AUTOSCALE_MAX_INSTANCES")
+    autoscale_step: int = Field(default=2, alias="AUTOSCALE_STEP")
+    autoscale_boot_grace_seconds: int = Field(default=240, alias="AUTOSCALE_BOOT_GRACE_SECONDS")
+    autoscale_idle_seconds: int = Field(default=120, alias="AUTOSCALE_IDLE_SECONDS")
+    autoscale_interval_seconds: int = Field(default=5, alias="AUTOSCALE_INTERVAL_SECONDS")
+    autoscale_cooldown_seconds: int = Field(default=60, alias="AUTOSCALE_COOLDOWN_SECONDS")
+    autoscale_max_lifetime_seconds: int = Field(default=7200, alias="AUTOSCALE_MAX_LIFETIME_SECONDS")
+    autoscale_capacity_per_worker: int = Field(default=5, alias="AUTOSCALE_CAPACITY_PER_WORKER")
+
     # Provisión por asignación: el worker no tiene entorno ni secretos en
     # reposo; la central le envía por sobre sellado el proxy, las claves de
     # captcha y los endpoints de servicio que necesite cada job. Estos

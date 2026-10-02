@@ -109,10 +109,15 @@ def derive_state(entry: WorkerEntry | None) -> str:
 def worker_overview(node: str) -> dict:
     settings = get_settings()
     entry = WORKERS.get(node)
+    from central_api.store import EPHEMERAL_WORKERS
+
+    origen = "efimero" if any(
+        info.get("node") == node for info in EPHEMERAL_WORKERS.values()
+    ) else "panel" if node in ADMIN_NODES else "env"
     return {
         "node": node,
         "worker_id": entry.worker_id if entry else "",
-        "origen": "panel" if node in ADMIN_NODES else "env",
+        "origen": origen,
         "registrado": entry is not None,
         "estado": derive_state(entry),
         "en_ejecucion": entry.running_jobs if entry else 0,
