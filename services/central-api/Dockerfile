@@ -31,7 +31,7 @@ COPY packages/mrbot-contracts/pyproject.toml ./mrbot-contracts/pyproject.toml
 COPY packages/mrbot-contracts/README.md ./mrbot-contracts/README.md
 COPY packages/mrbot-contracts/src ./mrbot-contracts/src
 RUN python -m pip install --upgrade pip \
- && python -m pip wheel --wheel-dir /wheels ./central-api ./mrbot-contracts
+ && python -m pip wheel --wheel-dir /wheels "./central-api[autoscaler]" ./mrbot-contracts
 
 FROM ${PYTHON_IMAGE} AS runtime
 ENV PYTHONUNBUFFERED=1 \
