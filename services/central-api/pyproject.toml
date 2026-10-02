@@ -18,6 +18,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+autoscaler = [
+  "boto3>=1.34",
+]
 dev = [
   "pytest>=8",
   "httpx>=0.27",
