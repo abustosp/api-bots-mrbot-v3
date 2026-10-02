@@ -456,3 +456,39 @@ def test_draining_worker_heartbeats_update_load_without_reentering_scheduler():
     assert WORKERS[node].running_jobs == 0
     assert EPHEMERAL_WORKERS["i-drain-heartbeat"]["registered_at"] is not None
     assert EPHEMERAL_WORKERS["i-drain-heartbeat"]["last_heartbeat_at"] is not None
+
+
+def test_postgres_es_autoridad_de_jobs_activos_y_no_la_cache_desfasada(monkeypatch):
+    """Hallazgo real: un job FALLIDO en la base seguia CORRIENDO en ``JOBS`` y la
+    EC2 drenando nunca se terminaba (costo indefinido). Con base, manda la base."""
+    from central_api.store import JOBS, Job
+
+    node = "18.1.1.1:8080"
+    EPHEMERAL_WORKERS["i-fantasma"] = {"node": node, "instance_id": "i-fantasma"}
+    JOBS["job-fantasma"] = Job(
+        id="job-fantasma", bot="mis_comprobantes", operation="consultar",
+        payload={}, credentials={}, status="CORRIENDO", worker_node=node,
+    )
+
+    async def base_dice_cero():
+        return {}
+
+    monkeypatch.setattr(controller, "_db_active_by_node", base_dice_cero)
+    try:
+        assert asyncio.run(controller._active_jobs({"node": node})) == 0
+        assert asyncio.run(controller._active_jobs_by_node()) == {node: 0}
+
+        async def base_dice_dos():
+            return {node: 2}
+
+        monkeypatch.setattr(controller, "_db_active_by_node", base_dice_dos)
+        assert asyncio.run(controller._active_jobs({"node": node})) == 2
+
+        async def sin_base():
+            return None
+
+        monkeypatch.setattr(controller, "_db_active_by_node", sin_base)
+        assert asyncio.run(controller._active_jobs({"node": node})) == 1  # sin base: cache
+    finally:
+        JOBS.pop("job-fantasma", None)
+        EPHEMERAL_WORKERS.pop("i-fantasma", None)

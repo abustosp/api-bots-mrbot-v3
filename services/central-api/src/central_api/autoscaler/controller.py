@@ -292,19 +292,10 @@ async def _queue_metrics() -> tuple[int, int, datetime | None, str]:
     )
 
 
-async def _active_jobs_by_node() -> dict[str, int]:
-    # Cache de memoria es una segunda fuente; en PostgreSQL se consulta el
-    # conteo canónico asociado al endpoint del worker.
-    counts = {
-        node: sum(
-            1 for job in JOBS.values()
-            if job.worker_node == node and job.status in ("ASIGNADO", "CORRIENDO")
-        )
-        for node in (item.get("node") for item in EPHEMERAL_WORKERS.values())
-        if node
-    }
+async def _db_active_by_node() -> dict[str, int] | None:
+    """Jobs ASIGNADO/CORRIENDO por worker segun PostgreSQL; ``None`` sin base o ante error."""
     if not db_configurado():
-        return counts
+        return None
     try:
         from sqlalchemy import func, select
 
@@ -318,11 +309,32 @@ async def _active_jobs_by_node() -> dict[str, int]:
                 .where(PersistedJob.status.in_(("ASIGNADO", "CORRIENDO")))
                 .group_by(Worker.endpoint)
             )).all()
-        for node, count in rows:
-            counts[str(node)] = max(counts.get(str(node), 0), int(count))
-    except Exception as exc:  # noqa: BLE001 - cache/heartbeat remains available
+        return {str(node): int(count) for node, count in rows}
+    except Exception as exc:  # noqa: BLE001 - se cae a la cache en memoria
         log.warning("no se pudieron consultar jobs activos de flota: %s", type(exc).__name__)
-    return counts
+        return None
+
+
+def _cache_active_by_node(nodes) -> dict[str, int]:
+    return {
+        node: sum(
+            1 for job in JOBS.values()
+            if job.worker_node == node and job.status in ("ASIGNADO", "CORRIENDO")
+        )
+        for node in nodes if node
+    }
+
+
+async def _active_jobs_by_node() -> dict[str, int]:
+    """Con PostgreSQL la base es la autoridad: la cache ``JOBS`` puede quedar
+    desfasada (p. ej. un job ya FALLIDO en la base que la cache sigue viendo
+    CORRIENDO) y eso bloquearia para siempre la baja de una EC2 que cuesta
+    dinero. Sin base se usa la cache."""
+    nodes = [item.get("node") for item in EPHEMERAL_WORKERS.values()]
+    canonical = await _db_active_by_node()
+    if canonical is not None:
+        return {node: canonical.get(node, 0) for node in nodes if node}
+    return _cache_active_by_node(nodes)
 
 
 def _elapsed_seconds(start: Any, end: Any) -> float | None:
@@ -604,17 +616,17 @@ async def launch_workers(
 
 async def _active_jobs(record: dict) -> int:
     node = str(record.get("node") or "")
-    entry = WORKERS.get(node) if node else None
+    if not node:
+        return 0
+    canonical = await _db_active_by_node()
+    if canonical is not None:
+        # Base como autoridad; el heartbeat del worker solo puede sumar (no restar).
+        entry = WORKERS.get(node)
+        heartbeat = entry.running_jobs if entry else 0
+        return max(canonical.get(node, 0), heartbeat)
+    entry = WORKERS.get(node)
     count = entry.running_jobs + entry.reserved_slots if entry else 0
-    count = max(count, sum(
-        1 for job in JOBS.values()
-        if job.worker_node == node and job.status in ("ASIGNADO", "CORRIENDO")
-    ))
-    try:
-        count = max(count, (await _active_jobs_by_node()).get(node, 0))
-    except Exception:  # noqa: BLE001
-        pass
-    return count
+    return max(count, _cache_active_by_node([node]).get(node, 0))
 
 
 async def _mark_draining(record: dict) -> None:
