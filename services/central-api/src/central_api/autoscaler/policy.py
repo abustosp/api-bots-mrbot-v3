@@ -158,8 +158,8 @@ def decide(snapshot: Any, cfg: Any, now: datetime) -> Decision:
     threshold = max(0, int(_get(cfg, "autoscale_queue_threshold", 10) or 0))
     up_after = max(0.0, float(_get(cfg, "autoscale_up_after_seconds", 20) or 0))
     max_instances = max(0, int(_get(cfg, "autoscale_max_instances", 4) or 0))
-    configured_step = max(0, int(_get(cfg, "autoscale_step", 2) or 0))
-    step = min(configured_step or 2, 2)
+    # step=0 significa sin limite por ciclo (solo lo acotan la formula y max_instances).
+    step = max(0, int(_get(cfg, "autoscale_step", 0) or 0))
     boot_grace = max(0.0, float(_get(cfg, "autoscale_boot_grace_seconds", 240) or 0))
     idle_seconds = max(0.0, float(_get(cfg, "autoscale_idle_seconds", 45) or 0))
     max_lifetime = max(0.0, float(_get(cfg, "autoscale_max_lifetime_seconds", 86400) or 0))
@@ -233,7 +233,8 @@ def decide(snapshot: Any, cfg: Any, now: datetime) -> Decision:
                 chosen_type = large_type
         available = max(0, max_instances - active_instances)
         desired = min(desired, available)
-        desired = min(desired, step)
+        if step:
+            desired = min(desired, step)
         last_scale_pending = _get(snapshot, "last_scale_up_pending")
         complementary = (
             last_scale_pending is not None

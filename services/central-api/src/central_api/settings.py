@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     autoscale_queue_threshold: int = Field(default=10, alias="AUTOSCALE_QUEUE_THRESHOLD")
     autoscale_up_after_seconds: int = Field(default=20, alias="AUTOSCALE_UP_AFTER_SECONDS")
     autoscale_max_instances: int = Field(default=4, alias="AUTOSCALE_MAX_INSTANCES")
-    autoscale_step: int = Field(default=2, ge=0, alias="AUTOSCALE_STEP")
+    autoscale_step: int = Field(default=0, ge=0, alias="AUTOSCALE_STEP")  # 0 = sin limite por ciclo
     autoscale_boot_grace_seconds: int = Field(default=240, alias="AUTOSCALE_BOOT_GRACE_SECONDS")
     autoscale_idle_seconds: int = Field(default=45, alias="AUTOSCALE_IDLE_SECONDS")
     autoscale_interval_seconds: int = Field(default=5, alias="AUTOSCALE_INTERVAL_SECONDS")

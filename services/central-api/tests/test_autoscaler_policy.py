@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import math
+
 import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -182,25 +184,20 @@ def test_queue_work_math_with_ten_fixed_free_slots_needs_no_worker():
 
 
 @pytest.mark.parametrize("pending", [300, 664])
-def test_large_queue_batches_at_formula_then_respects_hard_step_two(pending):
-    decision = decide(
-        snapshot(pendientes=pending, queue_pressure_seconds=30),
-        CFG,
-        NOW,
-    )
-    assert decision.scale_up == 2
-    assert decision.desired_instances == 2
+def test_large_queue_launches_all_needed_in_one_cycle_when_step_is_unlimited(pending):
+    cfg = SimpleNamespace(**{**vars(CFG), "autoscale_step": 0, "autoscale_max_instances": 50})
+    decision = decide(snapshot(pendientes=pending, queue_pressure_seconds=30), cfg, NOW)
+    expected = math.ceil((pending * 75) / (5 * 300))
+    assert decision.scale_up == expected and expected > 2
     assert decision.work_seconds == pending * 75
     assert decision.current_slots == 0
 
 
-def test_hard_step_ceiling_two_applies_even_if_configured_as_zero_or_larger():
-    for configured_step in (0, 2, 99):
-        cfg = SimpleNamespace(**{**vars(CFG), "autoscale_step": configured_step})
-        decision = decide(
-            snapshot(pendientes=664, queue_pressure_seconds=30), cfg, NOW
-        )
-        assert decision.scale_up == 2
+def test_configured_step_still_caps_launches_per_cycle_and_max_instances_caps_total():
+    capped = SimpleNamespace(**{**vars(CFG), "autoscale_step": 2, "autoscale_max_instances": 50})
+    assert decide(snapshot(pendientes=664, queue_pressure_seconds=30), capped, NOW).scale_up == 2
+    maxed = SimpleNamespace(**{**vars(CFG), "autoscale_step": 0, "autoscale_max_instances": 4})
+    assert decide(snapshot(pendientes=664, queue_pressure_seconds=30), maxed, NOW).scale_up == 4
 
 
 def test_max_instances_caps_step_and_cooldown_allows_only_complementary_growth():
