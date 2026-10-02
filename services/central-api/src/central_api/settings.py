@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     worker_heartbeat_interval_seconds: int = 10
     worker_degraded_after_seconds: int = 15
     worker_down_after_seconds: int = 45
-    worker_capacity: int = 5
+    worker_capacity: int = Field(default=10, ge=1, le=10)
 
     scheduler_enabled: bool = True
     scheduler_poll_interval_ms: int = 1000
@@ -122,13 +122,17 @@ class Settings(BaseSettings):
     autoscale_queue_threshold: int = Field(default=10, alias="AUTOSCALE_QUEUE_THRESHOLD")
     autoscale_up_after_seconds: int = Field(default=20, alias="AUTOSCALE_UP_AFTER_SECONDS")
     autoscale_max_instances: int = Field(default=4, alias="AUTOSCALE_MAX_INSTANCES")
-    autoscale_step: int = Field(default=2, alias="AUTOSCALE_STEP")
+    autoscale_step: int = Field(default=2, ge=0, alias="AUTOSCALE_STEP")
     autoscale_boot_grace_seconds: int = Field(default=240, alias="AUTOSCALE_BOOT_GRACE_SECONDS")
-    autoscale_idle_seconds: int = Field(default=120, alias="AUTOSCALE_IDLE_SECONDS")
+    autoscale_idle_seconds: int = Field(default=45, alias="AUTOSCALE_IDLE_SECONDS")
     autoscale_interval_seconds: int = Field(default=5, alias="AUTOSCALE_INTERVAL_SECONDS")
     autoscale_cooldown_seconds: int = Field(default=60, alias="AUTOSCALE_COOLDOWN_SECONDS")
     autoscale_max_lifetime_seconds: int = Field(default=7200, alias="AUTOSCALE_MAX_LIFETIME_SECONDS")
-    autoscale_capacity_per_worker: int = Field(default=5, alias="AUTOSCALE_CAPACITY_PER_WORKER")
+    autoscale_capacity_per_worker: int = Field(default=0, ge=0, alias="AUTOSCALE_CAPACITY_PER_WORKER")
+    autoscale_avg_job_seconds: float = Field(default=75, gt=0, alias="AUTOSCALE_AVG_JOB_SECONDS")
+    autoscale_boot_estimate_seconds: float = Field(default=150, gt=0, alias="AUTOSCALE_BOOT_ESTIMATE_SECONDS")
+    autoscale_target_work_seconds: float = Field(default=300, gt=0, alias="AUTOSCALE_TARGET_WORK_SECONDS")
+    autoscale_instance_type_large: str = Field(default="", alias="AUTOSCALE_INSTANCE_TYPE_LARGE")
 
     # Provisión por asignación: el worker no tiene entorno ni secretos en
     # reposo; la central le envía por sobre sellado el proxy, las claves de

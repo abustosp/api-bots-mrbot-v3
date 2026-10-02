@@ -84,19 +84,19 @@ class TestProtocolo(unittest.TestCase):
 
 
 class TestTopes(unittest.TestCase):
-    """Tope duro de capacidad 5 (W-2) en central y settings."""
+    """Tope duro de capacidad 10 (W-2) en central y settings."""
 
-    def test_max_worker_capacity_5(self):
+    def test_max_worker_capacity_10(self):
         ruta = RAIZ / "services/central-api/src/central_api/internal/workers.py"
-        self.assertEqual(_constante_numérica(ruta, "MAX_WORKER_CAPACITY"), 5)
+        self.assertEqual(_constante_numérica(ruta, "MAX_WORKER_CAPACITY"), 10)
 
-    def test_settings_capacity_5(self):
+    def test_settings_capacity_10(self):
         texto = (RAIZ / "services/central-api/src/central_api/settings.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn("worker_capacity: int = 5", texto)
+        self.assertIn("worker_capacity: int = Field(default=10, ge=1, le=10)", texto)
 
-    def test_registro_recorta_a_5(self):
+    def test_registro_recorta_a_10(self):
         texto = (
             RAIZ / "services/central-api/src/central_api/internal/workers.py"
         ).read_text(encoding="utf-8")
@@ -511,7 +511,7 @@ class TestReporting(unittest.TestCase):
         from bot_worker.reporting.heartbeat import build_heartbeat_payload
 
         class Sup:
-            capacity = 5
+            capacity = 10
             en_ejecucion = 2
             en_cola = 1
             draining = False
@@ -524,7 +524,7 @@ class TestReporting(unittest.TestCase):
             worker_id="w", protocol_version=1, image_version="v",
             supervisor=Sup(), state="SANO", accepting_jobs=True, sequence=1,
         )
-        self.assertLessEqual(carga["capacity"], 5)
+        self.assertLessEqual(carga["capacity"], 10)
         self.assertEqual(carga["en_ejecucion"], 2)
         self.assertEqual(carga["protocol_version"], 1)
 

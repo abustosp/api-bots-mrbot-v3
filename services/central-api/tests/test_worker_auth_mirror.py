@@ -116,7 +116,59 @@ class TestTokensServicio(unittest.TestCase):
 
 
 class TestRegistroEspejo(unittest.TestCase):
-    """Registro idempotente con pubkey y tope 5 (espejo de PostgreSQL)."""
+    """Registro idempotente con pubkey y tope 10 (espejo de PostgreSQL)."""
+
+    def test_registro_y_heartbeat_aceptan_capacidad_6_a_10(self):
+        for capacity in range(6, 11):
+            with self.subTest(capacity=capacity):
+                sesion = SesionFalsa(None)
+                fila = correr(
+                    WorkerRepository(sesion).register(
+                        name=f"10.0.0.{capacity}:8080",
+                        endpoint_node=f"10.0.0.{capacity}:8080",
+                        app_version="3.0.0",
+                        allowed={f"10.0.0.{capacity}:8080"},
+                        capacity=capacity,
+                    )
+                )
+                self.assertEqual(fila.capacity, capacity)
+                sesion_heartbeat = SesionFalsa(fila)
+                correr(
+                    WorkerRepository(sesion_heartbeat).heartbeat(
+                        worker_id=fila.id,
+                        status="SANO",
+                        running_jobs=capacity,
+                        queued_jobs=0,
+                        capacity=capacity,
+                    )
+                )
+                self.assertEqual(fila.running_jobs, capacity)
+
+    def test_registro_y_heartbeat_rechazan_11(self):
+        sesion = SesionFalsa(None)
+        with self.assertRaises(RepositoryError):
+            correr(
+                WorkerRepository(sesion).register(
+                    name="10.0.0.11:8080",
+                    endpoint_node="10.0.0.11:8080",
+                    app_version="3.0.0",
+                    allowed={"10.0.0.11:8080"},
+                    capacity=11,
+                )
+            )
+        fila = Worker(
+            id=new_uuid7(), name="10.0.0.12:8080", status="SANO",
+            endpoint="10.0.0.12:8080", app_version="3.0.0", capacity=10,
+            running_jobs=0, queued_jobs=0,
+        )
+        sesion = SesionFalsa(fila)
+        with self.assertRaises(RepositoryError):
+            correr(
+                WorkerRepository(sesion).heartbeat(
+                    worker_id=fila.id, status="SANO", running_jobs=11,
+                    queued_jobs=0, capacity=11,
+                )
+            )
 
     def test_alta_guarda_pubkey_y_capacidad(self):
         sesion = SesionFalsa(None)
@@ -191,7 +243,7 @@ class TestRegistroEspejo(unittest.TestCase):
                     endpoint_node="n",
                     app_version="x",
                     allowed={"n"},
-                    capacity=6,
+                    capacity=11,
                 )
             )
         with self.assertRaises(RepositoryError):
@@ -234,9 +286,9 @@ class TestRegistroEspejo(unittest.TestCase):
                 WorkerRepository(sesion).heartbeat(  # type: ignore[arg-type]
                     worker_id=previo.id,
                     status="SANO",
-                    running_jobs=6,
+                    running_jobs=11,
                     queued_jobs=0,
-                    capacity=5,
+                    capacity=11,
                 )
             )
 

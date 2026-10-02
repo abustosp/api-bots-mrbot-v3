@@ -11,7 +11,7 @@
 #   - Los ajustes criticos de Playwright sobreviven la resolucion.
 #   - W-1 y SEC-3: el worker no recibe ningun secreto de la central.
 #   - W-3: el worker no publica puertos ni esta en la red de borde.
-#   - W-2: la capacidad declarada es 5.
+#   - W-2: la capacidad declarada está entre 1 y 10.
 #   - Los Dockerfiles declaran usuario no root y la barrera de import de DB.
 
 set -euo pipefail
@@ -149,9 +149,9 @@ else:
         f"pids {limits['pids']}, drenaje {worker['stop_grace_period']}"
     )
 
-# --- W-2: capacidad 5 ---------------------------------------------------
+# --- W-2: capacidad máxima 10 -------------------------------------------
 # El worker no tiene variables de entorno: la concurrencia entra por CLI
-# (`command: [... --concurrency 5]`), con tope duro 1..5 en el código.
+# (`command: [... --concurrency 5]`), con tope duro 1..10 en el código.
 env = worker.get("environment") or {}
 if not isinstance(env, dict):
     env = dict(e.split("=", 1) for e in env if "=" in e)
@@ -164,12 +164,12 @@ for i, token in enumerate(cmd):
         cap = cmd[i + 1]
 if env:
     bad(f"W-2: el worker no debe tener entorno (tiene {sorted(env)})")
-elif str(cap) == "5":
-    ok("W-2: el worker fija --concurrency 5 por CLI, sin entorno")
+elif cap is not None and cap.isdigit() and 1 <= int(cap) <= 10:
+    ok(f"W-2: el worker fija --concurrency {cap} (máximo 10), sin entorno")
 elif cap is None:
     bad("W-2: el worker no fija --concurrency en command:")
 else:
-    bad(f"W-2: --concurrency={cap}, deberia ser 5")
+    bad(f"W-2: --concurrency={cap}, debe estar entre 1 y 10")
 
 # --- W-1 y SEC-3: aislamiento de secretos -------------------------------
 CENTRAL_ONLY = {

@@ -3,7 +3,7 @@
 La central SOLO guarda la dirección ``ip:port`` de cada worker (más el estado
 que el propio worker reporta por HTTP). El alta acepta la unión de
 ``WORKER_NODES`` y los nodos del panel admin (nunca solo uno); la capacidad
-se topa en 5 (W-2); la salud viva se confirma por HTTP contra el worker
+se topa en 10 (W-2); la salud viva se confirma por HTTP contra el worker
 además de los latidos. ``protocol_version`` es entero (1).
 
 Fase de identidad: con base configurada el registro devuelve el ``worker_id``
@@ -45,7 +45,7 @@ async def _registrar_db(node: str, body: object) -> UUID | None:
                 endpoint_node=node,
                 app_version=str(getattr(body, "build_version", "") or ""),
                 allowed=merge_nodes(get_settings().worker_node_list, ADMIN_NODES),
-                capacity=min(max(1, int(getattr(body, "capacity", 5) or 5)), 5),
+                capacity=min(max(1, int(getattr(body, "capacity", 5) or 5)), 10),
                 sealed_pubkey_pem=str(getattr(body, "sealed_pubkey_pem", "") or "") or None,
                 protocol_version=int(getattr(body, "protocol_version", 1) or 1),
             )
@@ -173,7 +173,7 @@ PROTOCOL_VERSION: int = 1
 if PROTOCOL_VERSION != CONTRACT_PROTOCOL_VERSION:  # pragma: no cover - guardia de build
     raise RuntimeError("central-api: versión de protocolo desalineada")
 
-MAX_WORKER_CAPACITY = 5  # W-2: tope duro inicial de 5 ejecuciones
+MAX_WORKER_CAPACITY = 10  # W-2: tope duro de 10 ejecuciones
 
 
 class RegisterBody(BaseModel):

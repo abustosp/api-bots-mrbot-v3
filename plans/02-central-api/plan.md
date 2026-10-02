@@ -44,7 +44,7 @@ Por lo tanto, una réplica es desechable y no posee estado de scheduler en memor
 | Crear y consultar jobs | Sí | No | API `/api/v3/jobs` |
 | Ejecutar Playwright | No | Sí | `POST /internal/v1/jobs` |
 | Elegir worker | Sí | No | scheduler push |
-| Límite de 5 ejecuciones | Cuenta y respeta | Impone con semáforo | W-2 |
+| Límite de 10 ejecuciones | Cuenta y respeta | Impone con semáforo | W-2 |
 | Credencial RSA privada | Sí | No | SEC-3 |
 | Credenciales fiscales | Descifra y entrega efímeramente | Usa solo en memoria | SEC-2 |
 | Bucket S3/MinIO | Firma URLs y valida metadatos | Solo usa URLs prefirmadas | protocolo §7 |
@@ -1553,9 +1553,9 @@ La central compara esos valores con jobs asignados y reservas propias.
 
 Una diferencia sostenida por dos heartbeats crea métrica `worker_slot_drift` y estado `DEGRADADO`.
 
-El worker conserva el tope duro de cinco con un semáforo, aun si la central comete un error.
+El worker conserva el tope duro de diez con un semáforo, aun si la central comete un error.
 
-Una configuración de `capacity > 5` enviada por worker se rechaza como incompatible con W-2 en la V3 inicial.
+Una configuración de `capacity > 10` enviada por worker se rechaza como incompatible con W-2.
 
 ---
 
@@ -1604,7 +1604,7 @@ Si el certificado de workload corresponde a un worker previamente conocido, la c
 
 La central verifica que `advertised_url` sea HTTPS interno permitido y no una URL arbitraria pública.
 
-También verifica que `capacity == 5` en la fase inicial.
+También verifica que `capacity <= 10` y que workers con capacidad 5 siguen siendo válidos.
 
 La compatibilidad se evalúa contra rango de protocolo soportado por central.
 

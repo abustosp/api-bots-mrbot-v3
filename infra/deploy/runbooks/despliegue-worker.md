@@ -27,7 +27,7 @@ cp infra/compose/worker.env.example infra/compose/.env.worker
 `WORKER_TOKEN` no forma parte del protocolo actual y no se consume desde `.env`;
 Compose usa las variables solo para interpolar los argumentos CLI, no las pasa al
 proceso worker. Agrega la URL anunciada exacta a `WORKER_NODES` de la central
-(o registra el nodo desde el panel). `WORKER_CONCURRENCY` tiene tope duro de 5
+(o registra el nodo desde el panel). `WORKER_CONCURRENCY` tiene tope duro de 10
 (invariante W-2).
 
 Con nginx-v2, el worker queda disponible en

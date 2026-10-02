@@ -9,7 +9,7 @@ Diseno: [plan de infra](../../plans/06-infra/plan.md).
 
 - [Dockerfile](Dockerfile): sobre la base Playwright interna, usuario
   no root `mrbot`, `/work` efimero, sin variables de entorno de config
-  (`--concurrency 5` entra por CLI).
+  (`--concurrency 5` entra por CLI; el máximo es 10).
 - El build verifica que `psycopg`, `sqlalchemy` y `alembic` no son
   importables (invariante W-1). Sin driver de base, sin modelos ORM,
   sin clave RSA, sin SMTP ni MercadoPago.
@@ -59,9 +59,8 @@ Salud: `GET /internal/v1/health` (vivacidad),
 `GET /internal/v1/status` (capacidad y versiones),
 `GET /internal/v1/bots` (manifiesto). Requiere `init: true`,
 `/dev/shm` de 2 GiB y `stop_grace_period` de 150 segundos (vienen en el
-compose). El tope de 5 jobs concurrentes (invariante W-2) lo aplica
-`WORKER_CONCURRENCY` (efectivo en la app, 1 a 5);
-Tope fijo por CLI (`--concurrency`, 1 a 5). Saturado responde `409`.
+compose). El tope de 10 jobs concurrentes (invariante W-2) lo aplica
+`--concurrency`, con rango permitido de 1 a 10. Saturado responde `409`.
 
 ## Navegador: real en imagen, stub solo en dev
 

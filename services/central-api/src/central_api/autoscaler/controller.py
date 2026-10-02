@@ -10,6 +10,7 @@ import asyncio
 import logging
 from collections import deque
 from datetime import datetime, timezone
+from statistics import fmean
 from typing import Any
 
 from central_api.autoscaler.policy import Decision, decide
@@ -20,9 +21,11 @@ from central_api.worker_nodes import merge_nodes
 
 log = logging.getLogger(__name__)
 EVENTS: deque[dict] = deque(maxlen=200)
+BOOT_SECONDS_SAMPLES: deque[float] = deque(maxlen=32)
 FLEET: Any | None = None  # injectable in tests; production instance is lazy
 RUNTIME_ENABLED: bool | None = None
 LAST_ACTION_AT: datetime | None = None
+LAST_SCALE_UP_PENDING: int | None = None
 QUEUE_PRESSURE_SINCE: datetime | None = None
 AUTOSCALER_TASK: asyncio.Task | None = None
 DRAIN_TASK: asyncio.Task | None = None
@@ -155,15 +158,29 @@ def _register_instance(worker: Any, *, adopted: bool = False) -> dict | None:
     else:
         inventory_owned = bool(previous.get("inventory_owned", False))
     state = str(getattr(worker, "state", "unknown") or "unknown").lower()
+    try:
+        ram_gib = float(getattr(worker, "ram_gib", previous.get("ram_gib", 0)) or 0)
+    except (TypeError, ValueError):
+        ram_gib = float(previous.get("ram_gib", 0) or 0)
+    try:
+        concurrency = int(getattr(worker, "concurrency", previous.get("concurrency", 5)) or 5)
+    except (TypeError, ValueError):
+        concurrency = int(previous.get("concurrency", 5) or 5)
     record = {
         **previous,
         "instance_id": instance_id,
         "node": node,
         "launched_at": launched_at,
+        "instance_type": str(
+            getattr(worker, "instance_type", previous.get("instance_type", "")) or ""
+        ),
+        "ram_gib": ram_gib,
+        "concurrency": concurrency,
         "state": state,
         "last_busy_at": previous.get("last_busy_at"),
         "last_heartbeat_at": previous.get("last_heartbeat_at"),
         "registered_at": previous.get("registered_at"),
+        "first_healthy_at": previous.get("first_healthy_at"),
         "inventory_owned": inventory_owned,
         "adopted": bool(previous.get("adopted", adopted)),
     }
@@ -308,6 +325,89 @@ async def _active_jobs_by_node() -> dict[str, int]:
     return counts
 
 
+def _elapsed_seconds(start: Any, end: Any) -> float | None:
+    if start is None or end is None:
+        return None
+    try:
+        start_at = _parse_dt(start)
+        end_at = _parse_dt(end)
+    except (TypeError, ValueError):
+        return None
+    seconds = (end_at - start_at).total_seconds()
+    return seconds if seconds > 0 else None
+
+
+async def _average_job_seconds(default: float) -> float:
+    """Mean duration of up to 100 recent terminal jobs from PG or memory."""
+    samples: list[float] = []
+    if db_configurado():
+        try:
+            from sqlalchemy import select
+
+            from central_api.models.execution import Job as PersistedJob
+
+            async with nueva_sesion() as session:
+                rows = (
+                    await session.execute(
+                        select(PersistedJob.started_at, PersistedJob.finished_at)
+                        .where(
+                            PersistedJob.status.in_(("COMPLETO", "FALLIDO", "CANCELADO")),
+                            PersistedJob.started_at.is_not(None),
+                            PersistedJob.finished_at.is_not(None),
+                        )
+                        .order_by(PersistedJob.finished_at.desc())
+                        .limit(100)
+                    )
+                ).all()
+            samples = [
+                seconds
+                for started_at, finished_at in rows
+                if (seconds := _elapsed_seconds(started_at, finished_at)) is not None
+            ]
+        except Exception as exc:  # noqa: BLE001 - memory mirror is fallback
+            log.warning("no se pudo medir duración media en PG: %s", type(exc).__name__)
+    if not samples:
+        try:
+            from central_api.api.dependencies import JOB_META
+
+            for job in JOBS.values():
+                if job.status not in ("COMPLETO", "FALLIDO", "CANCELADO"):
+                    continue
+                meta = JOB_META.get(str(job.id), {})
+                seconds = _elapsed_seconds(meta.get("started_at"), meta.get("finished_at"))
+                if seconds is not None:
+                    samples.append(seconds)
+        except Exception:  # noqa: BLE001 - use configured default
+            pass
+    return fmean(samples[-100:]) if samples else float(default)
+
+
+def _instance_policy_info(settings: Any) -> dict[str, Any]:
+    """Return offline RAM/slot/cost hints for the pure policy."""
+    from central_api.autoscaler.ec2 import (
+        Ec2Fleet,
+        Ec2Settings,
+        INSTANCE_TYPE_RAM_GIB,
+    )
+
+    ec2 = Ec2Settings.from_env()
+    base_type = ec2.instance_type
+    large_type = str(settings.autoscale_instance_type_large or ec2.large_instance_type or "")
+    base_ram = INSTANCE_TYPE_RAM_GIB.get(base_type, 8.0)
+    base_slots = ec2.concurrency_for_type(base_type, base_ram)
+    large_ram = INSTANCE_TYPE_RAM_GIB.get(large_type, 8.0) if large_type else 0.0
+    large_slots = ec2.concurrency_for_type(large_type, large_ram) if large_type else 0
+    rates = Ec2Fleet._ON_DEMAND_USD_HOUR_SA_EAST_1
+    return {
+        "instance_type": base_type,
+        "capacidad_nueva": base_slots,
+        "large_instance_type": large_type,
+        "capacidad_tipo_grande": large_slots,
+        "rate_default": rates.get(base_type, 0.0),
+        "rate_large": rates.get(large_type, 0.0),
+    }
+
+
 async def build_snapshot(now: datetime | None = None) -> dict:
     now = now or utcnow()
     settings = get_settings()
@@ -334,6 +434,7 @@ async def build_snapshot(now: datetime | None = None) -> dict:
         max(0, int(entry.capacity) - int(entry.running_jobs) - int(entry.reserved_slots))
         for entry in healthy_fixed
     )
+    avg_job_seconds = await _average_job_seconds(settings.autoscale_avg_job_seconds)
     ephemerals: list[dict] = []
     for instance_id, record in list(EPHEMERAL_WORKERS.items()):
         node = str(record.get("node") or "")
@@ -356,24 +457,50 @@ async def build_snapshot(now: datetime | None = None) -> dict:
             and heartbeat is not None
             and heartbeat.timestamp() >= fresh_cutoff
         )
+        if healthy and record.get("first_healthy_at") is None:
+            healthy_at = heartbeat or now
+            record["first_healthy_at"] = healthy_at
+            boot_sample = _elapsed_seconds(record.get("launched_at"), healthy_at)
+            if boot_sample is not None:
+                BOOT_SECONDS_SAMPLES.append(boot_sample)
+        concurrency = max(
+            1,
+            int(
+                record.get("concurrency")
+                or (entry.capacity if entry is not None else settings.autoscale_capacity_per_worker)
+                or 5
+            ),
+        )
         ephemerals.append({
             "instance_id": instance_id,
             "node": node,
             "launched_at": record.get("launched_at"),
+            "instance_type": record.get("instance_type", ""),
+            "ram_gib": record.get("ram_gib", 0),
+            "concurrency": concurrency,
             "jobs_activos": active,
             "last_busy_at": record.get("last_busy_at"),
             "sano": healthy,
             "state": record.get("state", "unknown"),
         })
+    instance_info = _instance_policy_info(settings)
+    boot_seconds = (
+        fmean(BOOT_SECONDS_SAMPLES)
+        if BOOT_SECONDS_SAMPLES
+        else float(settings.autoscale_boot_estimate_seconds)
+    )
     return {
         "pendientes": pending,
         "en_ejecucion": running,
         "capacidad_libre_fija": fixed_free,
         "capacidad_total_fija": fixed_total,
+        "avg_job_seconds": avg_job_seconds,
+        "boot_seconds": boot_seconds,
         "efimeros": ephemerals,
         "edad_pendiente_mas_antiguo": max(0.0, (now - _parse_dt(oldest, now)).total_seconds()) if oldest else None,
         "fuente": source,
         "fixed_nodes": fixed_nodes,
+        **instance_info,
     }
 
 
@@ -411,9 +538,17 @@ def _wait_until_running_and_register(fleet: Any, workers: list[Any], timeout: in
     return running_workers
 
 
-async def launch_workers(count: int, *, reason: str, dry_run: bool | None = None) -> list[dict]:
+async def launch_workers(
+    count: int,
+    *,
+    reason: str,
+    dry_run: bool | None = None,
+    instance_type: str | None = None,
+    pending_at_decision: int | None = None,
+    formula: dict[str, float | int] | None = None,
+) -> list[dict]:
     """Lanza y registra instancias. La espera por EC2 se mantiene fuera del loop."""
-    global LAST_ACTION_AT
+    global LAST_ACTION_AT, LAST_SCALE_UP_PENDING
     settings = get_settings()
     count = max(0, int(count))
     fleet = _make_fleet()
@@ -428,10 +563,30 @@ async def launch_workers(count: int, *, reason: str, dry_run: bool | None = None
     if dry_run:
         _event("dry_run", reason=reason, scale_up=count)
         return []
-    workers = await asyncio.to_thread(fleet.launch, count)
+    if instance_type:
+        try:
+            workers = await asyncio.to_thread(
+                fleet.launch, count, instance_type=instance_type
+            )
+        except TypeError as exc:
+            if "instance_type" not in str(exc):
+                raise
+            workers = await asyncio.to_thread(fleet.launch, count)
+    else:
+        workers = await asyncio.to_thread(fleet.launch, count)
     records = [record for worker in workers if (record := _register_instance(worker)) is not None]
-    LAST_ACTION_AT = utcnow()
-    _event("scale_up_launched", reason=reason, instances=[r["instance_id"] for r in records])
+    if workers:
+        LAST_ACTION_AT = utcnow()
+        LAST_SCALE_UP_PENDING = (
+            int(pending_at_decision) if pending_at_decision is not None else None
+        )
+    _event(
+        "scale_up_launched",
+        reason=reason,
+        instances=[r["instance_id"] for r in records],
+        instance_type=instance_type,
+        **(formula or {}),
+    )
     # launch() puede devolver nodos sin IP hasta que estén running. Esperar
     # fuera del event loop y reinsertar los datos más recientes.
     if workers:
@@ -611,19 +766,37 @@ async def autoscaler_tick(*, now: datetime | None = None) -> Decision:
         QUEUE_PRESSURE_SINCE = None
     snapshot["queue_pressure_since"] = QUEUE_PRESSURE_SINCE
     snapshot["last_action_at"] = LAST_ACTION_AT
+    snapshot["last_scale_up_pending"] = LAST_SCALE_UP_PENDING
     policy_cfg = settings.model_dump()
     policy_cfg["autoscale_max_lifetime_seconds"] = _effective_max_lifetime(settings)
     decision = decide(snapshot, policy_cfg, now)
+    formula: dict[str, float | int] = {
+        "W": round(decision.work_seconds, 2),
+        "S": decision.current_slots,
+        "R": round(decision.remaining_work_seconds, 2),
+        "n": decision.desired_instances,
+    }
+    _event(
+        "decision",
+        reason=decision.reason,
+        scale_up=decision.scale_up,
+        scale_down_ids=decision.scale_down_ids or [],
+        **formula,
+        dry_run=bool(settings.autoscale_dry_run),
+    )
     if settings.autoscale_dry_run:
-        _event("decision", reason=decision.reason, scale_up=decision.scale_up,
-               scale_down_ids=decision.scale_down_ids or [], dry_run=True)
         return decision
     if decision.scale_up:
-        await launch_workers(decision.scale_up, reason=decision.reason, dry_run=False)
+        await launch_workers(
+            decision.scale_up,
+            reason=decision.reason,
+            dry_run=False,
+            instance_type=decision.instance_type,
+            pending_at_decision=snapshot["pendientes"],
+            formula=formula,
+        )
     elif decision.scale_down_ids:
         await terminate_workers(decision.scale_down_ids, reason=decision.reason)
-    else:
-        _event("decision", reason=decision.reason, scale_up=0, scale_down_ids=[])
     await _process_draining()
     return decision
 

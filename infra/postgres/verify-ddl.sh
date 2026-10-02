@@ -7,7 +7,7 @@
 #
 # Comprueba los criterios de aceptacion 1, 2, 3, 4, 5, 9, 12, 13, 14, 15 y 20
 # de plans/01-database/plan.md, y de forma directa las invariantes I-1, I-2,
-# I-3, S-2 y el respaldo en base del tope de 5 de W-2.
+# I-3, S-2 y el respaldo en base del tope de 10 de W-2.
 
 set -euo pipefail
 
@@ -250,12 +250,21 @@ else
 fi
 
 CAPREJ=0
-CAP_OUT=$(psqlerr "UPDATE workers SET capacity=6 WHERE name='w1';")
-RUN_OUT=$(psqlerr "UPDATE workers SET running_jobs=6 WHERE name='w1';")
+CAP_ACCEPT=$(psqlerr "UPDATE workers SET capacity=10, running_jobs=10 WHERE name='w1';")
+if grep -q "UPDATE 1" <<<"$CAP_ACCEPT"; then
+    ok "Criterio 13 (W-2): la base acepta capacity=10 y running_jobs=10"
+else
+    bad "Criterio 13 (W-2): la base rechazó capacidad 10 ($CAP_ACCEPT)"
+fi
+psqlf -c "UPDATE workers SET capacity=5, running_jobs=0 WHERE name='w1';"
+CAP_OUT=$(psqlerr "UPDATE workers SET capacity=11 WHERE name='w1';")
+psqlf -c "UPDATE workers SET capacity=10 WHERE name='w1';"
+RUN_OUT=$(psqlerr "UPDATE workers SET running_jobs=11 WHERE name='w1';")
 grep -q "ck_workers_capacity" <<<"$CAP_OUT" && CAPREJ=$((CAPREJ+1))
 grep -q "ck_workers_running"  <<<"$RUN_OUT" && CAPREJ=$((CAPREJ+1))
-[ "$CAPREJ" = "2" ] && ok "Criterio 13 (W-2): la base rechaza capacity>5 y running_jobs>5" \
-                    || bad "Criterio 13 (W-2): la base no respalda el tope de 5 ($CAPREJ de 2 rechazos)"
+[ "$CAPREJ" = "2" ] && ok "Criterio 13 (W-2): la base rechaza capacity>10 y running_jobs>10" \
+                    || bad "Criterio 13 (W-2): la base no respalda el tope de 10 ($CAPREJ de 2 rechazos)"
+psqlf -c "UPDATE workers SET capacity=5, running_jobs=0 WHERE name='w1';"
 
 # ------------------------------------------- criterio 14: indice parcial
 info "Cargando 50.000 jobs terminales para probar el indice parcial"

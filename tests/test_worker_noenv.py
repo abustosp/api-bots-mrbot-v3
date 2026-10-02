@@ -88,7 +88,7 @@ def test_concurrencia_fuera_de_rango_falla():
     """W-2 también en construcción programática."""
     with pytest.raises(ValueError):
         WorkerConfig(
-            central_url=_CENTRAL, advertised_url=_ADVERTISED, worker_concurrency=6
+            central_url=_CENTRAL, advertised_url=_ADVERTISED, worker_concurrency=11
         )
     with pytest.raises(ValueError):
         parse_args(_argv(**{"concurrency": "0"}))

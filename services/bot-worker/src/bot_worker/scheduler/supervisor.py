@@ -1,4 +1,4 @@
-"""Supervisor de capacidad local: como maximo 5 jobs concurrentes (W-2).
+"""Supervisor de capacidad local: como maximo 10 jobs concurrentes (W-2).
 
 La admision reserva bajo candado: el contador `en_ejecucion` incluye las
 tareas con permiso incluso si aun preparan credenciales o esperan
@@ -52,13 +52,13 @@ class Acceptance:
 
 
 class JobSupervisor:
-    HARD_MAX_CONCURRENCY = 5
+    HARD_MAX_CONCURRENCY = 10
 
     def __init__(self, configured: int = 5, queue_limit: int = 0) -> None:
         if not 1 <= configured <= self.HARD_MAX_CONCURRENCY:
-            raise ValueError("WORKER_CONCURRENCY debe estar entre 1 y 5")
+            raise ValueError("WORKER_CONCURRENCY debe estar entre 1 y 10")
         if not 0 <= queue_limit <= self.HARD_MAX_CONCURRENCY:
-            raise ValueError("WORKER_LOCAL_QUEUE_LIMIT debe estar entre 0 y 5")
+            raise ValueError("WORKER_LOCAL_QUEUE_LIMIT debe estar entre 0 y 10")
         self.capacity = configured
         self.queue_limit = queue_limit
         # El permiso rodea la vida completa del job: como maximo

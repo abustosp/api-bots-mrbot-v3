@@ -84,14 +84,25 @@ def test_protocol_version_entero_1():
     assert get_settings().worker_protocol_version == 1
 
 
-def test_tope_w2_cinco():
-    """W-2: tope duro de 5 ejecuciones en central y base."""
+def test_tope_w2_diez():
+    """W-2: tope duro de 10 ejecuciones en central y base."""
     from central_api.internal.workers import MAX_WORKER_CAPACITY
     from central_api.models.base import WORKER_CAPACITY_MAX
 
-    assert MAX_WORKER_CAPACITY == 5
-    assert WORKER_CAPACITY_MAX == 5
-    assert get_settings().worker_capacity == 5
+    assert MAX_WORKER_CAPACITY == 10
+    assert WORKER_CAPACITY_MAX == 10
+    assert get_settings().worker_capacity == 10
+
+
+def test_worker_capacity_settings_accepts_six_to_ten_and_rejects_eleven():
+    from pydantic import ValidationError
+
+    from central_api.settings import Settings
+
+    for capacity in range(6, 11):
+        assert Settings(worker_capacity=capacity).worker_capacity == capacity
+    with pytest.raises(ValidationError):
+        Settings(worker_capacity=11)
 
 
 def test_storage_fake_por_defecto_documentado():

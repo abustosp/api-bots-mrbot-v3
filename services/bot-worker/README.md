@@ -24,7 +24,7 @@ servicio:
 | | Invariante | Verificación |
 |---|---|---|
 | **W-1** | No accede a ninguna base de datos | La imagen no instala driver de PostgreSQL ni ORM. Un test recorre el grafo de módulos y falla si aparece un import de base de datos |
-| **W-2** | Nunca ejecuta más de 5 jobs concurrentes | Semáforo de 5 y rechazo `409` cuando está lleno. Test: 10 jobs simultáneos, 5 corren y 5 son rechazados |
+| **W-2** | Nunca ejecuta más de 10 jobs concurrentes | Semáforo configurable de 1 a 10 y rechazo `409` cuando está lleno. Workers con capacidad 5 mantienen el comportamiento previo |
 | **W-3** | Solo responde a la API central | Token emitido en el registro más aislamiento de red. Sin ingreso desde internet |
 | **W-4** | Un worker que deja de reportar salud libera sus jobs | La central reencola por vencimiento del lease, sin intervención manual |
 
@@ -132,7 +132,7 @@ Contrato completo en
 
 ## Recursos
 
-Chromium consume entre 300 y 500 MB por instancia. Con el tope de 5 jobs
+Chromium consume entre 300 y 500 MB por instancia. Con el tope de 10 jobs
 concurrentes:
 
 | Recurso | Mínimo | Recomendado |

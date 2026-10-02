@@ -19,8 +19,12 @@ CFG = SimpleNamespace(
     autoscale_max_instances=4,
     autoscale_step=2,
     autoscale_capacity_per_worker=5,
+    autoscale_avg_job_seconds=75,
+    autoscale_boot_estimate_seconds=150,
+    autoscale_target_work_seconds=300,
+    autoscale_instance_type_large="",
     autoscale_boot_grace_seconds=240,
-    autoscale_idle_seconds=120,
+    autoscale_idle_seconds=45,
     autoscale_cooldown_seconds=60,
     autoscale_max_lifetime_seconds=7200,
 )
@@ -32,17 +36,31 @@ def snapshot(**overrides):
         "en_ejecucion": 0,
         "capacidad_libre_fija": 0,
         "capacidad_total_fija": 0,
+        "avg_job_seconds": 75,
+        "boot_seconds": 150,
+        "capacidad_nueva": 5,
+        "instance_type": "c6i.xlarge",
         "efimeros": [],
         "edad_pendiente_mas_antiguo": None,
         "queue_pressure_seconds": 0,
         "last_action_at": None,
+        "last_scale_up_pending": None,
     }
     result.update(overrides)
     return result
 
 
-def ephemeral(instance_id="i-1", *, age=500, busy_age=None, jobs=0,
-              healthy=True, state="running", never_registered=False):
+def ephemeral(
+    instance_id="i-1",
+    *,
+    age=500,
+    busy_age=None,
+    jobs=0,
+    healthy=True,
+    state="running",
+    never_registered=False,
+    concurrency=5,
+):
     return {
         "instance_id": instance_id,
         "node": "10.0.0.1:8080",
@@ -52,31 +70,92 @@ def ephemeral(instance_id="i-1", *, age=500, busy_age=None, jobs=0,
         "sano": healthy,
         "state": state,
         "never_registered": never_registered,
+        "concurrency": concurrency,
     }
 
 
 @pytest.mark.parametrize(
     ("data", "expected_up", "expected_down", "reason"),
     [
-        (snapshot(), 0, [], "sin cola"),
-        (snapshot(pendientes=10, capacidad_libre_fija=0, queue_pressure_seconds=60), 0, [], "umbral inclusivo"),
-        (snapshot(pendientes=15, capacidad_libre_fija=0, queue_pressure_seconds=30), 2, [], "cola grande y sostenida"),
-        (snapshot(pendientes=15, capacidad_libre_fija=0, queue_pressure_seconds=30,
-                  last_action_at=NOW - timedelta(seconds=10)), 0, [], "cooldown"),
-        (snapshot(pendientes=30, capacidad_libre_fija=0, queue_pressure_seconds=30,
-                  efimeros=[ephemeral(f"i-{n}") for n in range(4)]), 0, [], "max instances"),
-        (snapshot(pendientes=22, capacidad_libre_fija=0, queue_pressure_seconds=30,
-                  efimeros=[ephemeral("boot", age=60, healthy=False, state="pending",
-                                      never_registered=True)]), 2, [], "booting ya descontado"),
-        (snapshot(pendientes=0, capacidad_libre_fija=5,
-                  efimeros=[ephemeral("idle", age=400, busy_age=121)]), 0, ["idle"], "idle"),
-        (snapshot(pendientes=0, capacidad_libre_fija=5,
-                  efimeros=[ephemeral("busy", age=400, busy_age=121, jobs=1)]), 0, [], "no drenar activo"),
-        (snapshot(pendientes=0, capacidad_libre_fija=0,
-                  efimeros=[ephemeral("dead", age=500, healthy=False,
-                                      never_registered=True)]), 0, ["dead"], "dead man"),
-        (snapshot(pendientes=12, capacidad_libre_fija=5,
-                  efimeros=[ephemeral("needed", age=500, busy_age=200)]), 0, [], "pending necesita capacidad"),
+        (snapshot(), 0, [], "cola vacía"),
+        (snapshot(pendientes=10, queue_pressure_seconds=60), 0, [], "umbral inclusivo"),
+        (snapshot(pendientes=15, queue_pressure_seconds=30), 1, [], "un worker por horizonte"),
+        (
+            snapshot(
+                pendientes=15,
+                queue_pressure_seconds=30,
+                last_action_at=NOW - timedelta(seconds=10),
+            ),
+            0,
+            [],
+            "cooldown no complementario",
+        ),
+        (
+            snapshot(
+                pendientes=100,
+                queue_pressure_seconds=30,
+                efimeros=[ephemeral(f"i-{n}", jobs=1) for n in range(4)],
+            ),
+            0,
+            [],
+            "max instances sin capacidad de escalar más",
+        ),
+        (
+            snapshot(
+                pendientes=20,
+                queue_pressure_seconds=30,
+                efimeros=[
+                    ephemeral("boot", age=60, healthy=False, state="pending", never_registered=True)
+                ],
+            ),
+            1,
+            [],
+            "slots booteando cuentan en S",
+        ),
+        (
+            snapshot(
+                pendientes=0,
+                capacidad_libre_fija=5,
+                capacidad_total_fija=5,
+                efimeros=[ephemeral("idle", age=400, busy_age=46)],
+            ),
+            0,
+            ["idle"],
+            "ocioso al alcanzar 45 segundos",
+        ),
+        (
+            snapshot(
+                pendientes=0,
+                capacidad_libre_fija=5,
+                capacidad_total_fija=5,
+                efimeros=[ephemeral("busy", age=400, busy_age=121, jobs=1)],
+            ),
+            0,
+            [],
+            "no drenar un worker ocupado sin cola",
+        ),
+        (
+            snapshot(
+                pendientes=0,
+                efimeros=[
+                    ephemeral("dead", age=500, healthy=False, never_registered=True)
+                ],
+            ),
+            0,
+            ["dead"],
+            "dead man",
+        ),
+        (
+            snapshot(
+                pendientes=12,
+                capacidad_libre_fija=5,
+                capacidad_total_fija=5,
+                efimeros=[ephemeral("needed", age=500, busy_age=200)],
+            ),
+            0,
+            [],
+            "no reducir slots necesarios para la cola",
+        ),
     ],
 )
 def test_policy_table(data, expected_up, expected_down, reason):
@@ -85,44 +164,133 @@ def test_policy_table(data, expected_up, expected_down, reason):
     assert decision.scale_down_ids == expected_down, reason
 
 
-def test_policy_respects_step_and_rounds_capacity_need_up():
+def test_queue_work_math_with_ten_fixed_free_slots_needs_no_worker():
     decision = decide(
-        snapshot(pendientes=14, capacidad_libre_fija=3, queue_pressure_seconds=30),
-        CFG,
-        NOW,
-    )
-    # ceil((14 - 3) / 5) == 3, limited to AUTOSCALE_STEP=2.
-    assert decision.scale_up == 2
-
-
-def test_policy_waits_for_sustained_pressure_and_boot_grace():
-    not_sustained = decide(
-        snapshot(pendientes=20, queue_pressure_seconds=19), CFG, NOW
-    )
-    booting = decide(
         snapshot(
             pendientes=20,
+            capacidad_libre_fija=10,
+            capacidad_total_fija=10,
             queue_pressure_seconds=30,
-            efimeros=[ephemeral("boot", age=239, healthy=False,
-                                state="pending", never_registered=True)],
         ),
         CFG,
         NOW,
     )
-    assert not_sustained.scale_up == 0
-    assert booting.scale_up == 2
-
-
-def test_policy_deadman_and_max_lifetime_override_idle_demand():
-    decision = decide(
-        snapshot(
-            pendientes=20,
-            capacidad_libre_fija=0,
-            queue_pressure_seconds=30,
-            efimeros=[ephemeral("old", age=7201, jobs=1)],
-        ),
-        CFG,
-        NOW,
-    )
-    assert decision.scale_down_ids == ["old"]
     assert decision.scale_up == 0
+    assert decision.work_seconds == 1500
+    assert decision.current_slots == 10
+    assert decision.remaining_work_seconds == 0
+
+
+@pytest.mark.parametrize("pending", [300, 664])
+def test_large_queue_batches_at_formula_then_respects_hard_step_two(pending):
+    decision = decide(
+        snapshot(pendientes=pending, queue_pressure_seconds=30),
+        CFG,
+        NOW,
+    )
+    assert decision.scale_up == 2
+    assert decision.desired_instances == 2
+    assert decision.work_seconds == pending * 75
+    assert decision.current_slots == 0
+
+
+def test_hard_step_ceiling_two_applies_even_if_configured_as_zero_or_larger():
+    for configured_step in (0, 2, 99):
+        cfg = SimpleNamespace(**{**vars(CFG), "autoscale_step": configured_step})
+        decision = decide(
+            snapshot(pendientes=664, queue_pressure_seconds=30), cfg, NOW
+        )
+        assert decision.scale_up == 2
+
+
+def test_max_instances_caps_step_and_cooldown_allows_only_complementary_growth():
+    maxed = SimpleNamespace(**{**vars(CFG), "autoscale_max_instances": 1})
+    decision = decide(snapshot(pendientes=300, queue_pressure_seconds=30), maxed, NOW)
+    assert decision.scale_up == 1
+
+    complementary = decide(
+        snapshot(
+            pendientes=400,
+            queue_pressure_seconds=30,
+            last_action_at=NOW - timedelta(seconds=10),
+            last_scale_up_pending=300,
+            efimeros=[ephemeral("already-launched"), ephemeral("already-launched-2")],
+        ),
+        CFG,
+        NOW,
+    )
+    assert complementary.scale_up == 2
+
+    unchanged_queue = decide(
+        snapshot(
+            pendientes=300,
+            queue_pressure_seconds=30,
+            last_action_at=NOW - timedelta(seconds=10),
+            last_scale_up_pending=300,
+        ),
+        CFG,
+        NOW,
+    )
+    assert unchanged_queue.scale_up == 0
+
+
+def test_large_instance_preferred_when_cost_per_slot_is_not_higher():
+    decision = decide(
+        snapshot(
+            pendientes=300,
+            queue_pressure_seconds=30,
+            large_instance_type="c6i.2xlarge",
+            capacidad_tipo_grande=10,
+            rate_default=0.262,
+            rate_large=0.524,
+        ),
+        CFG,
+        NOW,
+    )
+    assert decision.scale_up == 2
+    assert decision.instance_type == "c6i.2xlarge"
+
+
+def test_scale_down_removes_lowest_load_workers_first_when_slots_are_surplus():
+    decision = decide(
+        snapshot(
+            pendientes=20,
+            capacidad_libre_fija=5,
+            capacidad_total_fija=5,
+            efimeros=[
+                ephemeral("more-work", jobs=1),
+                ephemeral("less-work", jobs=0),
+            ],
+        ),
+        CFG,
+        NOW,
+    )
+    assert decision.scale_up == 0
+    assert decision.scale_down_ids == ["less-work"]
+
+
+def test_boot_estimate_changes_queue_need():
+    long_boot = decide(
+        snapshot(
+            pendientes=20,
+            capacidad_libre_fija=5,
+            capacidad_total_fija=5,
+            boot_seconds=300,
+            queue_pressure_seconds=30,
+        ),
+        CFG,
+        NOW,
+    )
+    short_boot = decide(
+        snapshot(
+            pendientes=20,
+            capacidad_libre_fija=5,
+            capacidad_total_fija=5,
+            boot_seconds=150,
+            queue_pressure_seconds=30,
+        ),
+        CFG,
+        NOW,
+    )
+    assert long_boot.scale_up == 0
+    assert short_boot.scale_up == 1

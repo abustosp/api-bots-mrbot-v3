@@ -9,7 +9,7 @@
 #
 # Invariantes (igual que el stack completo):
 #   W-1/SEC-3: sin secretos de la central ni DATABASE_URL/RSA/MinIO.
-#   W-2: concurrencia máxima 5 (tope duro).
+#   W-2: concurrencia máxima 10 (tope duro); el valor local predeterminado es 5.
 #   W-3: sin puertos publicados; todo entra por `command:` y asignación sellada.
 
 name: mrbot-v3-worker

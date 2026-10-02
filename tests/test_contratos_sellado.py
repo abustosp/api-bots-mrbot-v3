@@ -69,16 +69,16 @@ def test_sobre_sellado_roundtrip_y_falla_cerrada():
         s.decrypt_sealed_section(privada, dict(sobre, blob_b64="!!no-b64!!"))
 
 
-def test_tope_5_en_marca_y_ajustes():
-    """La capacidad máxima es 5 en central y worker."""
+def test_tope_10_en_marca_y_ajustes():
+    """La capacidad máxima es 10 en central y worker."""
     from central_api.internal.workers import MAX_WORKER_CAPACITY
     from central_api.settings import get_settings
 
-    assert MAX_WORKER_CAPACITY == 5
+    assert MAX_WORKER_CAPACITY == 10
     texto = (RAIZ / "services/central-api/src/central_api/settings.py").read_text(
         encoding="utf-8"
     )
-    assert "worker_capacity: int = 5" in texto
+    assert "worker_capacity: int = Field(default=10, ge=1, le=10)" in texto
 
 
 def test_worker_sin_dependencias_de_datos():

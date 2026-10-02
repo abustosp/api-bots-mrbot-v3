@@ -37,7 +37,7 @@ El resultado debe respetar:
 1. Solo `central-api` posee `DATABASE_URL` y driver PostgreSQL.
 2. La imagen worker no instala `psycopg`, SQLAlchemy ni Alembic.
 3. Cada worker acepta solo control autenticado de la central.
-4. Cada worker ejecuta como máximo cinco jobs concurrentes.
+4. Cada worker ejecuta como máximo diez jobs concurrentes.
 5. Todas las imágenes usan tags base y digests inmutables.
 6. Los contenedores escriben logs estructurados a stdout, no a `./logs`.
 
@@ -335,7 +335,7 @@ No copia `bots_dev/`, rutas API V2, `reporte/`, modelos ORM ni SQLite.
 | Usuario no root | Limita daño de un bot comprometido y evita permisos de host. |
 | Digest de base | Evita que el mismo tag cambie navegador o librerías sin revisión. |
 | `/work` efímero | Los downloads de browser no sobreviven al job ni contaminan imagen. |
-| `--concurrency 5` por CLI | Hace cumplir W-2 sin variables de entorno. |
+| `--concurrency` por CLI (1..10) | Hace cumplir W-2 sin variables de entorno. |
 | Sin DB driver worker | Verificación estática clara de W-1. |
 | Sin `CMD alembic` | Evita carrera de migraciones con réplicas. |
 | Healthcheck propio | Distingue proceso vivo de readiness funcional de worker. |
@@ -1028,7 +1028,7 @@ KEDA escala infraestructura.
 | Cuántos pods worker existen | Sí, por backlog y límites | Publica métricas de demanda. |
 | Qué worker recibe un job | No | Sí, scheduler push basado en salud y capacidad. |
 | Salud y registro de worker | No | Sí, heartbeats y protocolo. |
-| Límite cinco jobs por worker | No | Sí, contabilidad y semáforo worker. |
+| Límite diez jobs por worker | No | Sí, contabilidad y semáforo worker. |
 | Recuperación de job perdido | No | Sí, W-4 y estado persistente. |
 
 KEDA no recibe acceso para decidir jobs individuales.
@@ -1089,15 +1089,15 @@ Un worker puede estar vivo y no ready, por ejemplo al iniciar browsers o durante
 
 Las cifras iniciales son presupuestos conservadores que se deben corregir con mediciones p95 por bot.
 
-Se asume cinco jobs máximos por worker y 300 a 500 MB por Chromium.
+Se asumen hasta diez jobs por worker en tipos con al menos 15.5 GiB de RAM; tipos de 8 GiB conservan cinco slots. Chromium consume 300 a 500 MB por instancia y user-data ajusta límites según RAM.
 
-| Jobs concurrentes N | Workers mínimos | RAM workers | CPU workers | Central | Conexiones Postgres estimadas | Storage objetos por mes inicial |
+| Jobs concurrentes N | Workers mínimos | Límite RAM workers | CPU asignada workers | Central | Conexiones Postgres estimadas | Storage objetos por mes inicial |
 |---:|---:|---:|---:|---:|---:|---:|
-| 5 | 1 | 3 GiB | 2.5 vCPU | 1 réplica, 2 GiB | 1 × 5 pool + 5 overflow = 10 | 50 GiB |
-| 10 | 2 | 6 GiB | 5 vCPU | 1 réplica, 2 GiB | 10 | 100 GiB |
-| 25 | 5 | 15 GiB | 12.5 vCPU | 2 réplicas, 4 GiB | 2 × 10 = 20 | 250 GiB |
-| 50 | 10 | 30 GiB | 25 vCPU | 2 réplicas, 4 GiB | 20 | 500 GiB |
-| 100 | 20 | 60 GiB | 50 vCPU | 3 réplicas, 6 GiB | 3 × 10 = 30 | 1 TiB |
+| 5 | 1 | 6 GiB | 2 vCPU | 1 réplica, 2 GiB | 1 × 5 pool + 5 overflow = 10 | 50 GiB |
+| 10 | 1 | 13 GiB | 2 vCPU | 1 réplica, 2 GiB | 10 | 100 GiB |
+| 25 | 3 | 39 GiB | 6 vCPU | 2 réplicas, 4 GiB | 2 × 10 = 20 | 250 GiB |
+| 50 | 5 | 65 GiB | 10 vCPU | 2 réplicas, 4 GiB | 20 | 500 GiB |
+| 100 | 10 | 130 GiB | 20 vCPU | 3 réplicas, 6 GiB | 3 × 10 = 30 | 1 TiB |
 
 El pool inicial central es `pool_size=5`, `max_overflow=5`, `pool_pre_ping=true` y `pool_recycle=1800`.
 
@@ -1133,7 +1133,7 @@ Un alerta avisa antes de 70%, 85% y 95% de capacidad de volumen.
 5. `bot-worker` incluye Playwright y dependencias de bots, y no instala `psycopg`, SQLAlchemy ni Alembic.
 6. CI falla si la imagen worker permite `import psycopg`, `import sqlalchemy` o `import alembic`.
 7. CI falla si una imagen contiene `.env`, PEM, `mrbot-keys`, `bots_dev` o secretos detectados.
-8. El worker corre como no root, tiene `/work` efímero y límite duro `--concurrency 5` por CLI, sin entorno.
+8. El worker corre como no root, tiene `/work` efímero y límite `--concurrency 1..10` por CLI, sin entorno.
 9. Compose levanta PostgreSQL 17 con volumen y healthcheck antes de iniciar central.
 10. Las migraciones se ejecutan mediante job one-off y ningún `CMD` de aplicación ejecuta `alembic upgrade head`.
 11. Compose inicia dos o más workers y estos no publican puerto al host.
@@ -1149,5 +1149,5 @@ Un alerta avisa antes de 70%, 85% y 95% de capacidad de volumen.
 21. Se genera `pg_dump` diario cifrado a object storage con retención definida y restore test mensual documentado.
 22. Central y worker emiten logs JSON a stdout sin secretos, y no existe bind mount `./logs`.
 23. Cada servicio expone liveness y readiness con semánticas diferentes y monitoreadas: la central en `/health` y `/ready`, el worker en `/internal/v1/health` y `/internal/v1/status`. Los nombres coinciden con `plans/02-central-api/plan.md` §3 y `plans/03-worker/plan.md` §3.
-24. La capacidad operativa se calcula con cinco jobs por worker, memoria browser medida y conexiones Postgres por réplicas y pool.
+24. La capacidad operativa se calcula con concurrencia por RAM (cinco o diez), memoria browser medida y conexiones Postgres por réplicas y pool.
 25. El diseño futuro k3s y KEDA escala pods sin sustituir a `central-api` como asignador de jobs.

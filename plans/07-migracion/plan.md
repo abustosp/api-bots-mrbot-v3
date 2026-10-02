@@ -180,7 +180,7 @@ También fuerza decisiones sobre continuaciones, cookies, CSV/ZIP, DataFrames, r
 
 La escritura V2 de `ConsultaLog` se reemplaza por un callback `JobResultReported` idempotente.
 
-Criterio de salida: las tres operaciones conservan `OK | PARCIAL | ERROR`, archivos con URL prefirmada y no exceden cinco jobs por worker.
+Criterio de salida: las tres operaciones conservan `OK | PARCIAL | ERROR`, archivos con URL prefirmada y no exceden diez jobs por worker.
 
 #### Ola 3: familia ARCA con infraestructura compartida
 

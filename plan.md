@@ -78,8 +78,8 @@ graph TB
     end
 
     subgraph data["Plano de datos"]
-        W1["bot-worker 1<br/>API secundaria<br/>max 5 jobs"]
-        W2["bot-worker 2<br/>API secundaria<br/>max 5 jobs"]
+        W1["bot-worker 1<br/>API secundaria<br/>max 10 jobs"]
+        W2["bot-worker 2<br/>API secundaria<br/>max 10 jobs"]
         WN["bot-worker N"]
     end
 
@@ -178,7 +178,7 @@ graph TB
 | R10 | La central hace load balancing entre workers sanos | `plans/02-central-api/plan.md` §6 |
 | R11 | La central informa al Admin de los workers no disponibles | `plans/05-admin-panel/plan.md` §4 |
 | R12 | El worker reporta salud y cuántos jobs tiene en cola | `plans/03-worker/plan.md` §4 |
-| R13 | Máximo 5 jobs simultáneos por worker | `plans/03-worker/plan.md` §5, invariante W-2 |
+| R13 | Máximo 10 jobs simultáneos por worker | `plans/03-worker/plan.md` §5, invariante W-2 |
 | R14 | Ejecuciones síncronas deprecadas | `plans/02-central-api/plan.md` §8 |
 | R15 | Usuarios con UUIDv4 | `plans/01-database/plan.md` §3 |
 | R16 | Tablas de bots/jobs con UUIDv7, cero IDs correlativos | `plans/01-database/plan.md` §3 |
@@ -212,7 +212,7 @@ que se escriben los tests de aceptación.
 
 **Ejecución**
 - **W-1** El worker no abre conexiones a base de datos. Verificable estáticamente: la imagen del worker no instala el driver de Postgres.
-- **W-2** Un worker nunca ejecuta más de 5 jobs concurrentes. El tope se impone en el worker (semáforo) y se respeta en el scheduler (contabilidad).
+- **W-2** Un worker nunca ejecuta más de 10 jobs concurrentes. El tope se impone en el worker (semáforo) y se respeta en el scheduler (contabilidad).
 - **W-3** El worker solo acepta requests autenticados como provenientes de la central.
 - **W-4** Un job asignado a un worker que deja de reportar salud vuelve a la cola, sin intervención manual.
 - **S-1** Ningún endpoint público ejecuta un bot dentro del request. Todo es `202 + job_id`.
@@ -512,7 +512,7 @@ duplicada.
 | [`plans/00-arquitectura/plan.md`](plans/00-arquitectura/plan.md) | Decisiones transversales, ADRs, especificación normativa del protocolo central↔worker, análisis de conflicto con el plan previo de la V2 | 1480 |
 | [`plans/01-database/plan.md`](plans/01-database/plan.md) | Esquema PostgreSQL completo con DDL, estrategia de UUIDv4/v7, unificación de las 28 tablas de logs, migraciones | 1031 |
 | [`plans/02-central-api/plan.md`](plans/02-central-api/plan.md) | API pública v3, autenticación, planificador y balanceo de carga, gobierno de la flota, deprecación de sync | 2369 |
-| [`plans/03-worker/plan.md`](plans/03-worker/plan.md) | API secundaria, contrato de plugin de bot, tope de 5 jobs, reporte de salud, empaquetado | 1037 |
+| [`plans/03-worker/plan.md`](plans/03-worker/plan.md) | API secundaria, contrato de plugin de bot, tope de 10 jobs, reporte de salud, empaquetado | 1037 |
 | [`plans/04-billing/plan.md`](plans/04-billing/plan.md) | Tiers, ciclo de cuota, créditos, ledger append-only, integración con MercadoPago | 1109 |
 | [`plans/05-admin-panel/plan.md`](plans/05-admin-panel/plan.md) | Panel de administración, observabilidad de la flota y alertas de workers caídos | 805 |
 | [`plans/06-infra/plan.md`](plans/06-infra/plan.md) | Imágenes Docker, Compose, secretos por destino, CI/CD, despliegue y dimensionamiento | 1153 |

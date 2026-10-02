@@ -299,11 +299,11 @@ El estado no depende de una sola métrica aislada.
 | `DRENANDO` | Comando de drain confirmado | No recibe trabajos nuevos | Azul, contador de trabajos restantes. |
 | `RETIRADO` | Baja explícita y sin jobs en vuelo | Nunca recibe trabajos | Gris, conservado para auditoría. |
 
-`capacity` es el máximo anunciado por el worker y no puede superar cinco.
+`capacity` es el máximo anunciado por el worker y no puede superar diez.
 
-La V3 fija `MAX_CONCURRENT_JOBS=5` por worker, invariante W-2.
+La V3 fija `MAX_CONCURRENT_JOBS=10` por worker, invariante W-2.
 
-Un heartbeat inválido, de protocolo incompatible o con capacidad mayor a cinco se rechaza y se audita.
+Un heartbeat inválido, de protocolo incompatible o con capacidad mayor a diez se rechaza y se audita.
 
 ### 4.2 Dashboard de flota
 

@@ -16,7 +16,7 @@ from sqlalchemy.orm import DeclarativeBase
 from mrbot_contracts.version import PROTOCOL_VERSION
 
 #: Tope duro de trabajos simultaneos por worker (invariante W-2).
-WORKER_CAPACITY_MAX: int = 5
+WORKER_CAPACITY_MAX: int = 10
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",

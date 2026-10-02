@@ -260,8 +260,8 @@ El claim necesita permanecer rápido cuando existan millones de jobs terminales.
 | `endpoint` | `text` | no | ninguno | UQ | Dirección privada validada. |
 | `protocol_version` | `varchar(32)` | no | ninguno | ninguno | Compatibilidad. |
 | `app_version` | `varchar(64)` | no | ninguno | ninguno | Build reportado. |
-| `capacity` | `smallint` | no | `5` | CHECK `1..5` | Tope duro V3 por worker. |
-| `running_jobs` | `smallint` | no | `0` | CHECK `0..5` | Snapshot de heartbeat. |
+| `capacity` | `smallint` | no | `5` | CHECK `1..10` | Tope duro V3 por worker. |
+| `running_jobs` | `smallint` | no | `0` | CHECK `0..10` | Snapshot de heartbeat. |
 | `queued_jobs` | `integer` | no | `0` | CHECK `>= 0` | Cola local reportada. |
 | `last_heartbeat_at` | `timestamptz` | sí | ninguno | índice | Detección de worker caído. |
 | `registered_at` | `timestamptz` | no | `now()` | ninguno | Registro inicial. |
@@ -272,9 +272,9 @@ El claim necesita permanecer rápido cuando existan millones de jobs terminales.
 | `id` | `uuid` | no | aplicación UUIDv7 | PK | Hecho de salud. |
 | `worker_id` | `uuid` | no | ninguno | FK `CASCADE`, índice | Worker emisor. |
 | `status` | `varchar(16)` | no | ninguno | CHECK | Estado reportado. |
-| `running_jobs` | `smallint` | no | ninguno | CHECK `0..5` | Ejecuciones en curso. |
+| `running_jobs` | `smallint` | no | ninguno | CHECK `0..10` | Ejecuciones en curso. |
 | `queued_jobs` | `integer` | no | ninguno | CHECK `>= 0` | Trabajo aceptado local. |
-| `capacity` | `smallint` | no | ninguno | CHECK `1..5` | Capacidad declarada. |
+| `capacity` | `smallint` | no | ninguno | CHECK `1..10` | Capacidad declarada. |
 | `metrics` | `jsonb` | no | `'{}'::jsonb` | CHECK object | CPU, memoria y diagnóstico no canónico. |
 | `received_at` | `timestamptz` | no | `now()` | índice de retención | Hora de central. |
 ### 5.5 Facturación
@@ -524,7 +524,7 @@ CREATE TABLE bot_operations (     id uuid NOT NULL,
     CONSTRAINT pk_workers PRIMARY KEY (id),     CONSTRAINT uq_workers_name UNIQUE (name),
     CONSTRAINT uq_workers_endpoint UNIQUE (endpoint),     CONSTRAINT ck_workers_status CHECK (
         status IN ('REGISTRANDO', 'SANO', 'DEGRADADO', 'DRENANDO', 'CAIDO')     ),
-    CONSTRAINT ck_workers_capacity CHECK (capacity BETWEEN 1 AND 5),     CONSTRAINT ck_workers_running CHECK (running_jobs BETWEEN 0 AND 5),
+    CONSTRAINT ck_workers_capacity CHECK (capacity BETWEEN 1 AND 10),     CONSTRAINT ck_workers_running CHECK (running_jobs BETWEEN 0 AND 10),
     CONSTRAINT ck_workers_queued CHECK (queued_jobs >= 0),     CONSTRAINT ck_workers_running_capacity CHECK (running_jobs <= capacity)
 ); CREATE INDEX ix_workers_schedulable ON workers (last_heartbeat_at, running_jobs)
     WHERE status = 'SANO'; CREATE TABLE jobs (
@@ -593,8 +593,8 @@ CREATE TABLE worker_heartbeats (     id uuid NOT NULL,
     received_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,     CONSTRAINT pk_worker_heartbeats PRIMARY KEY (id),
     CONSTRAINT fk_worker_heartbeats_worker FOREIGN KEY (worker_id)         REFERENCES workers(id) ON DELETE CASCADE,
     CONSTRAINT ck_worker_heartbeats_status CHECK (         status IN ('REGISTRANDO', 'SANO', 'DEGRADADO', 'DRENANDO', 'CAIDO')
-    ),     CONSTRAINT ck_worker_heartbeats_running CHECK (running_jobs BETWEEN 0 AND 5),
-    CONSTRAINT ck_worker_heartbeats_queue CHECK (queued_jobs >= 0),     CONSTRAINT ck_worker_heartbeats_capacity CHECK (capacity BETWEEN 1 AND 5),
+    ),     CONSTRAINT ck_worker_heartbeats_running CHECK (running_jobs BETWEEN 0 AND 10),
+    CONSTRAINT ck_worker_heartbeats_queue CHECK (queued_jobs >= 0),     CONSTRAINT ck_worker_heartbeats_capacity CHECK (capacity BETWEEN 1 AND 10),
     CONSTRAINT ck_worker_heartbeats_load CHECK (running_jobs <= capacity),     CONSTRAINT ck_worker_heartbeats_metrics CHECK (jsonb_typeof(metrics) = 'object')
 ); CREATE INDEX ix_worker_heartbeats_worker_time ON worker_heartbeats (worker_id, received_at DESC);
 CREATE TABLE plans (     id uuid NOT NULL,
@@ -951,7 +951,7 @@ una observación. Reproducible con `infra/postgres/verify-ddl.sh`.
 | 13 seguridad | 5 ráfagas de 12 claims concurrentes, verificando la invariante después de cada ráfaga | Nunca hubo doble asignación, sobrecapacidad, job `ASIGNADO` sin worker ni `running_jobs` desalineado del conteo real |
 | 13 vivacidad | Cola de 10 jobs, 2 workers de capacidad 5 | Se drena por completo, 5 y 5. Ver la nota sobre `SKIP LOCKED` abajo |
 | 13 cola vacía | Claim contra cola vacía | `running_jobs` no se mueve. Este caso **detectó un defecto real** en la consulta del plan. Ver §11.1.1 |
-| 13 | `capacity=6` y `running_jobs=6` | Rechazados por `ck_workers_capacity` y `ck_workers_running`. El tope de 5 de W-2 está respaldado por la base, no solo por el worker |
+| 13 | `capacity=10` y `running_jobs=10` se aceptan; `capacity=11` y `running_jobs=11` se rechazan | El tope de 10 de W-2 está respaldado por la base, no solo por el worker |
 | 14 | `EXPLAIN (ANALYZE, BUFFERS)` del claim con 50.000 jobs terminales y 50 pendientes | `Index Only Scan using ix_jobs_queue_pending`, 3 buffers, 0,120 ms. El índice parcial se comporta como se diseñó |
 | 15 | `job_results.payload @> '{"periodos_error":["202403"]}'` sobre un job de `libros_iva` | Devuelve la fila. La unificación de las 28 tablas es consultable sin tabla por bot |
 | 20 | Vista `worker_fleet_health` | Deriva `SATURADO` con `running_jobs = capacity`, `SANO` al liberar capacidad, y `CAIDO` a los 41 s sin latido con umbral de 30 s |

@@ -151,7 +151,7 @@ Los importes y límites de esta tabla son deliberadamente simbólicos. No son un
 | Palanca | Se aplica en | Semántica | No debe confundirse con |
 |---|---|---|---|
 | Cuota mensual | Admisión de job | Cantidad de ejecuciones que el período puede confirmar. | Rate limit por minuto. |
-| Concurrencia de usuario | Scheduler | Máximo de jobs no terminales ejecutándose o asignados para el usuario. | Tope W-2 de cinco jobs por worker. |
+| Concurrencia de usuario | Scheduler | Máximo de jobs no terminales ejecutándose o asignados para el usuario. | Tope W-2 de diez jobs por worker. |
 | Bots habilitados | Endpoint de creación | Lista o regla de operaciones que el plan permite. | El costo en créditos de un bot. |
 | Prioridad de cola | Selección del scheduler | Peso u orden relativo entre jobs ya admisibles. | Garantía de tiempo de respuesta. |
 | Precio y moneda | Checkout recurrente | Importe del plan para nuevas altas o renovaciones. | Saldo de créditos. |

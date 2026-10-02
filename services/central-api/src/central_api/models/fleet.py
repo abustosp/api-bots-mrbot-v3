@@ -1,7 +1,7 @@
 """Flota de workers: registro y telemetria (plan 01 §5.4).
 
 La central solo conoce al worker por ``endpoint`` (``ip:port`` privado) y lo
-contacta por HTTP. Capacidad y ejecuciones estan acotadas a 5 (tope W-2)
+contacta por HTTP. Capacidad y ejecuciones estan acotadas a 10 (tope W-2)
 tambien en la base, no solo en el worker. La columna ``sealed_pubkey_pem``
 guarda la RSA **publica** efimera del worker para el sobre sellado
 (``central_api.security.sealed``); jamas se persiste material privado.
@@ -61,8 +61,8 @@ class Worker(Base):
             "status IN ('REGISTRANDO','SANO','DEGRADADO','DRENANDO','CAIDO')",
             name="workers_status",
         ),
-        sa.CheckConstraint("capacity BETWEEN 1 AND 5", name="workers_capacity"),
-        sa.CheckConstraint("running_jobs BETWEEN 0 AND 5", name="workers_running"),
+        sa.CheckConstraint("capacity BETWEEN 1 AND 10", name="workers_capacity"),
+        sa.CheckConstraint("running_jobs BETWEEN 0 AND 10", name="workers_running"),
         sa.CheckConstraint("queued_jobs >= 0", name="workers_queued"),
         sa.CheckConstraint(
             "running_jobs <= capacity", name="workers_running_capacity"
@@ -112,10 +112,10 @@ class WorkerHeartbeat(Base):
             name="heartbeats_status",
         ),
         sa.CheckConstraint(
-            "running_jobs BETWEEN 0 AND 5", name="heartbeats_running"
+            "running_jobs BETWEEN 0 AND 10", name="heartbeats_running"
         ),
         sa.CheckConstraint("queued_jobs >= 0", name="heartbeats_queue"),
-        sa.CheckConstraint("capacity BETWEEN 1 AND 5", name="heartbeats_capacity"),
+        sa.CheckConstraint("capacity BETWEEN 1 AND 10", name="heartbeats_capacity"),
         sa.CheckConstraint(
             "running_jobs <= capacity", name="heartbeats_load"
         ),

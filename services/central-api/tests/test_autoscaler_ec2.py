@@ -7,7 +7,12 @@ from unittest.mock import Mock, patch
 import pytest
 
 from central_api.autoscaler import cli
-from central_api.autoscaler.ec2 import Ec2Fleet, Ec2Settings, Ec2Worker
+from central_api.autoscaler.ec2 import (
+    Ec2Fleet,
+    Ec2Settings,
+    Ec2Worker,
+    concurrency_for_ram_gib,
+)
 
 
 class AwsError(Exception):
@@ -94,6 +99,40 @@ def test_settings_rejects_world_open_ingress():
         Ec2Settings(allowed_ingress_cidrs=("::/0",))
 
 
+@pytest.mark.parametrize(
+    ("ram_gib", "expected"),
+    [(4, 5), (8, 5), (15.49, 5), (15.5, 10), (16, 10), (32, 10)],
+)
+def test_concurrency_is_derived_from_ram(ram_gib, expected):
+    assert concurrency_for_ram_gib(ram_gib) == expected
+
+
+def test_worker_concurrency_zero_is_auto_and_explicit_values_are_bounded():
+    assert Ec2Settings(worker_concurrency=0).effective_worker_concurrency == 5
+    assert Ec2Settings(worker_concurrency=10).effective_worker_concurrency == 10
+    with pytest.raises(ValueError):
+        Ec2Settings(worker_concurrency=11)
+
+
+def test_instance_memory_api_and_table_fallback_are_offline():
+    client = Mock()
+    client.describe_instance_types.return_value = {
+        "InstanceTypes": [{"MemoryInfo": {"SizeInMiB": 15872}}]
+    }
+    fleet = Ec2Fleet(Ec2Settings(instance_type="custom.16g"), client=client)
+    assert fleet.instance_runtime() == {
+        "instance_type": "custom.16g",
+        "ram_gib": 15.5,
+        "worker_concurrency": 10,
+    }
+    client.describe_instance_types.assert_called_once_with(
+        InstanceTypes=["custom.16g"]
+    )
+
+    no_api = Ec2Fleet(Ec2Settings(instance_type="r5.large"), client=Mock())
+    assert no_api.instance_runtime()["worker_concurrency"] == 10
+
+
 def test_worker_node_requires_public_ip():
     now = datetime.now(timezone.utc)
     assert Ec2Worker("i-1", "pending", None, "10.0.0.1", now, "sa-east-1a").node is None
@@ -131,6 +170,40 @@ def test_user_data_has_imdsv2_and_worker_compose_restrictions():
     ):
         assert expected in data
     assert "--password-stdin" in data
+
+
+def test_user_data_scales_memory_limits_and_concurrency_with_instance_ram():
+    settings = _settings(instance_type="c6i.2xlarge", worker_concurrency=0)
+    data = Ec2Fleet(settings, client=Mock())._user_data()
+    for expected in (
+        "--memory=13g",
+        "--shm-size=3g",
+        "size=3g,uid=10001,gid=10001,mode=1777",
+        "size=6g,uid=10001,gid=10001,mode=1777",
+        "--concurrency 10 --job-timeout 1800",
+    ):
+        assert expected in data
+
+
+def test_instance_metadata_reports_real_type_ram_slots_and_cost():
+    now = datetime(2026, 10, 2, tzinfo=timezone.utc)
+    fleet = Ec2Fleet(Ec2Settings(instance_type="c6i.xlarge"), client=Mock())
+    worker = fleet._worker_from_instance(
+        {
+            "InstanceId": "i-large",
+            "InstanceType": "c6i.2xlarge",
+            "LaunchTime": now - timedelta(hours=1),
+            "State": {"Name": "running"},
+            "Tags": [
+                {"Key": "RamGiB", "Value": "16"},
+                {"Key": "WorkerConcurrency", "Value": "10"},
+            ],
+        }
+    )
+    assert worker.instance_type == "c6i.2xlarge"
+    assert worker.ram_gib == 16
+    assert worker.concurrency == 10
+    assert fleet.estimate_cost([worker], now) == 0.524
 
 
 def test_list_managed_follows_pagination_and_project_tag_filter():

@@ -14,7 +14,7 @@
 #   - Los healthchecks usan contexto TLS sin verificar (solo vivacidad
 #     local); la autenticacion real la hace el handshake mTLS.
 #   - W-1/SEC-3 intactos: el worker sigue sin secretos de la central.
-#   - W-2 intacto: MAX_CONCURRENT_JOBS sigue en 5 (viene de la base).
+#   - W-2: máximo 10; este overlay mantiene la concurrencia configurada en 5.
 #   - W-3 intacto: el worker no publica puertos ni toca la red de borde.
 
 name: mrbot-v3

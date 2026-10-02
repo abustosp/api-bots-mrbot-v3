@@ -16,7 +16,29 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import floor
 from typing import Any, Iterable, Sequence
+
+
+INSTANCE_TYPE_RAM_GIB: dict[str, float] = {
+    "c6i.large": 4.0,
+    "c6i.xlarge": 8.0,
+    "c6i.2xlarge": 16.0,
+    "c6i.4xlarge": 32.0,
+    "m6i.large": 8.0,
+    "m6i.xlarge": 16.0,
+    "m6i.2xlarge": 32.0,
+    "r6i.large": 16.0,
+    "r6i.xlarge": 32.0,
+    "r5.large": 16.0,
+    "r5.xlarge": 32.0,
+    "r5.2xlarge": 64.0,
+}
+
+
+def concurrency_for_ram_gib(gib: float) -> int:
+    """Return worker slots for RAM in GiB, using a 15.5 GiB tolerance."""
+    return 10 if float(gib) >= 15.5 else 5
 
 
 @dataclass(frozen=True)
@@ -34,7 +56,8 @@ class Ec2Settings:
     registry_pass: str = ""
     central_url: str = ""
     worker_port: int = 8080
-    worker_concurrency: int = 5
+    worker_concurrency: int = 0
+    large_instance_type: str = ""
     allowed_ingress_cidrs: tuple[str, ...] = ()
     max_instances: int = 4
     max_lifetime_minutes: int = 120
@@ -52,8 +75,8 @@ class Ec2Settings:
             raise ValueError("volume_gb debe ser positivo")
         if not 1 <= self.worker_port <= 65535:
             raise ValueError("worker_port debe estar entre 1 y 65535")
-        if not 1 <= self.worker_concurrency <= 5:
-            raise ValueError("worker_concurrency debe estar entre 1 y 5")
+        if self.worker_concurrency != 0 and not 1 <= self.worker_concurrency <= 10:
+            raise ValueError("worker_concurrency debe ser 0 (auto) o estar entre 1 y 10")
         if self.max_instances < 0:
             raise ValueError("max_instances no puede ser negativo")
         if self.max_lifetime_minutes < 1:
@@ -93,11 +116,22 @@ class Ec2Settings:
             registry_pass=value("REGISTRY_PASS"),
             central_url=value("CENTRAL_URL"),
             worker_port=int(value("WORKER_PORT", "8080")),
-            worker_concurrency=int(value("WORKER_CONCURRENCY", "5")),
+            worker_concurrency=int(value("WORKER_CONCURRENCY", "0")),
+            large_instance_type=value("INSTANCE_TYPE_LARGE"),
             allowed_ingress_cidrs=csv("INGRESS_CIDRS"),
             max_instances=int(value("MAX_INSTANCES", "4")),
             max_lifetime_minutes=int(value("MAX_LIFETIME_MINUTES", "120")),
         )
+
+    def concurrency_for_type(self, instance_type: str, ram_gib: float | None = None) -> int:
+        if self.worker_concurrency:
+            return self.worker_concurrency
+        ram = ram_gib if ram_gib is not None else INSTANCE_TYPE_RAM_GIB.get(instance_type, 8.0)
+        return concurrency_for_ram_gib(ram)
+
+    @property
+    def effective_worker_concurrency(self) -> int:
+        return self.concurrency_for_type(self.instance_type)
 
 
 @dataclass
@@ -109,6 +143,9 @@ class Ec2Worker:
     launched_at: datetime
     az: str | None
     worker_port: int = 8080
+    instance_type: str = ""
+    ram_gib: float = 8.0
+    concurrency: int = 5
 
     @property
     def node(self) -> str | None:
@@ -133,6 +170,7 @@ class Ec2Fleet:
 
     def __init__(self, settings: Ec2Settings, client: Any = None):
         self.settings = settings
+        self._ram_cache: dict[str, float] = {}
         if client is None:
             try:
                 import boto3
@@ -182,7 +220,7 @@ class Ec2Fleet:
         self._reconcile_ingress(group_id)
         return group_id
 
-    def launch(self, count: int) -> list[Ec2Worker]:
+    def launch(self, count: int, instance_type: str | None = None) -> list[Ec2Worker]:
         """Lanza hasta ``count`` workers, respetando el máximo y cuota/capacidad."""
         if count <= 0 or self.settings.max_instances == 0:
             return []
@@ -195,6 +233,8 @@ class Ec2Fleet:
         ):
             raise ValueError("registry_user y registry_pass deben configurarse juntos")
 
+        launch_type = instance_type or self.settings.instance_type
+        ram_gib, concurrency = self._instance_runtime(launch_type)
         existing = self.list_managed(states=("pending", "running"))
         remaining = min(count, max(0, self.settings.max_instances - len(existing)))
         if remaining == 0:
@@ -225,10 +265,10 @@ class Ec2Fleet:
                 try:
                     response = self.client.run_instances(
                         ImageId=image_id,
-                        InstanceType=self.settings.instance_type,
+                        InstanceType=launch_type,
                         MinCount=1,
                         MaxCount=1,
-                        UserData=self._user_data(),
+                        UserData=self._user_data(instance_type=launch_type),
                         InstanceInitiatedShutdownBehavior="terminate",
                         BlockDeviceMappings=[
                             {
@@ -256,7 +296,11 @@ class Ec2Fleet:
                         TagSpecifications=[
                             {
                                 "ResourceType": "instance",
-                                "Tags": self._resource_tags(instance_name),
+                                "Tags": self._resource_tags(
+                                    instance_name,
+                                    ram_gib=ram_gib,
+                                    concurrency=concurrency,
+                                ),
                             },
                             {
                                 "ResourceType": "volume",
@@ -420,7 +464,7 @@ class Ec2Fleet:
             if worker.state not in ("pending", "running", "stopping"):
                 continue
             rate = self._ON_DEMAND_USD_HOUR_SA_EAST_1.get(
-                self.settings.instance_type, fallback
+                worker.instance_type or self.settings.instance_type, fallback
             )
             launched_at = worker.launched_at
             if launched_at.tzinfo is None:
@@ -491,17 +535,25 @@ class Ec2Fleet:
         images.sort(key=lambda image: image.get("CreationDate", ""), reverse=True)
         return images[0]["ImageId"]
 
-    def _resource_tags(self, name: str) -> list[dict[str, str]]:
-        return [
+    def _resource_tags(
+        self, name: str, *, ram_gib: float | None = None, concurrency: int | None = None
+    ) -> list[dict[str, str]]:
+        tags = [
             {"Key": "Project", "Value": self.settings.project_tag},
             {"Key": "Role", "Value": "worker"},
             {"Key": "Name", "Value": name},
             {"Key": "ManagedBy", "Value": "mrbot-central"},
         ]
+        if ram_gib is not None:
+            tags.append({"Key": "RamGiB", "Value": str(ram_gib)})
+        if concurrency is not None:
+            tags.append({"Key": "WorkerConcurrency", "Value": str(concurrency)})
+        return tags
 
-    def _user_data(self) -> str:
+    def _user_data(self, instance_type: str | None = None) -> str:
         """Cloud-init worker runtime matching worker.compose.yml resource limits."""
         settings = self.settings
+        instance_type = instance_type or settings.instance_type
         if settings.registry_user and not settings.registry_url:
             raise ValueError("registry_url es obligatorio al configurar registry credentials")
         login = ""
@@ -518,7 +570,10 @@ class Ec2Fleet:
         image = shlex.quote(settings.worker_image)
         central_url = shlex.quote(settings.central_url)
         port = settings.worker_port
-        concurrency = settings.worker_concurrency
+        ram_gib, concurrency = self._instance_runtime(instance_type)
+        memory_gib = max(1, floor(ram_gib * 0.85))
+        shm_gib = max(1, floor(ram_gib * 0.2 + 0.5))
+        work_gib = max(1, floor(ram_gib * 0.375))
         lifetime = settings.max_lifetime_minutes
         return f"""#!/bin/bash
 set -euo pipefail
@@ -530,9 +585,9 @@ token=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token \\
 public_ip=$(curl -fsS -H \"X-aws-ec2-metadata-token: $token\" \\
   http://169.254.169.254/latest/meta-data/public-ipv4)
 {login}docker run -d --name mrbot-worker --init --restart unless-stopped \\
-  --read-only --shm-size=2g --cpus=2.0 --memory=6g \\
-  --tmpfs /dev/shm:rw,nosuid,nodev,size=2g,uid=10001,gid=10001,mode=1777 \\
-  --tmpfs /work:rw,nosuid,nodev,size=3g,uid=10001,gid=10001,mode=1777 \\
+  --read-only --shm-size={shm_gib}g --cpus=2.0 --memory={memory_gib}g \\
+  --tmpfs /dev/shm:rw,nosuid,nodev,size={shm_gib}g,uid=10001,gid=10001,mode=1777 \\
+  --tmpfs /work:rw,nosuid,nodev,size={work_gib}g,uid=10001,gid=10001,mode=1777 \\
   --tmpfs /tmp:rw,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=1777 \\
   --publish {port}:{port} {image} \\
   python -u -m bot_worker --central-url {central_url} \\
@@ -614,6 +669,17 @@ public_ip=$(curl -fsS -H \"X-aws-ec2-metadata-token: $token\" \\
 
     def _worker_from_instance(self, instance: dict[str, Any]) -> Ec2Worker:
         placement = instance.get("Placement", {})
+        tags = {item.get("Key"): item.get("Value") for item in instance.get("Tags", [])}
+        instance_type = str(instance.get("InstanceType") or self.settings.instance_type)
+        ram_gib, concurrency = self._instance_runtime(instance_type)
+        try:
+            ram_gib = float(tags.get("RamGiB", ram_gib))
+        except (TypeError, ValueError):
+            pass
+        try:
+            concurrency = int(tags.get("WorkerConcurrency", concurrency))
+        except (TypeError, ValueError):
+            pass
         launched_at = instance.get("LaunchTime") or datetime.now(timezone.utc)
         if launched_at.tzinfo is None:
             launched_at = launched_at.replace(tzinfo=timezone.utc)
@@ -625,4 +691,34 @@ public_ip=$(curl -fsS -H \"X-aws-ec2-metadata-token: $token\" \\
             launched_at=launched_at,
             az=placement.get("AvailabilityZone"),
             worker_port=self.settings.worker_port,
+            instance_type=instance_type,
+            ram_gib=ram_gib,
+            concurrency=concurrency,
         )
+
+    def _instance_runtime(self, instance_type: str) -> tuple[float, int]:
+        """Resolve memory via EC2 when available, with an offline type table fallback."""
+        ram_gib = self._ram_cache.get(instance_type)
+        if ram_gib is None:
+            ram_gib = INSTANCE_TYPE_RAM_GIB.get(instance_type, 8.0)
+            describe = getattr(self.client, "describe_instance_types", None)
+            if callable(describe):
+                try:
+                    response = describe(InstanceTypes=[instance_type])
+                    descriptions = response.get("InstanceTypes", [])
+                    size_mib = descriptions[0].get("MemoryInfo", {}).get("SizeInMiB")
+                    if size_mib:
+                        ram_gib = float(size_mib) / 1024.0
+                except Exception:  # noqa: BLE001 - fallback keeps tests and launches offline
+                    pass
+            self._ram_cache[instance_type] = ram_gib
+        return ram_gib, self.settings.concurrency_for_type(instance_type, ram_gib)
+
+    def instance_runtime(self) -> dict[str, float | int | str]:
+        """Effective RAM and concurrency for the configured EC2 instance type."""
+        ram_gib, concurrency = self._instance_runtime(self.settings.instance_type)
+        return {
+            "instance_type": self.settings.instance_type,
+            "ram_gib": ram_gib,
+            "worker_concurrency": concurrency,
+        }

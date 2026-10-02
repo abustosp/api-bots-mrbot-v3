@@ -48,8 +48,29 @@ def _require_reason(motivo: str) -> str:
         raise
 
 
-def _safe_config(*, fleet: Any | None = None) -> dict:
+def _safe_config(
+    *, fleet: Any | None = None, runtime: dict[str, Any] | None = None
+) -> dict:
     settings = get_settings()
+    runtime = dict(runtime or {})
+    if fleet is not None and not runtime:
+        try:
+            runtime = fleet.instance_runtime()
+        except Exception:  # noqa: BLE001 - fallback to static offline type table
+            runtime = {}
+    if not runtime:
+        try:
+            from central_api.autoscaler.ec2 import Ec2Settings, INSTANCE_TYPE_RAM_GIB
+
+            ec2_settings = Ec2Settings.from_env()
+            runtime = {
+                "instance_type": ec2_settings.instance_type,
+                "ram_gib": INSTANCE_TYPE_RAM_GIB.get(ec2_settings.instance_type, 8.0),
+                "worker_concurrency": ec2_settings.effective_worker_concurrency,
+            }
+        except Exception:  # noqa: BLE001 - retain admin page availability
+            runtime = {"worker_concurrency": settings.autoscale_capacity_per_worker or 5}
+    concurrency = int(runtime.get("worker_concurrency", 5) or 5)
     return {
         "enabled": controller.effective_enabled(),
         "dry_run": settings.autoscale_dry_run,
@@ -65,7 +86,13 @@ def _safe_config(*, fleet: Any | None = None) -> dict:
         "interval_seconds": settings.autoscale_interval_seconds,
         "cooldown_seconds": settings.autoscale_cooldown_seconds,
         "max_lifetime_seconds": settings.autoscale_max_lifetime_seconds,
-        "capacity_per_worker": settings.autoscale_capacity_per_worker,
+        "capacity_per_worker": concurrency,
+        "worker_concurrency": concurrency,
+        "effective_worker_concurrency": concurrency,
+        "avg_job_seconds": settings.autoscale_avg_job_seconds,
+        "boot_estimate_seconds": settings.autoscale_boot_estimate_seconds,
+        "target_work_seconds": settings.autoscale_target_work_seconds,
+        "instance_type_large": settings.autoscale_instance_type_large,
     }
 
 
@@ -86,21 +113,34 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
     workers = []
     estimated_cost: float | None = None
     aws_error: str | None = None
+    runtime: dict[str, Any] = {}
     try:
         fleet = controller._make_fleet()
         workers = await asyncio.to_thread(fleet.list_managed)
         estimated_cost = await asyncio.to_thread(fleet.estimate_cost, workers, utcnow())
+        runtime = await asyncio.to_thread(fleet.instance_runtime)
     except Exception as exc:  # noqa: BLE001 - status view remains available without AWS
         aws_error = type(exc).__name__
     return {
         "success": True,
         "config": {
-            **_safe_config(fleet=fleet if aws_error is None else None),
+            **_safe_config(
+                fleet=fleet if aws_error is None else None,
+                runtime=runtime if aws_error is None else None,
+            ),
+            "avg_job_seconds": snapshot.get(
+                "avg_job_seconds", get_settings().autoscale_avg_job_seconds
+            ),
+            "boot_seconds": snapshot.get(
+                "boot_seconds", get_settings().autoscale_boot_estimate_seconds
+            ),
             "ec2": ({
                 "region": fleet.settings.region,
                 "instance_type": fleet.settings.instance_type,
                 "worker_port": fleet.settings.worker_port,
-                "worker_concurrency": fleet.settings.worker_concurrency,
+                "worker_concurrency": runtime.get("worker_concurrency")
+                or getattr(fleet.settings, "effective_worker_concurrency", 5),
+                "ram_gib": runtime.get("ram_gib"),
                 "max_lifetime_minutes": fleet.settings.max_lifetime_minutes,
                 "project_tag": fleet.settings.project_tag,
             } if aws_error is None else None),

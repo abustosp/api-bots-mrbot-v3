@@ -1,4 +1,4 @@
-"""Planificador local del worker: admision acotada y tope de 5 (W-2)."""
+"""Planificador local del worker: admision acotada y tope de 10 (W-2)."""
 
 from bot_worker.scheduler.supervisor import (
     Acceptance,

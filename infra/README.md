@@ -120,7 +120,7 @@ Qué verifica hoy, sin necesidad de código de aplicación:
 | `users` no tiene las columnas prohibidas | **I-3**, criterio 5 |
 | Una `Idempotency-Key` repetida es rechazada | **S-2**, criterio 9 |
 | `COMPLETO` sin `finished_at` es rechazado | criterio 12 |
-| La base rechaza `capacity > 5` y `running_jobs > 5` | **W-2** respaldado en base |
+| La base rechaza `capacity > 10` y `running_jobs > 10` | **W-2** respaldado en base |
 | Claim con cola vacía no mueve el contador de slots | criterio 13, caso vacío |
 | 5 ráfagas de 12 claims sin doble asignación ni sobrecapacidad | criterio 13, seguridad |
 | La cola de 10 se drena entre 2 workers | criterio 13, vivacidad |

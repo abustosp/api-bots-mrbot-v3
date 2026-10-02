@@ -12,7 +12,7 @@ El worker pertenece al plano de datos. No es una réplica de la API pública, no
 2. Exponer una API interna, privada, para recibir asignaciones y cancelaciones.
 3. Enviar *heartbeats* y eventos de ejecución hacia la central.
 4. Validar el sobre, versión de protocolo, `lease_id`, bot, operación y esquema.
-5. Mantener una cola local acotada y ejecutar como máximo cinco jobs a la vez.
+5. Mantener una cola local acotada y ejecutar como máximo diez jobs a la vez.
 6. Crear y eliminar un espacio de trabajo aislado por `(job_id, attempt)`.
 7. Construir el contexto de runtime que usan los plugins.
 8. Lanzar, cerrar y contabilizar Playwright, Chromium y sus procesos hijos.
@@ -41,7 +41,7 @@ Las invariantes W-1 a W-4 provienen del plan maestro. Son condiciones de aceptac
 | ID | Invariante | Implementación obligatoria | Verificación |
 |---|---|---|---|
 | W-1 | El worker no abre conexiones a base de datos. | No incluir DSN, driver, ORM, modelos ni sesión. Los plugins solo reciben `BotRuntime`. | Estática y de imagen, detallada abajo. |
-| W-2 | Un worker nunca ejecuta más de 5 jobs concurrentes. | `asyncio.Semaphore(5)` rodea la vida completa del job, y admisión rechaza al estar lleno. | Prueba de concurrencia, métricas y rechazo `409`. |
+| W-2 | Un worker nunca ejecuta más de 10 jobs concurrentes. | `asyncio.Semaphore` de capacidad configurable 1..10 rodea la vida completa del job, y admisión rechaza al estar lleno. | Prueba de concurrencia, métricas y rechazo `409`. |
 | W-3 | El worker solo acepta requests autenticados como provenientes de la central. | Bearer de worker rotativo, red privada y validación constante antes de toda ruta interna. | Pruebas de 401/403 y prueba de red sin ingreso público. |
 | W-4 | Un job asignado a un worker que deja de reportar salud vuelve a la cola sin intervención manual. | *Heartbeats*, `lease_id`, vencimiento y reconciliación en la central. | Prueba de caos que mata el worker y observa `CORRIENDO → PENDIENTE`. |
 ### 2.1 W-1: prohibición total de base de datos
@@ -391,29 +391,29 @@ El cliente usa timeout de conexión y lectura de 3 segundos. Tras falla, reinten
 - **`en_ejecucion`** es el número de tareas que poseen un permiso del semáforo. Incluye `PREPARANDO`, `CORRIENDO`, `SUBIENDO` y `REPORTANDO`. No se libera hasta que se ejecuta el `finally` de limpieza y reporte terminal.
 - **`en_cola`** es el número de sobres aceptados y aún sin permiso del semáforo. En régimen normal debe ser cero porque la central no sobreasigna. Existe para carreras entre POST simultáneos, drenaje y diagnóstico.
 - **`reserved_assignments`** cuenta sobres validados cuya tarea aún no se insertó en la cola. Evita que dos POST concurrentes vean la misma capacidad libre.
-- **`available_capacity`** es `max(0, 5 - en_ejecucion - en_cola - reserved)`. La central también lleva su propia contabilidad y usa el menor valor seguro.
+- **`available_capacity`** es `max(0, capacity - en_ejecucion - en_cola - reserved)`, con `1 <= capacity <= 10`. La central también lleva su propia contabilidad y usa el menor valor seguro.
 ### 5.4 Qué hace la central
 Al recibir el heartbeat, la central actualiza `workers.last_heartbeat_at`, guarda un registro append-only de `worker_heartbeats`, renueva las leases de los jobs indicados y recalcula estado de flota. No toma el conteo como autoridad absoluta, porque puede llegar fuera de orden. `sequence` debe ser monotónica por proceso y los payloads antiguos se conservan como telemetría pero no retroceden el estado.
 | Condición | Estado central | Acción |
 |---|---|---|
 | Heartbeat reciente, capacidad > 0 | `SANO` | Elegible para scheduler. |
-| `en_ejecucion = 5` o capacidad 0 | `SATURADO` | No asignar, no alertar como caída. |
+| `en_ejecucion >= capacity` o capacidad 0 | `SATURADO` | No asignar, no alertar como caída. |
 | Heartbeat reciente con errores recurrentes o recursos críticos | `DEGRADADO` | Reducir o detener asignaciones y alertar Admin. |
 | Sin heartbeat por más de 30 s | `CAIDO` | Expirar leases y reencolar según política. |
 | `accepting_jobs=false` | `DRENANDO` | No asignar, esperar trabajos o vencimiento. |
 Se reportan memoria disponible, uso y límite cgroup, `/dev/shm` libre y total, procesos Chromium vivos, PID actual/límite, uptime y conteos de completados, fallidos y cancelados desde el arranque. Son los indicadores mínimos que permiten distinguir caída de red, saturación, fuga de procesos y riesgo de OOM.
 ---
-## 6. Tope de cinco jobs, W-2 y R13
+## 6. Tope de diez jobs, W-2 y R13
 ### 6.1 Mecanismo de admisión
-La capacidad se impone dentro del worker con `asyncio.Semaphore(5)`. El valor máximo es una constante de seguridad, no un valor ampliable por variable de environment. `WORKER_CONCURRENCY` puede reducirse de 5 a 1 para un host pequeño, pero un valor mayor que 5 debe rechazar el arranque por configuración inválida.
+La capacidad se impone dentro del worker con `asyncio.Semaphore(configured)`. El valor máximo es 10 y no se puede ampliar por variable de environment. `WORKER_CONCURRENCY` puede reducirse de 10 a 1 para un host pequeño, pero un valor mayor que 10 debe rechazar el arranque por configuración inválida.
 La admisión mantiene un candado corto para revisar deduplicación y reservar la capacidad. Si no hay permiso disponible ni lugar en la cola local acotada, responde `409 WORKER_SATURADO`. No acepta infinitamente para responder `202` y ocultar la saturación a la central.
 ```python
 class JobSupervisor:
-    HARD_MAX_CONCURRENCY = 5
+    HARD_MAX_CONCURRENCY = 10
 
     def __init__(self, configured: int) -> None:
         if not 1 <= configured <= self.HARD_MAX_CONCURRENCY:
-            raise ValueError("WORKER_CONCURRENCY debe estar entre 1 y 5")
+            raise ValueError("WORKER_CONCURRENCY debe estar entre 1 y 10")
         self._semaphore = asyncio.Semaphore(configured)
         self._running: dict[tuple[str, int], asyncio.Task[None]] = {}
 
@@ -442,18 +442,19 @@ V2 tenía dos límites locales y no coordinados:
 | `MAX_BOTS` | 4 | Tareas de jobs por `WorkerManager`. | Una tarea podía consumir cupo esperando navegador. |
 | `BROWSER_CONCURRENCY` | 3 | Secciones que lanzaban browser por event loop. | Era otro semáforo, no coordinaba réplicas ni todos los caminos. |
 Ambos eran por proceso y event loop. Con dos réplicas podían existir hasta ocho tareas y seis permisos de navegador. Además, algunos bots generan contextos o procesos extra para PDF. El scheduler no conocía ninguna de esas cifras.
-V3 colapsa el contrato de capacidad visible a un número significativo: **cinco jobs simultáneos por worker**. Todo job browser posee el permiso durante su vida completa y cada plugin declara `browser_instances_max`. Para el arranque, el límite de browser se alinea con la capacidad de jobs, no existe una segunda cola oculta. Si un bot requiere más de un browser, su manifiesto consume más unidades de capacidad o se envía a un pool especializado en una fase posterior.
+V3 colapsa el contrato de capacidad visible a un límite verificable: **hasta diez jobs simultáneos por worker**. Todo job browser posee el permiso durante su vida completa y cada plugin declara `browser_instances_max`. Para el arranque, el límite de browser se alinea con la capacidad de jobs, no existe una segunda cola oculta. Si un bot requiere más de un browser, su manifiesto consume más unidades de capacidad o se envía a un pool especializado en una fase posterior.
 ### 6.3 Matemática de recursos
-La investigación estima Chromium en **300 a 500 MB por instancia**. Cinco instancias requieren aproximadamente:
+La investigación estima Chromium en **300 a 500 MB por instancia**. Diez instancias requieren aproximadamente:
 | Concepto | Cálculo | Presupuesto |
 |---|---:|---:|
-| Chromium mínimo | 5 × 300 MB | 1.5 GB |
-| Chromium conservador | 5 × 500 MB | 2.5 GB |
+| Chromium mínimo | 10 × 300 MB | 3.0 GB |
+| Chromium conservador | 10 × 500 MB | 5.0 GB |
 | Python, Playwright, parsing, buffers y SO | margen | 0.8 a 1.5 GB |
 | Descargas y exportación temporal | margen | 0.5 a 1 GB |
-| Total práctico | no sumar solo RSS ideal | 4 a 5 GB mínimo operativo |
-El riesgo no es solo RAM. `/dev/shm` debe ser memory-backed y dimensionado. El plan V2 de cluster ya señalaba que Chromium puede caer bajo concurrencia sin suficiente memoria compartida. Un `/dev/shm` Docker de 64 MB es insuficiente para una carga de cinco navegadores. También se requiere `init: true` o `tini` para recolectar hijos, y `pids_limit` explícito, con V2 usando 512 como referencia.
-**Recomendación concreta inicial por contenedor de capacidad 5:**
+| Total práctico | no sumar solo RSS ideal | 6 a 8 GB mínimo operativo para diez |
+El riesgo no es solo RAM. `/dev/shm` debe ser memory-backed y dimensionado. El plan V2 de cluster ya señalaba que Chromium puede caer bajo concurrencia sin suficiente memoria compartida. Un `/dev/shm` Docker de 64 MB es insuficiente para una carga alta de navegadores. También se requiere `init: true` o `tini` para recolectar hijos, y `pids_limit` explícito, con V2 usando 512 como referencia.
+**Dimensionamiento efímero por RAM nominal:** tipos de 8 GiB ejecutan 5 jobs y usan límites aproximados de 6 GiB de memoria, 2 GiB de `/dev/shm` y 3 GiB de `/work`; tipos de 16 GiB ejecutan 10 jobs y usan 13, 3 y 6 GiB, respectivamente. El user-data puede ajustar los valores con RAM observada.
+**Recomendación concreta inicial por contenedor de 8 GiB y capacidad 5:**
 | Recurso | Recomendación | Motivo |
 |---|---:|---|
 | Límite de memoria | 6 GiB | Da margen sobre 2.5 a 3 GB de Chromium y proceso Python. |
@@ -478,7 +479,7 @@ services:
         tmpfs:
           size: 5368709120
 ```
-Si el host no puede sostener cinco, no se infringe W-2 reduciendo `WORKER_CONCURRENCY` a 1, 2, 3 o 4. Se configura un valor menor, se publica esa capacidad en registro y heartbeat y la central asigna en consecuencia. No se mantiene `5` en status mientras se restringe Chromium por detrás. Antes de subir el valor deben ejecutarse pruebas por familia de bot, con proxy y sitios similares a producción, midiéndose RSS, `/dev/shm`, PIDs y tiempos p95.
+Si el host no puede sostener su capacidad configurada, no se infringe W-2 reduciendo `WORKER_CONCURRENCY` a un valor entre 1 y 10. Se publica esa capacidad en registro y heartbeat y la central asigna en consecuencia. No se mantiene una capacidad alta en status mientras se restringe Chromium por detrás. Antes de subir el valor deben ejecutarse pruebas por familia de bot, con proxy y sitios similares a producción, midiéndose RSS, `/dev/shm`, PIDs y tiempos p95.
 ---
 ## 7. Contrato de plugin de bot
 Este contrato es la frontera de migración de F3. Sustituye el executor V2 `execute(request_data, job_id, user_id, db)` y elimina de raíz la posibilidad de abrir `SessionLocal()` o persistir `consulta_*_logs` desde un bot.
@@ -740,7 +741,7 @@ sequenceDiagram
         W-->>A: 409 WORKER_SATURADO
     else aceptado
         W-->>A: 202 EN_COLA
-        W->>W: adquirir Semaphore(5)
+        W->>W: adquirir Semaphore(configured, 1..10)
         W->>A: POST started (lease_id, attempt)
         W->>W: crear /work/job/attempt y BotRuntime
         W->>P: validate(payload)
@@ -904,8 +905,8 @@ de verificación llegan en el registro, en memoria.
 | `--advertised-url` | URL http(s)://ip:port | requerido | URL propia que la central usa para contactarlo. |
 | (sin token pre-compartido) | - | - | Token de servicio y clave de verificación provisionados en el registro, en memoria. |
 | `WORKER_ID` | UUIDv7 | asignado | Identidad persistida por orquestador, no por DB local. |
-| `WORKER_CONCURRENCY` | int 1..5 | `5` | Capacidad local, jamás mayor a cinco. |
-| `WORKER_LOCAL_QUEUE_LIMIT` | int 0..5 | `0` | Cola efímera adicional permitida. |
+| `WORKER_CONCURRENCY` | int 1..10 | `5` | Capacidad local, jamás mayor a diez. |
+| `WORKER_LOCAL_QUEUE_LIMIT` | int 0..10 | `0` | Cola efímera adicional permitida. |
 | `HEARTBEAT_INTERVAL_SECONDS` | int | `10` | Cadencia nominal de heartbeat. |
 | `HEARTBEAT_JITTER_SECONDS` | int | `2` | Jitter simétrico. |
 | `WORKER_DRAIN_TIMEOUT_SECONDS` | int | `120` | Tiempo máximo de drenaje SIGTERM. |

@@ -346,7 +346,7 @@ completo.
 | I-3 | inspección de `information_schema.columns` asegura ausencia de `fecha_ultimo_reset`, `created_at`, `updated_at` en `users` | integración DDL | `tests/integration/test_users_columns.py` |
 | I-4 | smoke de imágenes y secretos verifica que solo central tiene `DATABASE_URL` y puede abrir conexión PG | sistema | `tests/system/test_database_isolation.py` |
 | W-1 | inspección de image SBOM y `pip freeze`, más AST/module graph sin driver/ORM/DB import en worker | estático | `services/bot-worker/tests/gates/test_no_database.py` |
-| W-2 | entregar 10 jobs simultáneos a un worker y afirmar exactamente 5 en ejecución, 5 rechazados 409 o permanecen sin asignar | sistema | `tests/system/test_worker_capacity.py` |
+| W-2 | entregar 11 jobs simultáneos a un worker de capacidad 10 y afirmar como máximo 10 en ejecución, el restante rechazado 409 o sin asignar | sistema | `tests/system/test_worker_capacity.py` |
 | W-3 | POST interno sin token, token inválido y token de otro worker devuelven 401/403 sin side effect | contrato + sistema | `tests/contracts/test_worker_auth.py` |
 | W-4 | matar o silenciar worker con job asignado, vencer heartbeat/lease y comprobar retorno a `PENDIENTE` y reasignación | sistema + caos | `tests/chaos/test_worker_loss_requeue.py` |
 | S-1 | escanear OpenAPI y handlers: toda operación de bot pública responde 202 y no importa plugin/executor inline | estático + contract | `tests/contracts/test_public_async_only.py` |
@@ -575,7 +575,7 @@ La V3 se considera terminada solo cuando todos los siguientes puntos tienen evid
 5. I-3 verifica que `users` no contiene las tres columnas eliminadas por R17.
 6. I-4 demuestra que solo la central posee y usa credenciales Postgres.
 7. W-1 demuestra por imagen y grafo de imports que worker no instala ni importa DB driver/ORM.
-8. W-2 demuestra diez entregas a un worker con exactamente cinco ejecuciones simultáneas máximas.
+8. W-2 demuestra once entregas a un worker de capacidad 10 con exactamente diez ejecuciones simultáneas máximas.
 9. W-3 demuestra autenticación fail-closed de toda API interna de worker.
 10. W-4 demuestra reencolado automático de un job asignado a worker perdido.
 11. S-1 demuestra que cada operación pública de bot retorna `202 + job_id` y no ejecuta inline.

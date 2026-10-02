@@ -34,7 +34,7 @@ Opciones del `.env` y del CLI que sí hay que revisar (el resto puede quedar por
 | `WORKER_NODES` | allowlist de workers; en Compose local incluir `bot-worker:8080` para que el registro se persista |
 | `WORKER_ADVERTISED_URL` | URL anunciada por el worker dedicado, debe coincidir con una entrada de `WORKER_NODES` |
 | `ADMIN_TOKEN` | Bearer [REDACTED] mutaciones de `/admin/*`; sin él son `403` |
-| `--concurrency` | argumento CLI del worker; Compose usa `5` por defecto y el máximo permitido es `5` (W-2) |
+| `--concurrency` | argumento CLI del worker; Compose usa `5` por defecto y el máximo permitido es `10` (W-2) |
 | `--central-url` | argumento CLI; en el stack local apunta a `http://central-api:8000` |
 | `WORKER_NUMBER` | número usado por nginx-v2 en `worker-{numero}.mrbot.com.ar` |
 
@@ -275,7 +275,7 @@ Borrar el volumen `postgres_data` re-ejecuta `postgres/init` y exige repetir
 | worker `unhealthy` | se consultó `/status` sin token | usar `/internal/v1/health` para liveness (§6) |
 | `401` en `/internal/v1/status` | falta `Authorization: Bearer <WORKER_TOKEN>` | es lo esperado sin token |
 | `403` en `POST /admin/*` | `ADMIN_TOKEN` vacío o distinto | fijarlo en `.env` y recrear central |
-| `409` del worker al asignar | 5 jobs en curso (SATURADO, W-2) | escalar con `--scale bot-worker=N` |
+| `409` del worker al asignar | capacidad configurada ocupada (hasta 10 jobs, SATURADO, W-2) | escalar con `--scale bot-worker=N` |
 | Chromium se cae | `/dev/shm` pequeño | no tocar: el compose ya fija `shm_size: 2gb` + `tmpfs` |
 | MinIO `unhealthy` | consola en `:9001` ≠ API en `:9000` | el healthcheck usa la liveness propia de MinIO en `:9000` (§6), en vez de /health del proyecto |
 | `alembic_version` ausente en `/ready` | migraciones sin aplicar | repetir §5 |

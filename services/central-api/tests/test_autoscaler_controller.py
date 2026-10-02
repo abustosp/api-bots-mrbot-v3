@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,6 +33,9 @@ class FakeWorker:
     launched_at: datetime | None = None
     az: str | None = "sa-east-1a"
     worker_port: int = 8080
+    instance_type: str = "c6i.xlarge"
+    ram_gib: float = 8.0
+    concurrency: int = 5
 
     def __post_init__(self):
         self.launched_at = self.launched_at or utcnow()
@@ -105,6 +108,7 @@ def isolated_state(monkeypatch):
         "jobs": dict(JOBS),
         "admin_nodes": set(ADMIN_NODES),
         "ephemeral": dict(EPHEMERAL_WORKERS),
+        "boot_samples": list(controller.BOOT_SECONDS_SAMPLES),
     }
     WORKERS.clear()
     JOBS.clear()
@@ -123,6 +127,10 @@ def isolated_state(monkeypatch):
         "AUTOSCALE_INTERVAL_SECONDS": "1",
         "AUTOSCALE_COOLDOWN_SECONDS": "0",
         "AUTOSCALE_CAPACITY_PER_WORKER": "5",
+        "AUTOSCALE_AVG_JOB_SECONDS": "75",
+        "AUTOSCALE_BOOT_ESTIMATE_SECONDS": "150",
+        "AUTOSCALE_TARGET_WORK_SECONDS": "300",
+        "AUTOSCALE_INSTANCE_TYPE_LARGE": "",
         "WORKER_NODES": "",
     }.items():
         monkeypatch.setenv(name, value)
@@ -130,10 +138,12 @@ def isolated_state(monkeypatch):
     controller.set_fleet_for_testing(None)
     controller.RUNTIME_ENABLED = None
     controller.LAST_ACTION_AT = None
+    controller.LAST_SCALE_UP_PENDING = None
     controller.QUEUE_PRESSURE_SINCE = None
     controller.DRAIN_TASK = None
     controller.AUTOSCALER_TASK = None
     controller.EVENTS.clear()
+    controller.BOOT_SECONDS_SAMPLES.clear()
     yield
     try:
         asyncio.run(controller.shutdown_tasks())
@@ -142,10 +152,13 @@ def isolated_state(monkeypatch):
     controller.set_fleet_for_testing(None)
     controller.RUNTIME_ENABLED = None
     controller.LAST_ACTION_AT = None
+    controller.LAST_SCALE_UP_PENDING = None
     controller.QUEUE_PRESSURE_SINCE = None
     controller.DRAIN_TASK = None
     controller.AUTOSCALER_TASK = None
     controller.EVENTS.clear()
+    controller.BOOT_SECONDS_SAMPLES.clear()
+    controller.BOOT_SECONDS_SAMPLES.extend(saved["boot_samples"])
     WORKERS.clear()
     WORKERS.update(saved["workers"])
     JOBS.clear()
@@ -167,6 +180,9 @@ def test_scale_up_registers_new_node_in_admin_inventory():
     assert created[0]["instance_id"] == "i-new-0"
     assert created[0]["node"] in ADMIN_NODES
     assert EPHEMERAL_WORKERS["i-new-0"]["state"] == "running"
+    assert EPHEMERAL_WORKERS["i-new-0"]["instance_type"] == "c6i.xlarge"
+    assert EPHEMERAL_WORKERS["i-new-0"]["ram_gib"] == 8
+    assert EPHEMERAL_WORKERS["i-new-0"]["concurrency"] == 5
 
 
 def test_wait_until_running_registers_ip_before_any_worker_registration(monkeypatch):
@@ -304,9 +320,97 @@ def test_dry_run_does_not_call_launch(monkeypatch):
 
     decision = asyncio.run(controller.autoscaler_tick())
 
-    assert decision.scale_up == 2
+    assert decision.scale_up == 1
     assert fleet.launch_calls == []
     assert controller.event_list()[0]["dry_run"] is True
+    assert {"W", "S", "R", "n", "reason"} <= controller.event_list()[0].keys()
+
+
+def test_snapshot_measures_job_and_boot_averages_and_exposes_worker_metadata():
+    from central_api.api.dependencies import JOB_META
+
+    now = utcnow()
+    saved_meta = dict(JOB_META)
+    try:
+        JOB_META.clear()
+        for job_id, duration in (("done-60", 60), ("done-90", 90)):
+            JOBS[job_id] = Job(
+                job_id, "ccma", "consultar", {}, status="COMPLETO", created_at=now
+            )
+            JOB_META[job_id] = {
+                "started_at": (now - timedelta(seconds=duration)).isoformat(),
+                "finished_at": now.isoformat(),
+            }
+
+        node = "198.51.100.80:8080"
+        launched_at = now - timedelta(seconds=120)
+        ADMIN_NODES.add(node)
+        WORKERS[node] = WorkerEntry(
+            node, status="SANO", capacity=10, last_heartbeat_at=now
+        )
+        EPHEMERAL_WORKERS["i-metrics"] = {
+            "instance_id": "i-metrics",
+            "node": node,
+            "launched_at": launched_at,
+            "instance_type": "c6i.2xlarge",
+            "ram_gib": 16,
+            "concurrency": 10,
+            "state": "running",
+        }
+
+        snapshot = asyncio.run(controller.build_snapshot(now))
+
+        assert snapshot["avg_job_seconds"] == 75
+        assert snapshot["boot_seconds"] == 120
+        assert snapshot["efimeros"][0]["instance_type"] == "c6i.2xlarge"
+        assert snapshot["efimeros"][0]["ram_gib"] == 16
+        assert snapshot["efimeros"][0]["concurrency"] == 10
+    finally:
+        JOB_META.clear()
+        JOB_META.update(saved_meta)
+
+
+def test_admin_autoscale_exposes_effective_concurrency(monkeypatch):
+    from central_api.admin import autoscale as admin_autoscale
+
+    class FleetForAdmin:
+        settings = type("Settings", (), {
+            "region": "sa-east-1",
+            "instance_type": "c6i.2xlarge",
+            "worker_port": 8080,
+            "max_lifetime_minutes": 120,
+            "project_tag": "unit-test-project",
+        })()
+
+        def instance_runtime(self):
+            return {
+                "instance_type": "c6i.2xlarge",
+                "ram_gib": 16.0,
+                "worker_concurrency": 10,
+            }
+
+        def list_managed(self):
+            return []
+
+        def estimate_cost(self, workers, now):
+            return 0.0
+
+    fleet = FleetForAdmin()
+    monkeypatch.setattr(admin_autoscale, "require_admin", lambda _authorization: None)
+    monkeypatch.setattr(controller, "_make_fleet", lambda: fleet)
+    monkeypatch.setattr(
+        controller,
+        "build_snapshot",
+        lambda: asyncio.sleep(0, result={"avg_job_seconds": 80, "boot_seconds": 130}),
+    )
+
+    result = asyncio.run(admin_autoscale.get_autoscale())
+
+    assert result["config"]["effective_worker_concurrency"] == 10
+    assert result["config"]["worker_concurrency"] == 10
+    assert result["config"]["ec2"]["worker_concurrency"] == 10
+    assert result["snapshot"]["avg_job_seconds"] == 80
+    assert result["snapshot"]["boot_seconds"] == 130
 
 
 def test_reconcile_adopts_pending_worker_without_removing_registration_inventory():

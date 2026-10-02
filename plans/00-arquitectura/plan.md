@@ -90,7 +90,7 @@ El diseño fue útil como primer sistema asíncrono y aporta activos reutilizabl
 | Worker hace polling y claim | No hay control central de carga, prioridad o indisponibilidad | Scheduler central selecciona worker sano y hace asignación push |
 | Worker tiene DB | Superficie de secretos y acoplamiento ORM excesivos | Sobre autocontenido y callbacks HTTP, sin driver Postgres en worker |
 | Recuperación global | Reiniciar A puede cancelar trabajo de B | Lease por intento, heartbeat y reaper central que solo recupera asignaciones vencidas |
-| Límites 4 y 3 independientes | Concurrencia impredecible y sobrecarga de Chromium | Capacidad declarada y semáforo duro de cinco jobs por worker |
+| Límites 4 y 3 independientes | Concurrencia impredecible y sobrecarga de Chromium | Capacidad declarada y semáforo duro de diez jobs por worker |
 | Dos tablas de job | Estado, intento y auditoría se pierden al mover filas | Tabla única `jobs`, estados terminales y eventos inmutables |
 | 28 logs heterogéneos | Alto coste por bot y esquemas duplicados | `job_results` y `job_artifacts`, con payload específico JSONB |
 | Catálogo disperso | Un bot puede estar expuesto sin executor o sin lectura | `bots` y manifiestos versionados como datos declarativos |
@@ -172,7 +172,7 @@ El diagnóstico V2 era correcto: SQLite bloquea el cluster, la recuperación glo
 | R10 central balancea workers sanos | Workers se auto-seleccionan jobs; KEDA solo escala | CONFLICTO DIRECTO | Scheduler central elige destino y persiste asignación |
 | R11 admin ve workers no disponibles | Heartbeat sugerido en DB, sin modelo de visualización | PARCIAL | Heartbeat HTTP actualiza flota y panel consulta estado central |
 | R12 worker informa salud y cola | Heartbeat DB propuesto, sin contrato ni profundidad | PARCIAL | Mensaje heartbeat tipado con capacidad, cola y recursos |
-| R13 máximo cinco jobs por worker | Límites configurables locales, ejemplos 3 y 4 | PARCIAL | Semáforo fijo 5 y admisión central por `free_capacity` |
+| R13 máximo diez jobs por worker | Límites configurables locales, ejemplos 3 y 4 | PARCIAL | Semáforo máximo 10 y admisión central por `free_capacity` |
 | R14 ejecución síncrona deprecada | Mantiene `/api/v1` y `/api/v2` | CONFLICTO DIRECTO | V3 no publica ejecución inline. Compatibilidad solo como adaptador async explícito |
 | R15 usuarios UUIDv4 | No tratado, esquema heredado usa enteros | NO CUBIERTO | Invariante de DDL V3 |
 | R16 UUIDv7 y cero correlativos | No tratado | NO CUBIERTO | Invariante de DDL V3 |
@@ -339,7 +339,7 @@ Las credenciales fiscales no son autenticación del servicio. Solo existen en `c
 La capacidad reportada debe cumplir:
 
 ```text
-0 <= running_jobs <= total_capacity <= 5
+0 <= running_jobs <= total_capacity <= 10
 0 <= queued_jobs
 free_capacity = total_capacity - running_jobs - reserved_assignments
 ```
@@ -400,7 +400,7 @@ free_capacity = total_capacity - running_jobs - reserved_assignments
 | `image.app_version` | string | Versión de aplicación compatible con jobs fijados |
 | `supported_protocol_versions` | array integer | Versiones que esta imagen puede decodificar y emitir |
 | `supported_bots` | array | Bot, versión de manifiesto y operaciones ejecutables |
-| `total_capacity` | integer 1..5 | Tope declarado, siempre menor o igual a cinco |
+| `total_capacity` | integer 1..10 | Tope declarado, siempre menor o igual a diez |
 | `runtime` | object | Versiones de runtime para diagnóstico y compatibilidad de Playwright |
 
 **Respuesta `201 Created` o `200 OK`:**
@@ -472,8 +472,8 @@ La central rechaza con `409 WORKER_ID_CONFLICT` si el mismo `worker_id` está ac
 | `running_jobs[].attempt` | integer >= 1 | Intento asignado por central |
 | `running_jobs[].execution_state` | enum | `ACCEPTED`, `RUNNING`, `CANCELLING` o `UPLOADING`. Ver la nota de abajo: **no** es el `status` del job |
 | `queued_jobs` | integer >= 0 | Sobres aceptados en cola local, aún no iniciados |
-| `total_capacity` | integer 1..5 | Capacidad configurada en proceso |
-| `free_capacity` | integer 0..5 | Cupos locales aún disponibles |
+| `total_capacity` | integer 1..10 | Capacidad configurada en proceso |
+| `free_capacity` | integer 0..10 | Cupos locales aún disponibles |
 
 > **`execution_state` no es `jobs.status`.** Son dos enumeraciones distintas y
 > confundirlas es un error fácil de cometer.
@@ -1165,7 +1165,7 @@ Reglas:
 | ADR-008 | `job_results` JSONB unifica 28 logs | Aceptada | Datos comunes normalizados y payload específico JSONB |
 | ADR-009 | Deprecación total de ejecución síncrona | Aceptada | Toda ejecución entra por cola async con job ID |
 | ADR-010 | Una imagen de worker con todos los bots | Aceptada | Menos pools y scheduling de compatibilidad en V3 inicial |
-| ADR-011 | Máximo cinco jobs concurrentes por worker | Aceptada | Semáforo duro y capacidad conocida por central |
+| ADR-011 | Máximo diez jobs concurrentes por worker | Aceptada | Semáforo duro y capacidad conocida por central |
 | ADR-012 | HTTP/JSON en lugar de gRPC o broker | Aceptada, revisar | Protocolos simples y depurables para V3 inicial |
 | ADR-013 | Sin Redis inicial | Aceptada, revisar | PostgreSQL resuelve estado, locking y cola al comienzo |
 | ADR-014 | Se conserva disciplina de errores públicos V2 | Aceptada | Diagnóstico interno separado de mensaje público saneado |
@@ -1270,11 +1270,11 @@ Reglas:
 
 **Alternativas descartadas.** Imagen por bot reduce tamaño puntual, pero multiplicaría CI, digest pinning, deployment y capacidad ociosa antes de contar con métricas.
 
-### ADR-011: tope de cinco jobs concurrentes por worker
+### ADR-011: tope de diez jobs concurrentes por worker
 
 **Contexto.** V2 combina dos semáforos no coordinados de 4 y 3. Chromium consume memoria y `/dev/shm` bajo carga.
 
-**Decisión.** `total_capacity` máximo es 5. Worker impone semáforo de cinco sobre trabajos completos. Central nunca asigna sobre capacidad libre computada.
+**Decisión.** `total_capacity` máximo es 10. Worker impone semáforo de hasta diez sobre trabajos completos. Central nunca asigna sobre capacidad libre computada.
 
 **Consecuencias.** El límite es defendible y observable. Infraestructura debe dimensionar CPU, memoria y `/dev/shm` para cinco browsers o reducir `total_capacity` sin excederlo. El máximo no autoriza automáticamente cinco browser launches si un bot usa subprocesos internos.
 
@@ -1430,7 +1430,7 @@ La frase operativa es: un deploy nunca cambia la semántica de un job en vuelo. 
 | R10 | Central balancea workers sanos | §3.1, §4.3, §5.4 | Con tres workers, central asigna por capacidad, versión y salud sin polling DB worker |
 | R11 | Admin informa workers no disponibles | §5.4, heartbeat §5.7 | Al faltar tres heartbeats, panel expone worker CAIDO y último visto |
 | R12 | Worker reporta salud y cola | §5.7 | Heartbeat actualiza capacidad, cola, recursos e intentos visibles centralmente |
-| R13 | Máximo cinco jobs por worker | ADR-011, §5.4, §5.15 | Enviar seis asignaciones produce como máximo cinco ejecutando y sexto se mantiene pendiente |
+| R13 | Máximo diez jobs por worker | ADR-011, §5.4, §5.15 | Enviar once asignaciones produce como máximo diez ejecutando y la restante se mantiene pendiente |
 | R14 | Síncrono deprecado | ADR-009, §9.1 | Análisis de rutas no encuentra executor en API pública, todas retornan 202 |
 | R15 | Usuarios UUIDv4 | ADR-005 | Migración y test de schema verifican `users.id` UUIDv4 sin secuencia |
 | R16 | Bots/jobs UUIDv7, cero correlativos | ADR-005 | Test DDL rechaza PK serial y verifica UUIDv7 en entidades requeridas |

@@ -72,7 +72,7 @@ def _revisar_pubkey(sealed_pubkey_pem: str | None) -> str | None:
 
 
 class WorkerRepository:
-    """Registro y telemetria de workers con tope 5 impuesto en la base."""
+    """Registro y telemetria de workers con tope 10 impuesto en la base."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -107,8 +107,8 @@ class WorkerRepository:
             raise RepositoryError(f"nodo {endpoint_node!r} fuera del inventario")
         if protocol_version != PROTOCOL_VERSION:
             raise RepositoryError("protocolo incompatible")
-        if not 1 <= capacity <= 5:
-            raise RepositoryError("capacidad fuera del tope 1..5")
+        if not 1 <= capacity <= 10:
+            raise RepositoryError("capacidad fuera del tope 1..10")
         pubkey = _revisar_pubkey(sealed_pubkey_pem)
         existente = await self.get_by_endpoint(endpoint_node)
         if existente is not None:
@@ -160,8 +160,12 @@ class WorkerRepository:
         metrics: dict | None = None,
     ) -> WorkerHeartbeat:
         """Persiste el latido y refresca el snapshot del worker."""
-        if not 1 <= capacity <= 5 or not 0 <= running_jobs <= 5:
-            raise RepositoryError("capacidad o carga fuera del tope 1..5/0..5")
+        if (
+            not 1 <= capacity <= 10
+            or not 0 <= running_jobs <= 10
+            or running_jobs > capacity
+        ):
+            raise RepositoryError("capacidad o carga fuera del tope 1..10/0..10")
         worker = await self._session.get(Worker, worker_id)
         if worker is None:
             raise NotFoundError("worker no registrado")

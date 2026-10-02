@@ -2,7 +2,7 @@
 
 El `worker_id` es UUIDv7 efimero de proceso: un reinicio genera uno nuevo
 aunque conserve el nombre logico. La capacidad declarada cumple
-`0 <= running <= total <= 5`. El registro unificado (`NodeRegistration`)
+`0 <= running <= total <= 10`. El registro unificado (`NodeRegistration`)
 acepta la union de nodos ejecutores (`WORKER_NODES`) y nodos
 administrativos (`ADMIN_NODES`), discriminada por `kind`.
 """
@@ -48,7 +48,7 @@ class WorkerRegistration(ProtocolMessage):
     image: ImageInfo
     supported_protocol_versions: list[int] = Field(min_length=1)
     supported_bots: list[SupportedBot] = Field(min_length=1)
-    total_capacity: int = Field(ge=1, le=5)
+    total_capacity: int = Field(ge=1, le=10)
     sealed_pubkey_pem: str | None = Field(
         default=None,
         max_length=4096,
@@ -104,8 +104,8 @@ class WorkerHeartbeat(ProtocolMessage):
     state: WorkerStatus
     running_jobs: list[RunningJobInfo] = Field(default_factory=list)
     queued_jobs: int = Field(ge=0)
-    total_capacity: int = Field(ge=1, le=5)
-    free_capacity: int = Field(ge=0, le=5)
+    total_capacity: int = Field(ge=1, le=10)
+    free_capacity: int = Field(ge=0, le=10)
     image_version: str = Field(min_length=1, max_length=128)
     image_digest: ImageDigest
     protocol_version_supported: int = Field(ge=1)
@@ -138,7 +138,7 @@ class WorkerNode(StrictModel):
     kind: Literal["WORKER_NODE"] = "WORKER_NODE"
     worker_id: Uuid7
     instance_name: str = Field(min_length=1, max_length=128)
-    total_capacity: int = Field(ge=1, le=5)
+    total_capacity: int = Field(ge=1, le=10)
 
 
 class AdminNode(StrictModel):

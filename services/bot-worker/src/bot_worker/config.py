@@ -126,10 +126,10 @@ class WorkerConfig:
         host = self.advertised_url.split("://", 1)[1].split("/", 1)[0]
         if ":" not in host:
             raise ValueError("advertised-url debe incluir ip:port")
-        if not 1 <= self.worker_concurrency <= 5:
-            raise ValueError("concurrency debe estar entre 1 y 5 (W-2)")
-        if not 0 <= self.worker_local_queue_limit <= 5:
-            raise ValueError("queue-limit debe estar entre 0 y 5")
+        if not 1 <= self.worker_concurrency <= 10:
+            raise ValueError("concurrency debe estar entre 1 y 10 (W-2)")
+        if not 0 <= self.worker_local_queue_limit <= 10:
+            raise ValueError("queue-limit debe estar entre 0 y 10")
         if self.log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
             raise ValueError("log-level inválido")
 
@@ -177,10 +177,10 @@ def parse_args(argv: list[str] | None = None) -> WorkerConfig:
             raise ValueError(f"URL debe ser http(s)://...: {url!r}")
     if ":" not in ns.advertised_url.split("://", 1)[1].split("/", 1)[0]:
         raise ValueError("advertised-url debe incluir ip:port")
-    if not 1 <= ns.worker_concurrency <= 5:
-        raise ValueError("--concurrency debe estar entre 1 y 5 (W-2)")
-    if not 0 <= ns.worker_local_queue_limit <= 5:
-        raise ValueError("--queue-limit debe estar entre 0 y 5")
+    if not 1 <= ns.worker_concurrency <= 10:
+        raise ValueError("--concurrency debe estar entre 1 y 10 (W-2)")
+    if not 0 <= ns.worker_local_queue_limit <= 10:
+        raise ValueError("--queue-limit debe estar entre 0 y 10")
     if ns.log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
         raise ValueError("--log-level inválido")
     return WorkerConfig(

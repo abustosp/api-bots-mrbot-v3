@@ -29,7 +29,7 @@
 #
 # Invariantes que este archivo respeta (ver infra/verify-packaging.sh):
 #   W-1/SEC-3: el worker no recibe secretos de la central.
-#   W-2: MAX_CONCURRENT_JOBS=5 en el worker.
+#   W-2: el worker admite como máximo 10 jobs; Compose conserva 5 por defecto.
 #   W-3: el worker no publica puertos. proxy-edge solo sirve su ingress TLS
 #   etiquetado y la ejecución sigue exigiendo firma de la central.
 #   I-4: solo la central llega a PostgreSQL; postgres no publica puertos.

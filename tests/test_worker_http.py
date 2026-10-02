@@ -92,7 +92,7 @@ def test_estado_abierto_en_red_privada():
     assert cuerpo["protocol_version"] == 1
     assert PROTOCOL_VERSION == 1
     assert isinstance(cuerpo["protocol_version"], int)
-    assert cuerpo["capacity"] <= 5
+    assert cuerpo["capacity"] <= 10
     assert cuerpo["en_ejecucion"] >= 0
 
 

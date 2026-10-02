@@ -7,7 +7,7 @@ comprobación estática del texto fuente donde el HTTP no llega.
 
 Convenciones del guard:
 - ``protocol_version`` es entero y vale 1 en el wire.
-- Tope duro de capacidad 5 (W-2) en central, worker y contratos.
+- Tope duro de capacidad 10 (W-2) en central, worker y contratos.
 - Lo sensible viaja sellado; el worker no toca base de datos (W-1).
 - Nodos de prueba en TEST-NET-1 (192.0.2.0/24) y secretos ficticios.
 """
@@ -413,7 +413,7 @@ def test_worker_vivo_reporta_protocolo_1_y_tope_5():
     cuerpo = estado.json()
     assert cuerpo["protocol_version"] == 1
     assert isinstance(cuerpo["protocol_version"], int)
-    assert cuerpo["capacity"] <= 5
+    assert cuerpo["capacity"] <= 10
     bots = cliente.get("/internal/v1/bots")
     assert bots.status_code == 200
     assert bots.json()["protocol_version"] == 1
@@ -743,39 +743,40 @@ def test_flujo_vivo_evento_resultado_y_acuse():
 # ----------------------------------------------------- topes y sellado ---
 
 
-def test_tope_5_en_central_worker_y_contratos():
-    """La capacidad máxima es 5 en los tres lados del wire."""
+def test_tope_10_en_central_worker_y_contratos():
+    """La capacidad máxima es 10 en los tres lados del wire."""
     from central_api.internal.workers import MAX_WORKER_CAPACITY
 
-    assert MAX_WORKER_CAPACITY == 5
+    assert MAX_WORKER_CAPACITY == 10
     ajustes = (RAIZ / "services/central-api/src/central_api/settings.py").read_text(
         encoding="utf-8"
     )
-    assert "worker_capacity: int = 5" in ajustes
+    assert "worker_capacity: int = Field(default=10, ge=1, le=10)" in ajustes
     from bot_worker.scheduler.supervisor import JobSupervisor
 
-    assert JobSupervisor.HARD_MAX_CONCURRENCY == 5
+    assert JobSupervisor.HARD_MAX_CONCURRENCY == 10
+    assert JobSupervisor(configured=10).capacity == 10
     with pytest.raises(ValueError):
-        JobSupervisor(configured=6)
+        JobSupervisor(configured=11)
     contratos = (
         RAIZ / "packages/mrbot-contracts/src/mrbot_contracts/worker.py"
     ).read_text(encoding="utf-8")
-    assert contratos.count("Field(ge=1, le=5)") >= 2
+    assert contratos.count("Field(ge=1, le=10)") == 3
 
 
-def test_ajustes_del_worker_recortan_a_1_5():
-    """La configuración del worker rechaza concurrencia fuera de 1..5."""
+def test_ajustes_del_worker_recortan_a_1_10():
+    """La configuración del worker rechaza concurrencia fuera de 1..10."""
     from bot_worker.config import WorkerConfig
 
     with pytest.raises(Exception):
         WorkerConfig(
             central_url=_CENTRAL_FICTICIA,
             advertised_url="http://127.0.0.1:8080",
-            worker_concurrency=6,
+            worker_concurrency=11,
         )
 
 
-def test_registro_vivo_recorta_capacidad_a_5():
+def test_registro_vivo_recorta_capacidad_a_10():
     """La central recorta la capacidad declarada al tope duro."""
     from central_api.store import WORKERS
 
@@ -787,7 +788,7 @@ def test_registro_vivo_recorta_capacidad_a_5():
             json={"advertised_url": f"http://{nodo}", "capacity": 99},
         )
         assert respuesta.status_code == 200
-        assert WORKERS[nodo].capacity == 5
+        assert WORKERS[nodo].capacity == 10
     finally:
         WORKERS.pop(nodo, None)
 
