@@ -92,6 +92,8 @@ def _safe_config(
         "avg_job_seconds": settings.autoscale_avg_job_seconds,
         "boot_estimate_seconds": settings.autoscale_boot_estimate_seconds,
         "target_work_seconds": settings.autoscale_target_work_seconds,
+        "jobs_per_worker": settings.autoscale_jobs_per_worker,
+        "max_total_workers": settings.autoscale_max_total_workers,
         "instance_type_large": settings.autoscale_instance_type_large,
     }
 

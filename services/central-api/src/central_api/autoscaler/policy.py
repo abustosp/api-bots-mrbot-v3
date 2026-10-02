@@ -105,6 +105,67 @@ def _decision(
     )
 
 
+def _decide_by_count(
+    snapshot: Any, cfg: Any, *, pending: int, fixed_workers: int, ephemerals: list,
+    jobs_per_worker: int, max_instances: int, threshold: int, up_after: float,
+    pressure_seconds: float, on_cooldown: bool, idle_candidates: list, base_slots: int,
+    work: float, slots: int, remaining: float, step: int,
+) -> Decision:
+    """Modo por conteo: 1 worker cada ``jobs_per_worker`` pendientes.
+
+    ``total = ceil(pendientes / jobs_per_worker)`` acotado por
+    ``AUTOSCALE_MAX_TOTAL_WORKERS`` (fijos + efimeros) y por ``max_instances``.
+    Los fijos cuentan primero; los efimeros cubren la diferencia. Las
+    instancias que ya estan arrancando cuentan como efimeros existentes, asi
+    no se relanza mientras bootean. Si la cola baja, el sobrante se drena
+    empezando por el de menos carga (el controller espera jobs==0 antes de
+    terminar).
+    """
+    max_total = max(0, int(_get(cfg, "autoscale_max_total_workers", 0) or 0))
+    wanted_total = math.ceil(pending / jobs_per_worker) if pending > 0 else 0
+    if max_total:
+        wanted_total = min(wanted_total, max_total)
+    wanted_ephemeral = min(max(0, wanted_total - fixed_workers), max_instances)
+    active = len(ephemerals)
+    common = dict(work=work, slots=slots, remaining=remaining, desired=wanted_ephemeral)
+    formula = (
+        f"cola={pending}, 1 worker/{jobs_per_worker} trabajos => total={wanted_total} "
+        f"(fijos={fixed_workers}, tope_total={max_total or 'sin tope'}) => efimeros objetivo={wanted_ephemeral}, activos={active}"
+    )
+
+    if pending > threshold and wanted_ephemeral > active:
+        if pressure_seconds < up_after:
+            return _decision(reason="presion de cola aun no sostenida; " + formula, **common)
+        if on_cooldown:
+            last = _get(snapshot, "last_scale_up_pending")
+            if not (last is not None and pending > int(last)):
+                return _decision(reason="cooldown activo; " + formula, **common)
+        n = wanted_ephemeral - active
+        if step:
+            n = min(n, step)
+        return _decision(reason="modo por conteo: " + formula, scale_up=n, **common)
+
+    # Cola en descenso: drenar el sobrante (menos carga primero).
+    if active > wanted_ephemeral and pending > 0 and not on_cooldown:
+        ranked = []
+        for item in ephemerals:
+            instance_id, _l, jobs, _b, _h, _s, _n = _ephemeral_parts(item)
+            if instance_id:
+                ranked.append((jobs, instance_id))
+        ranked.sort()
+        excess = [iid for _jobs, iid in ranked[: active - wanted_ephemeral]]
+        if excess:
+            return _decision(reason="modo por conteo, sobrante: " + formula, scale_down_ids=excess, **common)
+
+    if idle_candidates and not on_cooldown:
+        idle_candidates.sort()
+        return _decision(
+            reason="sin cola: retirar efimeros ociosos; " + formula,
+            scale_down_ids=[iid for _age, iid in idle_candidates], **common,
+        )
+    return _decision(reason=("cooldown activo; " if on_cooldown else "sin cambios; ") + formula, **common)
+
+
 def decide(snapshot: Any, cfg: Any, now: datetime) -> Decision:
     """Return one scale action using W/S/R/n in slot-seconds.
 
@@ -199,6 +260,16 @@ def decide(snapshot: Any, cfg: Any, now: datetime) -> Decision:
             work=work,
             slots=slots,
             remaining=remaining,
+        )
+
+    jobs_per_worker = max(0, int(_get(cfg, "autoscale_jobs_per_worker", 0) or 0))
+    if jobs_per_worker:
+        return _decide_by_count(
+            snapshot, cfg, pending=pending, fixed_workers=max(0, int(_get(snapshot, "workers_fijos", 0) or 0)),
+            ephemerals=ephemerals, jobs_per_worker=jobs_per_worker, max_instances=max_instances,
+            threshold=threshold, up_after=up_after, pressure_seconds=pressure_seconds,
+            on_cooldown=on_cooldown, idle_candidates=idle_candidates, base_slots=base_slots,
+            work=work, slots=slots, remaining=remaining, step=step,
         )
 
     desired_default = 0

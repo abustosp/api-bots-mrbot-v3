@@ -506,6 +506,7 @@ async def build_snapshot(now: datetime | None = None) -> dict:
         "en_ejecucion": running,
         "capacidad_libre_fija": fixed_free,
         "capacidad_total_fija": fixed_total,
+        "workers_fijos": len(healthy_fixed),
         "avg_job_seconds": avg_job_seconds,
         "boot_seconds": boot_seconds,
         "efimeros": ephemerals,

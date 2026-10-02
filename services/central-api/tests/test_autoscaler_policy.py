@@ -291,3 +291,53 @@ def test_boot_estimate_changes_queue_need():
     )
     assert long_boot.scale_up == 0
     assert short_boot.scale_up == 1
+
+
+# --- Modo por conteo: 1 worker cada N trabajos (AUTOSCALE_JOBS_PER_WORKER) ---
+
+COUNT_CFG = SimpleNamespace(**{**vars(CFG), "autoscale_step": 0, "autoscale_max_instances": 50,
+                               "autoscale_jobs_per_worker": 30, "autoscale_max_total_workers": 20})
+
+
+@pytest.mark.parametrize(
+    "pending,fixed,expected",
+    [
+        (0, 2, 0),      # sin cola
+        (30, 2, 0),     # 1 worker alcanza y ya hay 2 fijos
+        (60, 2, 0),     # total=2 == fijos
+        (61, 2, 1),     # total=3 -> 1 efimero
+        (300, 2, 8),    # total=10 -> 8 efimeros
+        (664, 2, 18),   # total=23 -> tope 20 -> 18 efimeros
+        (5000, 2, 18),  # el tope total manda
+    ],
+)
+def test_count_mode_one_worker_per_30_jobs_capped_at_20_total(pending, fixed, expected):
+    d = decide(snapshot(pendientes=pending, workers_fijos=fixed, queue_pressure_seconds=30), COUNT_CFG, NOW)
+    assert d.scale_up == expected
+    assert d.scale_down_ids == []
+
+
+def test_count_mode_counts_booting_instances_so_it_never_relaunches():
+    booting = [ephemeral(f"i-{n}", age=30, healthy=False) for n in range(10)]
+    d = decide(snapshot(pendientes=664, workers_fijos=2, queue_pressure_seconds=30, efimeros=booting), COUNT_CFG, NOW)
+    assert d.scale_up == 8  # objetivo 18, ya hay 10
+
+
+def test_count_mode_waits_for_sustained_pressure_and_respects_threshold():
+    d = decide(snapshot(pendientes=664, workers_fijos=2, queue_pressure_seconds=5), COUNT_CFG, NOW)
+    assert d.scale_up == 0 and "sostenida" in d.reason
+    d = decide(snapshot(pendientes=8, workers_fijos=0, queue_pressure_seconds=30), COUNT_CFG, NOW)
+    assert d.scale_up == 0  # bajo el umbral de cola
+
+
+def test_count_mode_drains_surplus_least_loaded_first_when_queue_shrinks():
+    fleet = [ephemeral(f"i-{n}", jobs=n) for n in range(6)]
+    d = decide(snapshot(pendientes=90, workers_fijos=2, queue_pressure_seconds=30, efimeros=fleet), COUNT_CFG, NOW)
+    # 90/30=3 totales, 2 fijos => 1 efimero; sobran 5, los de menos carga primero
+    assert d.scale_down_ids == ["i-0", "i-1", "i-2", "i-3", "i-4"]
+
+
+def test_count_mode_off_keeps_the_time_based_formula():
+    off = SimpleNamespace(**{**vars(COUNT_CFG), "autoscale_jobs_per_worker": 0})
+    d = decide(snapshot(pendientes=300, queue_pressure_seconds=30), off, NOW)
+    assert d.scale_up == min(math.ceil(300 * 75 / (5 * 300)), 50)

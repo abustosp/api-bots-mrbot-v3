@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     autoscale_capacity_per_worker: int = Field(default=0, ge=0, alias="AUTOSCALE_CAPACITY_PER_WORKER")
     autoscale_avg_job_seconds: float = Field(default=75, gt=0, alias="AUTOSCALE_AVG_JOB_SECONDS")
     autoscale_boot_estimate_seconds: float = Field(default=150, gt=0, alias="AUTOSCALE_BOOT_ESTIMATE_SECONDS")
+    # Modo por conteo: 1 worker cada N trabajos pendientes (0 = desactivado, usa W/S/R).
+    autoscale_jobs_per_worker: int = Field(default=0, ge=0, alias="AUTOSCALE_JOBS_PER_WORKER")
+    # Tope de workers totales (fijos + efimeros) en modo por conteo (0 = sin tope extra).
+    autoscale_max_total_workers: int = Field(default=0, ge=0, alias="AUTOSCALE_MAX_TOTAL_WORKERS")
     autoscale_target_work_seconds: float = Field(default=300, gt=0, alias="AUTOSCALE_TARGET_WORK_SECONDS")
     autoscale_instance_type_large: str = Field(default="", alias="AUTOSCALE_INSTANCE_TYPE_LARGE")
 
