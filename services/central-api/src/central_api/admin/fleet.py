@@ -17,7 +17,7 @@ máquina de estados. Este módulo agrega:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -26,7 +26,7 @@ from central_api.admin._common import require_admin, validar_motivo
 from central_api.admin.audit import log_event, nuevo_uuid7
 from central_api.admin.workers import derive_state, worker_overview
 from central_api.settings import get_settings
-from central_api.store import JOBS, WORKERS, utcnow
+from central_api.store import EPHEMERAL_WORKERS, JOBS, WORKERS, utcnow
 from central_api.worker_nodes import merge_nodes
 
 router = APIRouter()
@@ -161,6 +161,102 @@ def _vista_fila(nodo: str) -> dict:
     }
 
 
+def _parse_instante(valor: object) -> datetime | None:
+    """Normaliza timestamps del store sin asumir que aún sean serializados."""
+    if isinstance(valor, datetime):
+        return valor.replace(tzinfo=timezone.utc) if valor.tzinfo is None else valor
+    if isinstance(valor, str) and valor:
+        try:
+            instante = datetime.fromisoformat(valor.replace("Z", "+00:00"))
+            return instante.replace(tzinfo=timezone.utc) if instante.tzinfo is None else instante
+        except ValueError:
+            return None
+    return None
+
+
+def _vista_efimero(instance_id: str, item: dict) -> dict:
+    """Fila autoscaler incluso mientras la instancia todavía no tiene nodo."""
+    node = str(item.get("node") or "")
+    base = _vista_fila(node) if node else {
+        "node": "",
+        "estado": "REGISTRANDO",
+        "en_ejecucion": 0,
+        "jobs_activos": 0,
+        "capacidad": get_settings().worker_capacity,
+        "alertas": [],
+    }
+    entrada = WORKERS.get(node) if node else None
+    ec2_estado = str(item.get("state") or "").strip().lower()
+    if entrada is None:
+        if ec2_estado == "stopping":
+            estado = "DRENANDO"
+        elif ec2_estado in {"stopped", "terminated", "shutting-down"}:
+            estado = ec2_estado.upper()
+        else:
+            estado = "REGISTRANDO"
+    else:
+        estado = base["estado"]
+
+    lanzado = _parse_instante(item.get("launched_at"))
+    edad = None
+    if lanzado is not None:
+        edad = max(0, int((utcnow() - lanzado).total_seconds()))
+    concurrency = item.get("concurrency")
+    if concurrency is None:
+        concurrency = item.get("worker_concurrency")
+    if concurrency is None:
+        concurrency = base.get("capacidad", get_settings().worker_capacity)
+    return {
+        **base,
+        "node": node,
+        "origen": "efimero",
+        "instance_id": item.get("instance_id") or instance_id,
+        "instance_type": item.get("instance_type"),
+        "ram_gib": item.get("ram_gib"),
+        "concurrency": concurrency,
+        "launched_at": lanzado.isoformat() if lanzado else None,
+        "edad": edad,
+        "estado": estado,
+        "state_ec2": ec2_estado or None,
+        "jobs_activos": base.get("jobs_activos", 0),
+        "en_ejecucion": base.get("en_ejecucion", 0),
+        "capacidad": concurrency,
+    }
+
+
+def _costo_estimado_efimeros() -> float:
+    """Estimación local por tiempo de vida, sin llamadas de red a AWS."""
+    from central_api.autoscaler.ec2 import Ec2Fleet
+
+    tarifas = Ec2Fleet._ON_DEMAND_USD_HOUR_SA_EAST_1
+    tarifa_fallback = tarifas.get("c6i.xlarge", 0.0)
+    ahora = utcnow()
+    total = 0.0
+    for item in EPHEMERAL_WORKERS.values():
+        if str(item.get("state") or "running").lower() not in {"pending", "running", "stopping"}:
+            continue
+        lanzado = _parse_instante(item.get("launched_at"))
+        if lanzado is None:
+            continue
+        tipo = item.get("instance_type")
+        tarifa = tarifas.get(str(tipo), tarifa_fallback)
+        segundos = max(60.0, (ahora - lanzado).total_seconds())
+        total += tarifa * segundos / 3600.0
+    return round(total, 6)
+
+
+def _resumen_filas(filas: list[dict]) -> dict:
+    return {
+        "total": len(filas),
+        "sanos": sum(1 for fila in filas if fila.get("estado") == "SANO"),
+        "capacidad": sum(int(fila.get("capacidad") or 0) for fila in filas),
+        "en_ejecucion": sum(
+            int(fila.get("jobs_activos", fila.get("en_ejecucion", 0)) or 0)
+            for fila in filas
+        ),
+    }
+
+
 class ComentarioBody(BaseModel):
     comentario: str = Field(min_length=3, max_length=500)
 
@@ -180,7 +276,32 @@ def ver_flota(authorization: str | None = Header(default=None)) -> dict:
     require_admin(authorization)
     settings = get_settings()
     nodos = merge_nodes(settings.worker_node_list, _admin_nodes())
-    return {"success": True, "flota": [_vista_fila(n) for n in nodos]}
+    # ``flota`` mantiene el contrato previo, incluyendo nodos efímeros que el
+    # controller también conserva en ADMIN_NODES para compatibilidad histórica.
+    flota = [_vista_fila(n) for n in nodos]
+    nodos_efimeros = {
+        str(item.get("node") or "")
+        for item in EPHEMERAL_WORKERS.values()
+        if item.get("node")
+    }
+    manuales = [
+        fila for fila in flota
+        if fila["node"] not in nodos_efimeros
+    ]
+    efimeros = [
+        _vista_efimero(instance_id, item)
+        for instance_id, item in EPHEMERAL_WORKERS.items()
+    ]
+    resumen_manuales = _resumen_filas(manuales)
+    resumen_efimeros = _resumen_filas(efimeros)
+    resumen_efimeros["costo_estimado_usd"] = _costo_estimado_efimeros()
+    return {
+        "success": True,
+        "flota": flota,
+        "manuales": manuales,
+        "efimeros": efimeros,
+        "resumen": {"manuales": resumen_manuales, "efimeros": resumen_efimeros},
+    }
 
 
 @router.get("/fleet/workers/{node}")

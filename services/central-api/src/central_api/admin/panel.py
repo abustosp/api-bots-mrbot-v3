@@ -228,7 +228,10 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="kicker">Operación de workers</div><h2>Flota</h2><p class="subtle">Estado derivado, capacidad, protocolo y alertas del plano de ejecución. Agrega nodos al inventario en caliente sin tocar WORKER_NODES.</p>
         <div class="form-actions"><button class="button primary" type="button" id="fleet-refresh">Actualizar</button><button class="button secondary" type="button" id="fleet-evaluate">Evaluar alertas</button><a class="button secondary" href="/admin/workers/panel" target="_blank" rel="noreferrer">Vista clásica</a></div>
         <form id="add-worker-form" class="toolbar"><div class="field wide"><label for="new-worker-node">Agregar worker (ip:puerto)</label><input id="new-worker-node" type="text" placeholder="10.0.0.13:8080 o bot-worker:8080" required></div><button class="button primary" type="submit">Agregar</button><span class="muted">Se sondea best-effort; igual se registra aunque aún no responda.</span></form>
-        <div class="table-wrap"><table><thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Ejecución</th><th>Protocolo</th><th>Bots</th><th>Error</th><th>Alertas</th><th>Acciones</th></tr></thead><tbody id="fleet-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
+        <h3>Workers manuales <span class="pill" id="fleet-manual-count">0</span></h3>
+        <div class="table-wrap"><table><thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Ejecución</th><th>Protocolo</th><th>Bots</th><th>Error</th><th>Alertas</th><th>Acciones</th></tr></thead><tbody id="fleet-manual-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
+        <h3 style="margin-top:24px">Workers efímeros (EC2) <span class="pill" id="fleet-ephemeral-count">0</span></h3>
+        <div class="table-wrap"><table><thead><tr><th>Instancia</th><th>Tipo</th><th>RAM</th><th>Semaphore (slots)</th><th>Edad</th><th>Estado</th><th>Ejecución</th><th>Acciones</th></tr></thead><tbody id="fleet-ephemeral-table"><tr><td colspan="8" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="audit">
@@ -552,7 +555,11 @@ details > .details-body { padding: 0 14px 14px; }
       const [metrics, fleet, audit] = await Promise.all([api("/admin/jobs/metrics"), api("/admin/fleet"), api("/admin/audit?limit=8")]);
       const states = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join("");
       $("#dashboard-metrics").innerHTML = states || `<div class="card"><div class="metric"><span>Jobs registrados</span><strong>0</strong></div></div>`;
-      $("#dashboard-fleet").innerHTML = fleet.flota?.length ? fleet.flota.map((worker) => `<div style="margin:8px 0"><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span> ${esc(worker.node)} <span class="muted">${esc(worker.en_ejecucion)}/${esc(worker.capacidad)}</span></div>`).join("") : "No hay workers registrados.";
+      const manuales = fleet.manuales || (fleet.flota || []).filter((worker) => worker.origen !== "efimero");
+      const efimeros = fleet.efimeros || (fleet.flota || []).filter((worker) => worker.origen === "efimero");
+      const conteoManuales = fleet.resumen?.manuales?.total ?? manuales.length;
+      const conteoEfimeros = fleet.resumen?.efimeros?.total ?? efimeros.length;
+      $("#dashboard-fleet").innerHTML = `<div><strong>${esc(conteoManuales)} manuales / ${esc(conteoEfimeros)} efimeros</strong></div>` + (manuales.length || efimeros.length ? [...manuales, ...efimeros].map((worker) => `<div style="margin:8px 0"><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span> ${esc(worker.node || worker.instance_id || "—")} <span class="muted">${esc(worker.en_ejecucion ?? worker.jobs_activos ?? 0)}/${esc(worker.capacidad ?? worker.concurrency ?? 0)}</span></div>`).join("") : `<div class="muted">No hay workers registrados.</div>`);
       $("#dashboard-audit").innerHTML = audit.eventos?.length ? audit.eventos.map((event) => `<div style="margin:8px 0"><strong>${esc(event.action)}</strong><br><span class="muted">${esc(date(event.occurred_at))} · ${esc(event.actor_id)}</span></div>`).join("") : "No hay eventos recientes.";
     } catch (error) { flash(error.message, "error"); }
   }
@@ -747,16 +754,36 @@ details > .details-body { padding: 0 14px 14px; }
     }
     const motivo = window.prompt("Motivo de cancelación:", "cancelación desde panel V3"); if (!motivo) return; try { await api(`/admin/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: JSON.stringify({ motivo }) }); flash("Comando de cancelación registrado."); await loadJobs(); } catch (error) { flash(error.message, "error"); }
   }
-  async function loadFleet() { try { const data = await api("/admin/fleet"); const rows = data.flota || []; $("#fleet-table").innerHTML = rows.length ? rows.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></td></tr>`).join("") : `<tr><td colspan="9" class="empty">No hay workers inventariados. Agrega uno arriba.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
+  const formatAge = (seconds) => { if (seconds == null || !Number.isFinite(Number(seconds))) return "—"; const total = Math.max(0, Math.floor(Number(seconds))); const days = Math.floor(total / 86400); const hours = Math.floor((total % 86400) / 3600); const minutes = Math.floor((total % 3600) / 60); return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`; };
+  async function loadFleet() {
+    try {
+      const data = await api("/admin/fleet");
+      const legacy = data.flota || [];
+      const manuales = data.manuales || legacy.filter((worker) => worker.origen !== "efimero");
+      const efimeros = data.efimeros || legacy.filter((worker) => worker.origen === "efimero");
+      $("#fleet-manual-count").textContent = String(data.resumen?.manuales?.total ?? manuales.length);
+      $("#fleet-ephemeral-count").textContent = String(data.resumen?.efimeros?.total ?? efimeros.length);
+      $("#fleet-manual-table").innerHTML = manuales.length ? manuales.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></td></tr>`).join("") : `<tr><td colspan="9" class="empty">No hay workers manuales inventariados. Agrega uno arriba.</td></tr>`;
+      $("#fleet-ephemeral-table").innerHTML = efimeros.length ? efimeros.map((worker) => `<tr><td><code>${esc(worker.instance_id || "—")}</code></td><td>${esc(worker.instance_type || "—")}</td><td>${esc(worker.ram_gib == null ? "—" : `${worker.ram_gib} GiB`)}</td><td>${esc(worker.concurrency ?? worker.capacidad ?? "—")}</td><td>${esc(formatAge(worker.edad))}</td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.concurrency ?? worker.capacidad ?? 0)}</td><td class="actions"><button class="button danger small" data-action="ephemeral-terminate" data-id="${esc(worker.instance_id || "")}">Terminar</button></td></tr>`).join("") : `<tr><td colspan="8" class="empty">No hay workers efímeros (EC2).</td></tr>`;
+    } catch (error) { flash(error.message, "error"); }
+  }
   async function evaluateFleet() { try { const data = await api("/admin/fleet/evaluate", { method: "POST" }); flash(`Evaluación completada: ${data.activas?.length || 0} alertas activas.`); await loadFleet(); } catch (error) { flash(error.message, "error"); } }
   async function addWorker(event) {
     event.preventDefault(); const node = $("#new-worker-node").value.trim(); if (!node) return;
     try { const data = await api("/admin/workers", { method: "POST", body: JSON.stringify({ node }) }); $("#new-worker-node").value = ""; flash(data.alcanzable ? `Worker ${data.node} agregado y alcanzable.` : `Worker ${data.node} agregado (aún no responde: ${data.detalle || "sin sonda"}).`); await loadFleet(); } catch (error) { flash(error.message, "error"); }
   }
   async function fleetAction(event) {
-    const button = event.target.closest("button[data-action]"); if (!button || button.dataset.action !== "worker-remove") return;
-    if (!window.confirm(`Dar de baja ${button.dataset.id}? El scheduler dejará de asignarle jobs.`)) return;
-    try { await api(`/admin/workers/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" }); flash("Worker dado de baja."); await loadFleet(); } catch (error) { flash(error.message, "error"); }
+    const button = event.target.closest("button[data-action]"); if (!button) return;
+    if (button.dataset.action === "worker-remove") {
+      if (!window.confirm(`Dar de baja ${button.dataset.id}? El scheduler dejará de asignarle jobs.`)) return;
+      try { await api(`/admin/workers/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" }); flash("Worker dado de baja."); await loadFleet(); } catch (error) { flash(error.message, "error"); }
+      return;
+    }
+    if (button.dataset.action === "ephemeral-terminate") {
+      if (!window.confirm(`Terminar instancia EC2 ${button.dataset.id}?`)) return;
+      const motivo = window.prompt("Motivo de terminación (mínimo 10 caracteres):", "terminación desde panel V3"); if (!motivo) return;
+      try { await api("/admin/autoscale/terminate", { method: "POST", body: JSON.stringify({ instance_ids: [button.dataset.id], motivo }) }); flash(`Instancia ${button.dataset.id} enviada a terminación.`); await loadFleet(); } catch (error) { flash(error.message, "error"); }
+    }
   }
   async function loadAudit(event) { if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const action = $("#audit-action").value.trim(); const actor = $("#audit-actor").value.trim(); if (action) params.set("accion", action); if (actor) params.set("actor", actor); try { const data = await api(`/admin/audit?${params}`); const rows = data.eventos || []; $("#audit-table").innerHTML = rows.length ? rows.slice().reverse().map((item) => `<tr><td>${esc(date(item.occurred_at))}</td><td><strong>${esc(item.action)}</strong></td><td>${esc(item.actor_id)}</td><td>${esc(item.target_type)}<br><span class="muted">${esc(short(item.target_id, 22))}</span></td><td><span class="status ${item.result === "success" ? "status-good" : "status-bad"}">${esc(item.result)}</span></td><td>${esc(item.reason || "—")}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No hay eventos para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
   $("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); state.token = $("#admin-token").value.trim(); if (!state.token) return; try { await api("/admin/users?limit=1"); sessionStorage.setItem(TOKEN_KEY, state.token); loginError(""); showLoggedIn(true); setView(state.view); } catch (_) { state.token = ""; loginError("No se pudo validar el token de administración."); } });
@@ -772,7 +799,7 @@ details > .details-body { padding: 0 14px 14px; }
   document.addEventListener("click", (event) => { if (!$("#executions-table-combobox").contains(event.target)) closeTableOptions(true); });
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
   $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
-  $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
+  $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>
