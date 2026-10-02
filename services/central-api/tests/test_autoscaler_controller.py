@@ -512,3 +512,26 @@ def test_cuota_vcpu_agotada_se_registra_como_scale_up_short_y_no_como_exito(monk
     acciones = [a for a, _ in eventos]
     assert "scale_up_short" in acciones and "scale_up_launched" not in acciones
     assert [kw for a, kw in eventos if a == "scale_up_short"][0]["limit"] == "VcpuLimitExceeded"
+
+
+def test_snapshot_marca_registrado_a_un_worker_saturado_y_nunca_registrado_al_mudo():
+    """Un worker SATURADO tiene heartbeat reciente: no debe verse como 'nunca registrado'."""
+    now = utcnow()
+    sat, mudo = "198.51.100.91:8080", "198.51.100.92:8080"
+    for n in (sat, mudo):
+        ADMIN_NODES.add(n)
+    WORKERS[sat] = WorkerEntry(sat, status="SATURADO", capacity=5, last_heartbeat_at=now)
+    for iid, n in (("i-sat", sat), ("i-mudo", mudo)):
+        EPHEMERAL_WORKERS[iid] = {"instance_id": iid, "node": n, "launched_at": now - timedelta(seconds=900),
+                                  "instance_type": "m6i.large", "ram_gib": 8, "concurrency": 5, "state": "running"}
+    try:
+        snap = asyncio.run(controller.build_snapshot(now))
+        by_id = {e["instance_id"]: e for e in snap["efimeros"]}
+        assert by_id["i-sat"]["never_registered"] is False and by_id["i-sat"]["sano"] is False
+        assert by_id["i-mudo"]["never_registered"] is True
+    finally:
+        for iid in ("i-sat", "i-mudo"):
+            EPHEMERAL_WORKERS.pop(iid, None)
+        for n in (sat, mudo):
+            WORKERS.pop(n, None)
+            ADMIN_NODES.discard(n)

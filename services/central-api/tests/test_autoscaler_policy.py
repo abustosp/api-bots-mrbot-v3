@@ -341,3 +341,14 @@ def test_count_mode_off_keeps_the_time_based_formula():
     off = SimpleNamespace(**{**vars(COUNT_CFG), "autoscale_jobs_per_worker": 0})
     d = decide(snapshot(pendientes=300, queue_pressure_seconds=30), off, NOW)
     assert d.scale_up == min(math.ceil(300 * 75 / (5 * 300)), 50)
+
+
+def test_worker_saturado_ya_registrado_no_es_fallo_de_arranque():
+    """Hallazgo real: workers SATURADOS (registrados, trabajando) dejaban de ser 'sano'
+    y a los 480 s se terminaban como dead-man de arranque, en plena cola."""
+    saturado = ephemeral("i-sat", age=900, jobs=5, healthy=False, never_registered=False)
+    d = decide(snapshot(pendientes=200, workers_fijos=2, queue_pressure_seconds=30, efimeros=[saturado]), COUNT_CFG, NOW)
+    assert "i-sat" not in d.scale_down_ids
+    nunca = ephemeral("i-nunca", age=900, jobs=0, healthy=False, never_registered=True)
+    d = decide(snapshot(pendientes=200, workers_fijos=2, queue_pressure_seconds=30, efimeros=[nunca]), COUNT_CFG, NOW)
+    assert d.scale_down_ids == ["i-nunca"]  # el que jamas se registro si se retira

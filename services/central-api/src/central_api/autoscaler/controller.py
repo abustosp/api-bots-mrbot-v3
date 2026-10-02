@@ -493,6 +493,10 @@ async def build_snapshot(now: datetime | None = None) -> dict:
             "jobs_activos": active,
             "last_busy_at": record.get("last_busy_at"),
             "sano": healthy,
+            # Solo "nunca se registro" si jamas hubo registro ni latido. Un worker
+            # SATURADO (a tope de trabajo) ya no es SANO pero SI se registro: sin
+            # este dato la politica lo mataba como "fallo de arranque".
+            "never_registered": record.get("registered_at") is None and heartbeat is None,
             "state": record.get("state", "unknown"),
         })
     instance_info = _instance_policy_info(settings)
