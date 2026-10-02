@@ -121,6 +121,22 @@ async def hydrate_pending_jobs(batch_size: int = 100) -> list[str]:
                             str(row.credential_ciphertext)
                         )
                     }
+                    # El alta normal entrega tambien el CUIT de login
+                    # (``cuit_representante``). No es secreto y se persiste en
+                    # ``credential_metadata.context``: sin restituirlo, un job
+                    # rehidratado tras reiniciar la central inicia sesion con
+                    # otro CUIT y ARCA rechaza la clave (CREDENTIALS_REJECTED).
+                    context = (dict(row.credential_metadata or {}).get("context") or {})
+                    login_cuit = next(
+                        (
+                            str(context[name])
+                            for name in ("cuit_representante", "cuit_inicio_sesion", "cuit_login")
+                            if context.get(name) not in (None, "")
+                        ),
+                        "",
+                    )
+                    if login_cuit:
+                        credentials["cuit_representante"] = login_cuit
                 except Exception as exc:  # noqa: BLE001 - fail closed per job
                     log.warning(
                         "job PENDIENTE no hidratado por credencial inválida (%s)",
