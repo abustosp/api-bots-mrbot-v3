@@ -31,6 +31,10 @@ from central_api.worker_nodes import merge_nodes
 
 router = APIRouter()
 
+# Los registros efímeros legacy no guardaban el semaphore; el default histórico
+# de EC2 era 5 y no debe seguir un worker_capacity global que ahora puede ser 10.
+DEFAULT_EPHEMERAL_CONCURRENCY = 5
+
 
 @dataclass
 class Alert:
@@ -182,7 +186,7 @@ def _vista_efimero(instance_id: str, item: dict) -> dict:
         "estado": "REGISTRANDO",
         "en_ejecucion": 0,
         "jobs_activos": 0,
-        "capacidad": get_settings().worker_capacity,
+        "capacidad": DEFAULT_EPHEMERAL_CONCURRENCY,
         "alertas": [],
     }
     entrada = WORKERS.get(node) if node else None
@@ -205,7 +209,7 @@ def _vista_efimero(instance_id: str, item: dict) -> dict:
     if concurrency is None:
         concurrency = item.get("worker_concurrency")
     if concurrency is None:
-        concurrency = base.get("capacidad", get_settings().worker_capacity)
+        concurrency = base.get("capacidad", DEFAULT_EPHEMERAL_CONCURRENCY)
     return {
         **base,
         "node": node,
