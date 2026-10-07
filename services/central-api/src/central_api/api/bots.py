@@ -32,6 +32,7 @@ from central_api.api.dependencies import (
 from central_api.billing.entitlements import BOT_CREDIT_COST, PLANS, get_plan
 from central_api.billing.reservation import (
     QuotaExhausted,
+    get_usage,
     release_usage,
     reserve_for_job,
 )
@@ -559,12 +560,55 @@ async def submit_job(
 
     job_id = new_job_id()
     reserved_job_id = job_id
+    account_type_before_reservation = None
     try:
+        from central_api.billing.entitlements import (
+            get_billing_account,
+            hydrate_billing_account,
+            persist_billing_account,
+        )
+
+        account = await hydrate_billing_account(principal.user_id)
+        account_type_before_reservation = account.account_type
         reserve_for_job(principal.user_id, job_id, bot, operacion)
+        account_after_reservation = get_billing_account(
+            principal.user_id, expire=False
+        )
+        if (
+            account_type_before_reservation == "GRATUITA"
+            and account_after_reservation.account_type == "CREDITOS"
+        ):
+            await persist_billing_account(account_after_reservation)
     except QuotaExhausted:
+        account_after_reservation = get_billing_account(
+            principal.user_id, expire=False
+        )
+        if (
+            account_type_before_reservation == "GRATUITA"
+            and account_after_reservation.account_type == "CREDITOS"
+        ):
+            try:
+                from central_api.billing.entitlements import persist_billing_account
+
+                await persist_billing_account(account_after_reservation)
+            except RuntimeError:
+                return JSONResponse(
+                    status_code=503,
+                    content=public_error("service_not_enabled", corr),
+                    headers={"X-Correlation-ID": corr},
+                )
         return JSONResponse(
             status_code=429, content=public_error("quota_exhausted", corr),
             headers={"X-Correlation-ID": corr, "Retry-After": "60"},
+        )
+    except RuntimeError:
+        reserved = get_usage(reserved_job_id)
+        if reserved is not None and reserved.estado == "RESERVADO":
+            release_usage(reserved_job_id, motivo="persistencia de cuenta fallida")
+        return JSONResponse(
+            status_code=503,
+            content=public_error("service_not_enabled", corr),
+            headers={"X-Correlation-ID": corr},
         )
 
     if db_configurado():

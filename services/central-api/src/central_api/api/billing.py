@@ -16,7 +16,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from central_api.api.dependencies import require_api_principal
-from central_api.billing.entitlements import CREDIT_PRODUCTS, current_period, get_plan
+from central_api.billing.entitlements import (
+    CREDIT_PRODUCTS,
+    PLANS,
+    TIER_PLAN_CODES,
+    current_period,
+    get_plan,
+)
 from central_api.billing.facade import (
     PAYMENTS,
     apply_verified_payment,
@@ -51,13 +57,23 @@ class SubscriptionChangeBody(BaseModel):
 
 
 @router.get("/billing/plan")
-def billing_plan(principal: ApiPrincipal = Depends(require_api_principal)):
+async def billing_plan(principal: ApiPrincipal = Depends(require_api_principal)):
     """Suscripción, plan efectivo, período vigente y cuota (solo lectura)."""
+    from central_api.billing.entitlements import hydrate_billing_account
+
+    account = await hydrate_billing_account(principal.user_id)
     period = current_period(principal.user_id)
-    code = period.plan_code if period else "free"
+    code = period.plan_code if period else (account.plan_code or account.account_type.lower())
     plan = get_plan(code)
     return {
         "plan": plan.code if plan else code,
+        "account_type": account.account_type,
+        "max_requests": account.max_requests,
+        "included_requests": (
+            account.max_requests if account.account_type == "LIBRE"
+            else (plan.cuota_mensual if plan and account.account_type in {"TIER", "GRATUITA"} else 0)
+        ),
+        "expires_at": account.expires_at.isoformat() if account.expires_at else None,
         "periodo": (
             {"id": period.id, "cuota_asignada": period.cuota_asignada,
              "cuota_reservada": period.cuota_reservada,
@@ -65,6 +81,28 @@ def billing_plan(principal: ApiPrincipal = Depends(require_api_principal)):
             if period else None
         ),
         "moneda": "ARS",
+    }
+
+
+@router.get("/billing/plans")
+def billing_plans(principal: ApiPrincipal = Depends(require_api_principal)):
+    """Catálogo de tiers y sus importes enteros en centavos ARS."""
+    _ = principal
+    codes = ("gratuita", *TIER_PLAN_CODES)
+    return {
+        "items": [
+            {
+                "code": plan.code,
+                "name": plan.nombre,
+                "included_requests": plan.cuota_mensual,
+                "price_cents": plan.precio_centavos,
+                "unit_price_cents": plan.precio_unitario_centavos,
+                "currency": plan.moneda,
+                "period_days": 30,
+            }
+            for code in codes
+            if (plan := PLANS[code]).activo
+        ]
     }
 
 

@@ -95,15 +95,16 @@ def _append_credit(
 
 def reserve_for_job(
     user_id: str, job_id: str, bot: str, operation: str,
-    plan_code: str = "free",
+    plan_code: str | None = None,
 ) -> UsageEntry:
-    """Reserva cuota o créditos para un job (idempotente por ``job_id``).
+    """Reserva exactamente un request según el modo de cuenta activo.
 
-    Precedencia: cuota del período vigente, luego créditos. Lanza
-    ``QuotaExhausted`` sin reserva parcial si no hay fondos.
+    TIER usa primero su cuota mensual y después créditos si los tiene.
+    GRATUITA cuenta 100 requests durante el plazo admin asignado y cae a
+    CREDITOS al agotar cuota o vencer. LIBRE mantiene un límite manual total.
     """
     from central_api.billing.entitlements import (
-        BOT_CREDIT_COST, PERIODS, current_period, open_period,
+        PERIODS, get_billing_account, current_period, open_period,
     )
 
     existing = USAGE.get(job_id)
@@ -112,21 +113,46 @@ def reserve_for_job(
     with _lock_for(user_id):
         if job_id in USAGE:  # doble chequeo bajo candado (carrera)
             return USAGE[job_id]
-        period = current_period(user_id)
-        if period is None:
-            period = open_period(user_id, plan_code)
-        free = period.cuota_asignada - period.cuota_reservada - period.cuota_consumida
-        if free > 0:
-            period.cuota_reservada += 1
-            entry = UsageEntry(
-                id=_new_id(), user_id=user_id, job_id=job_id,
-                fuente_cobro="CUOTA", estado="RESERVADO",
-                costo_snapshot=0, period_id=period.id,
-            )
-            USAGE[job_id] = entry
-            return entry
-        cost = BOT_CREDIT_COST.get((bot, operation), 1)
-        if BALANCES.get(user_id, 0) >= cost and cost >= 0:
+        account = get_billing_account(user_id)
+
+        if account.account_type == "LIBRE":
+            used = account.requests_reserved + account.requests_consumed
+            if account.max_requests is not None and used < account.max_requests:
+                account.requests_reserved += 1
+                entry = UsageEntry(
+                    id=_new_id(), user_id=user_id, job_id=job_id,
+                    fuente_cobro="CUOTA", estado="RESERVADO",
+                    costo_snapshot=0, period_id=f"libre:{user_id}",
+                )
+                USAGE[job_id] = entry
+                return entry
+            raise QuotaExhausted("límite LIBRE agotado")
+
+        if account.account_type in {"TIER", "GRATUITA"}:
+            selected_plan = account.plan_code or ("gratuita" if account.account_type == "GRATUITA" else plan_code)
+            if selected_plan:
+                period = current_period(user_id)
+                if period is None:
+                    period = open_period(user_id, selected_plan)
+                available = period.cuota_asignada - period.cuota_reservada - period.cuota_consumida
+                if available > 0:
+                    period.cuota_reservada += 1
+                    entry = UsageEntry(
+                        id=_new_id(), user_id=user_id, job_id=job_id,
+                        fuente_cobro="CUOTA", estado="RESERVADO",
+                        costo_snapshot=0, period_id=period.id,
+                    )
+                    USAGE[job_id] = entry
+                    if (account.account_type == "GRATUITA" and
+                            period.cuota_reservada + period.cuota_consumida >= period.cuota_asignada):
+                        _fallback_gratuita(user_id, account, "cuota agotada")
+                    return entry
+                if account.account_type == "GRATUITA":
+                    _fallback_gratuita(user_id, account, "cuota agotada")
+
+        # Los paquetes representan requests, no pesos de complejidad por bot.
+        cost = 1
+        if BALANCES.get(user_id, 0) >= cost:
             _append_credit(user_id, -cost, "RESERVA", job_id=job_id,
                            idempotency_key=f"job:{job_id}:reserva")
             entry = UsageEntry(
@@ -139,14 +165,50 @@ def reserve_for_job(
         raise QuotaExhausted(f"sin cuota ni créditos para {bot}/{operation}")
 
 
+def _fallback_gratuita(user_id: str, account, reason: str) -> None:
+    """Desactiva el beneficio gratuito sin alterar el ledger histórico."""
+    if account.account_type != "GRATUITA":
+        return
+    account.account_type = "CREDITOS"
+    account.plan_code = None
+    account.max_requests = None
+    account.expires_at = None
+    try:
+        from central_api.admin.users import USERS
+        from central_api.admin.audit import log_event
+
+        user = USERS.get(user_id)
+        if user is not None:
+            user.account_type = "CREDITOS"
+            user.plan_code = None
+            user.max_requests = None
+            user.account_expires_at = None
+        log_event(
+            "billing.account.free_fallback",
+            actor_id="system:billing",
+            actor_type="system",
+            target_type="user",
+            target_id=user_id,
+            reason=reason,
+            metadata={"nuevo_tipo": "CREDITOS"},
+        )
+    except ImportError:
+        pass
+
+
 def confirm_usage(job_id: str, motivo: str | None = None) -> UsageEntry | None:
     """Convierte la reserva en consumo (terminal cobrado, sin segundo débito)."""
-    from central_api.billing.entitlements import PERIODS
+    from central_api.billing.entitlements import BILLING_ACCOUNTS, PERIODS
 
     entry = USAGE.get(job_id)
     if entry is None or entry.estado != "RESERVADO":
         return entry
-    if entry.fuente_cobro == "CUOTA" and entry.period_id:
+    if entry.fuente_cobro == "CUOTA" and entry.period_id and entry.period_id.startswith("libre:"):
+        account = BILLING_ACCOUNTS.get(entry.user_id)
+        if account is not None and account.requests_reserved > 0:
+            account.requests_reserved -= 1
+            account.requests_consumed += 1
+    elif entry.fuente_cobro == "CUOTA" and entry.period_id:
         for period in PERIODS.values():
             if period.id == entry.period_id and period.cuota_reservada > 0:
                 period.cuota_reservada -= 1
@@ -167,12 +229,16 @@ def confirm_usage(job_id: str, motivo: str | None = None) -> UsageEntry | None:
 
 def release_usage(job_id: str, motivo: str | None = None) -> UsageEntry | None:
     """Libera la reserva (cancelado en PENDIENTE: siempre, exactamente 1 vez)."""
-    from central_api.billing.entitlements import PERIODS
+    from central_api.billing.entitlements import BILLING_ACCOUNTS, PERIODS
 
     entry = USAGE.get(job_id)
     if entry is None or entry.estado != "RESERVADO":
         return entry
-    if entry.fuente_cobro == "CUOTA" and entry.period_id:
+    if entry.fuente_cobro == "CUOTA" and entry.period_id and entry.period_id.startswith("libre:"):
+        account = BILLING_ACCOUNTS.get(entry.user_id)
+        if account is not None and account.requests_reserved > 0:
+            account.requests_reserved -= 1
+    elif entry.fuente_cobro == "CUOTA" and entry.period_id:
         for period in PERIODS.values():
             if period.id == entry.period_id and period.cuota_reservada > 0:
                 period.cuota_reservada -= 1

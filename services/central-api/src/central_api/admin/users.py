@@ -49,6 +49,10 @@ class AdminUser:
     display_name: str = ""
     estado: str = "habilitado"
     plan: str = "free"
+    account_type: str = "CREDITOS"
+    plan_code: str | None = None
+    max_requests: int | None = None
+    account_expires_at: object | None = None
     saldo_creditos: int | None = 0
     motivo: str = ""
 
@@ -353,6 +357,36 @@ async def _filas_identidad_pg() -> tuple[list[tuple], list[tuple]]:
     return list(usuarios), list(claves)
 
 
+async def _cuentas_billing_pg() -> dict[str, tuple]:
+    """Lee el modo comercial junto con sus límites y vencimiento persistidos."""
+    from sqlalchemy import select
+
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.billing import BillingAccount as BillingAccountRow
+
+    if not db_configurado():
+        return {}
+    try:
+        async with nueva_sesion() as sesion:
+            rows = (
+                await sesion.execute(
+                    select(
+                        BillingAccountRow.user_id,
+                        BillingAccountRow.account_type,
+                        BillingAccountRow.plan_code,
+                        BillingAccountRow.max_requests,
+                        BillingAccountRow.starts_at,
+                        BillingAccountRow.expires_at,
+                        BillingAccountRow.requests_reserved,
+                        BillingAccountRow.requests_consumed,
+                    )
+                )
+            ).all()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    return {str(row.user_id): tuple(row[1:]) for row in rows}
+
+
 async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
     """Hidrata una identidad persistida para habilitar acciones desde el panel."""
     from central_api.db import db_configurado, nueva_sesion
@@ -367,6 +401,9 @@ async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
     try:
         async with nueva_sesion() as sesion:
             row = await sesion.get(User, user_uuid)
+            from central_api.models.billing import BillingAccount as BillingAccountRow
+
+            billing_row = await sesion.get(BillingAccountRow, user_uuid)
     except Exception:  # noqa: BLE001 - error DB sanitizado
         raise HTTPException(status_code=503, detail="Servicio no disponible") from None
     if row is None:
@@ -376,6 +413,10 @@ async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
         email=str(row.email),
         estado="habilitado" if row.habilitado else "deshabilitado",
         plan="—",
+        account_type=billing_row.account_type if billing_row else "CREDITOS",
+        plan_code=billing_row.plan_code if billing_row else None,
+        max_requests=billing_row.max_requests if billing_row else None,
+        account_expires_at=billing_row.expires_at if billing_row else None,
         saldo_creditos=None,
     )
 
@@ -421,6 +462,7 @@ async def _persistir_api_key_pg(
     from sqlalchemy.exc import IntegrityError
 
     from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.billing import BillingAccount as BillingAccountRow
     from central_api.models.identity import ApiKey, User
 
     if not db_configurado():
@@ -468,6 +510,11 @@ async def _persistir_api_key_pg(
                 )
                 sesion.add(cuenta)
                 await sesion.flush()
+            billing_account = await sesion.get(BillingAccountRow, user_uuid)
+            if billing_account is None:
+                sesion.add(
+                    BillingAccountRow(user_id=user_uuid, account_type="CREDITOS")
+                )
             sesion.add(
                 ApiKey(
                     id=key_uuid,
@@ -685,6 +732,7 @@ async def listar_usuarios(
     require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     filas_usuarios, filas_claves = await _filas_identidad_pg()
+    cuentas_billing = await _cuentas_billing_pg()
     usuarios_por_id = {user.id: user for user in USERS.values()}
     claves_por_usuario: dict[str, dict[str, dict]] = {}
     ahora = utcnow()
@@ -704,6 +752,27 @@ async def listar_usuarios(
         else:
             # El estado persistido es canónico tras reinicios o cambios externos.
             usuario.estado = "habilitado" if habilitado else "deshabilitado"
+        datos_cuenta = cuentas_billing.get(uid)
+        if datos_cuenta is not None:
+            (account_type, plan_code, max_requests, starts_at, expires_at,
+             requests_reserved, requests_consumed) = datos_cuenta
+            usuario.account_type = str(account_type)
+            usuario.plan_code = plan_code
+            usuario.max_requests = max_requests
+            usuario.account_expires_at = expires_at
+            usuario.plan = plan_code or str(account_type).lower()
+            from central_api.billing.entitlements import BillingAccount, BILLING_ACCOUNTS
+
+            BILLING_ACCOUNTS[uid] = BillingAccount(
+                user_id=uid,
+                account_type=str(account_type),
+                plan_code=plan_code,
+                max_requests=max_requests,
+                starts_at=starts_at,
+                expires_at=expires_at,
+                requests_reserved=int(requests_reserved or 0),
+                requests_consumed=int(requests_consumed or 0),
+            )
         claves_por_usuario[uid] = {}
     for key_id, user_id, prefix, scopes, expires_at, revoked_at, created_at, revelable in filas_claves:
         uid = str(user_id)

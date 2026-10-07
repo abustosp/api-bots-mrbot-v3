@@ -125,6 +125,8 @@ async def _crear_usuario_pg(identidad: str, api_key: str) -> str:
     from sqlalchemy import func, select
     from sqlalchemy.exc import IntegrityError
 
+    from central_api.models.billing import BillingAccount as BillingAccountRow
+
     key_prefix, verifier, ciphertext = _key_row_values(api_key)
     try:
         async with nueva_sesion() as sesion:
@@ -138,6 +140,9 @@ async def _crear_usuario_pg(identidad: str, api_key: str) -> str:
             cuenta = User(email=identidad, habilitado=False)
             sesion.add(cuenta)
             await sesion.flush()
+            sesion.add(
+                BillingAccountRow(user_id=cuenta.id, account_type="CREDITOS")
+            )
             key_row = ApiKey(
                 user_id=cuenta.id,
                 key_prefix=key_prefix,
@@ -423,6 +428,7 @@ async def mi_usuario(
     if principal.key_id == "dev":
         raise _no_autorizado()
     from central_api.admin.users import USERS
+    from central_api.billing.entitlements import hydrate_billing_account
 
     memoria = USERS.get(principal.user_id)
     identidad = memoria.email if memoria is not None else principal.user_id
@@ -435,16 +441,27 @@ async def mi_usuario(
             identidad = usuario.email
             estado = "habilitado" if usuario.habilitado else "deshabilitado"
 
+    cuenta = await hydrate_billing_account(principal.user_id)
     period = current_period(principal.user_id)
-    plan_code = period.plan_code if period is not None else plan_memoria
+    plan_code = period.plan_code if period is not None else (cuenta.plan_code or plan_memoria)
     plan = get_plan(plan_code) or get_plan("free")
-    asignadas = period.cuota_asignada if period is not None else (plan.cuota_mensual if plan else 0)
-    consumidas = period.cuota_consumida if period is not None else 0
-    reservadas = period.cuota_reservada if period is not None else 0
+    if cuenta.account_type == "LIBRE":
+        asignadas = cuenta.max_requests or 0
+        consumidas = cuenta.requests_consumed
+        reservadas = cuenta.requests_reserved
+    elif cuenta.account_type in {"TIER", "GRATUITA"}:
+        asignadas = period.cuota_asignada if period is not None else (plan.cuota_mensual if plan else 0)
+        consumidas = period.cuota_consumida if period is not None else 0
+        reservadas = period.cuota_reservada if period is not None else 0
+    else:
+        asignadas = consumidas = reservadas = 0
     return {
         "usuario": identidad,
         "estado": estado,
         "plan": plan.code if plan else plan_code,
+        "tipo_cuenta": cuenta.account_type,
+        "max_requests": cuenta.max_requests,
+        "account_expires_at": cuenta.expires_at.isoformat() if cuenta.expires_at else None,
         "saldo_creditos": get_balance(principal.user_id),
         "consultas": {
             "asignadas": asignadas,

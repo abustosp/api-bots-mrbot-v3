@@ -1,6 +1,6 @@
 """Modelos ORM de la central (fuente del ``metadata`` de Alembic).
 
-Importar este paquete registra las 19 tablas V3 de ``public``. No contiene
+Importar este paquete registra las tablas V3 de ``public``. No contiene
 logica de negocio ni serializacion publica (plan 02 §2.2).
 """
 
@@ -13,6 +13,7 @@ from central_api.models.base import (
     new_uuid7,
 )
 from central_api.models.billing import (
+    BillingAccount,
     CreditLedger,
     Payment,
     PaymentEvent,
@@ -34,6 +35,7 @@ __all__ = [
     "Base",
     "Bot",
     "BotOperation",
+    "BillingAccount",
     "CreditLedger",
     "Job",
     "JobArtifact",

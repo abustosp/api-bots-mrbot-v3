@@ -18,6 +18,9 @@ from central_api.security.principals import ApiPrincipal  # noqa: E402
 
 
 def _client(user_id: str = "route-user") -> TestClient:
+    from central_api.billing.entitlements import set_billing_account
+
+    set_billing_account(user_id, "LIBRE", max_requests=10_000)
     app = create_app()
     app.dependency_overrides[require_api_principal] = lambda: ApiPrincipal(
         user_id=user_id,

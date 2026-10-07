@@ -12,6 +12,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
+import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -23,7 +26,10 @@ from central_api.store import utcnow
 
 router = APIRouter()
 
-CATALOGO_PLANES = ("free", "basico", "pro", "empresa")
+CATALOGO_PLANES = (
+    "free", "gratuita", "basico", "pro", "empresa",
+    "tier-100", "tier-500", "tier-1000", "tier-2500", "tier-5000", "tier-10000",
+)
 
 
 @dataclass
@@ -77,6 +83,12 @@ DISCREPANCIES: list[Discrepancy] = []
 
 
 def _cuenta(user_id: str) -> dict:
+    from central_api.billing.entitlements import (
+        current_period,
+        get_billing_account,
+        get_plan,
+    )
+
     usuario = USERS.get(user_id)
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
@@ -85,8 +97,35 @@ def _cuenta(user_id: str) -> dict:
     pagos = [asdict(p) for p in PAYMENTS.values() if p.user_id == user_id]
     eventos = [e for e in PAYMENT_EVENTS.values() if e.get("user_id") == user_id]
     casos = [asdict(d) for d in DISCREPANCIES if PAYMENTS.get(d.payment_id, Payment(id="", user_id="")).user_id == user_id]
+    account = get_billing_account(user_id)
+    period = current_period(user_id)
+    if account.account_type == "LIBRE":
+        limit = account.max_requests or 0
+        used = account.requests_reserved + account.requests_consumed
+    elif account.account_type in {"TIER", "GRATUITA"}:
+        plan = get_plan(account.plan_code or "gratuita")
+        limit = period.cuota_asignada if period else (plan.cuota_mensual if plan else 0)
+        used = (period.cuota_reservada + period.cuota_consumida) if period else 0
+    else:
+        limit = None
+        used = 0
     return {
-        "usuario": {"id": usuario.id, "email": usuario.email, "plan": usuario.plan},
+        "usuario": {
+            "id": usuario.id,
+            "email": usuario.email,
+            "plan": usuario.plan,
+            "account_type": account.account_type,
+        },
+        "tipo_cuenta": {
+            "account_type": account.account_type,
+            "plan_code": account.plan_code,
+            "max_requests": account.max_requests,
+            "expires_at": account.expires_at.isoformat() if account.expires_at else None,
+            "requests_reserved": account.requests_reserved,
+            "requests_consumed": account.requests_consumed,
+            "limite_efectivo": limit,
+            "disponibles": max(0, limit - used) if limit is not None else None,
+        },
         "suscripcion": asdict(sub),
         "cuota": {
             "total": sub.cuota,
@@ -103,6 +142,14 @@ def _cuenta(user_id: str) -> dict:
 
 class CambiarPlanBody(BaseModel):
     plan: str
+    motivo: str = ""
+
+
+class CambiarTipoCuentaBody(BaseModel):
+    account_type: Literal["CREDITOS", "TIER", "GRATUITA", "LIBRE"]
+    plan_code: str | None = Field(default=None, max_length=64)
+    max_requests: int | None = Field(default=None, ge=1, le=10_000_000)
+    expires_at: datetime | None = None
     motivo: str = ""
 
 
@@ -137,9 +184,152 @@ class DiscrepanciaBody(BaseModel):
 
 
 @router.get("/billing/accounts/{user_id}")
-def ver_cuenta(user_id: str, authorization: str | None = Header(default=None)) -> dict:
+async def ver_cuenta(user_id: str, authorization: str | None = Header(default=None)) -> dict:
     """Vista de cuenta comercial con cuota, saldo, pagos y discrepancias."""
     require_admin(authorization)
+    await _hidratar_usuario_y_cuenta(user_id)
+    return {"success": True, "cuenta": _cuenta(user_id)}
+
+
+async def _hidratar_usuario_y_cuenta(user_id: str) -> None:
+    """Hidrata las vistas administrativas desde PostgreSQL cuando está activo."""
+    from central_api.admin.users import USERS, _usuario_pg_por_id
+    from central_api.db import db_configurado, nueva_sesion
+
+    if user_id not in USERS:
+        user = await _usuario_pg_por_id(user_id)
+        if user is not None:
+            USERS[user_id] = user
+    if not db_configurado():
+        return
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        return
+    from central_api.models.billing import BillingAccount as BillingAccountRow
+
+    async with nueva_sesion() as session:
+        row = await session.get(BillingAccountRow, user_uuid)
+        if row is None:
+            return
+        from central_api.billing.entitlements import BillingAccount, BILLING_ACCOUNTS
+
+        BILLING_ACCOUNTS[user_id] = BillingAccount(
+            user_id=user_id,
+            account_type=row.account_type,
+            plan_code=row.plan_code,
+            max_requests=row.max_requests,
+            starts_at=row.starts_at,
+            expires_at=row.expires_at,
+            requests_reserved=row.requests_reserved,
+            requests_consumed=row.requests_consumed,
+        )
+        user = USERS.get(user_id)
+        if user is not None:
+            user.account_type = row.account_type
+            user.plan_code = row.plan_code
+            user.max_requests = row.max_requests
+            user.account_expires_at = row.expires_at
+    from central_api.billing.entitlements import get_billing_account
+
+    account = get_billing_account(user_id)
+    if account.account_type == "CREDITOS" and row.account_type == "GRATUITA":
+        await _persistir_tipo_cuenta_pg(account)
+
+
+async def _persistir_tipo_cuenta_pg(account) -> None:
+    """Guarda una asignación de modo en billing_accounts."""
+    from central_api.db import db_configurado, nueva_sesion
+
+    if not db_configurado():
+        return
+    try:
+        user_uuid = uuid.UUID(account.user_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=404, detail="usuario no encontrado") from None
+    from central_api.models.billing import BillingAccount as BillingAccountRow
+    from central_api.models.identity import User
+
+    try:
+        async with nueva_sesion() as session:
+            if await session.get(User, user_uuid) is None:
+                raise HTTPException(status_code=404, detail="usuario no encontrado")
+            row = await session.get(BillingAccountRow, user_uuid)
+            if row is None:
+                row = BillingAccountRow(user_id=user_uuid, account_type=account.account_type)
+                session.add(row)
+            row.account_type = account.account_type
+            row.plan_code = account.plan_code
+            row.max_requests = account.max_requests
+            row.starts_at = account.starts_at
+            row.expires_at = account.expires_at
+            row.requests_reserved = account.requests_reserved
+            row.requests_consumed = account.requests_consumed
+            row.updated_at = utcnow()
+            await session.flush()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+
+
+@router.post("/billing/accounts/{user_id}/account-type")
+async def cambiar_tipo_cuenta(
+    user_id: str,
+    body: CambiarTipoCuentaBody,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    """Asigna un modo comercial, persiste el cambio y deja auditoría obligatoria."""
+    actor = require_admin(authorization)
+    motivo = validar_motivo(body.motivo)
+    await _hidratar_usuario_y_cuenta(user_id)
+    usuario = USERS.get(user_id)
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="usuario no encontrado")
+    from central_api.billing.entitlements import (
+        BILLING_ACCOUNTS,
+        get_billing_account,
+        set_billing_account,
+    )
+
+    anterior = get_billing_account(user_id)
+    anterior_copy = type(anterior)(**asdict(anterior))
+    try:
+        account = set_billing_account(
+            user_id,
+            body.account_type,
+            plan_code=body.plan_code,
+            max_requests=body.max_requests,
+            expires_at=body.expires_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    try:
+        await _persistir_tipo_cuenta_pg(account)
+    except Exception:
+        BILLING_ACCOUNTS[user_id] = anterior_copy
+        raise
+    usuario.account_type = account.account_type
+    usuario.plan_code = account.plan_code
+    usuario.max_requests = account.max_requests
+    usuario.account_expires_at = account.expires_at
+    usuario.plan = account.plan_code or account.account_type.lower()
+    log_event(
+        "billing.account_type.changed",
+        actor_id=actor,
+        target_type="user",
+        target_id=user_id,
+        request_id=request_id or "",
+        reason=motivo,
+        metadata={
+            "anterior": anterior_copy.account_type,
+            "nuevo": account.account_type,
+            "plan_code": account.plan_code,
+            "max_requests": account.max_requests,
+            "expires_at": account.expires_at.isoformat() if account.expires_at else None,
+        },
+    )
     return {"success": True, "cuenta": _cuenta(user_id)}
 
 
