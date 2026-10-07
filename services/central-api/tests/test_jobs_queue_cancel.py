@@ -161,7 +161,7 @@ def test_delete_cancels_postgresql_job_by_id_and_persists_state(monkeypatch) -> 
         cancelled_by=None,
         error_message=None,
     )
-    fake_session = _FakeSession([row])
+    fake_session = _FakeSession([row, None])
     monkeypatch.setattr(jobs_api, "db_configurado", lambda: True)
     monkeypatch.setattr(
         jobs_api,
@@ -181,4 +181,4 @@ def test_delete_cancels_postgresql_job_by_id_and_persists_state(monkeypatch) -> 
     assert response.json()["cancelled_by"] == "USER"
     assert row.status == "CANCELADO"
     assert row.finished_at is not None
-    assert fake_session.calls == 1
+    assert fake_session.calls == 2

@@ -241,10 +241,11 @@ def set_billing_account(
 
 
 async def hydrate_billing_account(user_id: str) -> BillingAccount:
-    """Load the admin-assigned mode from PostgreSQL before admitting a request."""
+    """Refresh the account and active quota period from PostgreSQL."""
     from central_api.db import db_configurado, nueva_sesion
     from central_api.security.principals import ANONYMOUS_USER_ID
     from central_api.settings import get_settings
+    from sqlalchemy import select, update
 
     if (
         not db_configurado()
@@ -255,35 +256,75 @@ async def hydrate_billing_account(user_id: str) -> BillingAccount:
         user_uuid = uuid.UUID(user_id)
     except (ValueError, TypeError, AttributeError):
         return get_billing_account(user_id)
-    from central_api.models.billing import BillingAccount as BillingAccountRow
+    from central_api.models.billing import (
+        BillingAccount as BillingAccountRow,
+        BillingAccountPeriod as BillingAccountPeriodRow,
+    )
+    from central_api.billing.postgres import _lock_account
 
     try:
         async with nueva_sesion() as session:
-            row = await session.get(BillingAccountRow, user_uuid)
-            if row is None:
-                return get_billing_account(user_id)
-            current = BILLING_ACCOUNTS.get(user_id)
+            row = await _lock_account(session, user_uuid)
+            now = _utcnow()
             if (
-                current is None
-                or current.account_type != row.account_type
-                or current.plan_code != row.plan_code
-                or current.starts_at != row.starts_at
+                row.account_type == "GRATUITA"
+                and row.expires_at is not None
+                and row.expires_at <= now
             ):
-                BILLING_ACCOUNTS[user_id] = BillingAccount(
+                row.account_type = "CREDITOS"
+                row.plan_code = None
+                row.max_requests = None
+                row.expires_at = None
+                row.updated_at = now
+                await session.execute(
+                    update(BillingAccountPeriodRow)
+                    .where(
+                        BillingAccountPeriodRow.user_id == user_uuid,
+                        BillingAccountPeriodRow.status == "ABIERTO",
+                    )
+                    .values(status="CERRADO", close_reason="plazo gratuito vencido")
+                )
+            active_period = (
+                await session.execute(
+                    select(BillingAccountPeriodRow)
+                    .where(
+                        BillingAccountPeriodRow.user_id == user_uuid,
+                        BillingAccountPeriodRow.status == "ABIERTO",
+                        BillingAccountPeriodRow.starts_at <= now,
+                        BillingAccountPeriodRow.ends_at > now,
+                    )
+                    .order_by(BillingAccountPeriodRow.starts_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            account = BillingAccount(
+                user_id=user_id,
+                account_type=row.account_type,
+                plan_code=row.plan_code,
+                max_requests=row.max_requests,
+                starts_at=row.starts_at,
+                expires_at=row.expires_at,
+                requests_reserved=row.requests_reserved,
+                requests_consumed=row.requests_consumed,
+            )
+            BILLING_ACCOUNTS[user_id] = account
+            if active_period is None:
+                PERIODS.pop(user_id, None)
+            else:
+                PERIODS[user_id] = SubscriptionPeriod(
+                    id=str(active_period.id),
                     user_id=user_id,
-                    account_type=row.account_type,
-                    plan_code=row.plan_code,
-                    max_requests=row.max_requests,
-                    starts_at=row.starts_at,
-                    expires_at=row.expires_at,
-                    requests_reserved=row.requests_reserved,
-                    requests_consumed=row.requests_consumed,
+                    plan_code=active_period.plan_code,
+                    inicio=active_period.starts_at,
+                    fin=active_period.ends_at,
+                    cuota_asignada=active_period.included_requests,
+                    cuota_reservada=active_period.requests_reserved,
+                    cuota_consumida=active_period.requests_consumed,
+                    estado=active_period.status,
+                    plan_snapshot={"code": active_period.plan_code},
                 )
     except Exception as exc:
         raise RuntimeError("no se pudo cargar el modo de facturación") from exc
-    account = get_billing_account(user_id)
-    if account.account_type != row.account_type:
-        await persist_billing_account(account)
     return account
 
 
@@ -298,12 +339,23 @@ async def persist_billing_account(account: BillingAccount) -> None:
     except (ValueError, TypeError, AttributeError) as exc:
         raise RuntimeError("no se pudo persistir una cuenta sin UUID válido") from exc
 
-    from central_api.models.billing import BillingAccount as BillingAccountRow
+    from central_api.models.billing import (
+        BillingAccount as BillingAccountRow,
+        BillingAccountPeriod as BillingAccountPeriodRow,
+    )
     from central_api.models.identity import User
 
     try:
         async with nueva_sesion() as session:
-            row = await session.get(BillingAccountRow, user_uuid)
+            from sqlalchemy import select
+
+            row = (
+                await session.execute(
+                    select(BillingAccountRow)
+                    .where(BillingAccountRow.user_id == user_uuid)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
             if row is None:
                 if await session.get(User, user_uuid) is None:
                     raise RuntimeError("usuario de la cuenta no encontrado")
@@ -314,9 +366,16 @@ async def persist_billing_account(account: BillingAccount) -> None:
             row.max_requests = account.max_requests
             row.starts_at = account.starts_at
             row.expires_at = account.expires_at
-            row.requests_reserved = account.requests_reserved
-            row.requests_consumed = account.requests_consumed
             row.updated_at = _utcnow()
+            if account.account_type == "CREDITOS":
+                await session.execute(
+                    BillingAccountPeriodRow.__table__.update()
+                    .where(
+                        BillingAccountPeriodRow.user_id == user_uuid,
+                        BillingAccountPeriodRow.status == "ABIERTO",
+                    )
+                    .values(status="CERRADO", close_reason="cuenta cambiada a CREDITOS")
+                )
     except Exception as exc:
         raise RuntimeError("no se pudo persistir la cuenta de facturación") from exc
 
@@ -379,19 +438,32 @@ def force_period(user_id: str, plan_code: str, motivo: str) -> SubscriptionPerio
     """
     if not (motivo or "").strip():
         raise ValueError("motivo obligatorio para forzar el período")
+    aliases = {"free": "gratuita", "basico": "tier-100", "pro": "tier-1000", "empresa": "tier-10000"}
+    plan_code = aliases.get(plan_code, plan_code)
+    if plan_code not in PLANS or not PLANS[plan_code].activo:
+        raise ValueError("plan fuera de catálogo")
     anterior = PERIODS.get(user_id)
     if anterior is not None and anterior.estado == "ABIERTO":
         anterior.estado = "CERRADO"
-    plan = get_plan(plan_code) or PLANS["free"]
     now = _utcnow()
     from datetime import timedelta
+
+    plan = PLANS[plan_code]
+    if plan_code == "gratuita":
+        account = set_billing_account(
+            user_id,
+            "GRATUITA",
+            expires_at=now + timedelta(days=30),
+        )
+    else:
+        account = set_billing_account(user_id, "TIER", plan_code=plan_code)
 
     nuevo = SubscriptionPeriod(
         id=f"period-{user_id}-{int(now.timestamp())}-forzado",
         user_id=user_id,
         plan_code=plan.code,
         inicio=now,
-        fin=now + timedelta(days=30),
+        fin=account.expires_at or now + timedelta(days=30),
         cuota_asignada=plan.cuota_mensual,
         plan_snapshot={"code": plan.code, "cuota": plan.cuota_mensual,
                        "prioridad": plan.prioridad_cola,

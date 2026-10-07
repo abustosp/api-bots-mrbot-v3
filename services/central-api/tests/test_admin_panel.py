@@ -71,6 +71,9 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     for account_type in ("CREDITOS", "TIER", "GRATUITA", "LIBRE"):
         assert account_type in cuerpo
     assert "/admin/billing/accounts/${encodeURIComponent(userId)}/account-type" in cuerpo
+    assert 'data-account-reason="${esc(user.id)}" type="text" minlength="10" maxlength="500"' in cuerpo
+    assert "reason.length < 10 || reason.length > 500" in cuerpo
+    assert "entre 10 y 500 caracteres" in cuerpo
     assert "La clave se guarda cifrada, nunca en texto plano" in cuerpo
     assert 'value="habilitado">Activo' in cuerpo
     assert 'value="deshabilitado">Desactivado' in cuerpo

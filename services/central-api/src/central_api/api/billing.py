@@ -25,10 +25,11 @@ from central_api.billing.entitlements import (
 )
 from central_api.billing.facade import (
     PAYMENTS,
-    apply_verified_payment,
+    apply_verified_payment_persisted,
     create_credit_payment,
 )
 from central_api.billing.reservation import CREDIT_MOVES, USAGE, get_balance
+from central_api.db import db_configurado
 from central_api.billing.mercadopago import (
     ConfigMercadoPagoError,
     coincide_entorno,
@@ -107,8 +108,12 @@ def billing_plans(principal: ApiPrincipal = Depends(require_api_principal)):
 
 
 @router.get("/billing/usage")
-def billing_usage(principal: ApiPrincipal = Depends(require_api_principal)):
+async def billing_usage(principal: ApiPrincipal = Depends(require_api_principal)):
     """Uso y reservas del usuario (filtrable por job en PG; aquí propio)."""
+    if db_configurado():
+        from central_api.billing.postgres import usage_for_user
+
+        return {"items": await usage_for_user(principal.user_id)}
     items = [
         {"job_id": u.job_id, "fuente_cobro": u.fuente_cobro, "estado": u.estado,
          "costo_snapshot": u.costo_snapshot}
@@ -118,8 +123,16 @@ def billing_usage(principal: ApiPrincipal = Depends(require_api_principal)):
 
 
 @router.get("/billing/credits/balance")
-def credits_balance(principal: ApiPrincipal = Depends(require_api_principal)):
+async def credits_balance(principal: ApiPrincipal = Depends(require_api_principal)):
     """Saldo derivado, proyección y últimos movimientos (sin vencimientos)."""
+    if db_configurado():
+        from central_api.billing.postgres import balance_for_user, credit_moves_for_user
+
+        return {
+            "saldo": await balance_for_user(principal.user_id),
+            "moneda": "ARS",
+            "movimientos": await credit_moves_for_user(principal.user_id),
+        }
     moves = [
         {"movimiento": m.movimiento, "amount": m.amount, "job_id": m.job_id,
          "creado_en": m.creado_en.isoformat().replace("+00:00", "Z")}
@@ -266,7 +279,7 @@ async def mp_webhook(request: Request):
             ):
                 mark_processed(event, False, error="live_mode/entorno")
                 return JSONResponse(status_code=200, content={"ok": True})
-            apply_verified_payment(target, remote, reconsulted=True)
+            await apply_verified_payment_persisted(target, remote, reconsulted=True)
             mark_processed(event, True)
             return JSONResponse(status_code=200, content={"ok": True})
     if event.estado_proceso != "PROCESADO":

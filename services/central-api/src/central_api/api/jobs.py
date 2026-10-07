@@ -343,6 +343,7 @@ async def _cancel_job_db(
 
     from sqlalchemy import select
 
+    from central_api.models.billing import BillingUsage
     from central_api.models.execution import Job
 
     try:
@@ -350,7 +351,6 @@ async def _cancel_job_db(
     except (ValueError, TypeError, AttributeError):
         return JSONResponse(status_code=404, content=public_error("not_found"))
 
-    release_reservation = False
     async with nueva_sesion() as session:
         row = (
             await session.execute(
@@ -368,7 +368,22 @@ async def _cancel_job_db(
                 row.status = "CANCELADO"
                 row.finished_at = now
                 row.result = None
-                release_reservation = True
+                usage_id = (
+                    await session.execute(
+                        select(BillingUsage.id)
+                        .where(BillingUsage.job_id == row.id)
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if usage_id is not None:
+                    from central_api.billing.postgres import settle_in_session
+
+                    await settle_in_session(
+                        session,
+                        row.id,
+                        status="LIBERADO",
+                        reason="cancelado en PENDIENTE",
+                    )
 
         meta = {
             "started_at": row.started_at.isoformat() if row.started_at else None,
@@ -391,8 +406,6 @@ async def _cancel_job_db(
             meta,
         )
 
-    if release_reservation:
-        release_usage(job_id, motivo="cancelado en PENDIENTE")
     mirror = JOBS.get(job_id)
     if mirror is not None:
         mirror.status = projected["status"]

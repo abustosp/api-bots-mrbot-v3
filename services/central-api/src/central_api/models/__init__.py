@@ -14,6 +14,8 @@ from central_api.models.base import (
 )
 from central_api.models.billing import (
     BillingAccount,
+    BillingAccountPeriod,
+    BillingUsage,
     CreditLedger,
     Payment,
     PaymentEvent,
@@ -36,6 +38,8 @@ __all__ = [
     "Bot",
     "BotOperation",
     "BillingAccount",
+    "BillingAccountPeriod",
+    "BillingUsage",
     "CreditLedger",
     "Job",
     "JobArtifact",

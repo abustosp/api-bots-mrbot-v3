@@ -203,43 +203,27 @@ async def _hidratar_usuario_y_cuenta(user_id: str) -> None:
     if not db_configurado():
         return
     try:
-        user_uuid = uuid.UUID(user_id)
+        uuid.UUID(user_id)
     except (ValueError, TypeError, AttributeError):
         return
-    from central_api.models.billing import BillingAccount as BillingAccountRow
+    from central_api.billing.entitlements import hydrate_billing_account
 
-    async with nueva_sesion() as session:
-        row = await session.get(BillingAccountRow, user_uuid)
-        if row is None:
-            return
-        from central_api.billing.entitlements import BillingAccount, BILLING_ACCOUNTS
-
-        BILLING_ACCOUNTS[user_id] = BillingAccount(
-            user_id=user_id,
-            account_type=row.account_type,
-            plan_code=row.plan_code,
-            max_requests=row.max_requests,
-            starts_at=row.starts_at,
-            expires_at=row.expires_at,
-            requests_reserved=row.requests_reserved,
-            requests_consumed=row.requests_consumed,
-        )
-        user = USERS.get(user_id)
-        if user is not None:
-            user.account_type = row.account_type
-            user.plan_code = row.plan_code
-            user.max_requests = row.max_requests
-            user.account_expires_at = row.expires_at
-    from central_api.billing.entitlements import get_billing_account
-
-    account = get_billing_account(user_id)
-    if account.account_type == "CREDITOS" and row.account_type == "GRATUITA":
-        await _persistir_tipo_cuenta_pg(account)
+    try:
+        account = await hydrate_billing_account(user_id)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    user = USERS.get(user_id)
+    if user is not None:
+        user.account_type = account.account_type
+        user.plan_code = account.plan_code
+        user.max_requests = account.max_requests
+        user.account_expires_at = account.expires_at
 
 
 async def _persistir_tipo_cuenta_pg(account) -> None:
     """Guarda una asignación de modo en billing_accounts."""
     from central_api.db import db_configurado, nueva_sesion
+    from sqlalchemy import select, update
 
     if not db_configurado():
         return
@@ -247,14 +231,23 @@ async def _persistir_tipo_cuenta_pg(account) -> None:
         user_uuid = uuid.UUID(account.user_id)
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=404, detail="usuario no encontrado") from None
-    from central_api.models.billing import BillingAccount as BillingAccountRow
+    from central_api.models.billing import (
+        BillingAccount as BillingAccountRow,
+        BillingAccountPeriod as BillingAccountPeriodRow,
+    )
     from central_api.models.identity import User
 
     try:
         async with nueva_sesion() as session:
             if await session.get(User, user_uuid) is None:
                 raise HTTPException(status_code=404, detail="usuario no encontrado")
-            row = await session.get(BillingAccountRow, user_uuid)
+            row = (
+                await session.execute(
+                    select(BillingAccountRow)
+                    .where(BillingAccountRow.user_id == user_uuid)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
             if row is None:
                 row = BillingAccountRow(user_id=user_uuid, account_type=account.account_type)
                 session.add(row)
@@ -263,9 +256,18 @@ async def _persistir_tipo_cuenta_pg(account) -> None:
             row.max_requests = account.max_requests
             row.starts_at = account.starts_at
             row.expires_at = account.expires_at
-            row.requests_reserved = account.requests_reserved
-            row.requests_consumed = account.requests_consumed
+            row.requests_reserved = 0
+            row.requests_consumed = 0
+            row.generation_id = uuid.uuid4()
             row.updated_at = utcnow()
+            await session.execute(
+                update(BillingAccountPeriodRow)
+                .where(
+                    BillingAccountPeriodRow.user_id == user_uuid,
+                    BillingAccountPeriodRow.status == "ABIERTO",
+                )
+                .values(status="CERRADO", close_reason="asignación de cuenta modificada")
+            )
             await session.flush()
     except HTTPException:
         raise
@@ -383,30 +385,61 @@ def suspender_suscripcion(
 
 
 @router.post("/billing/accounts/{user_id}/credit")
-def credito_manual(
+async def credito_manual(
     user_id: str,
     body: CreditoManualBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
     """Aplica un crédito manual como entrada compensatoria con autorización."""
-    from central_api.billing.reservation import adjust_credits
-
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
-    entrada = aplicar_credito(user_id, body.delta, f"{motivo} [ref:{body.referencia}]", actor)
-    # Ajuste append-only en el ledger de billing (una sola fuente por capa:
-    # el panel lleva su libro y billing el suyo, ambos con motivo y actor).
-    adjust_credits(
-        user_id, body.delta, motivo, actor=actor,
-        referencia=body.referencia,
-        idempotency_key=f"admin:{actor}:{user_id}:{body.referencia}:{body.delta}",
-    )
+    await _hidratar_usuario_y_cuenta(user_id)
+    usuario = USERS.get(user_id)
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="usuario no encontrado")
+    idempotency_key = f"admin:{actor}:{user_id}:{body.referencia}:{body.delta}"
+    from central_api.db import db_configurado
+
+    if db_configurado():
+        from central_api.billing.postgres import adjust_credits_in_session, balance_for_user
+        from central_api.db import nueva_sesion
+
+        try:
+            async with nueva_sesion() as session:
+                await adjust_credits_in_session(
+                    session,
+                    user_id=user_id,
+                    amount=body.delta,
+                    reason=motivo,
+                    idempotency_key=idempotency_key,
+                )
+            usuario.saldo_creditos = await balance_for_user(user_id)
+            saldo_posterior = usuario.saldo_creditos
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except Exception:
+            raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    else:
+        from central_api.billing.reservation import adjust_credits
+
+        entrada = aplicar_credito(
+            user_id, body.delta, f"{motivo} [ref:{body.referencia}]", actor
+        )
+        adjust_credits(
+            user_id,
+            body.delta,
+            motivo,
+            actor=actor,
+            referencia=body.referencia,
+            idempotency_key=idempotency_key,
+        )
+        saldo_posterior = entrada.saldo_posterior
     log_event(
         "billing.credit.applied", actor_id=actor, target_type="user",
         target_id=user_id, request_id=request_id or "", reason=motivo,
         metadata={
-            "delta": body.delta, "saldo_posterior": entrada.saldo_posterior,
+            "delta": body.delta, "saldo_posterior": saldo_posterior,
             "referencia": body.referencia,
         },
     )
@@ -419,7 +452,7 @@ class PeriodoForzadoBody(BaseModel):
 
 
 @router.post("/billing/accounts/{user_id}/period/force")
-def forzar_periodo(
+async def forzar_periodo(
     user_id: str,
     body: PeriodoForzadoBody,
     authorization: str | None = Header(default=None),
@@ -430,25 +463,52 @@ def forzar_periodo(
     El consumo del período desplazado queda intacto (trazable); el nuevo
     arranca con la cuota completa del plan indicado.
     """
-    from central_api.billing.entitlements import force_period
-
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     if body.plan not in CATALOGO_PLANES:
         raise HTTPException(status_code=400, detail="plan fuera de catálogo")
+    await _hidratar_usuario_y_cuenta(user_id)
     if USERS.get(user_id) is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
-    periodo = force_period(user_id, body.plan, motivo)
+    from central_api.db import db_configurado
+
+    if db_configurado():
+        from central_api.billing.entitlements import hydrate_billing_account
+        from central_api.billing.postgres import force_period_for_user
+
+        try:
+            periodo = await force_period_for_user(user_id, body.plan, motivo)
+            account = await hydrate_billing_account(user_id)
+        except ValueError as exc:
+            status_code = 404 if "usuario no encontrado" in str(exc) else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from None
+        except Exception:
+            raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+        usuario = USERS[user_id]
+        usuario.account_type = account.account_type
+        usuario.plan_code = account.plan_code
+        usuario.plan = account.plan_code or account.account_type.lower()
+        periodo_id = periodo["id"]
+        periodo_plan = periodo["plan_code"]
+    else:
+        from central_api.billing.entitlements import force_period
+
+        try:
+            periodo = force_period(user_id, body.plan, motivo)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        periodo_id = periodo.id
+        periodo_plan = periodo.plan_code
     log_event(
         "billing.period.forced", actor_id=actor, target_type="subscription",
         target_id=user_id, request_id=request_id or "", reason=motivo,
-        metadata={"plan": periodo.plan_code, "periodo_id": periodo.id},
+        metadata={"plan": periodo_plan, "periodo_id": periodo_id},
     )
     return {"success": True, "cuenta": _cuenta(user_id)}
 
 
 @router.post("/billing/periods/close-expired")
-def cerrar_periodos_vencidos(
+async def cerrar_periodos_vencidos(
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
@@ -458,10 +518,20 @@ def cerrar_periodos_vencidos(
     admisión solo acepta ``ABIERTO`` vigente, así que el cierre demorado
     nunca regala consumo.
     """
-    from central_api.billing.entitlements import close_expired_periods
-
     actor = require_admin(authorization)
-    cerrados = close_expired_periods()
+    from central_api.db import db_configurado
+
+    if db_configurado():
+        from central_api.billing.postgres import close_expired_periods_in_db
+
+        try:
+            cerrados = await close_expired_periods_in_db()
+        except Exception:
+            raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    else:
+        from central_api.billing.entitlements import close_expired_periods
+
+        cerrados = close_expired_periods()
     log_event(
         "billing.periods.closed", actor_id=actor, target_type="billing",
         target_id="periods", request_id=request_id or "",

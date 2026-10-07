@@ -17,6 +17,7 @@ from central_api.billing.entitlements import (
     get_plan,
 )
 from central_api.billing.reservation import get_balance
+from central_api.db import db_configurado
 from central_api.security.principals import ApiPrincipal
 
 router = APIRouter()
@@ -30,6 +31,16 @@ async def my_account(
 
     account = await hydrate_billing_account(principal.user_id)
     period = current_period(principal.user_id)
+    if db_configurado():
+        from central_api.billing.postgres import balance_for_user, period_count_for_user
+
+        balance = await balance_for_user(principal.user_id)
+        period_count = await period_count_for_user(principal.user_id)
+    else:
+        balance = get_balance(principal.user_id)
+        period_count = sum(
+            1 for item in PERIODS.values() if item.user_id == principal.user_id
+        )
     plan_code = period.plan_code if period else (account.plan_code or account.account_type.lower())
     plan = get_plan(plan_code)
     return JSONResponse(
@@ -59,10 +70,8 @@ async def my_account(
                 if period
                 else None
             ),
-            "saldo_creditos": get_balance(principal.user_id),
+            "saldo_creditos": balance,
             "moneda": "ARS",
-            "periodos_históricos": sum(
-                1 for p in PERIODS.values() if p.user_id == principal.user_id
-            ),
+            "periodos_históricos": period_count,
         },
     )

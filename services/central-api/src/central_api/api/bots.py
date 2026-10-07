@@ -32,8 +32,6 @@ from central_api.api.dependencies import (
 from central_api.billing.entitlements import BOT_CREDIT_COST, PLANS, get_plan
 from central_api.billing.reservation import (
     QuotaExhausted,
-    get_usage,
-    release_usage,
     reserve_for_job,
 )
 from central_api.db import db_configurado, nueva_sesion
@@ -118,6 +116,16 @@ async def _persistir_job_db(
                 idempotency_key=idempotency_key,
                 job_id=jid,
             )
+            if creado:
+                from central_api.billing.postgres import reserve_in_session
+
+                await reserve_in_session(
+                    sesion,
+                    user_id=uid,
+                    job_id=fila.id,
+                    bot=bot,
+                    operation=operacion,
+                )
             if not creado:
                 # No persistimos una huella simple de contraseña. En un replay
                 # se abre temporalmente el ciphertext ya custodiado y se compara
@@ -144,7 +152,7 @@ async def _persistir_job_db(
                             "clave de idempotencia reutilizada con otras credenciales"
                         )
             return str(fila.id), str(fila.status), creado
-    except IdempotencyConflict:
+    except (IdempotencyConflict, QuotaExhausted):
         raise
     except RepositoryError as exc:
         raise JobPersistenceUnavailable("falló la persistencia del job") from exc
@@ -559,58 +567,6 @@ async def submit_job(
         )
 
     job_id = new_job_id()
-    reserved_job_id = job_id
-    account_type_before_reservation = None
-    try:
-        from central_api.billing.entitlements import (
-            get_billing_account,
-            hydrate_billing_account,
-            persist_billing_account,
-        )
-
-        account = await hydrate_billing_account(principal.user_id)
-        account_type_before_reservation = account.account_type
-        reserve_for_job(principal.user_id, job_id, bot, operacion)
-        account_after_reservation = get_billing_account(
-            principal.user_id, expire=False
-        )
-        if (
-            account_type_before_reservation == "GRATUITA"
-            and account_after_reservation.account_type == "CREDITOS"
-        ):
-            await persist_billing_account(account_after_reservation)
-    except QuotaExhausted:
-        account_after_reservation = get_billing_account(
-            principal.user_id, expire=False
-        )
-        if (
-            account_type_before_reservation == "GRATUITA"
-            and account_after_reservation.account_type == "CREDITOS"
-        ):
-            try:
-                from central_api.billing.entitlements import persist_billing_account
-
-                await persist_billing_account(account_after_reservation)
-            except RuntimeError:
-                return JSONResponse(
-                    status_code=503,
-                    content=public_error("service_not_enabled", corr),
-                    headers={"X-Correlation-ID": corr},
-                )
-        return JSONResponse(
-            status_code=429, content=public_error("quota_exhausted", corr),
-            headers={"X-Correlation-ID": corr, "Retry-After": "60"},
-        )
-    except RuntimeError:
-        reserved = get_usage(reserved_job_id)
-        if reserved is not None and reserved.estado == "RESERVADO":
-            release_usage(reserved_job_id, motivo="persistencia de cuenta fallida")
-        return JSONResponse(
-            status_code=503,
-            content=public_error("service_not_enabled", corr),
-            headers={"X-Correlation-ID": corr},
-        )
-
     if db_configurado():
         try:
             job_id, persisted_status, created = await _persistir_job_db(
@@ -624,25 +580,26 @@ async def submit_job(
                 credential_fingerprint=credential_fingerprint,
                 job_id=job_id,
             )
+        except QuotaExhausted:
+            return JSONResponse(
+                status_code=429, content=public_error("quota_exhausted", corr),
+                headers={"X-Correlation-ID": corr, "Retry-After": "60"},
+            )
         except IdempotencyConflict:
-            release_usage(reserved_job_id, motivo="idempotency conflict")
             return JSONResponse(
                 status_code=409,
                 content=public_error("idempotency_conflict", corr),
                 headers={"X-Correlation-ID": corr},
             )
         except JobPersistenceUnavailable:
-            release_usage(reserved_job_id, motivo="persistencia fallida")
             return JSONResponse(
                 status_code=503,
                 content=public_error("service_not_enabled", corr),
                 headers={"X-Correlation-ID": corr},
             )
         if not created:
-            # Una carrera entre retries ganó el INSERT canónico. La reserva
-            # especulativa de este intento no debe quedar huérfana ni encolar
-            # un segundo trabajo en memoria.
-            release_usage(reserved_job_id, motivo="replay idempotente")
+            # Job and reservation commit together. A replay returns the
+            # already-persisted job without creating another reservation.
             if idempotency_key:
                 remember_idempotency(
                     principal.user_id, idempotency_key, fingerprint, job_id
@@ -659,6 +616,14 @@ async def submit_job(
                     "X-Correlation-ID": corr,
                     "Location": f"/api/v3/jobs/{job_id}",
                 },
+            )
+    else:
+        try:
+            reserve_for_job(principal.user_id, job_id, bot, operacion)
+        except QuotaExhausted:
+            return JSONResponse(
+                status_code=429, content=public_error("quota_exhausted", corr),
+                headers={"X-Correlation-ID": corr, "Retry-After": "60"},
             )
 
     job = Job(

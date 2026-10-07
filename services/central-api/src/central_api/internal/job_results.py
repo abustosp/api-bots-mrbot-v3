@@ -77,6 +77,18 @@ async def _espejar_resultado_db(job_id: str, body: ResultBody) -> tuple[str, boo
             summary=summary,
             artifacts=artifacts,
         )
+        if created:
+            from central_api.billing.postgres import settle_in_session
+
+            if body.result in TERMINAL_OK or (body.error_category or "") != "INFRASTRUCTURE_ERROR":
+                await settle_in_session(sesion, job.id, status="CONFIRMADO")
+            else:
+                await settle_in_session(
+                    sesion,
+                    job.id,
+                    status="REEMBOLSADO",
+                    reason="INFRASTRUCTURE_ERROR",
+                )
         return str(job.status), not created
 
 
@@ -158,10 +170,10 @@ async def report_result(
             meta["data"] = {"schema_version": 1, **(body.data or {})}
         else:
             meta["error"] = body.error or {"error_code": "unexpected"}
-    if terminal_ok or (body.error_category or "") != "INFRASTRUCTURE_ERROR":
+    if not db_configurado() and (terminal_ok or (body.error_category or "") != "INFRASTRUCTURE_ERROR"):
         # COMPLETO o error de negocio: cobro confirmado por defecto.
         confirm_usage(job.id)
-    else:
+    elif not db_configurado():
         # Fallo de infraestructura: reembolso propuesto (libera la reserva).
         refund_usage(job.id, motivo="INFRASTRUCTURE_ERROR")
     reaper_mod.clear_lease(job.id)

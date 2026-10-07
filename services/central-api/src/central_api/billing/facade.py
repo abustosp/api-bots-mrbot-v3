@@ -124,6 +124,53 @@ def apply_verified_payment(
     return payment
 
 
+async def apply_verified_payment_persisted(
+    payment: Payment, remote: dict, reconsulted: bool
+) -> Payment:
+    """Apply verified purchase credits to PostgreSQL when the DB is enabled."""
+    if not reconsulted:
+        return payment
+    if str(remote.get("status")) != "approved":
+        payment.estado = "RECHAZADO"
+        return payment
+    if str(remote.get("external_reference")) != payment.external_reference:
+        return payment
+    try:
+        remote_centavos = desde_monto_mp(remote.get("transaction_amount", "0"))
+    except Exception:
+        return payment
+    if remote_centavos != payment.precio_centavos:
+        return payment
+    if str(remote.get("currency_id", "ARS")) != payment.moneda:
+        return payment
+
+    from central_api.db import db_configurado, nueva_sesion
+
+    if db_configurado():
+        from central_api.billing.postgres import credit_purchase_in_session
+
+        async with nueva_sesion() as session:
+            await credit_purchase_in_session(
+                session,
+                user_id=payment.user_id,
+                amount=payment.creditos,
+                payment_id=payment.id,
+                idempotency_key=f"payment:{payment.id}:acreditado",
+            )
+    else:
+        from central_api.billing.reservation import credit_purchase
+
+        credit_purchase(
+            payment.user_id,
+            payment.creditos,
+            payment.id,
+            idempotency_key=f"payment:{payment.id}:acreditado",
+        )
+    payment.estado = "APROBADO"
+    payment.provider_payment_id = str(remote.get("id"))
+    return payment
+
+
 def payload_hash(payload: bytes) -> str:
     """Hash SHA-256 hex del cuerpo crudo (se guarda el hash, no el payload)."""
     return hashlib.sha256(payload or b"").hexdigest()
@@ -139,5 +186,6 @@ __all__ = [
     "new_external_reference",
     "create_credit_payment",
     "apply_verified_payment",
+    "apply_verified_payment_persisted",
     "payload_hash",
 ]

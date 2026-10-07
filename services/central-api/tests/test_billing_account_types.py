@@ -146,6 +146,12 @@ def test_admin_can_switch_each_mode_only_with_reason_and_audit(monkeypatch) -> N
             json={"account_type": "CREDITOS"},
         )
         assert missing_reason.status_code == 400
+        short_reason = client.post(
+            f"/admin/billing/accounts/{user_id}/account-type",
+            headers=headers,
+            json={"account_type": "CREDITOS", "motivo": "123456789"},
+        )
+        assert short_reason.status_code == 400
 
         changes = [
             {"account_type": "CREDITOS", "motivo": "Habilitar pago por consumo"},

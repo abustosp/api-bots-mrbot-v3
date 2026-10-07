@@ -36,6 +36,15 @@ async def _espejar_evento_db(job_id: str, body: JobEventBody) -> tuple[str, bool
             event_type=body.event_type,
             message=body.message,
         )
+        if created and body.event_type == "cancelled":
+            from central_api.billing.postgres import settle_in_session
+
+            await settle_in_session(
+                sesion,
+                job.id,
+                status="CONFIRMADO",
+                reason="cancelado en vuelo",
+            )
         return str(job.status), not created
 
 
@@ -136,7 +145,8 @@ async def report_event(
             meta["cancel_reason"] = meta.get("cancel_reason") or body.message or None
             meta["cancelled_by"] = meta.get("cancelled_by") or "worker"
         # Cancelado en vuelo: cobro confirmado por defecto (sin reembolso auto).
-        confirm_usage(job.id, motivo="cancelado en vuelo")
+        if not db_configurado():
+            confirm_usage(job.id, motivo="cancelado en vuelo")
         reaper_mod.clear_lease(job_id)
     elif body.event_type == "failed_prestart" and status_before == "ASIGNADO":
         job.status = "PENDIENTE"

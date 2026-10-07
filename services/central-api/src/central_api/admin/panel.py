@@ -586,7 +586,7 @@ details > .details-body { padding: 0 14px 14px; }
       const code = `tier-${count}`;
       return `<option value="${code}" ${plan === code ? "selected" : ""}>${count.toLocaleString("es-AR")} requests</option>`;
     }).join("");
-    return `<details><summary>${esc(mode)} · configurar</summary><div class="details-body"><div class="form-grid"><div class="field"><label>Tipo de cuenta</label><select data-account-mode="${esc(user.id)}">${options}</select></div><div class="field"><label>Tier mensual</label><select data-account-plan="${esc(user.id)}">${plans}</select></div><div class="field"><label>Límite LIBRE (requests)</label><input data-account-max="${esc(user.id)}" type="number" min="1" max="10000000" value="${esc(user.max_requests ?? "")}" placeholder="Obligatorio para LIBRE"></div><div class="field"><label>Gratuita vigente hasta</label><input data-account-expiry="${esc(user.id)}" type="datetime-local" value="${esc(expires)}"></div><div class="field wide"><label>Motivo obligatorio</label><input data-account-reason="${esc(user.id)}" type="text" minlength="3" maxlength="500" placeholder="Motivo del cambio"></div></div><div class="form-actions"><button type="button" class="button primary small" data-action="account-save" data-id="${esc(user.id)}">Guardar tipo de cuenta</button></div></div></details>`;
+    return `<details><summary>${esc(mode)} · configurar</summary><div class="details-body"><div class="form-grid"><div class="field"><label>Tipo de cuenta</label><select data-account-mode="${esc(user.id)}">${options}</select></div><div class="field"><label>Tier mensual</label><select data-account-plan="${esc(user.id)}">${plans}</select></div><div class="field"><label>Límite LIBRE (requests)</label><input data-account-max="${esc(user.id)}" type="number" min="1" max="10000000" value="${esc(user.max_requests ?? "")}" placeholder="Obligatorio para LIBRE"></div><div class="field"><label>Gratuita vigente hasta</label><input data-account-expiry="${esc(user.id)}" type="datetime-local" value="${esc(expires)}"></div><div class="field wide"><label>Motivo obligatorio</label><input data-account-reason="${esc(user.id)}" type="text" minlength="10" maxlength="500" placeholder="Motivo del cambio (mínimo 10 caracteres)"></div></div><div class="form-actions"><button type="button" class="button primary small" data-action="account-save" data-id="${esc(user.id)}">Guardar tipo de cuenta</button></div></div></details>`;
   }
   async function loadUsers(event) {
     if (event) event.preventDefault();
@@ -721,7 +721,7 @@ details > .details-body { padding: 0 14px 14px; }
     if (action === "account-save") {
       const mode = $(`[data-account-mode="${CSS.escape(userId)}"]`).value;
       const reason = $(`[data-account-reason="${CSS.escape(userId)}"]`).value.trim();
-      if (reason.length < 3) { flash("El motivo debe tener al menos 3 caracteres.", "error"); return; }
+      if (reason.length < 10 || reason.length > 500) { flash("El motivo debe tener entre 10 y 500 caracteres.", "error"); return; }
       const payload = { account_type: mode, motivo: reason };
       if (mode === "TIER") payload.plan_code = $(`[data-account-plan="${CSS.escape(userId)}"]`).value;
       if (mode === "LIBRE") payload.max_requests = Number($(`[data-account-max="${CSS.escape(userId)}"]`).value);
