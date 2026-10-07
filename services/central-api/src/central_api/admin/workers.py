@@ -150,7 +150,8 @@ def _coerce_node(raw: str) -> str:
 
 
 @router.get("/workers")
-async def list_workers() -> dict:
+async def list_workers(authorization: str | None = Header(default=None)) -> dict:
+    require_admin(authorization)
     settings = get_settings()
     nodes = merge_nodes(settings.worker_node_list, ADMIN_NODES)
     return {"success": True, "workers": [await vista_worker(n) for n in nodes]}
@@ -197,82 +198,70 @@ def remove_worker(node: str, authorization: str | None = Header(default=None)) -
 
 
 @router.get("/workers/panel", response_class=HTMLResponse)
-def workers_panel() -> str:
-    settings = get_settings()
-    nodes = merge_nodes(settings.worker_node_list, ADMIN_NODES)
-    rows = "\n".join(
-        _panel_row(worker_overview(n)) for n in nodes
-    ) or '<tr><td colspan="7">Sin workers inventariados. Agregue uno abajo.</td></tr>'
-    return f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
+def workers_panel() -> HTMLResponse:
+    """Cascarón estático sin datos: el inventario se pide a ``GET /admin/workers``
+    con el bearer ADMIN_TOKEN y se renderiza con ``textContent`` (sin XSS)."""
+    return HTMLResponse(
+        _PANEL_HTML,
+        headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
+                 "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; "
+                 "style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"},
+    )
+
+
+_PANEL_HTML = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="15">
-<title>Workers — MrBot central</title>
+<title>Workers - MrBot central</title>
 <style>
-body {{ font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 2rem; color: #1a1a1a; max-width: 70rem; }}
-table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
-th, td {{ border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }}
-th {{ background: #f0f0f0; }}
-.estado {{ font-weight: 600; }}
-form {{ margin-top: 1.5rem; }}
-input, button {{ font-size: 0.9rem; padding: 0.35rem 0.6rem; }}
-.muted {{ color: #555; font-size: 0.85rem; }}
-</style>
-</head>
-<body>
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; max-width: 70rem; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; font-size: .9rem; }
+th { background: #f0f0f0; } .muted { color: #555; font-size: .85rem; }
+input, button { font-size: .9rem; padding: .35rem .6rem; }
+</style></head><body>
 <h1>Workers</h1>
-<p class="muted">Alta de IPs en caliente y monitoreo. Mutaciones con bearer ADMIN_TOKEN.</p>
-<table>
-<thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Ejec/Cap</th><th>Sellado</th><th>Último latido</th><th></th></tr></thead>
-<tbody>{rows}</tbody>
-</table>
-<form id="alta">
-<input id="node" name="node" placeholder="10.0.0.13:8080" required>
-<button type="submit">Agregar worker</button>
-</form>
+<p class="muted">Requiere bearer ADMIN_TOKEN. Sin token no se muestra ni se modifica nada.</p>
+<table><thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Ejec/Cap</th><th>Sellado</th><th>Ultimo latido</th><th></th></tr></thead>
+<tbody id="rows"></tbody></table>
+<form id="alta"><input id="node" placeholder="10.0.0.13:8080" required>
+<button type="submit">Agregar worker</button></form>
 <p class="muted" id="msg"></p>
 <script>
-const msg = document.getElementById("msg");
-function token() {{
+const msg = document.getElementById("msg"), rows = document.getElementById("rows");
+function token() {
   let t = sessionStorage.getItem("admin_token");
-  if (!t) {{ t = prompt("ADMIN_TOKEN:") || ""; sessionStorage.setItem("admin_token", t); }}
+  if (!t) { t = prompt("ADMIN_TOKEN:") || ""; if (t) sessionStorage.setItem("admin_token", t); }
   return t;
-}}
-document.getElementById("alta").addEventListener("submit", async (ev) => {{
+}
+async function call(method, path, body) {
+  const r = await fetch(path, {method, headers: {"Content-Type": "application/json",
+    "Authorization": "Bearer " + token()}, body: body ? JSON.stringify(body) : undefined});
+  if (r.status === 401 || r.status === 403) sessionStorage.removeItem("admin_token");
+  return r;
+}
+function cell(tr, text) { const td = document.createElement("td"); td.textContent = text; tr.appendChild(td); return td; }
+async function load() {
+  const r = await call("GET", "/admin/workers");
+  if (!r.ok) { msg.textContent = "Error " + r.status; return; }
+  rows.replaceChildren();
+  for (const w of (await r.json()).workers) {
+    const tr = document.createElement("tr");
+    cell(tr, w.node); cell(tr, w.origen); cell(tr, w.estado);
+    cell(tr, w.en_ejecucion + "/" + w.capacidad); cell(tr, w.sellado ? "si" : "no");
+    cell(tr, w.ultimo_latido || "-");
+    const b = document.createElement("button"); b.textContent = "Dar de baja";
+    b.addEventListener("click", async () => {
+      const d = await call("DELETE", "/admin/workers/" + encodeURIComponent(w.node));
+      msg.textContent = d.ok ? "Worker dado de baja." : "Error " + d.status; if (d.ok) load();
+    });
+    cell(tr, "").appendChild(b); rows.appendChild(tr);
+  }
+}
+document.getElementById("alta").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const node = document.getElementById("node").value;
-  const r = await fetch("/admin/workers", {{
-    method: "POST",
-    headers: {{"Content-Type": "application/json", "Authorization": "Bearer " + token()}},
-    body: JSON.stringify({{node}})
-  }});
-  msg.textContent = r.ok ? "Worker agregado." : "Error " + r.status + ": " + await r.text();
-  if (r.ok) location.reload();
-}});
-async function baja(node) {{
-  const r = await fetch("/admin/workers/" + encodeURIComponent(node), {{
-    method: "DELETE", headers: {{"Authorization": "Bearer " + token()}}
-  }});
-  msg.textContent = r.ok ? "Worker dado de baja." : "Error " + r.status;
-  if (r.ok) location.reload();
-}}
-</script>
-</body>
-</html>"""
-
-
-def _panel_row(view: dict) -> str:
-    node = view["node"]
-    return (
-        "<tr>"
-        f"<td>{node}</td>"
-        f"<td>{view['origen']}</td>"
-        f"<td class=\"estado\">{view['estado']}</td>"
-        f"<td>{view['en_ejecucion']}/{view['capacidad']}</td>"
-        f"<td>{'sí' if view['sellado'] else 'no'}</td>"
-        f"<td>{view['ultimo_latido'] or '—'}</td>"
-        f"<td><button onclick=\"baja('{node}')\">Dar de baja</button></td>"
-        "</tr>"
-    )
+  const r = await call("POST", "/admin/workers", {node: document.getElementById("node").value});
+  msg.textContent = r.ok ? "Worker agregado." : "Error " + r.status; if (r.ok) load();
+});
+load(); setInterval(load, 15000);
+</script></body></html>"""
