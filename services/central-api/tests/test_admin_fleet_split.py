@@ -142,3 +142,102 @@ def test_panel_admin_muestra_las_dos_secciones_de_flota() -> None:
     assert 'api("/admin/autoscale/terminate"' in cuerpo
     assert "manuales / ${esc(conteoEfimeros)} efimeros" in cuerpo
     assert "${esc(worker.instance_id" in cuerpo
+    assert 'id="fleet-version-summary"' in cuerpo
+    assert 'id="fleet-outdated-only"' in cuerpo
+    assert cuerpo.count("<th>Versión</th>") == 2
+    assert "Desactualizado" in cuerpo
+    assert "de ${totalVersions} desactualizados" in cuerpo
+    assert "manualesVisibles" in cuerpo
+    assert "efimerosVisibles" in cuerpo
+
+
+def test_admin_fleet_expone_latest_y_cuenta_workers_desactualizados(admin_fleet, monkeypatch) -> None:
+    from central_api.store import ADMIN_NODES, WORKERS, WorkerEntry
+
+    monkeypatch.setenv("WORKER_NODES", "")
+    monkeypatch.delenv("WORKER_LATEST_VERSION", raising=False)
+    get_settings.cache_clear()
+    versiones = {
+        "worker-old:8080": ("3.9.9", ""),
+        "worker-latest:8080": ("3.10.0", "sha256:bbb"),
+        "worker-same-tag-old-digest:8080": ("3.10.0", "sha256:aaa"),
+        "worker-unreported:8080": ("", ""),
+    }
+    for node, (version, digest) in versiones.items():
+        ADMIN_NODES.add(node)
+        WORKERS[node] = WorkerEntry(
+            node=node, status="SANO", app_version=version, image_digest=digest
+        )
+
+    cliente = TestClient(create_app())
+    respuesta = cliente.get(
+        "/admin/fleet", headers={"Authorization": "Bearer admin-fleet-token"}
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["latest_version"] == "3.10.0"
+    filas = {fila["node"]: fila for fila in cuerpo["manuales"]}
+    assert filas["worker-latest:8080"]["version"] == "3.10.0"
+    assert filas["worker-latest:8080"]["image_digest"] == "sha256:bbb"
+    assert filas["worker-latest:8080"]["is_latest"] is True
+    assert filas["worker-old:8080"]["outdated"] is True
+    assert filas["worker-same-tag-old-digest:8080"]["is_latest"] is False
+    assert filas["worker-unreported:8080"]["version"] is None
+    assert filas["worker-unreported:8080"]["outdated"] is True
+    assert cuerpo["resumen"]["versiones"] == {
+        "latest_version": "3.10.0",
+        "latest_digest": "sha256:bbb",
+        "total": 4,
+        "outdated": 3,
+        "unknown": 1,
+    }
+
+
+def test_admin_fleet_expected_version_overrides_reported_high_water(admin_fleet, monkeypatch) -> None:
+    from central_api.store import ADMIN_NODES, WORKERS, WorkerEntry
+
+    monkeypatch.setenv("WORKER_NODES", "")
+    monkeypatch.setenv("WORKER_LATEST_VERSION", "3.11.0")
+    get_settings.cache_clear()
+    node = "worker-expected:8080"
+    ADMIN_NODES.add(node)
+    WORKERS[node] = WorkerEntry(node=node, app_version="3.10.9", status="SANO")
+
+    cliente = TestClient(create_app())
+    cuerpo = cliente.get(
+        "/admin/fleet", headers={"Authorization": "Bearer admin-fleet-token"}
+    ).json()
+
+    fila = next(item for item in cuerpo["manuales"] if item["node"] == node)
+    assert fila["latest_version"] == "3.11.0"
+    assert fila["is_latest"] is False
+    assert cuerpo["resumen"]["versiones"]["outdated"] == 1
+
+
+def test_worker_registration_and_heartbeat_store_version_metadata(admin_fleet) -> None:
+    from central_api.store import WORKERS
+
+    cliente = TestClient(create_app())
+    registro = cliente.post(
+        "/internal/v1/workers/register",
+        json={
+            "advertised_url": "http://env-node:8080",
+            "image": {"app_version": "3.4.1", "digest": "sha256:old"},
+        },
+    )
+    assert registro.status_code == 200
+    assert WORKERS["env-node:8080"].app_version == "3.4.1"
+    assert WORKERS["env-node:8080"].image_digest == "sha256:old"
+
+    latido = cliente.post(
+        "/internal/v1/workers/env-node:8080/heartbeat",
+        json={
+            "image": {"version": "3.4.2", "digest": "sha256:new"},
+            "capacity": 5,
+            "en_ejecucion": 0,
+        },
+    )
+    assert latido.status_code == 200
+    assert WORKERS["env-node:8080"].app_version == "3.4.2"
+    assert WORKERS["env-node:8080"].image_digest == "sha256:new"

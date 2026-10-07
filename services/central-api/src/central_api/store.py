@@ -1,9 +1,9 @@
 """Almacén en memoria del esqueleto F0-F2.
 
 Fases posteriores lo reemplazan por PostgreSQL (único cliente: esta central,
-invariante I-4). La forma ya respeta la regla del esqueleto: de cada worker
-SOLO se guarda su dirección ``ip:port`` + estado reportado por HTTP; el
-detalle vivo (carga, salud) se inspecciona contra el worker por HTTP.
+invariante I-4). La central conserva la dirección ``ip:port``, el estado
+reportado por HTTP y metadatos de build (versión y digest opcional). La carga y
+salud viva se inspeccionan contra el worker por HTTP.
 """
 
 from __future__ import annotations
@@ -38,6 +38,8 @@ class WorkerEntry:
     sealed_pubkey_pem: str = ""  # RSA pública efímera para el sobre sellado
     status: str = "REGISTRANDO"
     capabilities: list[str] = field(default_factory=list)
+    app_version: str = ""
+    image_digest: str = ""
     running_jobs: int = 0
     reserved_slots: int = 0
     capacity: int = 5

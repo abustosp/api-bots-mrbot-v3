@@ -58,6 +58,10 @@ services:
       - ${WORKER_ADVERTISED_URL:?fijar URL propia http(s)://IP:8080}
       - --concurrency
       - "5"
+      - --image-version
+      - ${APP_VERSION:?fijar tag o git SHA de bot-worker}
+      - --image-digest
+      - ${WORKER_IMAGE_DIGEST:-}
     logging:
       driver: json-file
       options:

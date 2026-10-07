@@ -487,6 +487,9 @@ async def _register_once(
         "capacity": settings.worker_concurrency,
         "capabilities": [],
         "build_version": settings.image_version,
+        "app_version": settings.image_version,
+        "image_version": settings.image_version,
+        "image_digest": settings.image_digest,
         "sealed_pubkey_pem": pubkey_pem,
     }
     for intento in range(len(REGISTER_RETRY_DELAYS_SECONDS) + 1):
@@ -580,6 +583,7 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
                 worker_id=node or settings.worker_id,
                 protocol_version=PROTOCOL_VERSION,
                 image_version=settings.image_version,
+                image_digest=settings.image_digest,
                 supervisor=supervisor,
                 interval=settings.heartbeat_interval_seconds,
                 jitter=settings.heartbeat_jitter_seconds,

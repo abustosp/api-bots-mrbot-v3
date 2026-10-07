@@ -21,7 +21,9 @@ variables de entorno.
 
 ```bash
 cp infra/compose/worker.env.example infra/compose/.env.worker
-# Edit .env.worker: CENTRAL_URL, WORKER_ADVERTISED_URL, WORKER_CONCURRENCY y WORKER_NUMBER.
+# Edit .env.worker: CENTRAL_URL, WORKER_ADVERTISED_URL, WORKER_CONCURRENCY,
+# WORKER_NUMBER y APP_VERSION. Use a release tag or git SHA, not `dev`.
+# Optional: WORKER_IMAGE_DIGEST=sha256:<digest-resuelto-de-la-imagen>.
 ```
 
 `WORKER_TOKEN` no forma parte del protocolo actual y no se consume desde `.env`;
@@ -29,6 +31,25 @@ Compose usa las variables solo para interpolar los argumentos CLI, no las pasa a
 proceso worker. Agrega la URL anunciada exacta a `WORKER_NODES` de la central
 (o registra el nodo desde el panel). `WORKER_CONCURRENCY` tiene tope duro de 10
 (invariante W-2).
+
+`APP_VERSION` llega al registro y a cada heartbeat como versión de aplicación.
+Para identificar el commit incluido en la imagen, configura el tag de release o
+el SHA del commit en `APP_VERSION` antes de ejecutar Compose. Por ejemplo:
+
+```bash
+export APP_VERSION="$(git rev-parse --short=12 HEAD)"
+docker compose -f infra/compose/worker.compose.yaml \
+  --env-file infra/compose/.env.worker up -d
+```
+
+Compose lo convierte en `--image-version`; el proceso worker sigue sin recibir
+variables de entorno. Si el pipeline conoce el digest resuelto, configura también
+`WORKER_IMAGE_DIGEST=sha256:<64 hex>` para que la UI compare imágenes incluso
+cuando comparten el mismo tag. En cada despliegue, fija en el `.env` de central
+`WORKER_LATEST_VERSION` al mismo `APP_VERSION`; si tienes digest, usa
+`APP_VERSION@WORKER_IMAGE_DIGEST`. Así los workers antiguos siguen marcados como
+obsoletos durante un rollout. Si se deja vacío, la central infiere el mayor valor
+observado entre workers registrados.
 
 Con nginx-v2, el worker queda disponible en
 `https://worker-${WORKER_NUMBER}.mrbot.com.ar`. El dominio no sustituye la
@@ -41,7 +62,8 @@ entorno dentro del contenedor y sin arrancar central o PostgreSQL en este host):
 
 ```text
 cp infra/compose/worker.env.example infra/compose/.env.worker
-# Editar .env.worker y fijar CENTRAL_URL, WORKER_ADVERTISED_URL y WORKER_CONCURRENCY.
+# Editar .env.worker y fijar CENTRAL_URL, WORKER_ADVERTISED_URL,
+# WORKER_CONCURRENCY y APP_VERSION (tag o git SHA del build).
 docker compose -f infra/compose/worker.compose.yaml \
   --env-file infra/compose/.env.worker up -d
 ```
@@ -71,7 +93,7 @@ Nunca matar primero un worker con jobs en vuelo:
 1. Marcar el worker como DRENANDO en la central: deja de recibir jobs.
 2. Esperar que termine los jobs en vuelo (hasta 120 segundos) o que
    la central los reencole por vencimiento del lease.
-3. Recrear con la imagen nueva por digest y confirmar estado SANO.
+3. Recrear con la imagen nueva por digest, actualizar `APP_VERSION` y confirmar estado SANO.
 4. Repetir worker por worker, conservando capacidad de la flota.
 
 ```text

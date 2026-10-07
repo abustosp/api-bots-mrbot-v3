@@ -28,9 +28,12 @@ class _Client:
     def __init__(self, responses: list[object]) -> None:
         self.responses = responses
         self.calls = 0
+        self.payloads: list[dict] = []
 
     async def post(self, *_args, **_kwargs):
         self.calls += 1
+        if isinstance(_kwargs.get("json"), dict):
+            self.payloads.append(_kwargs["json"])
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -123,3 +126,60 @@ def test_register_accepted_false_no_es_exito():
 
     assert result == (None, "", "")
     assert client.calls == 1
+
+
+def test_register_envia_version_y_digest_del_build():
+    settings = WorkerConfig(
+        central_url="http://central:8000",
+        advertised_url="http://worker:8080",
+        image_version="4.2.0+abc123",
+        image_digest="sha256:0123456789",
+    )
+    client = _Client(
+        [
+            _Response(
+                200,
+                {
+                    "accepted": True,
+                    "service_token": "service-token-test",
+                    "assignment_verify_key_pem": "verify-key-test",
+                },
+            )
+        ]
+    )
+
+    result = asyncio.run(main._register_once(client, settings, "pubkey", "nonce"))
+
+    assert result[0] == "worker:8080"
+    assert client.payloads[0]["build_version"] == "4.2.0+abc123"
+    assert client.payloads[0]["app_version"] == "4.2.0+abc123"
+    assert client.payloads[0]["image_digest"] == "sha256:0123456789"
+
+
+def test_heartbeat_incluye_version_y_digest_de_imagen(monkeypatch):
+    from bot_worker.reporting import heartbeat
+
+    class Supervisor:
+        capacity = 5
+        en_ejecucion = 0
+        en_cola = 0
+        counters = {}
+
+        def items(self):
+            return []
+
+    monkeypatch.setattr(heartbeat, "_resources", lambda: {})
+    monkeypatch.setattr(heartbeat, "_manifest_hash", lambda: "sha256:manifest")
+    payload = heartbeat.build_heartbeat_payload(
+        worker_id="worker:8080",
+        protocol_version=1,
+        image_version="4.2.0+abc123",
+        image_digest="sha256:0123456789",
+        supervisor=Supervisor(),
+        state="SANO",
+        accepting_jobs=True,
+        sequence=1,
+    )
+
+    assert payload["image"]["version"] == "4.2.0+abc123"
+    assert payload["image"]["digest"] == "sha256:0123456789"

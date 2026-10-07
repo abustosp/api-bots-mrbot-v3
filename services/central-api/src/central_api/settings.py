@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     # Inventario de workers: SOLO direcciones "ip:port", contactadas por HTTP.
     # El panel de administración puede sumar nodos en caliente (ADMIN_NODES).
     worker_nodes: str = Field(default="", alias="WORKER_NODES")
+    # Versión objetivo opcional de la flota. Sin valor, se deriva el máximo
+    # observado entre los workers registrados.
+    worker_latest_version: str = Field(default="", alias="WORKER_LATEST_VERSION")
     # Firma Ed25519 de asignaciones (la central firma, el worker verifica con
     # la pública que recibe en el registro). Sin clave configurada se genera
     # una efímera por proceso (desarrollo): los workers deben re-registrarse

@@ -158,6 +158,7 @@ class WorkerRepository:
         queued_jobs: int,
         capacity: int,
         metrics: dict | None = None,
+        app_version: str | None = None,
     ) -> WorkerHeartbeat:
         """Persiste el latido y refresca el snapshot del worker."""
         if (
@@ -182,6 +183,8 @@ class WorkerRepository:
         worker.running_jobs = running_jobs
         worker.queued_jobs = queued_jobs
         worker.capacity = capacity
+        if app_version is not None:
+            worker.app_version = app_version
         worker.last_heartbeat_at = datetime.now(timezone.utc)
         self._session.add(beat)
         await self._session.flush()

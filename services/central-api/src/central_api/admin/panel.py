@@ -227,11 +227,12 @@ details > .details-body { padding: 0 14px 14px; }
       <section class="view hidden" data-panel="fleet">
         <div class="kicker">Operación de workers</div><h2>Flota</h2><p class="subtle">Estado derivado, capacidad, protocolo y alertas del plano de ejecución. Agrega nodos al inventario en caliente sin tocar WORKER_NODES.</p>
         <div class="form-actions"><button class="button primary" type="button" id="fleet-refresh">Actualizar</button><button class="button secondary" type="button" id="fleet-evaluate">Evaluar alertas</button><a class="button secondary" href="/admin/workers/panel" target="_blank" rel="noreferrer">Vista clásica</a></div>
+        <div class="form-actions"><strong id="fleet-version-summary" class="muted" aria-live="polite">Versiones: cargando...</strong><label class="checkbox-inline"><input id="fleet-outdated-only" type="checkbox"> Solo desactualizados</label></div>
         <form id="add-worker-form" class="toolbar"><div class="field wide"><label for="new-worker-node">Agregar worker (ip:puerto)</label><input id="new-worker-node" type="text" placeholder="10.0.0.13:8080 o bot-worker:8080" required></div><button class="button primary" type="submit">Agregar</button><span class="muted">Se sondea best-effort; igual se registra aunque aún no responda.</span></form>
         <h3>Workers manuales <span class="pill" id="fleet-manual-count">0</span></h3>
-        <div class="table-wrap"><table><thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Ejecución</th><th>Protocolo</th><th>Bots</th><th>Error</th><th>Alertas</th><th>Acciones</th></tr></thead><tbody id="fleet-manual-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Versión</th><th>Ejecución</th><th>Protocolo</th><th>Bots</th><th>Error</th><th>Alertas</th><th>Acciones</th></tr></thead><tbody id="fleet-manual-table"><tr><td colspan="10" class="empty">Cargando...</td></tr></tbody></table></div>
         <h3 style="margin-top:24px">Workers efímeros (EC2) <span class="pill" id="fleet-ephemeral-count">0</span></h3>
-        <div class="table-wrap"><table><thead><tr><th>Instancia</th><th>Tipo</th><th>RAM</th><th>Semaphore (slots)</th><th>Edad</th><th>Estado</th><th>Ejecución</th><th>Acciones</th></tr></thead><tbody id="fleet-ephemeral-table"><tr><td colspan="8" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Instancia</th><th>Tipo</th><th>RAM</th><th>Semaphore (slots)</th><th>Edad</th><th>Estado</th><th>Versión</th><th>Ejecución</th><th>Acciones</th></tr></thead><tbody id="fleet-ephemeral-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="audit">
@@ -785,16 +786,35 @@ details > .details-body { padding: 0 14px 14px; }
     const motivo = window.prompt("Motivo de cancelación:", "cancelación desde panel V3"); if (!motivo) return; try { await api(`/admin/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: JSON.stringify({ motivo }) }); flash("Comando de cancelación registrado."); await loadJobs(); } catch (error) { flash(error.message, "error"); }
   }
   const formatAge = (seconds) => { if (seconds == null || !Number.isFinite(Number(seconds))) return "—"; const total = Math.max(0, Math.floor(Number(seconds))); const days = Math.floor(total / 86400); const hours = Math.floor((total % 86400) / 3600); const minutes = Math.floor((total % 3600) / 60); return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`; };
+  function fleetVersionBadge(worker) {
+    const version = worker.version || worker.app_version || worker.image_digest || "";
+    const label = worker.outdated === true ? "Desactualizado" : worker.is_latest === true ? "Actualizado" : version ? "Sin referencia" : "Sin versión";
+    const kind = worker.outdated === true ? "status-bad" : worker.is_latest === true ? "status-good" : "status-neutral";
+    const latest = worker.latest_version ? `Latest: ${worker.latest_version}` : "Latest no disponible";
+    const digest = worker.image_digest ? `<br><span class="muted" title="${esc(worker.image_digest)}">digest ${esc(short(worker.image_digest, 20))}</span>` : "";
+    return `<span class="status ${kind}" title="${esc(latest)}">${label}</span><br><code title="${esc(version || "Sin versión reportada")}">${esc(version ? short(version, 24) : "Sin versión")}</code>${digest}`;
+  }
   async function loadFleet() {
     try {
       const data = await api("/admin/fleet");
       const legacy = data.flota || [];
       const manuales = data.manuales || legacy.filter((worker) => worker.origen !== "efimero");
       const efimeros = data.efimeros || legacy.filter((worker) => worker.origen === "efimero");
+      const versionSummary = data.resumen?.versiones || {};
+      const workers = [...manuales, ...efimeros];
+      const totalVersions = Number(versionSummary.total ?? workers.length);
+      const outdatedCount = Number(versionSummary.outdated ?? workers.filter((worker) => worker.outdated === true).length);
+      const latestVersion = versionSummary.latest_version ?? data.latest_version;
+      const latestDigest = versionSummary.latest_digest ?? data.latest_digest;
+      const unknownCount = Number(versionSummary.unknown ?? workers.filter((worker) => !worker.version).length);
+      $("#fleet-version-summary").textContent = `${outdatedCount} de ${totalVersions} desactualizados · Latest: ${latestVersion || "sin versión reportada"}${latestDigest ? ` · digest ${short(latestDigest, 20)}` : ""}${unknownCount ? ` · ${unknownCount} sin versión` : ""}`;
+      const outdatedOnly = $("#fleet-outdated-only").checked;
+      const manualesVisibles = outdatedOnly ? manuales.filter((worker) => worker.outdated === true) : manuales;
+      const efimerosVisibles = outdatedOnly ? efimeros.filter((worker) => worker.outdated === true) : efimeros;
       $("#fleet-manual-count").textContent = String(data.resumen?.manuales?.total ?? manuales.length);
       $("#fleet-ephemeral-count").textContent = String(data.resumen?.efimeros?.total ?? efimeros.length);
-      $("#fleet-manual-table").innerHTML = manuales.length ? manuales.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></td></tr>`).join("") : `<tr><td colspan="9" class="empty">No hay workers manuales inventariados. Agrega uno arriba.</td></tr>`;
-      $("#fleet-ephemeral-table").innerHTML = efimeros.length ? efimeros.map((worker) => `<tr><td><code>${esc(worker.instance_id || "—")}</code></td><td>${esc(worker.instance_type || "—")}</td><td>${esc(worker.ram_gib == null ? "—" : `${worker.ram_gib} GiB`)}</td><td>${esc(worker.concurrency ?? worker.capacidad ?? "—")}</td><td>${esc(formatAge(worker.edad))}</td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.concurrency ?? worker.capacidad ?? 0)}</td><td class="actions"><button class="button danger small" data-action="ephemeral-terminate" data-id="${esc(worker.instance_id || "")}">Terminar</button></td></tr>`).join("") : `<tr><td colspan="8" class="empty">No hay workers efímeros (EC2).</td></tr>`;
+      $("#fleet-manual-table").innerHTML = manualesVisibles.length ? manualesVisibles.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></td></tr>`).join("") : `<tr><td colspan="10" class="empty">${outdatedOnly ? "No hay workers manuales desactualizados." : "No hay workers manuales inventariados. Agrega uno arriba."}</td></tr>`;
+      $("#fleet-ephemeral-table").innerHTML = efimerosVisibles.length ? efimerosVisibles.map((worker) => `<tr><td><code>${esc(worker.instance_id || "—")}</code></td><td>${esc(worker.instance_type || "—")}</td><td>${esc(worker.ram_gib == null ? "—" : `${worker.ram_gib} GiB`)}</td><td>${esc(worker.concurrency ?? worker.capacidad ?? "—")}</td><td>${esc(formatAge(worker.edad))}</td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.concurrency ?? worker.capacidad ?? 0)}</td><td class="actions"><button class="button danger small" data-action="ephemeral-terminate" data-id="${esc(worker.instance_id || "")}">Terminar</button></td></tr>`).join("") : `<tr><td colspan="9" class="empty">${outdatedOnly ? "No hay workers efímeros desactualizados." : "No hay workers efímeros (EC2)."}</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
   }
   async function evaluateFleet() { try { const data = await api("/admin/fleet/evaluate", { method: "POST" }); flash(`Evaluación completada: ${data.activas?.length || 0} alertas activas.`); await loadFleet(); } catch (error) { flash(error.message, "error"); } }
@@ -829,7 +849,7 @@ details > .details-body { padding: 0 14px 14px; }
   document.addEventListener("click", (event) => { if (!$("#executions-table-combobox").contains(event.target)) closeTableOptions(true); });
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
   $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
-  $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
+  $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>

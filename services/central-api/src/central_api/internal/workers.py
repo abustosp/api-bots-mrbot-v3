@@ -1,7 +1,7 @@
 """Registro y latidos de workers (plan 02 §7.2-§7.5).
 
-La central SOLO guarda la dirección ``ip:port`` de cada worker (más el estado
-que el propio worker reporta por HTTP). El alta acepta la unión de
+La central guarda la dirección ``ip:port`` de cada worker, su versión de build
+y el estado reportado por HTTP. El alta acepta la unión de
 ``WORKER_NODES`` y los nodos del panel admin (nunca solo uno); la capacidad
 se topa en 10 (W-2); la salud viva se confirma por HTTP contra el worker
 además de los latidos. ``protocol_version`` es entero (1).
@@ -27,7 +27,7 @@ from central_api.store import ADMIN_NODES, EPHEMERAL_WORKERS, WORKERS, WorkerEnt
 from central_api.worker_nodes import merge_nodes, node_from_url
 
 
-async def _registrar_db(node: str, body: object) -> UUID | None:
+async def _registrar_db(node: str, body: RegisterBody) -> UUID | None:
     """Registra el worker en PostgreSQL; ``None`` si hay que usar memoria.
 
     Idempotente por ``endpoint``: un re-registro actualiza pubkey, capacidad
@@ -43,7 +43,7 @@ async def _registrar_db(node: str, body: object) -> UUID | None:
             fila = await repo.register(
                 name=node,
                 endpoint_node=node,
-                app_version=str(getattr(body, "build_version", "") or ""),
+                app_version=_reported_version(body),
                 allowed=merge_nodes(get_settings().worker_node_list, ADMIN_NODES),
                 capacity=min(max(1, int(getattr(body, "capacity", 5) or 5)), 10),
                 sealed_pubkey_pem=str(getattr(body, "sealed_pubkey_pem", "") or "") or None,
@@ -55,7 +55,13 @@ async def _registrar_db(node: str, body: object) -> UUID | None:
 
 
 async def _latido_db(
-    worker_id: UUID | None, node: str, status: str, running: int, capacity: int
+    worker_id: UUID | None,
+    node: str,
+    status: str,
+    running: int,
+    capacity: int,
+    app_version: str = "",
+    image_digest: str = "",
 ) -> bool:
     """Persiste el latido en PostgreSQL; ``False`` si hay que usar memoria."""
     if worker_id is None:
@@ -73,6 +79,8 @@ async def _latido_db(
                 running_jobs=running,
                 queued_jobs=0,
                 capacity=capacity,
+                app_version=app_version or None,
+                metrics={"image_digest": image_digest} if image_digest else {},
             )
     except Exception:  # noqa: BLE001 - el latido vive igual en memoria
         return False
@@ -116,6 +124,7 @@ async def _nodo_desde_ruta(worker_id: str) -> str:
                     entrada.capacity = int(fila.capacity or 5)
                     entrada.running_jobs = int(fila.running_jobs or 0)
                     entrada.sealed_pubkey_pem = str(fila.sealed_pubkey_pem or "")
+                    entrada.app_version = str(fila.app_version or "")
                     entrada.last_heartbeat_at = fila.last_heartbeat_at
                     WORKERS[nodo] = entrada
                     return nodo
@@ -151,6 +160,7 @@ async def _reincorporar_por_latido(node: str) -> WorkerEntry | None:
                     entrada.capacity = int(fila.capacity or 5)
                     entrada.running_jobs = int(fila.running_jobs or 0)
                     entrada.sealed_pubkey_pem = str(fila.sealed_pubkey_pem or "")
+                    entrada.app_version = str(fila.app_version or "")
                     entrada.last_heartbeat_at = fila.last_heartbeat_at
                     WORKERS[node] = entrada
                     return entrada
@@ -181,6 +191,10 @@ class RegisterBody(BaseModel):
     capacity: int = 5
     capabilities: list[str] = Field(default_factory=list)
     build_version: str = ""
+    app_version: str = ""
+    image_version: str = ""
+    image_digest: str = ""
+    image: dict = Field(default_factory=dict)
     protocol_version: int = PROTOCOL_VERSION
     instance_nonce: str = Field(
         default="",
@@ -197,6 +211,29 @@ class HeartbeatBody(BaseModel):
     capacity: int = 5
     en_ejecucion: int = 0
     en_cola_local: int = 0
+    build_version: str = ""
+    app_version: str = ""
+    image_version: str = ""
+    image_digest: str = ""
+    image: dict = Field(default_factory=dict)
+
+
+def _reported_version(body: RegisterBody | HeartbeatBody) -> str:
+    """Acepta los nombres del protocolo formal y los del worker legacy."""
+    image = getattr(body, "image", {}) or {}
+    return str(
+        body.app_version
+        or body.image_version
+        or body.build_version
+        or image.get("app_version")
+        or image.get("version")
+        or ""
+    ).strip()
+
+
+def _reported_digest(body: RegisterBody | HeartbeatBody) -> str:
+    image = getattr(body, "image", {}) or {}
+    return str(body.image_digest or image.get("digest") or "").strip()
 
 
 @router.post("/workers/register")
@@ -232,6 +269,8 @@ async def register_worker(body: RegisterBody) -> dict:
     entry.status = "DRENANDO" if draining else "REGISTRANDO"
     entry.capacity = min(max(1, body.capacity), MAX_WORKER_CAPACITY)
     entry.capabilities = body.capabilities
+    entry.app_version = _reported_version(body)
+    entry.image_digest = _reported_digest(body)
     if body.sealed_pubkey_pem:
         entry.sealed_pubkey_pem = body.sealed_pubkey_pem
     WORKERS[node] = entry
@@ -339,6 +378,12 @@ async def worker_heartbeat(worker_id: str, body: HeartbeatBody) -> dict:
     entry.status = "DRENANDO" if draining else body.status
     entry.capacity = min(max(1, body.capacity), MAX_WORKER_CAPACITY)
     entry.running_jobs = max(0, body.en_ejecucion)
+    reported_version = _reported_version(body)
+    if reported_version:
+        entry.app_version = reported_version
+    reported_digest = _reported_digest(body)
+    if reported_digest:
+        entry.image_digest = reported_digest
     entry.last_heartbeat_at = utcnow()
     if ephemeral is not None:
         ephemeral["last_heartbeat_at"] = entry.last_heartbeat_at
@@ -346,6 +391,12 @@ async def worker_heartbeat(worker_id: str, body: HeartbeatBody) -> dict:
     # Con base configurada el latido canónico vive en PostgreSQL.
     if db_configurado():
         await _latido_db(
-            _uuid_de(entry), node, entry.status, entry.running_jobs, entry.capacity
+            _uuid_de(entry),
+            node,
+            entry.status,
+            entry.running_jobs,
+            entry.capacity,
+            entry.app_version,
+            entry.image_digest,
         )
     return {"ok": True, "node": entry.node, "status": entry.status}

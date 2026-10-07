@@ -203,6 +203,10 @@ services:
       - ${WORKER_ADVERTISED_URL:-http://bot-worker:8080}
       - --concurrency
       - "5"
+      - --image-version
+      - ${APP_VERSION:-3.0.0-dev}
+      - --image-digest
+      - ${WORKER_IMAGE_DIGEST:-}
     volumes:
       # Identidad mTLS montada (archivos, no entorno): la usa el canal
       # futuro y el overlay docker-compose.mtls.yml. Sin secretos de la

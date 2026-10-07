@@ -30,6 +30,10 @@ services:
       - ${WORKER_ADVERTISED_URL:?fijar URL propia http(s)://IP:8080}
       - --concurrency
       - ${WORKER_CONCURRENCY:-5}
+      - --image-version
+      - ${APP_VERSION:-3.0.0-dev}
+      - --image-digest
+      - ${WORKER_IMAGE_DIGEST:-}
     expose:
       - "8080"
     healthcheck:

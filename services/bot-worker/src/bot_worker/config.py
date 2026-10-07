@@ -110,6 +110,7 @@ class WorkerConfig:
     work_dir: str = "/work"
     log_level: str = "INFO"
     image_version: str = "3.0.0-dev"
+    image_digest: str = ""
     tls_ca_file: str = "/certs/ca.pem"
     tls_cert_file: str = "/certs/worker-server.pem"
     tls_key_file: str = "/certs/worker-server.key"
@@ -157,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--callback-timeout", dest="callback_timeout_seconds", type=int, default=3)
     p.add_argument("--log-level", default="INFO")
     p.add_argument("--image-version", default="3.0.0-dev")
+    p.add_argument("--image-digest", default="")
     p.add_argument("--tls-ca", dest="tls_ca_file", default="/certs/ca.pem")
     p.add_argument("--tls-cert", dest="tls_cert_file", default="/certs/worker-server.pem")
     p.add_argument("--tls-key", dest="tls_key_file", default="/certs/worker-server.key")
@@ -198,6 +200,7 @@ def parse_args(argv: list[str] | None = None) -> WorkerConfig:
         work_dir=ns.work_dir,
         log_level=ns.log_level,
         image_version=ns.image_version,
+        image_digest=ns.image_digest,
         tls_ca_file=ns.tls_ca_file,
         tls_cert_file=ns.tls_cert_file,
         tls_key_file=ns.tls_key_file,

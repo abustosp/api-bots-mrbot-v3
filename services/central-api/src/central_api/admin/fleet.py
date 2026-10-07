@@ -16,6 +16,7 @@ máquina de estados. Este módulo agrega:
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -26,7 +27,7 @@ from central_api.admin._common import require_admin, validar_motivo
 from central_api.admin.audit import log_event, nuevo_uuid7
 from central_api.admin.workers import derive_state, worker_overview
 from central_api.settings import get_settings
-from central_api.store import EPHEMERAL_WORKERS, JOBS, WORKERS, utcnow
+from central_api.store import EPHEMERAL_WORKERS, JOBS, WORKERS, WorkerEntry, utcnow
 from central_api.worker_nodes import merge_nodes
 
 router = APIRouter()
@@ -34,6 +35,91 @@ router = APIRouter()
 # Los registros efímeros legacy no guardaban el semaphore; el default histórico
 # de EC2 era 5 y no debe seguir un worker_capacity global que ahora puede ser 10.
 DEFAULT_EPHEMERAL_CONCURRENCY = 5
+_SEMVER = re.compile(
+    r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
+)
+
+
+def _version_sort_key(version: str, digest: str = "") -> tuple:
+    """Ordena SemVer numericamente; etiquetas opacas usan orden textual."""
+    texto = version.strip()
+    match = _SEMVER.fullmatch(texto)
+    if match is None:
+        return (0, texto.casefold(), digest.casefold())
+    prerelease = match.group(4)
+    prerelease_key = tuple(
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
+        for part in (prerelease.split(".") if prerelease else [])
+    )
+    return (
+        1,
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+        1 if prerelease is None else 0,
+        prerelease_key,
+        digest.casefold(),
+        texto.casefold(),
+    )
+
+
+def _latest_version() -> tuple[str | None, str | None, str | None]:
+    """Retorna (latest, digest, versión de app) desde settings o flota activa."""
+    expected = get_settings().worker_latest_version.strip()
+    if expected:
+        if expected.startswith("sha256:"):
+            return expected, expected, None
+        if "@" in expected:
+            version, digest = expected.split("@", 1)
+            return version or digest, digest or None, version or None
+        return expected, None, expected
+
+    reported = [
+        (worker.app_version.strip(), worker.image_digest.strip())
+        for worker in WORKERS.values()
+        if worker.app_version.strip() or worker.image_digest.strip()
+    ]
+    if not reported:
+        return None, None, None
+    app_version, digest = max(
+        reported,
+        key=lambda item: _version_sort_key(item[0] or item[1], item[1]),
+    )
+    return app_version or digest, digest or None, app_version or None
+
+
+def _version_fields(entrada: WorkerEntry | None) -> dict:
+    app_version = str(getattr(entrada, "app_version", "") or "").strip()
+    digest = str(getattr(entrada, "image_digest", "") or "").strip()
+    latest, latest_digest, latest_app = _latest_version()
+    if latest is None:
+        is_latest = None
+    elif latest_app is None:
+        is_latest = digest == latest_digest
+    else:
+        is_latest = app_version == latest_app and (
+            latest_digest is None or digest == latest_digest
+        )
+    return {
+        "version": app_version or digest or None,
+        "app_version": app_version or None,
+        "image_digest": digest or None,
+        "latest_version": latest,
+        "latest_digest": latest_digest,
+        "is_latest": is_latest,
+        "outdated": None if is_latest is None else not is_latest,
+    }
+
+
+def _version_summary(filas: list[dict]) -> dict:
+    latest, latest_digest, _ = _latest_version()
+    return {
+        "latest_version": latest,
+        "latest_digest": latest_digest,
+        "total": len(filas),
+        "outdated": sum(1 for fila in filas if fila.get("outdated") is True),
+        "unknown": sum(1 for fila in filas if not fila.get("version")),
+    }
 
 
 @dataclass
@@ -153,6 +239,7 @@ def _vista_fila(nodo: str) -> dict:
     )
     return {
         **base,
+        **_version_fields(entrada),
         "origen": "efimero" if ephemeral is not None else base.get("origen"),
         "instance_id": ephemeral.get("instance_id") if ephemeral else None,
         "protocolo": settings.worker_protocol_version,
@@ -188,6 +275,7 @@ def _vista_efimero(instance_id: str, item: dict) -> dict:
         "jobs_activos": 0,
         "capacidad": DEFAULT_EPHEMERAL_CONCURRENCY,
         "alertas": [],
+        **_version_fields(None),
     }
     entrada = WORKERS.get(node) if node else None
     ec2_estado = str(item.get("state") or "").strip().lower()
@@ -299,12 +387,19 @@ def ver_flota(authorization: str | None = Header(default=None)) -> dict:
     resumen_manuales = _resumen_filas(manuales)
     resumen_efimeros = _resumen_filas(efimeros)
     resumen_efimeros["costo_estimado_usd"] = _costo_estimado_efimeros()
+    resumen_versiones = _version_summary(manuales + efimeros)
     return {
         "success": True,
+        "latest_version": resumen_versiones["latest_version"],
+        "latest_digest": resumen_versiones["latest_digest"],
         "flota": flota,
         "manuales": manuales,
         "efimeros": efimeros,
-        "resumen": {"manuales": resumen_manuales, "efimeros": resumen_efimeros},
+        "resumen": {
+            "manuales": resumen_manuales,
+            "efimeros": resumen_efimeros,
+            "versiones": resumen_versiones,
+        },
     }
 
 
