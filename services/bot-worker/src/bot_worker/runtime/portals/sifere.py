@@ -44,7 +44,7 @@ class SiferePortal(PortalArca):
             )
         await self.paso("entrar_al_portal", self._resolver_entry_point())
         selector, ambito = await self._buscar_selector_cuit()
-        if selector is None and "portalcf.cloud.afip.gob.ar" in await self._url():
+        if selector is None:
             # El click del catálogo puede disparar el SSO sin abrir el popup
             # en Chromium. Entrar por mainMenu.do evita la redirección HTTP
             # de la raíz COMARB y conserva la sesión del mismo contexto.

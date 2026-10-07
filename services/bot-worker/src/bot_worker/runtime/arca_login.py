@@ -9,7 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import re
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
@@ -206,6 +206,7 @@ class ArcaSession:
         self._page = page
         self._context = context
         self._logged_in = False
+        self._comarb_https_route = False
 
     @property
     def page(self) -> Any:
@@ -365,6 +366,37 @@ class ArcaSession:
             if await self._click_first(context, selectors):
                 return True
         return False
+
+    async def _asegurar_route_https_comarb(self) -> None:
+        """Fuerza ``https://`` en las navegaciones a COMARB del contexto.
+
+        COMARB redirige a ``http://`` después del SSO y algunos entornos no
+        alcanzan el puerto 80; sin este ajuste la pestaña del servicio queda
+        en una página de error. Es idempotente por sesión.
+        """
+        if self._comarb_https_route or self._context is None:
+            return
+        self._comarb_https_route = True
+        try:
+            await self._context.route(
+                "**://app1.comarb.gob.ar/**", self._subir_comarb_a_https
+            )
+        except Exception:
+            self._comarb_https_route = False
+
+    @staticmethod
+    async def _subir_comarb_a_https(route: Any) -> None:
+        url = str(getattr(route.request, "url", "") or "")
+        destino = (
+            "https://" + url[len("http://"):]
+            if url.startswith("http://app1.comarb.gob.ar")
+            else None
+        )
+        with suppress(Exception):
+            if destino:
+                await route.continue_(url=destino)
+            else:
+                await route.continue_()
 
     async def login(self) -> None:
         """Inicia sesión una sola vez con errores tipados y sin secretos."""
@@ -612,6 +644,9 @@ class ArcaSession:
                     "no se pudo abrir el servicio ARCA",
                     diagnostic_code="arca_service_navigation_failed",
                 ) from exc
+
+        if portal == "sifere":
+            await self._asegurar_route_https_comarb()
 
         # El portal de Clave Fiscal es una SPA: el documento puede haber
         # alcanzado ``domcontentloaded`` mientras el catálogo todavía se
