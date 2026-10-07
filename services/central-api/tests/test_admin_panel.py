@@ -66,6 +66,11 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
         assert viejo not in cuerpo, viejo
     assert 'data-action="user-toggle"' in cuerpo
     assert "Desactivar" in cuerpo and "Activar" in cuerpo
+    assert 'data-action="account-save"' in cuerpo
+    assert "function accountEditor(user)" in cuerpo
+    for account_type in ("CREDITOS", "TIER", "GRATUITA", "LIBRE"):
+        assert account_type in cuerpo
+    assert "/admin/billing/accounts/${encodeURIComponent(userId)}/account-type" in cuerpo
     assert "La clave se guarda cifrada, nunca en texto plano" in cuerpo
     assert 'value="habilitado">Activo' in cuerpo
     assert 'value="deshabilitado">Desactivado' in cuerpo
