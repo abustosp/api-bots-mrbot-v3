@@ -487,7 +487,7 @@ _V2_REQUIRED_FIELDS: dict[tuple[str, str], frozenset[str]] = {
 
 
 # El checkout de V1 no existe en el contenedor de la central. Este snapshot se
-# generó desde ``/home/abp/Desktop/Proyectos Python/Scripts/Mr bot/api/api-bots-mrbot``
+# generó desde ``/home/abp/Desktop/Proyectos Python/Scripts/Mr bot/api/api-bots/api-bots-mrbot``
 # y se versiona junto con la central para que el contrato OpenAPI no dependa de
 # una ruta del host de desarrollo. ``eliminar_descargas`` se omitió del snapshot
 # al retirar esa opción: V3 siempre limpia el workdir temporal en ``finally``.

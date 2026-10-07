@@ -69,7 +69,11 @@ def test_config_solo_argv_ignora_entorno():
         # CENTRAL_URL/WORKER_* en entorno son prohibidas: primero el guard.
         with pytest.raises(RuntimeError):
             parse_args(_argv())
-    cfg = parse_args(_argv())
+    # El camino "argv manda" se comprueba sin entorno ambiente: las suites que
+    # apuntan a una base de prueba (CENTRAL_API_TEST_DATABASE_URL) no deben
+    # teñir este caso con sus propias variables.
+    with mock.patch.dict(os.environ, {}, clear=True):
+        cfg = parse_args(_argv())
     assert cfg.central_url == _CENTRAL
     assert cfg.worker_concurrency == 5
 
@@ -90,8 +94,9 @@ def test_concurrencia_fuera_de_rango_falla():
         WorkerConfig(
             central_url=_CENTRAL, advertised_url=_ADVERTISED, worker_concurrency=11
         )
-    with pytest.raises(ValueError):
-        parse_args(_argv(**{"concurrency": "0"}))
+    with mock.patch.dict(os.environ, {}, clear=True):
+        with pytest.raises(ValueError):
+            parse_args(_argv(**{"concurrency": "0"}))
 
 
 # --------------------------------------- provisión sin entorno/reposo ---

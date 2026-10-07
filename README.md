@@ -95,6 +95,7 @@ graph TB
 api-bots-mrbot-v3/
 ├── README.md                    # este archivo
 ├── plan.md                      # plan maestro de la V3
+├── workers-swarm.md             # flota EC2 efímera: diseño + PoC + modificaciones
 ├── .research/                   # investigación sobre la V2 (insumo del plan)
 ├── plans/                       # planes detallados por sección
 │   ├── 00-arquitectura/         # decisiones transversales, ADRs, protocolo
@@ -269,6 +270,7 @@ Detalle en [`plan.md`](plan.md) §9.
 | Documento | Contenido |
 |---|---|
 | [`plan.md`](plan.md) | Plan maestro: arquitectura, invariantes, fases, riesgos |
+| [`workers-swarm.md`](workers-swarm.md) | Reparto de trabajo en flota EC2 efímera: arquitectura, defectos hallados (facturación/registro), PoC reproducible y modificaciones propuestas para la V3 |
 | [`plans/00-arquitectura/plan.md`](plans/00-arquitectura/plan.md) | Decisiones transversales, ADRs, protocolo central↔worker |
 | [`plans/01-database/plan.md`](plans/01-database/plan.md) | Esquema PostgreSQL, estrategia de UUID, migraciones |
 | [`plans/02-central-api/plan.md`](plans/02-central-api/plan.md) | API pública, planificador y balanceo, autenticación |
