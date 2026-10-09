@@ -23,6 +23,10 @@ from bot_worker.bots.retper_iibb_agip.plugin import (
     _yyyymm_to_mmyyyy,
     nombre_descarga_agip,
 )
+from bot_worker.bots.retper_iibb_agip.session import (
+    AgipSession,
+    _nombre_archivo as _nombre_archivo_agip,
+)
 from bot_worker.bots.retper_iibb_misiones.plugin import RetperIibbMisionesPlugin
 from bot_worker.bots.retper_iibb_misiones.plugin import (
     _build_filename_base,
@@ -30,7 +34,8 @@ from bot_worker.bots.retper_iibb_misiones.plugin import (
     _period_to_site_format,
 )
 from bot_worker.bots.sct.plugin import SctPlugin, nombre_reporte_sct
-from bot_worker.bots.sifere.plugin import SiferePlugin, nombre_excel_sifere
+from bot_worker.bots.sifere.plugin import SiferePlugin
+from bot_worker.runtime.portals.sifere import nombre_sifere, representado_para_nombre
 from bot_worker.bots.srt.plugin import SrtPlugin, es_respuesta_sin_datos
 from bot_worker.runtime.context import (
     ArtifactSlot,
@@ -110,6 +115,7 @@ class _PaginaArba:
     def __init__(self, contenido: str = "") -> None:
         self._contenido = contenido
         self.url = "https://dfe.arba.gov.ar/DomicilioElectronico/consulta"
+        self.consultas = 0
 
     def set_default_timeout(self, *args: Any) -> None:
         pass
@@ -118,7 +124,16 @@ class _PaginaArba:
         pass
 
     def get_by_role(self, *args: Any, **kwargs: Any) -> _Rol:
-        return _Rol()
+        pagina = self
+        nombre = kwargs.get("name") or (args[1] if len(args) > 1 else "")
+        es_consultar = "Consultar" in str(getattr(nombre, "pattern", nombre))
+
+        class _RolContador(_Rol):
+            async def click(self, *a: Any, **k: Any) -> None:
+                if es_consultar:
+                    pagina.consultas += 1
+
+        return _RolContador()
 
     def locator(self, *args: Any, **kwargs: Any) -> _Rol:
         return _Rol()
@@ -147,11 +162,41 @@ class _ServicioBase:
 
 
 class _ServicioSifere(_ServicioBase):
-    async def consultar_jurisdiccion(
-        self, codigo: int, periodo: str, destino: Path
+    async def consultar_sircar(
+        self,
+        *,
+        metodo: str,
+        jurisdiccion: int,
+        periodo: str,
+        destino_dir: Path,
+        representado_cuit: str,
+        nombre_representado: str | None = None,
     ) -> dict[str, Any]:
-        Path(destino).write_text("cuit;importe\n30;100\n", encoding="utf-8")
-        return {"filas": 1, "total": "100"}
+        etiqueta = "Retenciones" if metodo == "retencion" else "Percepciones"
+        nombre = representado_para_nombre(nombre_representado, representado_cuit)
+        archivos = []
+        for tipo, ext in (("xlsx", ".xls"), ("pdf", ".pdf")):
+            ruta = Path(destino_dir) / nombre_sifere(
+                representado_cuit,
+                periodo,
+                nombre,
+                ("SIRCAR", etiqueta, str(jurisdiccion)),
+                ext=ext,
+            )
+            ruta.write_bytes(b"PK\x03\x04sifere")
+            archivos.append({"nombre": ruta.name, "tipo": tipo, "filas": 1})
+        return {
+            "metodo": metodo,
+            "etiqueta": etiqueta,
+            "jurisdiccion": jurisdiccion,
+            "periodo": periodo,
+            "archivos": archivos,
+            "errores": [],
+        }
+
+    async def consultar_consolidados(self, **_: Any) -> dict[str, Any]:
+        # Como el portal real sin tablas consolidadas: no genera archivos.
+        return {"archivos": [], "errores": [], "filas": {}}
 
 
 class _ServicioSrt:
@@ -182,6 +227,20 @@ class _Hacienda:
         self, consulta_key: str, desde: str, hasta: str
     ) -> list[dict[str, Any]]:
         return [{"consulta": consulta_key, "desde": desde, "hasta": hasta}]
+
+    async def recorrer_consulta(
+        self,
+        consulta_key: str,
+        desde: str,
+        hasta: str,
+        destino_dir: Any = None,
+        representado_cuit: str = "",
+        descargar_pdf: bool = True,
+    ) -> dict[str, Any]:
+        return {
+            "filas": [{"consulta": consulta_key, "desde": desde, "hasta": hasta}],
+            "pdfs": [],
+        }
 
 
 class _Sesion:
@@ -253,8 +312,16 @@ def _runtime(
 
 
 def test_helpers_puros_provinciales() -> None:
-    assert nombre_archivo_descarga(CUIT, "202401", "Mi Empresa").endswith(".zip")
-    assert CUIT in nombre_archivo_descarga(CUIT, "202401", "Mi Empresa")
+    assert nombre_archivo_descarga(CUIT, "202401", "Mi Empresa") == (
+        f"{CUIT[-1]} - {CUIT} - RETPER ARBA - 202401 - Mi Empresa.zip"
+    )
+    assert nombre_archivo_descarga(CUIT, "202401", "  Mi/Empresa *") == (
+        f"{CUIT[-1]} - {CUIT} - RETPER ARBA - 202401 - MiEmpresa.zip"
+    )
+    assert nombre_archivo_descarga(CUIT, "202401", "   ").endswith("SIN_DENOMINACION.zip")
+    assert _nombre_archivo_agip(CUIT, "RET", "01/2024", "02/2024", "xls", "Mi Empresa") == (
+        f"{CUIT[-1]} - {CUIT} - RET - 202401 - 202402 - Mi Empresa.xls"
+    )
     assert _yyyymm_to_mmyyyy("202401") == "01/2024"
     nombre = nombre_descarga_agip(CUIT, "RETPER", "202401", "202402", "Denom", "csv")
     assert nombre.endswith(".csv") and CUIT in nombre
@@ -263,11 +330,105 @@ def test_helpers_puros_provinciales() -> None:
     assert CUIT in base and "MISIONES" in base
     assert _looks_like_pdf(b"%PDF-1.4\n" + b"x" * 200) is True
     assert _looks_like_pdf(b"no-es-pdf") is False
-    assert nombre_excel_sifere(CUIT, "202401", 901).endswith(".xlsx")
+    assert nombre_sifere(CUIT, "202401", "Empresa", ("SIRCAR", "Retenciones", "901"), ext=".xls") == (
+        f"{CUIT[-1]} - {CUIT} - SIFERE - SIRCAR - Retenciones - 901 - 202401 - Empresa.xls"
+    )
+    assert nombre_sifere(CUIT, "202401", representado_para_nombre(None, CUIT), ("SIRCREB", "Tablas"), ext=".xlsx") == (
+        f"{CUIT[-1]} - {CUIT} - SIFERE - SIRCREB - Tablas - 202401 - {CUIT}.xlsx"
+    )
     assert es_respuesta_sin_datos("No tiene afiliación vigente") is not None
     assert es_respuesta_sin_datos("alicuota 1,5 vigente") is None
     assert nombre_reporte_sct(CUIT, "deudas", "csv").endswith(".csv")
     assert "POR_EMISOR" in nombre_consolidado(CUIT, "por_emisor", "01/01/2024", "31/01/2024").upper()
+
+
+class _TabFalso:
+    def __init__(self) -> None:
+        self.clics = 0
+
+    async def count(self) -> int:
+        return 1
+
+    @property
+    def first(self) -> "_TabFalso":
+        return self
+
+    async def is_visible(self) -> bool:
+        return True
+
+    async def click(self) -> None:
+        self.clics += 1
+
+
+class _DivConsultado:
+    def get_by_text(self, *_: Any, **__: Any) -> _TabFalso:
+        return _TabFalso()
+
+
+class _BotonBuscar:
+    async def click(self, *_: Any, **__: Any) -> None:
+        return None
+
+
+class _PaginaAgipTabs:
+    """Pagina AGIP con las cinco solapas visibles y botones que descargan."""
+
+    def locator(self, _selector: str) -> _DivConsultado:
+        return _DivConsultado()
+
+    def get_by_role(self, *_: Any, **__: Any) -> _BotonBuscar:
+        return _BotonBuscar()
+
+    async def wait_for_timeout(self, *_: Any) -> None:
+        return None
+
+
+def test_agip_empaqueta_las_salidas_con_los_nombres_de_v1(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import zipfile
+
+    async def _ir() -> None:
+        sesion = AgipSession(object(), page=_PaginaAgipTabs())
+        sesion._logged_in = True  # type: ignore[attr-defined]
+        sesion._representado = CUIT  # type: ignore[attr-defined]
+        descargados: list[str] = []
+
+        async def set_periodos(desde: str, hasta: str) -> None:
+            assert (desde, hasta) == ("01/2024", "02/2024")
+
+        async def esperar() -> str:
+            return "con_datos"
+
+        async def descargar(_selector: str, destino: Path) -> bool:
+            Path(destino).write_bytes(b"salida")
+            descargados.append(Path(destino).name)
+            return True
+
+        monkeypatch.setattr(sesion, "_set_periodos", set_periodos)
+        monkeypatch.setattr(sesion, "_esperar_resultados", esperar)
+        monkeypatch.setattr(sesion, "_descargar", descargar)
+
+        destino = tmp_path / "reporte.zip"
+        archivos = await sesion.consultar_retper(
+            "01/2024", "02/2024", destino, denominacion="Mi Empresa"
+        )
+
+        assert [a["tipo"] for a in archivos] == [
+            "RET", "RET", "RET SIFERE",
+            "PER", "PER", "PER SIFERE",
+            "RET bancarias", "RET bancarias", "RET bancarias SIFERE",
+            "PER ADUANERAS", "PER ADUANERAS", "PER ADUANERAS SIFERE",
+            "RET SIRTAC", "RET SIRTAC", "RET SIRTAC SIFERE",
+        ]
+        assert all(a["url_minio"] is None for a in archivos)
+        assert archivos[0]["archivo"] == (
+            f"{CUIT[-1]} - {CUIT} - RET - 202401 - 202402 - Mi Empresa.xls"
+        )
+        with zipfile.ZipFile(destino) as paquete:
+            assert paquete.namelist() == descargados
+
+    asyncio.run(_ir())
 
 
 def test_hacienda_escribir_consolidado(tmp_path: Path) -> None:
@@ -314,6 +475,63 @@ def test_validate_provincial_ok() -> None:
     asyncio.run(_ir())
 
 
+def test_validate_arba_acepta_los_nombres_de_v1() -> None:
+    async def _ir() -> None:
+        _, entrada = await ArbaPlugin().validate({
+            "operacion": "descargar",
+            "cuit": "20-12345678-9",
+            "clave": "secreta",
+            "denominacion": "Mi Empresa",
+            "periodo": "202401",
+            "carga_minio": False,
+            "proxy_request": True,
+        })
+        assert entrada.representado_cuit == CUIT
+        assert entrada.representado_nombre == "Mi Empresa"
+        assert entrada.subir is False
+
+    asyncio.run(_ir())
+
+
+def test_validate_agip_acepta_los_nombres_de_v1() -> None:
+    async def _ir() -> None:
+        _, entrada = await RetperIibbAgipPlugin().validate({
+            "operacion": "consultar",
+            "cuit_representado": "20-12345678-9",
+            "usuario": "usuario@ejemplo.test",
+            "clave": "secreta",
+            "denominacion": "Mi Empresa",
+            "desde": "202401",
+            "hasta": "202402",
+            "carga_minio": False,
+            "proxy_request": True,
+        })
+        assert entrada.representado_cuit == CUIT
+        assert (entrada.periodo_desde, entrada.periodo_hasta) == ("202401", "202402")
+        assert entrada.subir_archivo is False
+
+    asyncio.run(_ir())
+
+
+def test_validate_misiones_acepta_los_nombres_de_v1() -> None:
+    async def _ir() -> None:
+        _, entrada = await RetperIibbMisionesPlugin().validate({
+            "operacion": "consultar",
+            "cuit_representante": "20-12345678-9",
+            "clave_representante": "secreta",
+            "denominacion": "Mi Empresa",
+            "desde": "202401",
+            "hasta": "202402",
+            "carga_minio": False,
+            "proxy_request": True,
+        })
+        assert entrada.representado_cuit == CUIT
+        assert (entrada.periodo_desde, entrada.periodo_hasta) == ("202401", "202402")
+        assert entrada.subir_archivo is False
+
+    asyncio.run(_ir())
+
+
 def test_validate_provincial_rechaza_entrada_invalida() -> None:
     async def _ir() -> None:
         casos = [
@@ -327,8 +545,10 @@ def test_validate_provincial_rechaza_entrada_invalida() -> None:
             (RetperIibbMisionesPlugin(), {"operacion": "consultar",
                                           "representado_cuit": CUIT, "denominacion": "D",
                                           "periodo_desde": "202413", "periodo_hasta": "202413"}),
+            # SIFERE: jurisdicciones fuera del padrón ya no es error (V1: lista
+            # vacía = no consultar SIRCAR); el periodo inválido sí.
             (SiferePlugin(), {"operacion": "consultar", "representado_cuit": CUIT,
-                              "periodo": "202401", "jurisdicciones": [100]}),
+                              "periodo": "202413"}),
             (SrtPlugin(), {"operacion": "consultar_alicuotas", "cuits_consulta": []}),
             (HaciendaPlugin(), {"operacion": "consultar", "representado_cuit": CUIT,
                                 "denominacion": "D", "fecha_desde": "31/01/2024",
@@ -384,6 +604,16 @@ def test_execute_arba_descarga_zip(tmp_path: Path) -> None:
         assert resultado.data["periodo"] == "202401"
         assert len(resultado.artifacts) == 1
         assert resultado.artifacts[0]["sha256"]
+        # V1: ``archivos`` con tipo/archivo/url del comprobante subido.
+        assert resultado.data["tipo"] == "RETPER ARBA"
+        assert resultado.data["archivos"] == [
+            {
+                "tipo": "RETPER ARBA",
+                "archivo": resultado.data["archivo"],
+                "url_minio": "obj/retper_arba.zip",
+            }
+        ]
+        assert resultado.data["archivo"] == nombre_archivo_descarga(CUIT, "202401", "Mi Empresa")
 
     asyncio.run(_ir())
 
@@ -400,6 +630,8 @@ def test_execute_arba_sin_archivos(tmp_path: Path) -> None:
         resultado = await plugin.execute(payload, rt)
         assert resultado.result == "OK"
         assert resultado.data["archivos"] == []
+        # V1 repite la consulta completa y recien despues evalua el aviso.
+        assert pagina.consultas == 2
 
     asyncio.run(_ir())
 
@@ -445,14 +677,22 @@ def test_execute_sifere_srt_sct(tmp_path: Path) -> None:
         sif = SiferePlugin()
         pays = await sif.validate({
             "operacion": "consultar", "representado_cuit": CUIT,
-            "periodo": "202401", "jurisdicciones": [901, 902],
+            "periodo": "202401", "jurisdicciones": [901],
         })
         rts = _runtime(tmp_path, _Fabrica(_Sesion(_ServicioSifere())), {
-            "sifere_jurisdiccion_xlsx_901": _slot("sifere_jurisdiccion_xlsx_901"),
-            "sifere_jurisdiccion_xlsx_902": _slot("sifere_jurisdiccion_xlsx_902"),
+            "sifere_sircar_xlsx_retencion_901": _slot("sifere_sircar_xlsx_retencion_901"),
+            "sifere_sircar_pdf_retencion_901": _slot("sifere_sircar_pdf_retencion_901"),
+            "sifere_sircar_xlsx_percepcion_901": _slot("sifere_sircar_xlsx_percepcion_901"),
+            "sifere_sircar_pdf_percepcion_901": _slot("sifere_sircar_pdf_percepcion_901"),
         })
         ress = await sif.execute(pays, rts)
-        assert ress.result == "OK" and len(ress.artifacts) == 2
+        assert ress.result == "OK" and len(ress.artifacts) == 4
+        assert [a["artifact_id"] for a in ress.artifacts] == [
+            "sifere_sircar_xlsx_retencion_901",
+            "sifere_sircar_pdf_retencion_901",
+            "sifere_sircar_xlsx_percepcion_901",
+            "sifere_sircar_pdf_percepcion_901",
+        ]
 
         srt = SrtPlugin()
         payr = await srt.validate({
@@ -491,6 +731,12 @@ def test_execute_hacienda_consulta_y_consolida(tmp_path: Path) -> None:
         assert resultado.result == "OK"
         assert resultado.data["por_emisor"]["filas"] == 1
         assert "por_receptor" not in resultado.data
+        # V1: un unico artefacto consolidado (.xlsx) con una hoja por consulta.
         assert len(resultado.artifacts) == 1
+        assert resultado.artifacts[0]["artifact_id"] == "hacienda_consolidado"
+        consolidado = resultado.data["consolidado"]
+        assert consolidado["archivo"].endswith(".xlsx")
+        assert consolidado["hojas"] == ["consolidado", "por_emisor"]
+        assert consolidado["filas"] == 1
 
     asyncio.run(_ir())

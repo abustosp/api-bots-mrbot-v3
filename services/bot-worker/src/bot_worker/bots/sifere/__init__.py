@@ -1,6 +1,6 @@
-"""Bot ``sifere``: retenciones SIFERE de COMARB."""
+"""Bot ``sifere``: retenciones y percepciones SIFERE de COMARB."""
 
-from bot_worker.bots.sifere.plugin import SiferePlugin, nombre_excel_sifere
+from bot_worker.bots.sifere.plugin import SiferePlugin
 from bot_worker.bots.sifere.schema import SifereConsultarInput
 
-__all__ = ["SifereConsultarInput", "SiferePlugin", "nombre_excel_sifere"]
+__all__ = ["SifereConsultarInput", "SiferePlugin"]

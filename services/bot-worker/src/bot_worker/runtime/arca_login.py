@@ -18,6 +18,7 @@ from bot_worker.bots.errors import (
     CredentialsRejectedError,
     TargetUnavailableError,
 )
+from bot_worker.bots.planillas import TIMEOUT_MC_MS_POR_DEFECTO
 from bot_worker.runtime.captcha import CaptchaSolver
 from bot_worker.runtime.context import FiscalCredentials
 
@@ -104,7 +105,14 @@ class ArcaServicePage:
         await self._page.get_by_text(nombre, exact=True).click(timeout=15_000)
         await self._esperar_mis_comprobantes()
 
-    async def _configurar_rango(self, desde: str, hasta: str) -> None:
+    async def _configurar_rango(
+        self,
+        desde: str,
+        hasta: str,
+        puntos_venta: list[str] | None = None,
+        *,
+        puntos_venta_antes_de_aplicar: bool = True,
+    ) -> None:
         await self._page.get_by_label("Fecha del Comprobante *").click()
         campo_desde = self._page.locator("input[name='daterangepicker_start']")
         campo_hasta = self._page.locator("input[name='daterangepicker_end']")
@@ -112,7 +120,21 @@ class ArcaServicePage:
         await campo_desde.fill(desde)
         await campo_hasta.click()
         await campo_hasta.fill(hasta)
+        if puntos_venta and puntos_venta_antes_de_aplicar:
+            await self._filtrar_puntos_venta(puntos_venta)
         await self._page.get_by_role("button", name="Aplicar").click()
+        # V1 llena el punto de venta despues de Aplicar al solicitar consultas
+        # (``solicitar_consulta_mis_comprobantes``) y antes de Aplicar al
+        # descargar un CSV (``descargar_mis_comprobantes``).
+        if puntos_venta and not puntos_venta_antes_de_aplicar:
+            await self._filtrar_puntos_venta(puntos_venta)
+
+    async def _filtrar_puntos_venta(self, puntos_venta: list[str]) -> None:
+        """Llena el campo ``Punto de Venta`` como V1 (valores unidos por coma)."""
+        if not puntos_venta:
+            return
+        texto = ",".join(str(punto) for punto in puntos_venta)
+        await self._page.get_by_role("textbox", name="Punto de Venta").fill(texto)
 
     async def _buscar(self) -> None:
         await self._page.get_by_role("button", name="Buscar").click()
@@ -128,35 +150,52 @@ class ArcaServicePage:
             pass
 
     async def descargar_csv(
-        self, tipo: str, destino: Any, desde: str, hasta: str
+        self,
+        tipo: str,
+        destino: Any,
+        desde: str,
+        hasta: str,
+        puntos_venta: list[str] | None = None,
+        timeout_ms: int | None = None,
     ) -> None:
-        """Descarga el CSV real de emitidos o recibidos a ``destino``."""
+        """Descarga el CSV real de emitidos o recibidos a ``destino``.
+
+        ``puntos_venta`` replica el filtro opcional de V1 y ``timeout_ms`` la
+        espera configurable (``timeout_mc``, 30 s por defecto) del boton CSV.
+        """
+        espera = timeout_ms or TIMEOUT_MC_MS_POR_DEFECTO
         await self._abrir_tipo_comprobante(tipo)
-        await self._configurar_rango(desde, hasta)
+        await self._configurar_rango(desde, hasta, puntos_venta)
         await self._buscar()
-        async with self._page.expect_download(timeout=60_000) as descarga:
-            await self._page.get_by_role("button", name="CSV").click(
-                timeout=60_000
-            )
+        async with self._page.expect_download(timeout=espera) as descarga:
+            await self._page.get_by_role("button", name="CSV").click(timeout=espera)
         archivo = await descarga.value
         await archivo.save_as(path=str(destino))
         await self._volver_menu_principal()
 
     async def solicitar_consulta(
-        self, tipo: str, desde: str, hasta: str
+        self,
+        tipo: str,
+        desde: str,
+        hasta: str,
+        puntos_venta: list[str] | None = None,
+        timeout_ms: int | None = None,
     ) -> str:
         """Solicita una consulta asíncrona y devuelve su ``idConsulta``."""
+        espera = timeout_ms or TIMEOUT_MC_MS_POR_DEFECTO
         await self._abrir_tipo_comprobante(tipo)
-        await self._configurar_rango(desde, hasta)
+        await self._configurar_rango(
+            desde, hasta, puntos_venta, puntos_venta_antes_de_aplicar=False
+        )
         codigo = "E" if tipo == "emitidos" else "R"
         async with self._page.expect_response(
             lambda response: (
                 "ajax.do?f=generarConsulta" in response.url
                 and f"&t={codigo}" in response.url
             ),
-            timeout=60_000,
+            timeout=espera,
         ) as respuesta:
-            await self._page.get_by_role("button", name="Buscar").click()
+            await self._page.get_by_role("button", name="Buscar").click(timeout=espera)
         response = await respuesta.value
         if response.status != 200:
             raise TargetUnavailableError(
@@ -549,8 +588,20 @@ class ArcaSession:
             )
         self._logged_in = True
 
-    async def _find_service(self, service: str) -> Any | None:
-        matcher = re.compile(re.escape(service), re.I)
+    #: El portal recorta el titulo de algunas tarjetas con "..." (p. ej.
+    #: "Convenio Multilateral – SIFERE WEB - Cons..."), por lo que el nombre
+    #: completo nunca coincide. V1 lo resolvia con un patron; aqui se acepta el
+    #: prefijo visible. Se distingue de la tarjeta "SIFERE WEB - DDJJ".
+    _PATRONES_SERVICIO_RECORTADO: dict[str, re.Pattern[str]] = {
+        "sifere": re.compile(
+            r"CONVENIO\s+MULTILATERAL\s*\S?\s*SIFERE\s+WEB\s*-\s*CONS", re.I
+        ),
+    }
+
+    async def _find_service(
+        self, service: str, patron: re.Pattern[str] | None = None
+    ) -> Any | None:
+        matcher = patron or re.compile(re.escape(service), re.I)
         for context in self._page_contexts():
             candidate_factories = (
                 lambda: context.get_by_role("button", name=matcher),
@@ -645,16 +696,20 @@ class ArcaSession:
                     diagnostic_code="arca_service_navigation_failed",
                 ) from exc
 
-        if portal == "sifere":
-            await self._asegurar_route_https_comarb()
+        # La regla que fuerza https en COMARB NO se instala aqui: verificado en
+        # vivo que, con ella activa, el catalogo del portal de Clave Fiscal no
+        # llega a hidratarse (0 enlaces) y la tarjeta nunca aparece. Se
+        # instala despues de ubicarla, justo antes del clic que dispara el
+        # redirect de COMARB.
 
         # El portal de Clave Fiscal es una SPA: el documento puede haber
         # alcanzado ``domcontentloaded`` mientras el catálogo todavía se
         # hidrata. Sin esta espera, una sesión válida se reporta como
         # ``arca_service_not_visible`` de forma intermitente.
         service_locator = None
+        patron_servicio = self._PATRONES_SERVICIO_RECORTADO.get(str(portal or ""))
         for _ in range(30):
-            service_locator = await self._find_service(value)
+            service_locator = await self._find_service(value, patron_servicio)
             if service_locator is not None:
                 break
             try:
@@ -673,7 +728,7 @@ class ArcaSession:
             )
             await self._wait_ready()
             for _ in range(30):
-                service_locator = await self._find_service(value)
+                service_locator = await self._find_service(value, patron_servicio)
                 if service_locator is not None:
                     break
                 try:
@@ -685,6 +740,9 @@ class ArcaSession:
                 "servicio ARCA no habilitado o no visible",
                 diagnostic_code="arca_service_not_visible",
             )
+
+        if portal == "sifere":
+            await self._asegurar_route_https_comarb()
 
         before_url = getattr(self.page, "url", "")
         try:

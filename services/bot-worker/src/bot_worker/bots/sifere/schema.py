@@ -4,6 +4,21 @@ Porta la validacion de V2
 (``api-bots-mrbot-v2/app/bot/sifere_bot.py``: ``bot_sifere`` y
 ``_validar_periodo``): CUIT de 11 digitos, periodo ``AAAAMM`` con mes
 01-12 y jurisdicciones del padron 901-924.
+
+Paridad adicional con V1 (``api-bots-mrbot/app/bot/sifere_bot.py``,
+``bot_sifere``):
+
+- ``cuit_representado`` es alias valido del CUIT consultado (igual que
+  ``cuit``).
+- Los campos del sobre sellado ``cuit_representante``,
+  ``clave_representante``, ``clave_encriptada`` y ``proxy_request`` se
+  descartan antes de validar, como en ``bots/arba/schema.py``: la
+  central los sella para el flujo de navegador y no viajan al plugin.
+- ``representado_nombre`` (V1: ``representado``) es opcional y puede
+  venir vacio/``null``: en ese caso el nombre de archivo usa el CUIT.
+- ``jurisdicciones: []`` ya no es error: significa no consultar SIRCAR
+  por jurisdiccion (V1 recorria la lista vacia sin fallar). ``null``
+  sigue significando el padron completo 901-924.
 """
 
 from __future__ import annotations
@@ -16,6 +31,13 @@ CUIT_PATTERN = r"^\d{11}$"
 PERIODO_PATTERN = r"^\d{6}$"
 JURISDICCION_MIN = 901
 JURISDICCION_MAX = 924
+#: Campos del contrato compartido con V1 que la central sella y V3 descarta.
+CAMPOS_SOBRE_SELLADO = (
+    "cuit_representante",
+    "clave_representante",
+    "clave_encriptada",
+    "proxy_request",
+)
 
 
 class _Base(BaseModel):
@@ -45,25 +67,42 @@ def normalizar_periodo(valor: Any) -> str:
 
 
 class SifereConsultarInput(_Base):
-    """Operacion ``consultar``: retenciones SIFERE por jurisdiccion."""
+    """Operacion ``consultar``: retenciones/percepciones SIFERE por jurisdiccion."""
 
     representado_cuit: str = Field(
-        validation_alias=AliasChoices("representado_cuit", "cuit"),
+        validation_alias=AliasChoices(
+            "representado_cuit", "cuit", "cuit_representado"
+        ),
         min_length=11,
         max_length=14,
     )
     periodo: str = Field(min_length=6, max_length=6)
-    representado_nombre: str = Field(default="", max_length=256)
+    representado_nombre: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("representado_nombre", "representado"),
+        max_length=256,
+    )
     jurisdicciones: list[int] | None = None
     incluir_json: bool = True
-    subir: bool = True
+    # V1 usa ``carga_minio``: decide si los Excel se suben. Alias de ``subir``.
+    subir: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir", "carga_minio"),
+    )
+    # Por defecto genera los Excel de Retenciones/Coeficientes (SIRCREB) y de
+    # SIRTAC del periodo, como V1 (sifere_bot.py). Se puede apagar.
+    consolidados: bool = True
 
     @model_validator(mode="before")
     @classmethod
     def _normalizar(cls, datos: Any) -> Any:
         if isinstance(datos, dict):
             datos = dict(datos)
-            for clave in ("representado_cuit", "cuit"):
+            # La central sella estos campos para su propio flujo: nunca
+            # deben llegar a la validacion del plugin (extra="forbid").
+            for clave in CAMPOS_SOBRE_SELLADO:
+                datos.pop(clave, None)
+            for clave in ("representado_cuit", "cuit", "cuit_representado"):
                 if clave in datos and datos[clave] is not None:
                     datos[clave] = limpiar_cuit(datos[clave])
         return datos
@@ -71,6 +110,8 @@ class SifereConsultarInput(_Base):
     @model_validator(mode="after")
     def _periodo_y_jurisdicciones(self) -> SifereConsultarInput:
         object.__setattr__(self, "periodo", normalizar_periodo(self.periodo))
+        nombre = (self.representado_nombre or "").strip()
+        object.__setattr__(self, "representado_nombre", nombre or None)
         if self.jurisdicciones is None:
             object.__setattr__(
                 self,
@@ -78,11 +119,10 @@ class SifereConsultarInput(_Base):
                 list(range(JURISDICCION_MIN, JURISDICCION_MAX + 1)),
             )
         else:
+            # Lista vacia valida: no se consulta SIRCAR por jurisdiccion.
             validas = sorted(
                 {j for j in self.jurisdicciones if JURISDICCION_MIN <= j <= JURISDICCION_MAX}
             )
-            if not validas:
-                raise ValueError("jurisdicciones debe tener al menos una entre 901 y 924")
             object.__setattr__(self, "jurisdicciones", validas)
         if not self.incluir_json and not self.subir:
             raise ValueError("seleccionar al menos una salida (json o archivo)")
@@ -104,8 +144,11 @@ def esquema_entrada() -> dict[str, Any]:
         "properties": {
             "operacion": {"type": "string", "enum": ["consultar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "cuit_representado": {"type": "string", "pattern": CUIT_PATTERN},
             "periodo": {"type": "string", "pattern": PERIODO_PATTERN},
-            "representado_nombre": {"type": "string"},
+            "representado_nombre": {"type": ["string", "null"]},
+            "representado": {"type": ["string", "null"]},
             "jurisdicciones": {
                 "type": "array",
                 "items": {
@@ -116,5 +159,6 @@ def esquema_entrada() -> dict[str, Any]:
             },
             "incluir_json": {"type": "boolean"},
             "subir": {"type": "boolean"},
+            "consolidados": {"type": "boolean"},
         },
     }
