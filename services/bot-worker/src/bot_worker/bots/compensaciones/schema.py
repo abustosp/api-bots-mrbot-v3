@@ -3,9 +3,12 @@
 Porta la validacion de V2
 (``api-bots-mrbot-v2/app/bot/compensaciones_bot.py::bot_compensaciones``):
 
-- CUIT de 11 digitos (alias ``cuit``).
+- CUIT de 11 digitos (alias ``cuit`` y ``cuit_representado``).
 - Rango ``desde``/``hasta`` en ``dd/mm/aaaa`` con ``desde <= hasta``.
 - Al menos un formato de salida: Excel (XLS), CSV o PDF.
+- ``cuit_representante``, ``clave_representante``, ``proxy_request`` y
+  ``headless`` de V1 se aceptan y se ignoran: la credencial y el proxy viajan
+  en el sobre sellado.
 """
 
 from __future__ import annotations
@@ -13,7 +16,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 CUIT_PATTERN = r"^\d{11}$"
 FORMATO_FECHA = "%d/%m/%Y"
@@ -52,7 +61,9 @@ class CompensacionesConsultarInput(_Base):
     """Operacion ``consultar``: compensaciones y afectaciones (SCT)."""
 
     representado_cuit: str = Field(
-        validation_alias=AliasChoices("representado_cuit", "cuit"),
+        validation_alias=AliasChoices(
+            "representado_cuit", "cuit", "cuit_representado"
+        ),
         min_length=11,
         max_length=14,
     )
@@ -69,14 +80,34 @@ class CompensacionesConsultarInput(_Base):
     excel: bool = False
     csv: bool = False
     pdf: bool = False
-    subir: bool = True
+    subir: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir", "carga_minio", "subir_archivo"),
+    )
+    # Campos de V1 que el sobre sellado resuelve: se aceptan y se ignoran.
+    cuit_representante: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "cuit_representante", "cuit_inicio_sesion", "cuit_login"
+        ),
+        repr=False,
+        max_length=14,
+    )
+    clave_representante: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("clave_representante", "contrasena", "clave"),
+        repr=False,
+        max_length=4096,
+    )
+    proxy_request: bool | None = None
+    headless: bool | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _normalizar(cls, datos: Any) -> Any:
         if isinstance(datos, dict):
             datos = dict(datos)
-            for clave in ("representado_cuit", "cuit"):
+            for clave in ("representado_cuit", "cuit", "cuit_representado"):
                 if clave in datos and datos[clave] is not None:
                     datos[clave] = limpiar_cuit(datos[clave])
             for clave in ("fecha_desde", "desde", "fecha_hasta", "hasta"):

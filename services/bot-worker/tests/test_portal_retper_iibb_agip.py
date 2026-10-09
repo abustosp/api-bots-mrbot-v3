@@ -425,10 +425,16 @@ def test_execute_usa_contexto_comun_y_sesion_agip(
             invocaciones["login"] = (usuario, cuit_representado)
 
         async def consultar_retper(
-            self, desde_mmyyyy: str, hasta_mmyyyy: str, destino: Path
-        ) -> None:
+            self,
+            desde_mmyyyy: str,
+            hasta_mmyyyy: str,
+            destino: Path,
+            denominacion: str = "",
+        ) -> list[dict[str, str]]:
             invocaciones["consulta"] = (desde_mmyyyy, hasta_mmyyyy)
+            invocaciones["denominacion"] = denominacion
             destino.write_bytes(b"zip de prueba")
+            return [{"tipo": "RET", "archivo": "RET.xls", "url_minio": None}]
 
         async def close(self) -> None:
             invocaciones["closed"] = True
@@ -574,8 +580,16 @@ class _SesionAgipQueFalla:
     async def ingresar(self, usuario: str, cuit_representado: str) -> None:
         return None
 
-    async def consultar_retper(self, *, desde_mmyyyy: str, hasta_mmyyyy: str, destino: Path) -> None:
+    async def consultar_retper(
+        self,
+        *,
+        desde_mmyyyy: str,
+        hasta_mmyyyy: str,
+        destino: Path,
+        denominacion: str = "",
+    ) -> list[dict[str, str]]:
         destino.write_bytes(b"zip de prueba")
+        return [{"tipo": "RET", "archivo": "RET.xls", "url_minio": None}]
 
     async def close(self) -> None:
         return None

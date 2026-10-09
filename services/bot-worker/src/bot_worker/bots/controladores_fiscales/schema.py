@@ -18,6 +18,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MAX_ARCHIVOS = 50
+#: Campos del contrato compartido que V3 no toma del payload (van en el sobre).
+CAMPOS_SOBRE_SELLADO = ("clave", "clave_representante", "clave_encriptada", "cuit_representante", "proxy_request")
+#: Nombres equivalentes de la subida de la constancia (V1: ``minio_upload``).
+ALIAS_SUBIDA = ("subir_constancia", "minio_upload", "subir_a_minio")
 
 
 class _Base(BaseModel):
@@ -37,11 +41,33 @@ def _nombre_archivo_seguro(valor: Any) -> str:
 
 
 class ControladoresFiscalesPresentarInput(_Base):
-    """Entrada de ``presentar``: archivos del work_dir a presentar."""
+    """Entrada de ``presentar``: archivos del work_dir a presentar.
+
+    Paridad con V1 (``controladores_fiscales_bot``): ``minio_upload`` del
+    contrato compartido es el mismo flag que ``subir_constancia``.
+    """
 
     archivos: list[str] = Field(min_length=1, max_length=MAX_ARCHIVOS)
     subir_constancia: bool = True
     incluir_json: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalizar(cls, datos: Any) -> Any:
+        if isinstance(datos, dict):
+            datos = dict(datos)
+            for clave in CAMPOS_SOBRE_SELLADO:
+                datos.pop(clave, None)
+            presentes = [c for c in ALIAS_SUBIDA if c in datos]
+            if presentes:
+                valores = {bool(datos[c]) for c in presentes}
+                if len(valores) > 1:
+                    raise ValueError("subir_constancia y minio_upload contradictorios")
+                valor = valores.pop()
+                for c in ALIAS_SUBIDA:
+                    datos.pop(c, None)
+                datos["subir_constancia"] = valor
+        return datos
 
     @field_validator("archivos", mode="before")
     @classmethod
@@ -86,5 +112,6 @@ def esquema_entrada() -> dict[str, Any]:
             },
             "subir_constancia": {"type": "boolean"},
             "incluir_json": {"type": "boolean"},
+            "minio_upload": {"type": "boolean"},
         },
     }

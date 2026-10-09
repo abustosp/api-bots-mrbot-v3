@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from pathlib import Path
 from typing import Any, Mapping
 
 from bot_worker.bots.errors import (
@@ -61,6 +62,7 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 
 SERVICIO_ARCA = "PRESENTACIÓN DE DDJJ Y PAGOS"
 ID_ARTEFACTO_DETALLE = "vep_archivo_detalle_pdf"
+ID_ARTEFACTO_QR = "vep_archivo_qr_png"
 
 
 def generar_registro(
@@ -152,6 +154,12 @@ class VepArchivoPlugin:
                 max_bytes=52_428_800,
                 obligatorio=False,
             ),
+            ArtifactSpec(
+                nombre="vep_archivo_qr.png",
+                content_types=("image/png",),
+                max_bytes=52_428_800,
+                obligatorio=False,
+            ),
         ),
         timeout_por_defecto_seconds=1800,
         requiere_credenciales_fiscales=True,
@@ -230,7 +238,9 @@ class VepArchivoPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(self._servicio_nombre)
+                servicio = await sesion.open_service(
+                    self._servicio_nombre, portal="vep_archivo"
+                )
                 datos, artefactos = await self._generar(
                     servicio, entrada, registros, runtime
                 )
@@ -286,6 +296,23 @@ class VepArchivoPlugin:
             artefactos.append(referencia)
             datos["sha256"] = referencia["sha256"]
             datos["size_bytes"] = referencia["size_bytes"]
+        # QR: solo existe cuando el medio es ``qr``, como en V1.
+        qr_generado = False
+        qr: Path | None = None
+        if entrada.medio_pago == "qr":
+            qr = runtime.artifact_store.resolve(f"{representado} - VEP - {entrada.medio_pago} - QR.png")
+            qr_generado = await servicio.descargar_qr(destino=qr)
+        if qr_generado and qr is not None:
+            datos["nombre_qr"] = qr.name
+            if getattr(entrada, "subir_pdf", True):
+                try:
+                    referencia_qr = await runtime.artifact_store.upload(
+                        ID_ARTEFACTO_QR, qr.name
+                    )
+                except ValueError as exc:
+                    raise ArtifactUploadError(str(exc)) from exc
+                artefactos.append(referencia_qr)
+                datos["sha256_qr"] = referencia_qr["sha256"]
         if not getattr(entrada, "incluir_json", True):
             datos = {"detalle": datos["detalle"]}
         return datos, artefactos

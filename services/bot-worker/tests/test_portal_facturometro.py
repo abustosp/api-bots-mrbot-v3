@@ -286,3 +286,202 @@ def test_plugin_abre_servicio_con_portal_facturometro(tmp_path: Path) -> None:
     assert resultado.data["categoria"] == "A"
     assert resultado.artifacts == []
     assert json.loads((tmp_path / "resultado.json").read_text()) == resultado.data
+
+
+def test_portal_captura_el_panel_del_facturometro(tmp_path: Path) -> None:
+    """V1 capturaba ``#divFacturometro``; el portal escribe ese PNG."""
+
+    class _Seccion:
+        def __init__(self) -> None:
+            self.capturado: str | None = None
+
+        async def count(self) -> int:
+            return 1
+
+        @property
+        def first(self) -> "_Seccion":
+            return self
+
+        async def screenshot(self, path: str = "", **_: Any) -> None:
+            self.capturado = path
+            Path(path).write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    seccion = _Seccion()
+
+    class _PaginaCaptura:
+        def locator(self, _selector: str) -> _Seccion:
+            return seccion
+
+    destino = tmp_path / "captura.png"
+    escrito = asyncio.run(
+        FacturometroPortal(_PaginaCaptura()).capturar_facturometro(destino)
+    )
+
+    assert escrito == destino
+    assert destino.read_bytes().startswith(b"\x89PNG")
+    assert seccion.capturado == str(destino)
+
+
+def test_portal_sin_panel_no_captura_nada(tmp_path: Path) -> None:
+    class _PaginaSinPanel:
+        def locator(self, _selector: str) -> Any:
+            class _Vacio:
+                async def count(self) -> int:
+                    return 0
+
+            return _Vacio()
+
+    assert asyncio.run(
+        FacturometroPortal(_PaginaSinPanel()).capturar_facturometro(tmp_path / "x.png")
+    ) is None
+
+
+def test_plugin_sube_la_captura_como_artefacto(tmp_path: Path) -> None:
+    """La captura viaja por slot prefirmado y expone ``screenshot_url``."""
+
+    class _Servicio:
+        async def leer_facturometro(self, representado_cuit: str) -> dict[str, str]:
+            return {"monto": "$ 1,00", "tope": "$ 2,00", "categoria": "A"}
+
+        async def capturar_facturometro(self, destino: Path) -> Path:
+            Path(destino).write_bytes(b"\x89PNG\r\n\x1a\npanel")
+            return Path(destino)
+
+    class _Sesion:
+        async def login(self) -> None:
+            return None
+
+        async def open_service(self, nombre: str, **kwargs: Any) -> _Servicio:
+            return _Servicio()
+
+    class _Factory:
+        @asynccontextmanager
+        async def arca_session(self, **_: Any):
+            yield _Sesion()
+
+    from bot_worker.runtime.context import ArtifactStore, CancellationToken
+
+    async def _presign(artifact_id: str, content_type: str, size: int) -> dict[str, Any]:
+        return {"upload_url": "", "object_key": f"facturometro/{artifact_id}.png"}
+
+    store = ArtifactStore(
+        work_dir=tmp_path,
+        slots={},
+        presign=_presign,
+        declarados={
+            spec.nombre: (tuple(spec.content_types), spec.max_bytes)
+            for spec in FacturometroPlugin.manifest.artefactos_produce
+        },
+    )
+
+    async def no_op(*_: Any, **__: Any) -> None:
+        return None
+
+    runtime = SimpleNamespace(
+        credentials=SimpleNamespace(clave="clave-ficticia", cuit_representante="20123456789"),
+        cancellation=CancellationToken(),
+        event_sink=SimpleNamespace(progress=no_op),
+        deadline=SimpleNamespace(remaining_seconds=lambda: 60),
+        browser_factory=_Factory(),
+        proxy=None,
+        work_dir=tmp_path,
+        artifact_store=store,
+    )
+    plugin = FacturometroPlugin()
+    entrada = asyncio.run(
+        plugin.validate({"operacion": "consultar", "carga_minio": True})
+    )
+
+    resultado = asyncio.run(plugin.execute(entrada, runtime))
+
+    assert resultado.data["screenshot_url"] == "facturometro/facturometro_captura.png"
+    assert resultado.data["captura"]["archivo"] == "facturometro_seccion.png"
+    assert resultado.data["captura"]["sha256"]
+    assert [a["artifact_id"] for a in resultado.artifacts] == ["facturometro_captura"]
+
+
+def test_plugin_sin_captura_avisa_cuando_el_panel_no_esta(tmp_path: Path) -> None:
+    class _Servicio:
+        async def leer_facturometro(self, representado_cuit: str) -> dict[str, str]:
+            return {"monto": "$ 1,00", "tope": "$ 2,00", "categoria": "A"}
+
+        async def capturar_facturometro(self, destino: Path) -> Path | None:
+            return None
+
+    class _Sesion:
+        async def login(self) -> None:
+            return None
+
+        async def open_service(self, nombre: str, **kwargs: Any) -> _Servicio:
+            return _Servicio()
+
+    class _Factory:
+        @asynccontextmanager
+        async def arca_session(self, **_: Any):
+            yield _Sesion()
+
+    async def no_op(*_: Any, **__: Any) -> None:
+        return None
+
+    from bot_worker.runtime.context import ArtifactStore, CancellationToken
+
+    runtime = SimpleNamespace(
+        credentials=SimpleNamespace(clave="clave-ficticia", cuit_representante="20123456789"),
+        cancellation=CancellationToken(),
+        event_sink=SimpleNamespace(progress=no_op),
+        deadline=SimpleNamespace(remaining_seconds=lambda: 60),
+        browser_factory=_Factory(),
+        proxy=None,
+        work_dir=tmp_path,
+        artifact_store=ArtifactStore(tmp_path, slots={}, presign=no_op),
+    )
+    plugin = FacturometroPlugin()
+    entrada = asyncio.run(plugin.validate({"operacion": "consultar"}))
+
+    resultado = asyncio.run(plugin.execute(entrada, runtime))
+
+    assert resultado.artifacts == []
+    assert resultado.data["screenshot_url"] is None
+    assert "sin panel" in resultado.data["warnings"][0]
+
+
+def test_plugin_usa_el_cuit_de_la_credencial_sin_representado(tmp_path: Path) -> None:
+    """V1 permitía omitir el representado: se usa el CUIT de la sesión."""
+    visto: dict[str, str] = {}
+
+    class _Servicio:
+        async def leer_facturometro(self, representado_cuit: str) -> dict[str, str]:
+            visto["cuit"] = representado_cuit
+            return {"monto": "$ 1,00", "tope": "$ 2,00", "categoria": "A"}
+
+    class _Sesion:
+        async def login(self) -> None:
+            return None
+
+        async def open_service(self, nombre: str, **kwargs: Any) -> _Servicio:
+            return _Servicio()
+
+    class _Factory:
+        @asynccontextmanager
+        async def arca_session(self, **_: Any):
+            yield _Sesion()
+
+    async def no_op(*_: Any, **__: Any) -> None:
+        return None
+
+    runtime = SimpleNamespace(
+        credentials=SimpleNamespace(clave="clave-ficticia", cuit_representante="27987654321"),
+        cancellation=SimpleNamespace(raise_if_cancelled=no_op),
+        event_sink=SimpleNamespace(progress=no_op),
+        deadline=SimpleNamespace(remaining_seconds=lambda: 60),
+        browser_factory=_Factory(),
+        proxy=None,
+        work_dir=tmp_path,
+    )
+    plugin = FacturometroPlugin()
+    entrada = asyncio.run(plugin.validate({"operacion": "consultar"}))
+
+    resultado = asyncio.run(plugin.execute(entrada, runtime))
+
+    assert visto["cuit"] == "27987654321"
+    assert resultado.data["representado_cuit"] == "27987654321"

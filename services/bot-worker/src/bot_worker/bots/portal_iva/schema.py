@@ -32,7 +32,7 @@ PERIODO_PATTERN = r"^\d{6}$"
 
 
 class _Base(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
 
 def limpiar_cuit(valor: Any) -> str:
@@ -118,6 +118,19 @@ class PortalIvaDescargarInput(_Periodo, _Representado):
     )
     incluir_json: bool = True
     subir_csv: bool = True
+    # V1 always refreshed ARCA and cleared the downloaded book afterwards.
+    refrescar_desde_arca: bool = True
+    limpiar_despues: bool = True
+    operaciones_ng_o_e: bool = False
+    prorrateo_global: bool = False
+    prorrateo_asignacion_directa: bool = False
+    prorrateo_ambos: bool = False
+    importacion_definitiva_bienes: bool = False
+    importacion_servicios: bool = False
+    regimen_turiva: bool = False
+    bienes_usados: bool = False
+    ninguna_anteriores: bool = True
+    periodos_seleccionables: list[dict[str, str]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validar(self) -> PortalIvaDescargarInput:
@@ -128,11 +141,44 @@ class PortalIvaDescargarInput(_Periodo, _Representado):
         return self
 
 
-class PortalIvaImportarInput(_Periodo, _Representado):
-    """Operacion ``importar``: importa TXT de ventas y/o compras."""
+class _ArchivosTxt(_Base):
+    """TXT inline de comprobantes y, opcionalmente, de alicuotas por libro.
+
+    Los campos ``*_alicuotas_txt`` son opcionales: sin ellos solo se sube el
+    TXT de comprobantes, como en el contrato anterior.
+    """
 
     ventas_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
     compras_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
+    ventas_alicuotas_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
+    compras_alicuotas_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
+
+    @model_validator(mode="after")
+    def _alicuotas_con_comprobante(self) -> _ArchivosTxt:
+        if self.ventas_txt and not self.ventas_alicuotas_txt:
+            raise ValueError("ventas_txt requiere ventas_alicuotas_txt")
+        if self.compras_txt and not self.compras_alicuotas_txt:
+            raise ValueError("compras_txt requiere compras_alicuotas_txt")
+        if self.ventas_alicuotas_txt and not self.ventas_txt:
+            raise ValueError("ventas_alicuotas_txt requiere ventas_txt")
+        if self.compras_alicuotas_txt and not self.compras_txt:
+            raise ValueError("compras_alicuotas_txt requiere compras_txt")
+        return self
+
+
+class PortalIvaImportarInput(_Periodo, _Representado, _ArchivosTxt):
+    """Operacion ``importar``: importa TXT de ventas y/o compras."""
+
+    operaciones_ng_o_e: bool = False
+    prorrateo_global: bool = False
+    prorrateo_asignacion_directa: bool = False
+    prorrateo_ambos: bool = False
+    importacion_definitiva_bienes: bool = False
+    importacion_servicios: bool = False
+    regimen_turiva: bool = False
+    bienes_usados: bool = False
+    ninguna_anteriores: bool = True
+    periodos_seleccionables: list[dict[str, str]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validar(self) -> PortalIvaImportarInput:
@@ -141,11 +187,8 @@ class PortalIvaImportarInput(_Periodo, _Representado):
         return self
 
 
-class PortalIvaGestionarInput(PortalIvaDescargarInput):
+class PortalIvaGestionarInput(PortalIvaDescargarInput, _ArchivosTxt):
     """Operacion ``gestionar``: descarga y luego importa (flujo V2)."""
-
-    ventas_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
-    compras_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
 
 
 OperacionPortalIva = Literal["descargar", "importar", "gestionar"]
@@ -174,7 +217,21 @@ def esquema_entrada() -> dict[str, Any]:
             "descarga_compras": {"type": "boolean"},
             "ventas_txt": {"type": "string"},
             "compras_txt": {"type": "string"},
+            "ventas_alicuotas_txt": {"type": "string"},
+            "compras_alicuotas_txt": {"type": "string"},
             "incluir_json": {"type": "boolean"},
             "subir_csv": {"type": "boolean"},
+            "refrescar_desde_arca": {"type": "boolean"},
+            "limpiar_despues": {"type": "boolean"},
+            "operaciones_ng_o_e": {"type": "boolean"},
+            "prorrateo_global": {"type": "boolean"},
+            "prorrateo_asignacion_directa": {"type": "boolean"},
+            "prorrateo_ambos": {"type": "boolean"},
+            "importacion_definitiva_bienes": {"type": "boolean"},
+            "importacion_servicios": {"type": "boolean"},
+            "regimen_turiva": {"type": "boolean"},
+            "bienes_usados": {"type": "boolean"},
+            "ninguna_anteriores": {"type": "boolean"},
+            "periodos_seleccionables": {"type": "array"},
         },
     }

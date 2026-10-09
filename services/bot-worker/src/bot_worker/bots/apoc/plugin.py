@@ -19,7 +19,7 @@ import json
 from typing import Any, Mapping
 
 from bot_worker.bots.apoc.schema import ApocConsultarInput, esquema_entrada
-from bot_worker.bots.errors import InvalidInputError
+from bot_worker.bots.errors import InvalidInputError, TargetUnavailableError
 from bot_worker.bots.registry import BotManifest
 
 try:
@@ -116,7 +116,12 @@ class ApocPlugin:
             raise InvalidInputError(f"entrada invalida: {exc}") from exc
 
     async def execute(self, payload: Any, runtime: BotRuntime) -> BotResult:
-        """Busca el CUIT en la base provisionada y retorna ``BotResult``."""
+        """Busca el CUIT en la base provisionada y retorna ``BotResult``.
+
+        Sin base provisionada se falla con error tipado: V1 tambien fallaba
+        (``FileNotFoundError`` -> 400) y la central responde 503 cuando no
+        tiene la base, asi que devolver ``apoc=False`` seria un falso negativo.
+        """
         from bot_worker.runtime.context import BotResult
 
         _, entrada = payload
@@ -124,17 +129,12 @@ class ApocPlugin:
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Buscando CUIT en base APOC"
         )
-        advertencias: list[str] = []
-        if self._base_text:
-            datos = buscar_en_base(entrada.cuit, self._base_text)
-        else:
-            datos = {
-                "cuit": entrada.cuit,
-                "fecha_condicion": None,
-                "fecha_publicacion": None,
-                "apoc": False,
-            }
-            advertencias.append("base APOC no provisionada en el sobre sellado")
+        if not self._base_text:
+            raise TargetUnavailableError(
+                "base APOC no provisionada en el sobre sellado",
+                diagnostic_code="apoc_base_missing",
+            )
+        datos = buscar_en_base(entrada.cuit, self._base_text)
         copia = runtime.work_dir / "resultado.json"
         copia.write_text(
             json.dumps(datos, ensure_ascii=False, separators=(",", ":"))[:1_048_576],
@@ -143,4 +143,4 @@ class ApocPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos, warnings=advertencias)
+        return BotResult(result="OK", data=datos, warnings=[])

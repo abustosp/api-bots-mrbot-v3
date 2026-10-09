@@ -1,9 +1,9 @@
 """Plugin ``pago_devoluciones``: pagos de devoluciones (ola 3).
 
-Porta ``api-bots-mrbot-v2/app/bot/pago_devoluciones_bot.py``
+Porta ``api-bots-mrbot/app/bot/pago_devoluciones_bot.py``
 (``bot_pago_devoluciones``: consulta y exportacion del Excel de pagos,
 con errores agrupados por seccion) al contrato S7. Cambios
-obligatorios respecto de V2:
+obligatorios respecto de V1:
 
 - Sin ``SessionLocal`` ni escritura de ``ConsultaLog``: la central
   persiste el resultado tras el callback idempotente.
@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Mapping
 
 from bot_worker.bots.errors import (
@@ -54,13 +54,21 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 
 SERVICIO_ARCA = "PAGO DEVOLUCIONES"
 ID_ARTEFACTO_XLSX = "pagos_xlsx"
+INVALID_FILENAME_RE = re.compile(r'[\\/:*?"<>|]+')
+
+
+def safe_filename(value: str) -> str:
+    """Sanitiza el nombre de archivo (port de V1 ``safe_filename``)."""
+    limpio = INVALID_FILENAME_RE.sub("_", value or "")
+    limpio = re.sub(r"\s+", "_", limpio).strip("_")
+    return limpio or "archivo"
 
 
 def nombre_base_archivo(representado_cuit: str) -> str:
-    """Replica el patron de nombres V2 ``'PAGO-DEVOLUCIONES - ...'``."""
+    """Replica el patron de nombres V1 ``'pago_devoluciones_<cuit>_<sello>'``."""
     digitos = re.sub(r"\D", "", representado_cuit or "")
-    sello = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return f"PAGO-DEVOLUCIONES - {digitos} - {sello}"
+    sello = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return safe_filename(f"pago_devoluciones_{digitos}_{sello}")
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -75,6 +83,32 @@ def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     if "browser" in type(exc).__name__.lower() or "playwright" in type(exc).__name__.lower():
         return BrowserCrashedError(f"navegador caido: {texto}")
     return TargetUnavailableError(f"falla del organismo: {texto}")
+
+
+#: Secciones cuyo error invalida la consulta (port de V1 ``_has_critical_errors``).
+SECCIONES_CRITICAS = frozenset(
+    {"validacion", "proxy", "login", "servicio", "representado", "consulta", "general"}
+)
+
+
+def _append_section_error(
+    errores: dict[str, list[str]], seccion: str, mensaje: str
+) -> None:
+    """Registra un error bajo su sección (port de V1 ``_append_section_error``)."""
+    limpio = (mensaje or "").strip() or "Error desconocido"
+    errores.setdefault(seccion, []).append(limpio)
+
+
+def _has_critical_errors(errores: dict[str, list[str]]) -> bool:
+    """True si alguna sección crítica tiene errores (port de V1)."""
+    return any(errores.get(seccion) for seccion in SECCIONES_CRITICAS)
+
+
+def _estado_por_secciones(errores: dict[str, list[str]]) -> str:
+    """ERROR si hay una sección crítica, PARCIAL si solo hay no críticas, OK si no hay."""
+    if _has_critical_errors(errores):
+        return "ERROR"
+    return "PARCIAL" if any(errores.values()) else "OK"
 
 
 class PagoDevolucionesPlugin:
@@ -187,7 +221,8 @@ class PagoDevolucionesPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos, artifacts=artefactos)
+        estado = _estado_por_secciones(datos.get("errores_por_seccion", {}))
+        return BotResult(result=estado, data=datos, artifacts=artefactos)
 
     async def _consultar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime, cuit_objetivo: str
@@ -206,13 +241,19 @@ class PagoDevolucionesPlugin:
             "archivo": None,
             "errores_por_seccion": {},
         }
+        errores: dict[str, list[str]] = datos["errores_por_seccion"]
         artefactos: list[dict[str, Any]] = []
         destino = runtime.artifact_store.resolve(
             f"{nombre_base_archivo(cuit_objetivo)}.xlsx"
         )
-        await servicio.consultar_y_exportar(
-            cuit_representado=cuit_objetivo, destino=destino
-        )
+        try:
+            await servicio.consultar_y_exportar(
+                cuit_representado=cuit_objetivo, destino=destino
+            )
+        except ErrorDeBot as exc:
+            # Fallo de exportación: seccion "consulta" (critica, como en V1).
+            _append_section_error(errores, "consulta", getattr(exc, "diagnostico", str(exc)))
+            raise
         await runtime.event_sink.progress(
             phase="PROCESANDO", percent=65, message="Procesando pagos"
         )
@@ -229,6 +270,8 @@ class PagoDevolucionesPlugin:
                     ID_ARTEFACTO_XLSX, destino.name
                 )
             except ValueError as exc:
+                # Contrato V3: una subida fallida es ArtifactUploadError
+                # reintentable. No se degrada a PARCIAL en silencio.
                 raise ArtifactUploadError(str(exc)) from exc
             artefactos.append(referencia)
             resumen["sha256"] = referencia["sha256"]

@@ -1,13 +1,14 @@
 """Esquemas de entrada del bot ``declaracion_en_linea`` (worker V3).
 
-Porta la validacion implicita de V2
-(``api-bots-mrbot-v2/app/bot/declaracion_en_linea_bot.py``,
+Porta la validacion implicita de V1
+(``api-bots-mrbot/app/bot/declaracion_en_linea_bot.py``,
 ``bot_declaracion_en_linea`` / ``declaracion_en_linea_consulta``):
 CUIT de representado (por defecto el representante), rango de periodos
-en formato ``AAAAMM`` y flags de salida. Falla antes del navegador.
+(``AAAAMM`` o los formatos ``MM/AAAA``/``AAAA-MM`` que V1 normaliza) y flags
+de salida (``carga_minio`` en V1). Falla antes del navegador.
 
 Incluye el generador puro de rango de periodos (port de
-``normalize_periodo_range``/``generate_period_range`` de V2) para que el
+``normalize_periodo_range``/``generate_period_range`` de V1) para que el
 plugin itere ``[periodo_desde, periodo_hasta]`` sin logica de fechas en
 el flujo de navegador.
 """
@@ -18,8 +19,21 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from bot_worker.bots.declaracion_en_linea.helpers import periodo_a_yyyymm
+
 CUIT_PATTERN = r"^\d{11}$"
 PERIODO_PATTERN = r"^\d{6}$"
+#: Campos del contrato compartido con V1 que V3 no toma del payload (van en el
+#: sobre sellado o los resuelve la infraestructura).
+CAMPOS_SOBRE_SELLADO = (
+    "clave",
+    "clave_representante",
+    "clave_encriptada",
+    "cuit_representante",
+    "cuit_inicio_sesion",
+    "proxy_request",
+    "proxy",
+)
 
 
 class _Base(BaseModel):
@@ -41,10 +55,14 @@ def limpiar_cuit(valor: Any) -> str:
 
 
 def normalizar_periodo(valor: Any) -> str:
-    """Exige periodo ``AAAAMM`` con mes 01-12 (port de V2)."""
-    texto = str(valor).strip()
-    if len(texto) != 6 or not texto.isdigit():
-        raise ValueError(f"periodo debe tener formato AAAAMM: {texto!r}")
+    """Normaliza el periodo a ``AAAAMM`` con mes 01-12 (port de V1).
+
+    V1 acepta ``AAAAMM`` y tambien ``MM/AAAA``, ``AAAA/MM``, ``MM-AAAA`` y
+    ``AAAA-MM`` via ``periodo_to_yyyymm``.
+    """
+    texto = periodo_a_yyyymm(str(valor) if valor is not None else None)
+    if not texto:
+        raise ValueError(f"Periodo desde/hasta invalido. Use formato AAAAMM: {valor!r}")
     mes = int(texto[4:6])
     if mes < 1 or mes > 12:
         raise ValueError(f"periodo con mes invalido: {texto!r}")
@@ -88,7 +106,12 @@ class DeclaracionEnLineaConsultarInput(_Base):
     periodo_desde: str = Field(min_length=6, max_length=6, pattern=PERIODO_PATTERN)
     periodo_hasta: str = Field(min_length=6, max_length=6, pattern=PERIODO_PATTERN)
     incluir_json: bool = True
-    subir_archivos: bool = True
+    subir_archivos: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "subir_archivos", "carga_minio", "minio_upload", "archivo_historico_minio"
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -100,6 +123,8 @@ class DeclaracionEnLineaConsultarInput(_Base):
                     datos[clave] = limpiar_cuit(datos[clave])
                 elif clave in datos and datos[clave] == "":
                     datos[clave] = None
+            for clave in CAMPOS_SOBRE_SELLADO:
+                datos.pop(clave, None)
             for clave in ("periodo_desde", "periodo_hasta"):
                 if clave in datos and datos[clave] is not None:
                     datos[clave] = normalizar_periodo(datos[clave])
@@ -107,8 +132,11 @@ class DeclaracionEnLineaConsultarInput(_Base):
 
     @model_validator(mode="after")
     def _rango_valido(self) -> DeclaracionEnLineaConsultarInput:
+        # V1 ordena el rango: si vienen invertidos, los intercambia.
         if self.periodo_desde > self.periodo_hasta:
-            raise ValueError("periodo_desde no puede ser posterior a periodo_hasta")
+            desde, hasta = self.periodo_hasta, self.periodo_desde
+            object.__setattr__(self, "periodo_desde", desde)
+            object.__setattr__(self, "periodo_hasta", hasta)
         if not self.incluir_json and not self.subir_archivos:
             raise ValueError("seleccionar al menos una salida (json o archivos)")
         return self
@@ -129,10 +157,13 @@ def esquema_entrada() -> dict[str, Any]:
         "properties": {
             "operacion": {"type": "string", "enum": ["consultar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "cuit_representado": {"type": "string", "pattern": CUIT_PATTERN},
             "representado_nombre": {"type": "string"},
-            "periodo_desde": {"type": "string", "pattern": PERIODO_PATTERN},
-            "periodo_hasta": {"type": "string", "pattern": PERIODO_PATTERN},
+            "periodo_desde": {"type": "string"},
+            "periodo_hasta": {"type": "string"},
             "incluir_json": {"type": "boolean"},
             "subir_archivos": {"type": "boolean"},
+            "carga_minio": {"type": "boolean"},
         },
     }

@@ -46,7 +46,10 @@ CAMPOS_ARCHIVO = (
 
 
 class _Base(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    # V1 accepted the complete API payload, including transport and legacy
+    # fields that the worker itself does not need.  Preserve that compatibility
+    # instead of rejecting a V1 request before the portal is reached.
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
 
 def limpiar_cuit(valor: Any) -> str:

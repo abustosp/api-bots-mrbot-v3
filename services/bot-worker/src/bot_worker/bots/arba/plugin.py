@@ -180,24 +180,27 @@ class ArbaPlugin:
                     phase="CONSULTA", percent=45, message="Consultando periodo"
                 )
                 sin_archivos = False
-                for _ in range(2):  # port V2: la primera consulta no siempre lista
+                # V1 repite la consulta completa siempre: la primera pasada no
+                # siempre lista y el aviso de "sin datos" se evalua al final.
+                for _ in range(2):
                     await pagina.goto(self._consulta_url)
                     await pagina.wait_for_load_state("networkidle")
                     await pagina.locator("input[name=\"anio\"]").fill(anio)
                     await pagina.locator("input[name=\"mes\"]").fill(mes)
                     await pagina.get_by_role("button", name="Consultar").click()
                     await pagina.wait_for_load_state("networkidle")
-                    contenido = await pagina.content()
-                    if "No Existen archivos para el periodo solicitado" in contenido:
-                        sin_archivos = True
-                        break
+                contenido = await pagina.content()
+                if "No Existen archivos para el periodo solicitado" in contenido:
+                    sin_archivos = True
+                if not sin_archivos:
+                    # El boton puede renderizarse despues del networkidle; la
+                    # espera acotada evita un clic sobre un DOM incompleto.
                     try:
                         await pagina.get_by_role(
                             "button", name="Descargar"
-                        ).wait_for(state="visible", timeout=5_000)
-                        break
+                        ).wait_for(state="visible", timeout=10_000)
                     except Exception:
-                        continue
+                        pass
                 if sin_archivos:
                     return BotResult(
                         result="OK",
@@ -231,7 +234,11 @@ class ArbaPlugin:
             "operacion": "descargar",
             "representado_cuit": entrada.representado_cuit,
             "periodo": periodo,
+            "tipo": "RETPER ARBA",
             "archivo": destino.name,
+            # Misma forma que V1 ``results['archivos']``; ``url_minio`` lleva el
+            # object key del artefacto subido (el sobre no expone la URL).
+            "archivos": [{"tipo": "RETPER ARBA", "archivo": destino.name, "url_minio": None}],
         }
         artefactos: list[dict[str, Any]] = []
         if entrada.subir:
@@ -247,6 +254,7 @@ class ArbaPlugin:
             artefactos.append(referencia)
             datos["sha256"] = referencia["sha256"]
             datos["size_bytes"] = referencia["size_bytes"]
+            datos["archivos"][0]["url_minio"] = referencia.get("object_key") or None
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )

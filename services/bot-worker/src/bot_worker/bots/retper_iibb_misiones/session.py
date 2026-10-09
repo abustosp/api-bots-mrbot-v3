@@ -71,6 +71,8 @@ async def _fill_first(
     for locator in candidates:
         try:
             if await locator.count() > 0:
+                # V1 enfoca con un clic antes de completar el campo.
+                await locator.first.click(timeout=timeout_ms)
                 await locator.first.fill(value, timeout=timeout_ms)
                 return True
         except Exception:

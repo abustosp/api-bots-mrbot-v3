@@ -6,9 +6,11 @@ Porta la validacion implicita de V2
 contribuyente, rango de fechas ``dd/mm/aaaa`` de comprobantes y flags
 por consulta (emisor/receptor) y de salida. Falla antes del navegador.
 
-V2 consolida los cuadros por emisor/receptor en un Excel con pandas; en
-V3 el worker no garantiza pandas, asi que el plugin escribe un CSV
-consolidado por consulta con la biblioteca estandar.
+V2 consolida los cuadros por emisor/receptor en un Excel con pandas; en V3 el
+worker no garantiza pandas, asi que el plugin escribe ese mismo Excel
+(``consolidado``, ``por_emisor`` y ``por_receptor``) con el escritor XLSX de
+biblioteca estandar del portal de hacienda, y la descarga de PDF por
+comprobante queda activa por defecto como en V1.
 """
 
 from __future__ import annotations
@@ -16,7 +18,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 CUIT_PATTERN = r"^\d{11}$"
 FORMATO_FECHA = "%d/%m/%Y"
@@ -71,7 +80,30 @@ class HaciendaConsultarInput(_Base):
     por_emisor: bool = True
     por_receptor: bool = True
     incluir_json: bool = True
-    subir_excel: bool = True
+    subir_excel: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir_excel", "subir_a_minio", "carga_minio"),
+    )
+    # V1 descarga el PDF de cada comprobante siempre; el flag permite apagarlo.
+    descargar_pdf: bool = True
+    # Campos de V1 que la central resuelve en el sobre sellado: se aceptan para
+    # no romper clientes viejos y se ignoran (las credenciales nunca viajan aca).
+    cuit_representante: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "cuit_representante", "cuit_inicio_sesion", "cuit_login"
+        ),
+        repr=False,
+        max_length=14,
+    )
+    eliminar_descargas: bool = True
+    proxy_request: bool | None = None
+    headless: bool | None = None
+
+    @field_validator("cuit_representante", mode="after")
+    @classmethod
+    def _normalizar_cuit_representante(cls, valor: str | None) -> str | None:
+        return limpiar_cuit(valor) if valor else None
 
     @model_validator(mode="before")
     @classmethod
@@ -131,5 +163,6 @@ def esquema_entrada() -> dict[str, Any]:
             "por_receptor": {"type": "boolean"},
             "incluir_json": {"type": "boolean"},
             "subir_excel": {"type": "boolean"},
+            "descargar_pdf": {"type": "boolean"},
         },
     }

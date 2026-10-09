@@ -117,3 +117,87 @@ def test_plugin_conecta_capmonster_srt_y_no_el_perfil_arca() -> None:
     _configurar_captcha_srt(portal, _Factory())
 
     assert portal._captcha is resolvedor_srt
+
+
+# --- Paridad V1: estado por CUIT y lote que sigue ante un fallo -------------
+
+
+def _lote_srt(consultas_por_cuit: dict[str, object], cuits: list[str]) -> tuple[dict, list]:
+    from types import SimpleNamespace
+
+    from bot_worker.bots.srt.plugin import SrtPlugin
+
+    class _Servicio:
+        async def consultar_cuit(self, cuit: str) -> dict:
+            valor = consultas_por_cuit[cuit]
+            if isinstance(valor, Exception):
+                raise valor
+            return valor  # type: ignore[return-value]
+
+    class _Store:
+        def resolve(self, nombre: str):  # pragma: no cover - ruta temporal
+            import tempfile
+            from pathlib import Path
+
+            return Path(tempfile.mkdtemp()) / nombre
+
+        async def upload(self, artifact_id: str, nombre: str) -> dict:
+            return {"sha256": "abc", "size_bytes": 1}
+
+    async def _no_op(*_: object, **__: object) -> None:
+        return None
+
+    async def _correr() -> tuple[dict, list]:
+        _, entrada = await SrtPlugin().validate({
+            "operacion": "consultar_alicuotas",
+            "cuits_consulta": cuits,
+            "subir_json": False,
+        })
+        runtime = SimpleNamespace(
+            cancellation=SimpleNamespace(raise_if_cancelled=_no_op),
+            event_sink=SimpleNamespace(progress=_no_op),
+            artifact_store=_Store(),
+        )
+        datos, _, errores = await SrtPlugin()._consultar_lote(_Servicio(), entrada, runtime)
+        return datos, errores
+
+    return asyncio.run(_correr())
+
+
+def test_un_cuit_con_error_no_corta_el_lote() -> None:
+    from bot_worker.bots.errors import TargetUnavailableError
+
+    datos, errores = _lote_srt(
+        {
+            "20123456789": {"status": "OK", "message": None, "data": [{"t": 1}]},
+            "27111222333": TargetUnavailableError(
+                "no se pudo ejecutar la consulta en el portal SRT",
+                diagnostic_code="srt_query_failed",
+            ),
+            "23444555666": {"status": "SIN_AFILIACION_VIGENTE", "message": "x", "data": None},
+        },
+        ["20123456789", "27111222333", "23444555666"],
+    )
+
+    # Los tres CUIT quedan en el resultado: el del medio como ERROR.
+    estados = [(c["cuit"], c["status"]) for c in datos["consultas"]]
+    assert estados == [
+        ("20123456789", "OK"),
+        ("27111222333", "ERROR"),
+        ("23444555666", "SIN_AFILIACION_VIGENTE"),
+    ]
+    assert datos["consultas_ok"] == 2
+    assert datos["consultas_error"] == 1
+    assert len(errores) == 1
+    assert "srt_query_failed" in errores[0].internal_diagnostic
+
+
+def test_lote_sin_fallos_no_reporta_errores() -> None:
+    datos, errores = _lote_srt(
+        {"20123456789": {"status": "OK", "message": None, "data": []}},
+        ["20123456789"],
+    )
+
+    assert errores == []
+    assert datos["consultas_error"] == 0
+    assert datos["consultas_ok"] == 1

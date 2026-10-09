@@ -165,47 +165,45 @@ class CargaPortalIvaPlugin:
         return rutas
 
     async def _importar_txts(
-        self, pagina: Any, libro: str, cbte: str, alicuota: str, runtime: BotRuntime
+        self, pagina: Any, libro: str, cbte: Path, alicuota: Path, runtime: BotRuntime
     ) -> str:
-        """Importa un par comprobantes+alicuotas (port de ``_importar_txts``).
+        """Borra los registros previos del libro e importa el par (port V1 ``_cargar_txt_seccion``).
 
-        Sube ambos archivos y dispara la importacion una sola vez, con
-        reintentos por seccion independiente como en V2.
+        El borrado va UNA sola vez, antes del reintento: si la importacion ya llego
+        a entrar y solo falla la verificacion, reintentar no debe borrar ni volver
+        a importar lo que ya quedo cargado. El borrado es obligatorio: sin el, la
+        importacion duplicaria los comprobantes. Sin boton de borrado, el libro
+        no se toca y la seccion falla.
         """
+        await runtime.cancellation.raise_if_cancelled()
+        await pagina.abrir_libro(libro)
+        if not await pagina.eliminar_todo():
+            raise TargetUnavailableError(
+                f"{libro}: no se pudo borrar los registros previos",
+                diagnostic_code="carga_eliminar_todo_failed",
+            )
         ultimo_error = "importacion no intentada"
         for intento in range(1, MAX_REINTENTOS_SECCION + 1):
             await runtime.cancellation.raise_if_cancelled()
             try:
-                await pagina.get_by_role(
-                    "link", name=re.compile(r"Importar\s+(?:desde\s+)?Archivos?", re.I)
-                ).first.click()
-                entradas = pagina.locator("input[type='file']")
-                await entradas.nth(0).set_input_files(cbte)
-                await entradas.nth(1).set_input_files(alicuota)
-                await pagina.get_by_role(
-                    "button", name=re.compile(r"Importar", re.I)
-                ).first.click()
-                await pagina.wait_for_timeout(5_000)
+                await pagina.importar_txt(libro, cbte, alicuota)
                 return f"{libro}: importado (intento {intento})"
             except Exception as exc:  # noqa: BLE001 - se reintenta por seccion
                 ultimo_error = type(exc).__name__
-                await pagina.wait_for_timeout(3_000)
-        raise TargetUnavailableError(f"{libro}: {ultimo_error}")
+                await pagina.volver_al_inicio()
+                if intento < MAX_REINTENTOS_SECCION:
+                    await pagina.abrir_libro(libro)
+        raise TargetUnavailableError(
+            f"{libro}: {ultimo_error}",
+            diagnostic_code="carga_txt_failed",
+        )
 
     async def _cargar_apertura_csv(
-        self, pagina: Any, seccion: str, csv_nombre: str, runtime: BotRuntime
+        self, pagina: Any, seccion: str, csv_path: Path, runtime: BotRuntime
     ) -> str:
-        """Carga un CSV de apertura (port de ``cargar_apertura_csv``)."""
+        """Carga un CSV de apertura desde "Informacion adicional" (port V1 ``cargar_apertura_csv``)."""
         await runtime.cancellation.raise_if_cancelled()
-        await pagina.get_by_role(
-            "link", name=re.compile(rf"{re.escape(seccion)}", re.I)
-        ).first.click()
-        entrada_archivo = pagina.locator("input[type='file']").first
-        await entrada_archivo.set_input_files(csv_nombre)
-        await pagina.get_by_role(
-            "button", name=re.compile(r"Cargar|Importar|Confirmar", re.I)
-        ).first.click()
-        await pagina.wait_for_timeout(5_000)
+        await pagina.cargar_csv(seccion, csv_path)
         return f"{seccion}: cargado"
 
     async def execute(self, payload: Any, runtime: BotRuntime) -> BotResult:
@@ -223,6 +221,10 @@ class CargaPortalIvaPlugin:
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
         rutas = self._materializar_archivos(entrada, runtime)
+        # Rutas absolutas dentro de work_dir: el portal nunca recibe nombres sueltos.
+        rutas_abs = {
+            campo: runtime.artifact_store.resolve(nombre) for campo, nombre in rutas.items()
+        }
         total_cf = (
             calcular_total_cf_csv(base64.b64decode(str(entrada.csv_cf_b64)))
             if entrada.csv_cf_b64
@@ -245,19 +247,39 @@ class CargaPortalIvaPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                pagina = await sesion.open_service(self._servicio)
+                pagina = await sesion.open_service(self._servicio, portal="carga_portal_iva")
+                await pagina.seleccionar_representado(entrada.representado_cuit)
+                preparar_periodo = getattr(pagina, "preparar_periodo", None)
+                if preparar_periodo is not None:
+                    periodos = await preparar_periodo(
+                        entrada.periodo,
+                        operaciones_ng_o_e=entrada.operaciones_ng_o_e,
+                        prorrateo_global=entrada.prorrateo_global,
+                        prorrateo_asignacion_directa=entrada.prorrateo_asignacion_directa,
+                        prorrateo_ambos=entrada.prorrateo_ambos,
+                        importacion_definitiva_bienes=entrada.importacion_definitiva_bienes,
+                        importacion_servicios=entrada.importacion_servicios,
+                        regimen_turiva=entrada.regimen_turiva,
+                        bienes_usados=entrada.bienes_usados,
+                        ninguna_anteriores=entrada.ninguna_anteriores,
+                    )
+                    if periodos:
+                        resultados["periodos_seleccionables"] = periodos
+                else:
+                    # Backwards-compatible fake/adapter contract.
+                    await pagina.seleccionar_periodo(entrada.periodo)
                 await runtime.event_sink.progress(
                     phase="CONSULTA", percent=45, message="Cargando comprobantes"
                 )
-                if rutas.get("liv_cbte_b64"):
-                    resultados["secciones"]["ventas_txt"] = await self._importar_txts(
-                        pagina, "ventas", rutas["liv_cbte_b64"],
-                        rutas["liv_alicuota_b64"], runtime,
-                    )
-                if rutas.get("lic_cbte_b64"):
-                    resultados["secciones"]["compras_txt"] = await self._importar_txts(
-                        pagina, "compras", rutas["lic_cbte_b64"],
-                        rutas["lic_alicuota_b64"], runtime,
+                for clave, libro, cbte, alic in (
+                    ("ventas_txt", "ventas", "liv_cbte_b64", "liv_alicuota_b64"),
+                    ("compras_txt", "compras", "lic_cbte_b64", "lic_alicuota_b64"),
+                ):
+                    if not rutas_abs.get(cbte):
+                        continue
+                    await self._seccion(
+                        resultados["secciones"], clave,
+                        self._importar_txts(pagina, libro, rutas_abs[cbte], rutas_abs[alic], runtime),
                     )
                 await runtime.event_sink.progress(
                     phase="PROCESANDO", percent=65, message="Cargando aperturas"
@@ -268,11 +290,16 @@ class CargaPortalIvaPlugin:
                     ("DF", "csv_df_b64"),
                     ("DF Restitucion", "csv_df_restitucion_b64"),
                 ):
-                    if rutas.get(campo):
-                        resultados["secciones"][seccion] = (
-                            await self._cargar_apertura_csv(
-                                pagina, seccion, rutas[campo], runtime
-                            )
+                    if not rutas_abs.get(campo):
+                        continue
+                    await self._seccion(
+                        resultados["secciones"], seccion,
+                        self._cargar_apertura_csv(pagina, seccion, rutas_abs[campo], runtime),
+                    )
+                    if seccion == "CF" and entrada.prorrateo_global and total_cf is not None:
+                        await self._seccion(
+                            resultados["secciones"], "credito_fiscal_compras",
+                            self._credito_fiscal_compras(pagina, total_cf, runtime),
                         )
         except ErrorDeBot:
             raise
@@ -283,4 +310,62 @@ class CargaPortalIvaPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=resultados)
+        return self._resultado(resultados)
+
+    async def _seccion(
+        self,
+        secciones: dict[str, Any],
+        clave: str,
+        operacion: Any,
+    ) -> None:
+        """Corre una seccion aislada: si falla, queda registrada y el job sigue (V1).
+
+        Un error de seccion no tumba el job completo: las demas secciones siguen y el
+        resultado final queda PARCIAL. Las cancelaciones y deadlines sí se propagan.
+        """
+        from bot_worker.bots.errors import CredentialsRejectedError as _Credenciales
+        from bot_worker.bots.errors import DeadlineExceededError as _Deadline
+        from bot_worker.runtime.context import JobCancelled
+
+        try:
+            secciones[clave] = await operacion
+        except (JobCancelled, _Deadline, _Credenciales):
+            raise
+        except ErrorDeBot as exc:
+            secciones[clave] = f"error: {exc.__class__.__name__}"
+        except Exception as exc:  # noqa: BLE001 - una seccion no tumba el job
+            secciones[clave] = f"error: {type(exc).__name__}"
+
+    async def _credito_fiscal_compras(self, pagina: Any, total_cf: str, runtime: BotRuntime) -> str:
+        """Crédito fiscal computable global de compras (V1 ``_ir_a_editar_credito_fiscal_en_compras``)."""
+        await runtime.cancellation.raise_if_cancelled()
+        manejado = await pagina.cargar_credito_fiscal_compras(total_cf)
+        return "ok" if manejado else "sin_modal"
+
+    @staticmethod
+    def _resultado(resultados: dict[str, Any]) -> BotResult:
+        """OK si todas las secciones cargaron; PARCIAL si alguna fallo y otra no."""
+        from bot_worker.bots.errors import Categoria
+        from bot_worker.runtime.context import BotError, BotResult
+
+        secciones = resultados.get("secciones", {})
+        fallidas = [k for k, v in secciones.items() if isinstance(v, str) and v.startswith("error:")]
+        if not fallidas:
+            return BotResult(result="OK", data=resultados)
+        if len(fallidas) == len(secciones):
+            return BotResult(
+                result="ERROR",
+                data=resultados,
+                errors=[
+                    BotError(
+                        category=Categoria.TARGET_UNAVAILABLE,
+                        internal_diagnostic="carga_todas_las_secciones_fallaron",
+                        retryable=True,
+                    )
+                ],
+            )
+        return BotResult(
+            result="PARCIAL",
+            data=resultados,
+            warnings=["secciones con error: " + ", ".join(fallidas)],
+        )

@@ -1,9 +1,10 @@
 """Esquemas de entrada del plugin ``vep_archivo``.
 
-Porta la validacion de V2
-(``api-bots-mrbot-v2/app/bot/vep_archivo_bot.py``:
-``generar_vep_desde_archivo``): CUIT de 11 digitos, medio de pago
-habilitado y archivo .txt (contenido b64) de hasta 600 registros.
+Paridad con V1 (``app/bot/vep_archivo_bot.py``: ``generar_vep_desde_archivo``):
+los medios de pago son los de V1 (incluido ``qr``) y se aceptan los flags
+``minio_upload``/``subir_a_minio`` y ``proxy_request`` con los mismos nombres
+que el contrato compartido. ``eliminar_descargas`` se acepta por compatibilidad:
+el worker ya borra el ``work_dir`` al terminar, asi que no cambia el resultado.
 """
 
 from __future__ import annotations
@@ -15,11 +16,35 @@ from typing import Any, Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 CUIT_PATTERN = r"^\d{11}$"
-MEDIOS_PAGO = ("link", "pago_mis_cuentas", "internet_banking", "xn_group")
+#: Medios de pago habilitados en V1 (``medio_pagos_habilitados``).
+MEDIOS_PAGO = ("link", "pago_mis_cuentas", "internet_banking", "xn_group", "qr")
 MAX_REGISTROS_POR_LOTE = 600
 MAX_ARCHIVO_BYTES = 7_000_000
 # Nombre del TXT temporal dentro del workdir del job: lo define el bot.
 ARCHIVO_ENTRADA = "vep_entrada.txt"
+#: Campos que V1 recibe por HTTP pero V3 nunca toma del payload.
+CAMPOS_SOBRE_SELLADO = ("contrasena", "clave", "clave_representante", "clave_encriptada", "proxy_request")
+#: Nombres equivalentes de la subida del PDF (V1: ``minio_upload``/``subir_a_minio``).
+ALIAS_SUBIDA = ("subir_pdf", "subir_a_minio", "minio_upload")
+
+
+
+def _unificar_cuit(datos: dict[str, Any], alias: tuple[str, ...] = ("representado_cuit", "cuit", "cuit_representado")) -> None:
+    """Reduce los alias de CUIT del bot a uno.
+
+    Si vienen varios con el mismo valor no hay contradiccion y se acepta. Si
+    difieren, el pedido es ambiguo y se rechaza.
+    """
+    presentes = [c for c in alias if datos.get(c) is not None]
+    if not presentes:
+        return
+    valores = {limpiar_cuit(datos[c]) for c in presentes}
+    if len(valores) > 1:
+        raise ValueError("los alias de CUIT del pedido no coinciden")
+    valor = valores.pop()
+    for c in presentes:
+        datos.pop(c, None)
+    datos["representado_cuit"] = valor
 
 
 class _Base(BaseModel):
@@ -53,6 +78,24 @@ def decodificar_archivo(valor: Any) -> bytes:
     return crudo
 
 
+def _unificar_subida(datos: dict[str, Any]) -> None:
+    """Reduce ``subir_pdf``/``subir_a_minio``/``minio_upload`` a un solo valor.
+
+    Si el cliente manda varios con valores distintos el pedido es
+    contradictorio y se rechaza, en vez de dejar que gane el orden.
+    """
+    presentes = [clave for clave in ALIAS_SUBIDA if clave in datos]
+    if not presentes:
+        return
+    valores = {bool(datos[clave]) for clave in presentes}
+    if len(valores) > 1:
+        raise ValueError("subir_pdf y minio_upload/subir_a_minio contradictorios")
+    valor = valores.pop()
+    for clave in ALIAS_SUBIDA:
+        datos.pop(clave, None)
+    datos["subir_pdf"] = valor
+
+
 class VepArchivoGenerarInput(_Base):
     """Operacion ``generar``: VEP desde archivo .txt.
 
@@ -60,11 +103,14 @@ class VepArchivoGenerarInput(_Base):
     pago y si se sube el PDF. El nombre del TXT temporal y el del PDF subido
     los define el bot; el CUIT se toma de la sesión fiscal cuando no se
     informa. Los archivos temporales siempre se eliminan al terminar.
+
+    ``cuit_inicio_sesion`` es el nombre que usa V1 para el CUIT que inicia
+    sesion: se acepta como alias de ``representado_cuit``.
     """
 
     representado_cuit: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("representado_cuit", "cuit"),
+        validation_alias=AliasChoices("representado_cuit", "cuit", "cuit_inicio_sesion"),
         min_length=11,
         max_length=14,
     )
@@ -72,17 +118,22 @@ class VepArchivoGenerarInput(_Base):
     archivo_b64: str = Field(min_length=1)
     incluir_json: bool = True
     subir_pdf: bool = True
+    eliminar_descargas: bool = True
 
     @model_validator(mode="before")
     @classmethod
     def _normalizar(cls, datos: Any) -> Any:
         if isinstance(datos, dict):
             datos = dict(datos)
-            for clave in ("representado_cuit", "cuit"):
-                if clave in datos and datos[clave] is not None:
-                    datos[clave] = limpiar_cuit(datos[clave])
+            _unificar_cuit(datos, ("representado_cuit", "cuit", "cuit_inicio_sesion"))
             if "medio_pago" in datos and datos["medio_pago"] is not None:
                 datos["medio_pago"] = str(datos["medio_pago"]).strip().lower()
+            for clave in CAMPOS_SOBRE_SELLADO:
+                datos.pop(clave, None)
+            for clave in (*ALIAS_SUBIDA, "incluir_json", "eliminar_descargas"):
+                if clave in datos and datos[clave] is None:
+                    del datos[clave]
+            _unificar_subida(datos)
         return datos
 
     @model_validator(mode="after")
@@ -103,7 +154,11 @@ ENTRADAS: dict[str, type[BaseModel]] = {
 
 
 def esquema_entrada() -> dict[str, Any]:
-    """JSON Schema de la operacion ``generar``, sin credenciales."""
+    """JSON Schema de la operacion ``generar``, sin credenciales.
+
+    Publica los nombres del contrato compartido (``minio_upload``) y los
+    medios de V1. ``subir_pdf`` y ``subir_a_minio`` siguen siendo aceptados.
+    """
     return {
         "type": "object",
         "required": ["operacion"],
@@ -114,5 +169,7 @@ def esquema_entrada() -> dict[str, Any]:
             "archivo_b64": {"type": "string", "minLength": 1},
             "incluir_json": {"type": "boolean"},
             "subir_pdf": {"type": "boolean"},
+            "minio_upload": {"type": "boolean"},
+            "eliminar_descargas": {"type": "boolean"},
         },
     }

@@ -35,6 +35,7 @@ from bot_worker.bots.errors import (
     ArtifactUploadError,
     BrowserCrashedError,
     CaptchaUnsolvableError,
+    Categoria,
     CredentialsRejectedError,
     DeadlineExceededError,
     ErrorDeBot,
@@ -59,6 +60,38 @@ def nombre_constancia(archivo: str) -> str:
     tallo = Path(archivo).stem
     seguro = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tallo)
     return f"constancia_{seguro[:100]}.pdf"
+
+
+def _resultado(datos: dict[str, Any], artefactos: list[dict[str, Any]]) -> BotResult:
+    """OK si todos los archivos se presentaron; PARCIAL si alguno fallo y otro no.
+
+    ERROR solo si fallaron todos (igual criterio que ``carga_portal_iva``).
+    """
+    from bot_worker.runtime.context import BotError, BotResult as _BotResult
+
+    errores = int(datos.get("total_errores", 0))
+    total = int(datos.get("total_archivos", 0))
+    if errores == 0:
+        return _BotResult(result="OK", data=datos, artifacts=artefactos)
+    if errores >= total:
+        return _BotResult(
+            result="ERROR",
+            data=datos,
+            artifacts=artefactos,
+            errors=[
+                BotError(
+                    category=Categoria.TARGET_UNAVAILABLE,
+                    internal_diagnostic="presentacion_todos_los_archivos_fallaron",
+                    retryable=True,
+                )
+            ],
+        )
+    return _BotResult(
+        result="PARCIAL",
+        data=datos,
+        artifacts=artefactos,
+        warnings=[f"archivos con error: {errores} de {total}"],
+    )
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -159,7 +192,9 @@ class ControladoresFiscalesPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(self._servicio)
+                servicio = await sesion.open_service(
+                    self._servicio, portal="controladores_fiscales"
+                )
                 datos, artefactos = await self._presentar(
                     servicio, entrada, runtime
                 )
@@ -172,12 +207,17 @@ class ControladoresFiscalesPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos, artifacts=artefactos)
+        return _resultado(datos, artefactos)
 
     async def _presentar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Presenta cada archivo y descarga su constancia a ``work_dir``."""
+        """Presenta cada archivo y descarga su constancia a ``work_dir``.
+
+        Paridad con V1 (``controladores_fiscales_bot``): un archivo que falla no
+        corta el lote. El fallo queda registrado como ``error|...`` y se sigue
+        con el siguiente. Cancelacion y deadline siguen cortando el job.
+        """
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Presentando archivos"
         )
@@ -193,10 +233,21 @@ class ControladoresFiscalesPlugin:
             if not origen.is_file():
                 raise InvalidInputError(f"archivo no encontrado en work_dir: {nombre}")
             destino = runtime.artifact_store.resolve(nombre_constancia(nombre))
-            estado = await servicio.presentar_archivo(
-                archivo=str(origen),
-                destino=destino,
-            )
+            try:
+                estado = await servicio.presentar_archivo(
+                    archivo=str(origen),
+                    destino=destino,
+                )
+            except TargetUnavailableError as exc:
+                # Fallo de este archivo: se registra y el lote sigue (V1).
+                presentados.append(
+                    {
+                        "archivo": nombre,
+                        "estado": f"error|{exc.diagnostic_code}",
+                        "constancia": None,
+                    }
+                )
+                continue
             registro: dict[str, Any] = {
                 "archivo": nombre,
                 "estado": str(estado),
@@ -221,6 +272,9 @@ class ControladoresFiscalesPlugin:
         datos: dict[str, Any] = {
             "operacion": "presentar",
             "archivos_presentados": len(presentados),
+            "total_archivos": total,
+            "total_exitosos": sum(1 for r in presentados if not str(r["estado"]).startswith("error")),
+            "total_errores": sum(1 for r in presentados if str(r["estado"]).startswith("error")),
         }
         if getattr(entrada, "incluir_json", True):
             datos["detalle"] = presentados

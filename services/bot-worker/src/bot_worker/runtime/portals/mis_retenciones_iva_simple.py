@@ -11,6 +11,11 @@ from bot_worker.bots.errors import TargetUnavailableError
 from .mis_retenciones import MisRetencionesPortal, _clave_fecha, _recortar_a_hoy
 
 _OPERACION_IVA_SIMPLE = "RETENCIONES IMPOSITIVAS"
+_OPERACIONES_IVA_SIMPLE = {
+    "RETENCIONES IMPOSITIVAS": ("217", "Retencion"),
+    "PERCEPCIONES IMPOSITIVAS": ("217", "Percepcion"),
+    "PERCEPCIONES ADUANERAS": ("767", "Percepcion"),
+}
 
 
 def _rango_iva_simple_valido(desde: str, hasta: str) -> bool:
@@ -97,33 +102,37 @@ class MisRetencionesIvaSimplePortal(MisRetencionesPortal):
         destino: Path,
         desde: str,
         hasta: str,
+        operacion: str = _OPERACION_IVA_SIMPLE,
+        export_option: str = "iva_simple",
+        required_result_marker: str = "",
     ) -> Path:
         """Consulta el rango en IVA Simple y descarga su exportación CSV."""
         await self._asegurar_formulario()
         if not self._iva_simple_activo:
             await self.activar_modo_iva_simple()
-        await self.paso("seleccionar_operacion_iva_simple", self._seleccionar_operacion_iva_simple())
+        await self.paso("seleccionar_operacion_iva_simple", self._seleccionar_operacion_iva_simple(operacion))
         await self.paso("seleccionar_fechas_iva_simple", self._seleccionar_fechas_iva_simple(desde, hasta))
         archivo = await self.paso(
             "exportar_csv_iva_simple",
             self._consultar_y_descargar(
                 Path(destino),
-                export_option="iva_simple",
+                export_option=export_option,
+                required_marker=required_result_marker,
             ),
         )
         self._normalizar_exportacion_csv(Path(archivo))
         return Path(archivo)
 
-    async def _seleccionar_operacion_iva_simple(self) -> None:
+    async def _seleccionar_operacion_iva_simple(self, operacion: str = _OPERACION_IVA_SIMPLE) -> None:
         """Selecciona retenciones impositivas en el selector V2 o su UI actualizada."""
         selector = self.page.locator("#selectTipoOperacionIvaSimple")
         try:
             await selector.wait_for(state="visible", timeout=4_000)
             await selector.click(timeout=4_000)
             opciones = (
-                self.page.get_by_role("option", name=re.compile(rf"^{re.escape(_OPERACION_IVA_SIMPLE)}$", re.I)),
+                self.page.get_by_role("option", name=re.compile(rf"^{re.escape(operacion)}$", re.I)),
                 self.page.locator("#selectTipoOperacionIvaSimple-dropdown").get_by_text(
-                    _OPERACION_IVA_SIMPLE, exact=True
+                    operacion, exact=True
                 ),
             )
             for opcion in opciones:
@@ -137,11 +146,16 @@ class MisRetencionesIvaSimplePortal(MisRetencionesPortal):
             pass
         # La SPA vigente reemplazó el selector IVA Simple por el filtro normal
         # de impuestos y tipo de operación. SICORE 217 es el equivalente actual
-        # de la primera categoría V2, “Retenciones Impositivas”.
+        # de las categorías V2. Map each historical category to its current
+        # tax/type pair rather than silently exporting only retentions.
         tipo = self.page.locator("#tipoOperacion")
         if not await tipo.count():
+            codigo, tipo_equivalente = _OPERACIONES_IVA_SIMPLE.get(
+                operacion, _OPERACIONES_IVA_SIMPLE[_OPERACION_IVA_SIMPLE]
+            )
             if not await self._seleccionar_impuesto(
-                "217 - SICORE-IMPTO.A LAS GANANCIAS", "217"
+                "217 - SICORE-IMPTO.A LAS GANANCIAS" if codigo == "217" else "767 - SICORE - RETENCIONES Y PERCEPC",
+                codigo,
             ):
                 raise TargetUnavailableError(
                     "no se encontraron filtros de operación IVA Simple",
@@ -154,7 +168,10 @@ class MisRetencionesIvaSimplePortal(MisRetencionesPortal):
                     "no apareció el tipo de operación tras elegir los impuestos",
                     diagnostic_code="iva_simple_operation_control_missing",
                 ) from exc
-        if await self._seleccionar_tipo("Retencion"):
+        _, tipo_equivalente = _OPERACIONES_IVA_SIMPLE.get(
+            operacion, _OPERACIONES_IVA_SIMPLE[_OPERACION_IVA_SIMPLE]
+        )
+        if await self._seleccionar_tipo(tipo_equivalente):
             return
         raise TargetUnavailableError(
             "no se encontró la selección de operación de retenciones IVA Simple",

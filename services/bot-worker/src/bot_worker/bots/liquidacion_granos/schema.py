@@ -21,6 +21,30 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 CUIT_PATTERN = r"^\d{11}$"
 FORMATO_FECHA = "%d/%m/%Y"
+#: Campos del contrato compartido que V3 no toma del payload (van en el sobre).
+CAMPOS_SOBRE_SELLADO = ("clave", "clave_representante", "clave_encriptada", "cuit_representante", "proxy_request")
+#: Nombres equivalentes de la subida de archivos (V1: ``minio_upload``).
+ALIAS_SUBIDA = ("subir_archivos", "minio_upload", "subir_a_minio")
+
+
+
+def _unificar_cuit(datos: dict[str, Any]) -> None:
+    """Reduce los alias de CUIT (``representado_cuit``/``cuit``/``cuit_representado``) a uno.
+
+    Si vienen varios con el mismo valor no hay contradiccion y se acepta. Si
+    difieren, el pedido es ambiguo y se rechaza.
+    """
+    alias = ("representado_cuit", "cuit", "cuit_representado")
+    presentes = [c for c in alias if datos.get(c) is not None]
+    if not presentes:
+        return
+    valores = {limpiar_cuit(datos[c]) for c in presentes}
+    if len(valores) > 1:
+        raise ValueError("los alias de CUIT del pedido no coinciden")
+    valor = valores.pop()
+    for c in presentes:
+        datos.pop(c, None)
+    datos["representado_cuit"] = valor
 
 
 class _Base(BaseModel):
@@ -54,11 +78,15 @@ class LiquidacionGranosConsultarInput(_Base):
     """Operacion ``consultar``: planillas y comprobantes del rango."""
 
     representado_cuit: str = Field(
-        validation_alias=AliasChoices("representado_cuit", "cuit"),
+        validation_alias=AliasChoices("representado_cuit", "cuit", "cuit_representado"),
         min_length=11,
         max_length=14,
     )
-    representado_nombre: str = Field(min_length=1, max_length=128)
+    representado_nombre: str = Field(
+        validation_alias=AliasChoices("representado_nombre", "denominacion"),
+        min_length=1,
+        max_length=128,
+    )
     fecha_desde: str = Field(
         validation_alias=AliasChoices("fecha_desde", "desde"),
         min_length=10,
@@ -80,10 +108,22 @@ class LiquidacionGranosConsultarInput(_Base):
     @classmethod
     def _normalizar_cuit(cls, datos: Any) -> Any:
         if isinstance(datos, dict):
-            for clave in ("representado_cuit", "cuit"):
-                if clave in datos and datos[clave] is not None:
-                    datos = dict(datos)
-                    datos[clave] = limpiar_cuit(datos[clave])
+            datos = dict(datos)
+            _unificar_cuit(datos)
+            for clave in CAMPOS_SOBRE_SELLADO:
+                datos.pop(clave, None)
+            for clave in (*ALIAS_SUBIDA,):
+                if clave in datos and datos[clave] is None:
+                    del datos[clave]
+            presentes = [c for c in ALIAS_SUBIDA if c in datos]
+            if presentes:
+                valores = {bool(datos[c]) for c in presentes}
+                if len(valores) > 1:
+                    raise ValueError("subir_archivos y minio_upload contradictorios")
+                valor = valores.pop()
+                for c in ALIAS_SUBIDA:
+                    datos.pop(c, None)
+                datos["subir_archivos"] = valor
         return datos
 
     @model_validator(mode="after")
@@ -138,5 +178,6 @@ def esquema_entrada() -> dict[str, Any]:
             "lsg_recibidas": {"type": "boolean"},
             "certificados_deposito": {"type": "boolean"},
             "subir_archivos": {"type": "boolean"},
+            "minio_upload": {"type": "boolean"},
         },
     }

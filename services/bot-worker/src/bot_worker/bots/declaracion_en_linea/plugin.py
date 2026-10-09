@@ -49,6 +49,44 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "DECLARACIÓN EN LÍNEA"
 ID_ARTEFACTO_DDJJ = "ddjj_pdf"
 ID_ARTEFACTO_VEP = "vep_pdf"
+ID_ARTEFACTO_NOMINA = "nomina_xls"
+ID_ARTEFACTO_JSON = "ddjj_json"
+INVALID_COMPONENTE = ("/", "\\")
+
+
+def _sanear_componente(valor: str) -> str:
+    """Port de V1 ``_sanitize_component``."""
+    texto = valor or ""
+    for caracter in INVALID_COMPONENTE:
+        texto = texto.replace(caracter, "_")
+    return texto.strip()
+
+
+def nombre_archivo_periodo(
+    cuit_representado: str,
+    tipo: str,
+    periodo: str,
+    representado_nombre: str,
+    extension: str,
+) -> str:
+    """Nombre de archivo por periodo (port de V1 ``_build_archivo_nombre``).
+
+    V1: ``fin - cuit - Declaracion en linea - TIPO - AAAAMM - nombre.ext``.
+    """
+    from bot_worker.bots.declaracion_en_linea.helpers import periodo_a_yyyymm
+
+    fin_cuit = (cuit_representado or "")[-1:]
+    periodo_valor = periodo_a_yyyymm(periodo) or (periodo or "sin_periodo")
+    partes = [
+        _sanear_componente(fin_cuit),
+        _sanear_componente(cuit_representado),
+        "Declaracion en linea",
+        _sanear_componente(tipo),
+        _sanear_componente(periodo_valor),
+        _sanear_componente(representado_nombre),
+    ]
+    base = " - ".join(parte for parte in partes if parte)
+    return f"{base}{extension}"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -83,6 +121,18 @@ class DeclaracionEnLineaPlugin:
             ArtifactSpec(
                 nombre="vep.pdf",
                 content_types=("application/pdf",),
+                max_bytes=52_428_800,
+                obligatorio=False,
+            ),
+            ArtifactSpec(
+                nombre="nomina.xls",
+                content_types=("application/vnd.ms-excel",),
+                max_bytes=52_428_800,
+                obligatorio=False,
+            ),
+            ArtifactSpec(
+                nombre="ddjj.json",
+                content_types=("application/json",),
                 max_bytes=52_428_800,
                 obligatorio=False,
             ),
@@ -197,19 +247,35 @@ class DeclaracionEnLineaPlugin:
         artefactos: list[dict[str, Any]] = []
         sin_ddjj: list[str] = []
         total = len(periodos)
+        nombre_representado = getattr(entrada, "representado_nombre", "") or ""
         for indice, periodo in enumerate(periodos):
             await runtime.cancellation.raise_if_cancelled()
             destino_ddjj = runtime.artifact_store.resolve(
-                f"ddjj_{representado}_{periodo}.pdf"
+                nombre_archivo_periodo(
+                    representado, "DDJJ", periodo, nombre_representado, ".pdf"
+                )
             )
             destino_vep = runtime.artifact_store.resolve(
-                f"vep_{representado}_{periodo}.pdf"
+                nombre_archivo_periodo(
+                    representado, "VEP", periodo, nombre_representado, ".pdf"
+                )
+            )
+            destino_nomina = runtime.artifact_store.resolve(
+                nombre_archivo_periodo(
+                    representado, "DDJJ Cuiles", periodo, nombre_representado, ".xls"
+                )
+            )
+            destino_json = runtime.artifact_store.resolve(
+                nombre_archivo_periodo(
+                    representado, "DDJJ", periodo, nombre_representado, ".json"
+                )
             )
             try:
-                resultado = await servicio.consultar_periodo(
+                resultado = await servicio.consultar_periodo_detalle(
                     periodo=periodo,
                     destino_ddjj=destino_ddjj,
                     destino_vep=destino_vep,
+                    destino_json=destino_json,
                 )
             except TargetUnavailableError as exc:
                 # Como V2: un período sin DDJJ generada se saltea y se informa.
@@ -217,6 +283,7 @@ class DeclaracionEnLineaPlugin:
                     raise
                 sin_ddjj.append(periodo)
                 continue
+            await servicio.descargar_nomina(periodo, destino_nomina)
             registro: dict[str, Any] = {
                 "periodo": periodo,
                 "ddjj": destino_ddjj.name,
@@ -225,6 +292,7 @@ class DeclaracionEnLineaPlugin:
             if isinstance(resultado, dict):
                 registro["estado_vep"] = str(resultado.get("estado_vep", ""))
                 registro["pagado"] = bool(resultado.get("pagado", False))
+                registro["vep_datos"] = dict(resultado.get("vep") or {})
             if getattr(entrada, "subir_archivos", True):
                 await runtime.event_sink.progress(
                     phase="SUBIENDO",
@@ -235,6 +303,8 @@ class DeclaracionEnLineaPlugin:
                 for destino, id_artefacto, campo_hash in (
                     (destino_ddjj, ID_ARTEFACTO_DDJJ, "sha256_ddjj"),
                     (destino_vep, ID_ARTEFACTO_VEP, "sha256_vep"),
+                    (destino_nomina, ID_ARTEFACTO_NOMINA, "sha256_nomina"),
+                    (destino_json, ID_ARTEFACTO_JSON, "sha256_json"),
                 ):
                     if not destino.is_file() or destino.stat().st_size == 0:
                         continue
@@ -250,6 +320,13 @@ class DeclaracionEnLineaPlugin:
                 registro.update(hashes)
             if not destino_vep.is_file() or destino_vep.stat().st_size == 0:
                 registro["vep"] = ""
+            if not destino_ddjj.is_file() or destino_ddjj.stat().st_size == 0:
+                # V1 sigue sin el PDF de la DDJJ: el periodo queda con su JSON.
+                registro["ddjj"] = ""
+            if isinstance(resultado, dict):
+                registro["cabecera"] = resultado.get("cabecera", {})
+                registro["secciones"] = resultado.get("secciones", {})
+                registro["advertencias"] = resultado.get("advertencias", [])
             detalle.append(registro)
         if not detalle:
             raise TargetUnavailableError(

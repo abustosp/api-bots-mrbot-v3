@@ -45,7 +45,8 @@ def test_filtrar_csv_por_rango_acepta_csv_arca_semicolon_y_fecha_iso(tmp_path):
     ]
 
 
-def test_filtrar_csv_por_rango_conserva_csv_coma_y_fecha_local(tmp_path):
+def test_filtrar_csv_por_rango_normaliza_el_delimitador_y_la_fecha(tmp_path):
+    """V1 reescribe siempre con ``sep=';'`` y fechas ISO (``strftime``)."""
     origen = tmp_path / "origen.csv"
     destino = tmp_path / "destino.csv"
     origen.write_text(
@@ -59,7 +60,7 @@ def test_filtrar_csv_por_rango_conserva_csv_coma_y_fecha_local(tmp_path):
 
     assert filas == 2
     assert destino.read_text(encoding="utf-8").splitlines() == [
-        "Fecha,Tipo",
-        "01/01/2025,E",
-        "31/12/2025,E",
+        "Fecha;Tipo",
+        "2025-01-01;E",
+        "2025-12-31;E",
     ]

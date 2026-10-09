@@ -345,17 +345,22 @@ class RetperIibbAgipPlugin:
             "zip",
         )
         destino = runtime.artifact_store.resolve(nombre)
-        await sesion.consultar_retper(
+        archivos = await sesion.consultar_retper(
             desde_mmyyyy=desde,
             hasta_mmyyyy=hasta,
             destino=destino,
+            denominacion=entrada.denominacion,
         )
         datos: dict[str, Any] = {
             "operacion": "consultar",
             "representado_cuit": entrada.representado_cuit,
             "periodo_desde": entrada.periodo_desde,
             "periodo_hasta": entrada.periodo_hasta,
+            "tipo": "RETPER IIBB AGIP",
             "archivo": destino.name,
+            # Misma forma que V1 ``results['archivos']``; en V3 las salidas
+            # viajan dentro del zip, asi que ``url_minio`` queda en ``None``.
+            "archivos": list(archivos or []),
         }
         artefactos: list[dict[str, Any]] = []
         if getattr(entrada, "subir_archivo", True):

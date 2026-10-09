@@ -26,11 +26,21 @@ desactiva headless/proxy/limpieza.
 from __future__ import annotations
 
 import asyncio
-import re
+from datetime import datetime
 from typing import Any, Mapping
 
 from bot_worker.bots.ccma.schema import esquema_entrada
 from bot_worker.bots.ccma.schema import CcmaConsultarInput
+from bot_worker.bots.ccma.movimientos import (
+    CORTE_DEADLINE,
+    CORTE_ESTADO_REPETIDO,
+    CORTE_FALLBACK,
+    CORTE_SIN_PROGRESO,
+    CORTE_TOPE_MOVIMIENTOS,
+    CORTE_TOPE_PAGINAS,
+    recorrer_movimientos_con_fallback,
+)
+from bot_worker.bots.ccma.pdf import build_ccma_pdf_html
 from bot_worker.bots.errors import (
     ArtifactUploadError,
     BrowserCrashedError,
@@ -56,6 +66,13 @@ URL_CTACTE = (
 )
 ID_ARTEFACTO_PDF = "ccma_resumen.pdf"
 MAX_MOVIMIENTOS = 500
+MAX_PAGINAS = 100
+
+
+def nombre_pdf_ccma(cuit_representado: str, ahora: datetime | None = None) -> str:
+    """Nombre del PDF consolidado (port de V1 ``_subir_pdf_ccma_a_minio``)."""
+    marca = (ahora or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    return f"ccma_{cuit_representado}_{marca}.pdf"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -139,53 +156,20 @@ class CcmaPlugin:
         except ValueError as exc:
             raise InvalidInputError(f"entrada invalida: {exc}") from exc
 
-    async def _extraer_resumen(self, pagina: Any, cuit: str) -> dict[str, str]:
-        """Extrae saldos del resumen CCMA (port de ``_extract_ccma_summary``)."""
-        return await pagina.evaluate(
-            """({ cuit }) => {
-                const clean = (v) => (v || "").replace(/\\u00a0/g, " ").trim();
-                const cells = Array.from(
-                    document.querySelectorAll("td.CeldaTitularResaltado")
-                ).map((c) => clean(c.textContent)).filter(Boolean);
-                const byXpath = (xp) => {
-                    const r = document.evaluate(xp, document, null, 9, null);
-                    return clean(r.singleNodeValue ? r.singleNodeValue.textContent : "");
-                };
-                const xp = (row, col) => `/html/body/table[2]/tbody/tr[2]/td[2]/form/table[1]/tbody/tr[2]/td/table/tbody/tr[2]/td/table/tbody/tr[${row}]/td[${col}]/table/tbody/tr/td[1]`;
-                return {
-                    celdas: cells.slice(0, 8).join(" | "),
-                    deuda_capital: byXpath(xp(2, 2)),
-                    deuda_accesorios: byXpath(xp(3, 2)),
-                    credito_capital: byXpath(xp(2, 4)),
-                    credito_accesorios: byXpath(xp(3, 4)),
-                };
-            }""",
-            {"cuit": cuit},
-        )
+    async def _extraer_movimientos(self, pagina: Any, runtime: BotRuntime) -> tuple[list[dict[str, str]], str]:
+        """Recorre la cuenta corriente con el fallback y los cortes de V1.
 
-    async def _extraer_movimientos(self, pagina: Any) -> list[dict[str, str]]:
-        """Recorre la tabla de movimientos con paginado (port de V2)."""
-        movimientos: list[dict[str, str]] = []
-        vistos: set[str] = set()
-        while len(movimientos) < MAX_MOVIMIENTOS:
-            filas = await pagina.locator(
-                "table[width='729'] tbody tr[valign='middle'][align='center']"
-            ).all_inner_texts()
-            for fila in filas:
-                clave = fila.strip()
-                if clave and clave not in vistos:
-                    vistos.add(clave)
-                    celdas = [c.strip() for c in clave.split("\t")]
-                    movimientos.append({"fila": " | ".join(celdas)})
-            try:
-                siguiente = pagina.locator("#mas1")
-                if await siguiente.count() == 0:
-                    break
-                await siguiente.first.click()
-                await pagina.wait_for_timeout(800)
-            except Exception:
-                break
-        return movimientos[:MAX_MOVIMIENTOS]
+        ``pagina`` es el portal CCMA (``open_service(..., portal="ccma")``). Devuelve
+        ``(movimientos, motivo_de_corte)``. Un corte no es un error: el resultado
+        queda OK con lo reunido hasta ese punto y el motivo viaja en ``data``.
+        """
+        resultado = await recorrer_movimientos_con_fallback(
+            pagina,
+            restante_segundos=runtime.deadline.remaining_seconds,
+            max_paginas=MAX_PAGINAS,
+            max_movimientos=MAX_MOVIMIENTOS,
+        )
+        return resultado.movimientos, resultado.corte
 
     async def execute(self, payload: Any, runtime: BotRuntime) -> BotResult:
         """Consulta saldos CCMA y retorna ``BotResult`` tipado."""
@@ -210,54 +194,45 @@ class CcmaPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                pagina = await sesion.open_service(self._servicio)
-                try:  # versiones con listbox + "Elegir CUIT" (port V2)
-                    await pagina.get_by_role("listbox").select_option(
-                        entrada.representado_cuit, timeout=2_000
-                    )
-                    await pagina.get_by_role(
-                        "button", name=re.compile(r"Elegir CUIT", re.I)
-                    ).click()
-                except Exception:
-                    pass
-                await pagina.get_by_role(
-                    "cell", name="PERÍODO DESDE (MM/AAAA)", exact=True
-                ).click()
-                campo = pagina.locator("input[name='perdesde2']")
-                await campo.click()
-                await campo.fill(entrada.periodo_desde)
-                await pagina.get_by_role(
-                    "button", name="CALCULO DE DEUDA"
-                ).click()
-                await pagina.goto(URL_CTACTE)
+                pagina = await sesion.open_service(self._servicio, portal="ccma")
+                await pagina.seleccionar_cuit(entrada.representado_cuit)
+                await pagina.calcular_deuda(entrada.periodo_desde)
+                await pagina.ir_a_cuenta_corriente(URL_CTACTE)
                 await runtime.event_sink.progress(
                     phase="CONSULTA", percent=45, message="Extrayendo saldos CCMA"
                 )
-                try:
-                    await pagina.locator("select[name='rango']").select_option(
-                        "48", timeout=3_000
-                    )
-                except Exception:
-                    pass
-                resumen = await self._extraer_resumen(
-                    pagina, entrada.representado_cuit
+                await pagina.seleccionar_rango("48")
+                resumen = await pagina.resumen(
+                    entrada.representado_cuit, entrada.periodo_desde
                 )
                 datos: dict[str, Any] = {
                     "operacion": "consultar",
                     "representado_cuit": entrada.representado_cuit,
                     "periodo_desde": entrada.periodo_desde,
-                    **resumen,
+                    **{k: v for k, v in resumen.items() if k != "periodo_desde"},
                 }
+                movimientos: list[dict[str, str]] = []
                 if entrada.incluir_movimientos:
-                    datos["movimientos"] = await self._extraer_movimientos(pagina)
+                    movimientos, corte = await self._extraer_movimientos(pagina, runtime)
+                    datos["movimientos"] = movimientos
+                    datos["movimientos_corte"] = corte
+                    if corte in (
+                        CORTE_SIN_PROGRESO,
+                        CORTE_ESTADO_REPETIDO,
+                        CORTE_DEADLINE,
+                        CORTE_FALLBACK,
+                        CORTE_TOPE_MOVIMIENTOS,
+                        CORTE_TOPE_PAGINAS,
+                    ):
+                        datos["movimientos_completos"] = False
                 artefactos: list[dict[str, Any]] = []
                 if entrada.incluir_pdf:
-                    nombre = (
-                        f"CCMA - {entrada.representado_cuit} - "
-                        f"{entrada.periodo_desde.replace('/', '')}.pdf"
-                    )
+                    nombre = nombre_pdf_ccma(entrada.representado_cuit)
                     destino = runtime.artifact_store.resolve(nombre)
-                    await pagina.pdf(path=str(destino))
+                    html = build_ccma_pdf_html(
+                        resumen, movimientos, generado=datetime.now()
+                    )
+                    await pagina.imprimir_pdf(html, destino)
                     if entrada.subir:
                         await runtime.event_sink.progress(
                             phase="SUBIENDO", percent=80, message="Subiendo PDF"

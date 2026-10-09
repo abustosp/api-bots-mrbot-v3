@@ -113,6 +113,10 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "fecha_hasta": _string(required=True, pattern=DATE),
         "representado_nombre": _string(min_length=1, max_length=128),
         "emitidos": _boolean(), "recibidos": _boolean(),
+        "puntos_venta_emitidos": _list(item=str | int),
+        "puntos_venta_recibidos": _list(item=str | int),
+        "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
+        "carga_b64": _boolean(),
         "incluir_json": _boolean(default=True), "subir_csv": _boolean(default=True),
     },
     "consulta_cuit": {
@@ -135,7 +139,10 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "periodo_hasta": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
         "incluir_json": _boolean(default=True), "subir_archivos": _boolean(default=True),
     },
-    "facturometro": {"representado_cuit": _string(required=True, pattern=CUIT)},
+    "facturometro": {
+        "representado_cuit": _string(pattern=CUIT),
+        "incluir_captura": _boolean(default=True),
+    },
     "hacienda": {
         "representado_cuit": _string(required=True, pattern=CUIT),
         "denominacion": _string(required=True, min_length=1, max_length=256),
@@ -143,6 +150,7 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "fecha_hasta": _string(required=True, pattern=DATE),
         "por_emisor": _boolean(default=True), "por_receptor": _boolean(default=True),
         "incluir_json": _boolean(default=True), "subir_excel": _boolean(default=True),
+        "descargar_pdf": _boolean(default=True),
     },
     "libros_portal_iva": {
         "representado_cuit": _string(pattern=CUIT),
@@ -166,7 +174,10 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "fecha_hasta": _string(required=True, pattern=DATE),
         "representado_nombre": _string(min_length=1, max_length=128),
         "emitidos": _boolean(), "recibidos": _boolean(),
-        "puntos_venta_emitidos": _list(item=int), "puntos_venta_recibidos": _list(item=int),
+        "puntos_venta_emitidos": _list(item=str | int),
+        "puntos_venta_recibidos": _list(item=str | int),
+        "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
+        "carga_b64": _boolean(),
         "incluir_json": _boolean(default=True), "subir_csv": _boolean(default=True),
     },
     "mis_facilidades": {
@@ -304,6 +315,7 @@ _V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
     "carga_minio": _boolean(default=True), "carga_json": _boolean(), "minio_upload": _boolean(default=True),
     "pv": (bool | None, Field(default=None)),
     "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
+    "carga_b64": (bool, Field(default=False)),
     "usuario": _string(max_length=256), "denominacion": _string(max_length=256),
     "nombre_rcel": _string(max_length=256), "medio_pago": _string(),
     "archivo_historico_minio": _boolean(default=True),
@@ -478,6 +490,8 @@ def _example_value(name: str, bot: str, operation: str, default: Any) -> Any:
         return name == "excel"
     if name in {"descarga_ventas", "descarga_compras"}:
         return name == "descarga_ventas"
+    if name == "carga_b64":
+        return False
     if name.endswith("_b64"):
         if name == "archivo_b64" and bot == "vep_archivo":
             return (

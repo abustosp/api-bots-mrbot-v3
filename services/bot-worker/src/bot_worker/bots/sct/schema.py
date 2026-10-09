@@ -47,6 +47,8 @@ class SctConsultarInput(_Base):
     formatos: list[str] = Field(min_length=1)
     incluir_json: bool = True
     subir: bool = True
+    # Como V1: una seccion con insignia 0 no se descarga y queda marcada como omitida.
+    omitir_vacias: bool = True
 
     @model_validator(mode="before")
     @classmethod

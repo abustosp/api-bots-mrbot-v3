@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from datetime import datetime
 from typing import Any, Mapping
 
@@ -56,6 +57,10 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "APORTES EN LÍNEA"
 ID_ARTEFACTO_HISTORICO = "historico.xls"
 TOPE_BASE64_BYTES = 5_242_880
+# V1 clickea el boton con este patron (``re.compile(r"INGRESAR", re.I)``) y
+# espera 10 segundos; el sitio alterna mayusculas y sufijos.
+BOTON_INGRESAR = re.compile(r"INGRESAR", re.I)
+TIMEOUT_INGRESAR_MS = 10_000
 
 
 def nombre_archivo_historico(representado_cuit: str, fecha: str | None = None) -> str:
@@ -165,7 +170,10 @@ class AportesEnLineaPlugin:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
                 pagina = await sesion.open_service(self._servicio)
-                await pagina.get_by_role("button", name="INGRESAR").click()
+                # V1: el boton se busca por regex sin distinguir mayusculas.
+                await pagina.get_by_role("button", name=BOTON_INGRESAR).click(
+                    timeout=TIMEOUT_INGRESAR_MS
+                )
                 await runtime.event_sink.progress(
                     phase="CONSULTA",
                     percent=45,

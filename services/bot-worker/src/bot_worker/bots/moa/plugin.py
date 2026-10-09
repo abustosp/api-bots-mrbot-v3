@@ -76,6 +76,45 @@ def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     return TargetUnavailableError(f"falla del organismo: {texto}")
 
 
+def _registro_despacho_con_error(
+    despacho: str, metodo: str, exc: ErrorDeBot
+) -> dict[str, Any]:
+    """Registro de un despacho fallido con la misma forma que uno exitoso.
+
+    V1 guarda el dict completo tambien para los fallidos (``error`` con el
+    texto y carátula vacia), asi el JSON y el CSV tienen siempre las mismas
+    claves. ``timestamp`` se completa igual que en un exitoso.
+    """
+    return {
+        "despacho": despacho,
+        "metodo": metodo,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "datos_caratula": {},
+        "estado_presentacion": {},
+        "error": str(getattr(exc, "diagnostico", "") or type(exc).__name__),
+    }
+
+
+def _fila_despacho(registro: dict[str, Any]) -> dict[str, Any]:
+    """Aplana un registro de despacho en columnas, como V1 ``_escribir_csv``.
+
+    ``datos_caratula`` pasa a ``caratula_<campo>`` y ``estado_presentacion``
+    a ``estado_<campo>``. ``despacho``, ``metodo``, ``timestamp`` y ``error``
+    quedan siempre presentes (``error`` vacio si el despacho salio bien).
+    """
+    fila: dict[str, Any] = {
+        "despacho": registro.get("despacho", ""),
+        "metodo": registro.get("metodo", ""),
+        "timestamp": registro.get("timestamp", "") or "",
+        "error": registro.get("error") or "",
+    }
+    for clave, valor in dict(registro.get("datos_caratula") or {}).items():
+        fila[f"caratula_{clave}"] = valor
+    for clave, valor in dict(registro.get("estado_presentacion") or {}).items():
+        fila[f"estado_{clave}"] = valor
+    return fila
+
+
 class MoaPlugin:
     """MOA de ARCA: scrapeo de despachos del arbol de empresa."""
 
@@ -200,6 +239,7 @@ class MoaPlugin:
             "datos": [],
             "errores": [],
         }
+        filas_csv: list[dict[str, Any]] = []
         artefactos: list[dict[str, Any]] = []
         total = len(entrada.despachos)
         for indice, despacho in enumerate(entrada.despachos):
@@ -223,21 +263,22 @@ class MoaPlugin:
                         "diagnostic_code": getattr(exc, "diagnostic_code", None),
                     }
                 )
+                registro_error = _registro_despacho_con_error(despacho, entrada.metodo, exc)
+                datos["datos"].append(registro_error)
+                filas_csv.append(_fila_despacho(registro_error))
                 continue
             datos["despachos_procesados"] += 1
             datos["despachos_exitosos"] += 1
-            datos["datos"].append({"despacho": despacho, **dict(registro or {})})
-        if datos["despachos_exitosos"] == 0:
-            raise TargetUnavailableError(
-                "MOA no devolvió datos para ninguno de los despachos consultados",
-                diagnostic_code="moa_no_dispatch_results",
-            )
+            registro_ok = {"despacho": despacho, "metodo": entrada.metodo, **dict(registro or {})}
+            registro_ok.setdefault("error", None)
+            datos["datos"].append(registro_ok)
+            filas_csv.append(_fila_despacho(registro_ok))
         destino = runtime.artifact_store.resolve(
             f"{nombre_base_archivo(entrada.representado_cuit)}.csv"
         )
-        self._escribir_csv(destino, datos["datos"])
+        self._escribir_csv(destino, filas_csv)
         resumen_csv: dict[str, Any] = {
-            "filas": len(datos["datos"]),
+            "filas": len(filas_csv),
             "archivo": destino.name,
         }
         if entrada.subir_csv:
@@ -260,9 +301,16 @@ class MoaPlugin:
 
     @staticmethod
     def _escribir_csv(destino: Path, filas: list[dict[str, Any]]) -> None:
-        """Escribe los registros scrapeados como CSV en ``work_dir`` (V2)."""
-        campos = sorted({k for fila in filas for k in fila})
+        """Escribe una fila por despacho con columnas aplanadas (port V1).
+
+        V1 aplana ``caratula_<campo>`` y ``estado_<campo>``, y siempre incluye
+        ``despacho``, ``metodo``, ``timestamp`` y ``error`` (vacio si no hubo
+        error). Asi cada campo queda en su propia columna, nunca como repr.
+        """
+        campos: set[str] = {"despacho", "metodo", "timestamp", "error"}
+        for fila in filas:
+            campos.update(fila.keys())
         with open(destino, "w", encoding="utf-8", newline="") as fh:
-            escritor = csv.DictWriter(fh, fieldnames=campos or ["despacho"])
+            escritor = csv.DictWriter(fh, fieldnames=sorted(campos))
             escritor.writeheader()
             escritor.writerows(filas)

@@ -35,6 +35,7 @@ from typing import Any, Mapping
 from bot_worker.bots.errors import (
     ArtifactUploadError,
     BrowserCrashedError,
+    Categoria,
     CaptchaUnsolvableError,
     CredentialsRejectedError,
     DeadlineExceededError,
@@ -62,6 +63,26 @@ def nombre_base_archivo(representado_cuit: str, plan: str = "") -> str:
     digitos = re.sub(r"\D", "", representado_cuit or "")
     sufijo = f" - {re.sub(r'[\\\\/:*?\"<>|]', '_', plan).strip()}" if plan else ""
     return f"{digitos} - MIS FACILIDADES{sufijo}"
+
+
+def _sanear_componente(valor: str) -> str:
+    """Quita caracteres invalidos de nombre de archivo, como V1 ``safe_filename``."""
+    limpio = re.sub(r"[\\/:*?\"<>|]+", "_", str(valor or ""))
+    limpio = re.sub(r"\s+", " ", limpio).strip()
+    return limpio or "reporte"
+
+
+def nombre_base_plan(representado_cuit: str, plan: str, denominacion: str) -> str:
+    """Base de nombre de V1: ``'{fin} - {cuit} - {plan} - {denominacion}'``.
+
+    Cada vista agrega su etiqueta (``pagos``, ``cuotas``, ...) al final, como
+    hace ``build_report_path`` en V1.
+    """
+    digitos = re.sub(r"\D", "", representado_cuit or "")
+    fin = digitos[-1:] if digitos else "X"
+    return _sanear_componente(
+        f"{fin} - {digitos} - {plan or 'plan'} - {denominacion or 'denominacion'}"
+    )
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -181,13 +202,16 @@ class MisFacilidadesPlugin:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
                 servicio = await sesion.open_service(SERVICIO_ARCA, portal="mis_facilidades")
+                # Como V1: los CUIT disponibles se leen antes de elegir el representado.
+                disponibles = await self._leer_cuits_disponibles(servicio)
                 cuit_objetivo = (
                     entrada.representado_cuit or runtime.credentials.cuit_representante
                 )
                 await servicio.seleccionar_representado(cuit_objetivo)
-                datos, artefactos = await self._consultar(
+                datos, artefactos, errores = await self._consultar(
                     servicio, entrada, runtime, cuit_objetivo
                 )
+                datos["cuits_disponibles"] = disponibles
         except ErrorDeBot:
             raise
         except Exception as exc:
@@ -197,12 +221,33 @@ class MisFacilidadesPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos, artifacts=artefactos)
+        resultado = "OK" if not errores else "PARCIAL"
+        return BotResult(
+            result=resultado, data=datos, artifacts=artefactos, errors=errores
+        )
+
+    @staticmethod
+    async def _leer_cuits_disponibles(servicio: Any) -> list[str]:
+        """CUITs del combo; si el portal no lo expone, lista vacia (como V1)."""
+        leer = getattr(servicio, "cuits_disponibles", None)
+        if leer is None:
+            return []
+        try:
+            return [str(c) for c in (await leer() or [])]
+        except ErrorDeBot:
+            return []
 
     async def _consultar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime, cuit_objetivo: str
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Lista planes, filtra por situacion y exporta PDF/Excel (port V2)."""
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], list[Any]]:
+        """Lista planes, filtra por situacion y exporta PDF por vista y Excel (port V1).
+
+        Como V1: un PDF por cada vista del plan (pagos, cuotas, obligaciones),
+        un Excel de tablas por plan, y un error en un plan se registra sin
+        cortar los demas.
+        """
+        from bot_worker.runtime.context import BotError
+
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Listando planes"
         )
@@ -214,6 +259,7 @@ class MisFacilidadesPlugin:
             "planes": [],
         }
         artefactos: list[dict[str, Any]] = []
+        errores: list[Any] = []
         for plan in planes or []:
             situacion = str((plan or {}).get("situacion", "") or "")
             if "plan cancelado" in situacion.lower():
@@ -222,25 +268,79 @@ class MisFacilidadesPlugin:
                 continue
             await runtime.cancellation.raise_if_cancelled()
             numero = str((plan or {}).get("numero", "") or "s-n")
-            base = nombre_base_archivo(cuit_objetivo, numero)
-            resumen: dict[str, Any] = {"numero": numero, "situacion": situacion}
-            if entrada.incluir_xlsx:
-                destino = runtime.artifact_store.resolve(f"{base}.xlsx")
-                await servicio.exportar_plan_xlsx(numero=numero, destino=destino)
-                resumen["xlsx"] = await self._resumir_y_subir(
-                    destino, ID_ARTEFACTO_XLSX, entrada, runtime, "Subiendo plan"
+            # Como V1: la denominacion del request gana; si no llega, la del listado.
+            denominacion_plan = (
+                entrada.denominacion
+                or str((plan or {}).get("denominacion", "") or "")
+                or "denominacion"
+            )
+            base = nombre_base_plan(cuit_objetivo, numero, denominacion_plan)
+            resumen: dict[str, Any] = {
+                "numero": numero,
+                "denominacion": denominacion_plan,
+                "situacion": situacion,
+            }
+            try:
+                if entrada.incluir_pdf:
+                    vistas = await servicio.exportar_vistas_pdf(
+                        numero=numero,
+                        destino_dir=runtime.artifact_store.resolve(f"{base}.vistas"),
+                        base=base,
+                    )
+                    resumen["pdf_vistas"] = []
+                    for vista in vistas:
+                        registro = await self._subir_vista_pdf(
+                            vista, entrada, runtime
+                        )
+                        artefactos.extend(registro.pop("referencias"))
+                        resumen["pdf_vistas"].append(registro)
+                if entrada.incluir_xlsx:
+                    destino = runtime.artifact_store.resolve(f"{base} - tablas.xlsx")
+                    await servicio.exportar_plan_xlsx(numero=numero, destino=destino)
+                    resumen["xlsx"] = await self._resumir_y_subir(
+                        destino, ID_ARTEFACTO_XLSX, entrada, runtime, "Subiendo plan"
+                    )
+                    artefactos.extend(resumen["xlsx"].pop("referencias"))
+            except ErrorDeBot as exc:
+                errores.append(
+                    BotError(
+                        category=Categoria.TARGET_UNAVAILABLE,
+                        internal_diagnostic=(
+                            f"plan {numero}: "
+                            f"{getattr(exc, 'diagnostic_code', None) or exc.diagnostico}"
+                        ),
+                        retryable=False,
+                    )
                 )
-                artefactos.extend(resumen["xlsx"].pop("referencias"))
-            if entrada.incluir_pdf:
-                destino_pdf = runtime.artifact_store.resolve(f"{base}.pdf")
-                await servicio.exportar_plan_pdf(numero=numero, destino=destino_pdf)
-                resumen["pdf"] = await self._resumir_y_subir(
-                    destino_pdf, ID_ARTEFACTO_PDF, entrada, runtime, "Subiendo PDF"
-                )
-                artefactos.extend(resumen["pdf"].pop("referencias"))
             datos["planes"].append(resumen)
         datos["planes_procesados"] = len(datos["planes"])
-        return datos, artefactos
+        return datos, artefactos, errores
+
+    async def _subir_vista_pdf(
+        self, vista: dict[str, Any], entrada: Any, runtime: BotRuntime
+    ) -> dict[str, Any]:
+        """Sube un PDF de vista por slot prefirmado y devuelve su resumen."""
+        destino: Path = vista["destino"]
+        registro: dict[str, Any] = {
+            "vista": vista["vista"],
+            "archivo": destino.name,
+            "size_bytes": destino.stat().st_size if destino.is_file() else 0,
+            "referencias": [],
+        }
+        if entrada.subir_archivos:
+            await runtime.event_sink.progress(
+                phase="SUBIENDO", percent=80, message=f"Subiendo {vista['vista']}"
+            )
+            try:
+                referencia = await runtime.artifact_store.upload(
+                    ID_ARTEFACTO_PDF, destino.name
+                )
+            except ValueError as exc:
+                raise ArtifactUploadError(str(exc)) from exc
+            registro["referencias"].append(referencia)
+            registro["sha256"] = referencia["sha256"]
+            registro["size_bytes"] = referencia["size_bytes"]
+        return registro
 
     async def _resumir_y_subir(
         self,

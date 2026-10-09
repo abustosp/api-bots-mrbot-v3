@@ -25,7 +25,6 @@ directo ni desactiva headless/proxy/limpieza.
 from __future__ import annotations
 
 import asyncio
-import csv
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -40,8 +39,12 @@ from bot_worker.bots.errors import (
     TargetUnavailableError,
     sin_secretos,
 )
-from bot_worker.bots.planillas import COLUMNAS_FECHA, materializar_csv_descargado
-from bot_worker.bots.planillas import filtrar_csv_por_rango as _filtrar_compartido
+from bot_worker.bots.planillas import (
+    TIMEOUT_MC_SEGUNDOS_POR_DEFECTO,
+    filtrar_csv_comprobantes,
+    leer_muestra_mis_comprobantes,
+    materializar_csv_descargado,
+)
 from bot_worker.bots.mis_comprobantes.schema import (
     ENTRADAS,
     esquema_entrada,
@@ -59,6 +62,8 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "MIS COMPROBANTES"
 ID_ARTEFACTO_EMITIDOS = "emitidos_csv"
 ID_ARTEFACTO_RECIBIDOS = "recibidos_csv"
+# Historial de consultas: mismo portal que ``comprobantes`` (port V1 compartido).
+PORTAL_HISTORIAL = "comprobantes"
 
 
 def nombre_base_archivo(
@@ -73,20 +78,35 @@ def nombre_base_archivo(
 
 
 def filtrar_csv_por_rango(
-    origen: Path, destino: Path, desde: str, hasta: str
+    origen: Path, destino: Path, desde: str, hasta: str, tipo: str = "emitidos"
 ) -> int:
-    """Filtra un CSV de comprobantes por rango inclusive (port de V2).
+    """Filtra un CSV de comprobantes con el criterio de V1 (port de V1/V2).
 
-    Delega en :mod:`bot_worker.bots.planillas`, que tolera el delimitador real
-    del portal y fechas locales o ISO. Funcion pura, sin red ni secretos.
+    Delega en :mod:`bot_worker.bots.planillas`, que renombra las columnas por
+    posición según el tipo, rellena los importes que el portal no informa,
+    recorta el rango inclusive y detecta el delimitador y el formato de fecha
+    reales de la planilla. Funcion pura, sin red ni secretos.
     """
-    return _filtrar_compartido(
+    return filtrar_csv_comprobantes(
         Path(origen),
         Path(destino),
         normalizar_fecha(desde),
         normalizar_fecha(hasta),
-        columnas_fecha=COLUMNAS_FECHA,
+        tipo,
     )
+
+
+def archivo_en_base64(ruta: Path) -> str:
+    """Base64 del archivo tal como lo descargó el portal (port de V1)."""
+    import base64
+
+    return base64.b64encode(Path(ruta).read_bytes()).decode("utf-8")
+
+
+def timeout_mc_ms(entrada: Any) -> int:
+    """Espera del boton ``CSV`` en milisegundos (V1: ``timeout_mc`` segundos)."""
+    segundos = getattr(entrada, "timeout_mc", None) or TIMEOUT_MC_SEGUNDOS_POR_DEFECTO
+    return int(segundos) * 1000
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -146,8 +166,31 @@ class MisComprobantesPlugin:
         ),
     )
 
+    def __init__(self, servicio: str | None = None, muestra_json: int = 5) -> None:
+        """Valores por defecto; la seccion sellada los ajusta en ``configure``."""
+        self._servicio = servicio or SERVICIO_ARCA
+        self._muestra_json = muestra_json
+
     def __repr__(self) -> str:
         return "MisComprobantesPlugin(<redacted>)"
+
+    def configure(self, service: dict[str, Any] | None) -> "MisComprobantesPlugin":
+        """Aplica la seccion ``service`` del sobre sellado (por job).
+
+        Se invoca sobre una copia del plugin, nunca sobre la instancia del
+        registro compartido. Claves conocidas: ``servicio`` (nombre visible
+        del servicio ARCA) y ``muestra_json`` (filas de muestra en la
+        respuesta). Sin seccion rigen los valores por defecto V1.
+        """
+        service = service if isinstance(service, dict) else {}
+        if service.get("servicio"):
+            self._servicio = str(service["servicio"])
+        try:
+            muestra = int(service.get("muestra_json", self._muestra_json))
+        except (TypeError, ValueError):
+            muestra = self._muestra_json
+        self._muestra_json = max(0, min(20, muestra))
+        return self
 
     async def validate(self, payload: Mapping[str, Any]) -> Any:
         """Valida operacion, CUIT, periodo y flags antes del navegador."""
@@ -186,11 +229,14 @@ class MisComprobantesPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(SERVICIO_ARCA)
+                portal = PORTAL_HISTORIAL if operacion == "historial" else None
+                servicio = await sesion.open_service(self._servicio, portal=portal)
                 await servicio.seleccionar_representado(entrada.representado_cuit)
                 if operacion == "solicitar":
                     datos = await self._solicitar(servicio, entrada, runtime)
                     artefactos: list[dict[str, Any]] = []
+                elif operacion == "historial":
+                    datos, artefactos = await self._historial(servicio, entrada, runtime)
                 else:
                     datos, artefactos = await self._descargar(
                         servicio, entrada, runtime, operacion
@@ -204,6 +250,8 @@ class MisComprobantesPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
+        if operacion == "historial":
+            return self._resultado_historial(entrada, datos, artefactos)
         return BotResult(result="OK", data=datos, artifacts=artefactos)
 
     async def _solicitar(
@@ -222,6 +270,8 @@ class MisComprobantesPlugin:
                 tipo=tipo,
                 desde=entrada.fecha_desde,
                 hasta=entrada.fecha_hasta,
+                puntos_venta=entrada.puntos_venta(tipo),
+                timeout_ms=timeout_mc_ms(entrada),
             )
             ids_consulta[tipo] = str(id_consulta)
         return {
@@ -267,37 +317,142 @@ class MisComprobantesPlugin:
                 destino=crudo,
                 desde=entrada.fecha_desde,
                 hasta=entrada.fecha_hasta,
+                puntos_venta=entrada.puntos_venta(tipo),
+                timeout_ms=timeout_mc_ms(entrada),
             )
-            materializar_csv_descargado(crudo)
-            await runtime.event_sink.progress(
-                phase="PROCESANDO", percent=65, message=f"Filtrando {tipo}"
+            datos[tipo] = await self._publicar_csv(
+                crudo, final, tipo, id_artefacto, entrada, runtime, artefactos
             )
-            filas = filtrar_csv_por_rango(
-                crudo, final, entrada.fecha_desde, entrada.fecha_hasta
-            )
-            crudo.unlink(missing_ok=True)
-            resumen: dict[str, Any] = {"filas": filas, "archivo": final.name}
-            if getattr(entrada, "subir_csv", True):
-                await runtime.event_sink.progress(
-                    phase="SUBIENDO", percent=80, message=f"Subiendo {tipo}"
-                )
-                try:
-                    referencia = await runtime.artifact_store.upload(
-                        id_artefacto, final.name
-                    )
-                except ValueError as exc:
-                    raise ArtifactUploadError(str(exc)) from exc
-                artefactos.append(referencia)
-                resumen["sha256"] = referencia["sha256"]
-                resumen["size_bytes"] = referencia["size_bytes"]
-            if getattr(entrada, "incluir_json", True):
-                resumen["muestra"] = self._muestra(final)
-            datos[tipo] = resumen
         return datos, artefactos
 
+    async def _historial(
+        self, servicio: Any, entrada: Any, runtime: BotRuntime
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Descarga la consulta YA existente del rango (port V1). Sin consultas nuevas."""
+        await runtime.event_sink.progress(
+            phase="CONSULTA", percent=45, message="Leyendo historial de consultas"
+        )
+        datos: dict[str, Any] = {
+            "operacion": "historial",
+            "representado_cuit": entrada.representado_cuit,
+            "fecha_desde": entrada.fecha_desde,
+            "fecha_hasta": entrada.fecha_hasta,
+            "consultas": {},
+            "faltantes": [],
+        }
+        artefactos: list[dict[str, Any]] = []
+        for tipo, id_artefacto in (
+            ("emitidos", ID_ARTEFACTO_EMITIDOS),
+            ("recibidos", ID_ARTEFACTO_RECIBIDOS),
+        ):
+            if not getattr(entrada, tipo):
+                continue
+            await runtime.cancellation.raise_if_cancelled()
+            base = nombre_base_archivo(
+                entrada.representado_cuit,
+                entrada.representado_nombre,
+                entrada.fecha_desde,
+                entrada.fecha_hasta,
+                tipo,
+            )
+            crudo = runtime.artifact_store.resolve(f"{base}.crudo.csv")
+            final = runtime.artifact_store.resolve(f"{base}.csv")
+            resultado = await servicio.historial(
+                tipo=tipo,
+                desde=entrada.fecha_desde,
+                hasta=entrada.fecha_hasta,
+                destino=crudo,
+                timeout_ms=timeout_mc_ms(entrada),
+            )
+            datos["consultas"][tipo] = resultado.get("consultas", [])
+            if not resultado.get("descargado"):
+                datos["faltantes"].append(tipo)
+                continue
+            datos[tipo] = await self._publicar_csv(
+                crudo, final, tipo, id_artefacto, entrada, runtime, artefactos
+            )
+        return datos, artefactos
+
+    async def _publicar_csv(
+        self,
+        crudo: Path,
+        final: Path,
+        tipo: str,
+        id_artefacto: str,
+        entrada: Any,
+        runtime: BotRuntime,
+        artefactos: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Materializa, filtra por rango, sube por slot y resume ``tipo``."""
+        resumen: dict[str, Any] = {}
+        if getattr(entrada, "carga_b64", False):
+            # V1 codifica el archivo descargado (el ZIP del portal) antes de
+            # procesarlo; se guarda en el resumen del tipo correspondiente.
+            resumen["archivo_b64"] = archivo_en_base64(crudo)
+        materializar_csv_descargado(crudo)
+        await runtime.event_sink.progress(
+            phase="PROCESANDO", percent=65, message=f"Filtrando {tipo}"
+        )
+        filas = filtrar_csv_por_rango(
+            crudo, final, entrada.fecha_desde, entrada.fecha_hasta, tipo
+        )
+        crudo.unlink(missing_ok=True)
+        resumen["filas"] = filas
+        resumen["archivo"] = final.name
+        if getattr(entrada, "subir_csv", True):
+            await runtime.event_sink.progress(
+                phase="SUBIENDO", percent=80, message=f"Subiendo {tipo}"
+            )
+            try:
+                referencia = await runtime.artifact_store.upload(
+                    id_artefacto, final.name
+                )
+            except ValueError as exc:
+                raise ArtifactUploadError(str(exc)) from exc
+            artefactos.append(referencia)
+            resumen["sha256"] = referencia["sha256"]
+            resumen["size_bytes"] = referencia["size_bytes"]
+        if getattr(entrada, "incluir_json", True):
+            resumen["muestra"] = self._muestra(final, tipo, entrada)
+        return resumen
+
     @staticmethod
-    def _muestra(archivo: Path, limite: int = 5) -> list[dict[str, str]]:
-        """Lee las primeras filas del CSV final para el JSON de respuesta."""
-        with open(archivo, "r", encoding="utf-8", newline="") as fh:
-            lector = csv.DictReader(fh)
-            return [dict(fila) for _, fila in zip(range(limite), lector)]
+    def _resultado_historial(
+        entrada: Any, datos: dict[str, Any], artefactos: list[dict[str, Any]]
+    ) -> BotResult:
+        """OK si estan todas las consultas pedidas; PARCIAL o ERROR si faltan."""
+        from bot_worker.bots.errors import Categoria
+        from bot_worker.runtime.context import BotError, BotResult
+
+        pedidos = [t for t in ("emitidos", "recibidos") if getattr(entrada, t)]
+        faltantes = list(datos.get("faltantes", []))
+        if faltantes and len(faltantes) == len(pedidos):
+            return BotResult(
+                result="ERROR",
+                data=datos,
+                artifacts=artefactos,
+                errors=[
+                    BotError(
+                        category=Categoria.TARGET_UNAVAILABLE,
+                        internal_diagnostic="comprobantes_historial_sin_consulta",
+                        retryable=False,
+                    )
+                ],
+            )
+        if faltantes:
+            return BotResult(
+                result="PARCIAL",
+                data=datos,
+                artifacts=artefactos,
+                warnings=["sin consulta en el historial para: " + ", ".join(faltantes)],
+            )
+        return BotResult(result="OK", data=datos, artifacts=artefactos)
+
+    def _muestra(
+        self, archivo: Path, tipo: str = "emitidos", entrada: Any = None
+    ) -> list[dict[str, str]]:
+        """Filas del CSV final con las columnas auxiliares de V1."""
+        cuit = getattr(entrada, "representado_cuit", "")
+        return leer_muestra_mis_comprobantes(
+            archivo, tipo, cuit, self._muestra_json
+        )

@@ -14,14 +14,112 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import shutil
 import tempfile
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any, Mapping
 
 COLUMNAS_FECHA = ("Fecha", "Fecha de Emisión", "Fecha de Emision")
 FORMATOS_FECHA = ("%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y")
+
+# Nombres estándar con los que V1/V2 renombran, por posición, la planilla de
+# Mis Comprobantes (``mce_xlsx``/``mcr_xlsx`` en ``comprobantes_bot.py``).
+COLUMNAS_MCE = (
+    "Fecha",
+    "Tipo",
+    "Punto de Venta",
+    "Número Desde",
+    "Número Hasta",
+    "Cód. Autorización",
+    "Tipo Doc. Receptor",
+    "Nro. Doc. Receptor",
+    "Denominación Receptor",
+    "Tipo Cambio",
+    "Moneda",
+    "Neto Grav. IVA 0%",
+    "IVA 2,5%",
+    "Neto Grav. IVA 2,5%",
+    "IVA 5%",
+    "Neto Grav. IVA 5%",
+    "IVA 10,5%",
+    "Neto Grav. IVA 10,5%",
+    "IVA 21%",
+    "Neto Grav. IVA 21%",
+    "IVA 27%",
+    "Neto Grav. IVA 27%",
+    "Neto Gravado Total",
+    "Neto No Gravado",
+    "Op. Exentas",
+    "Otros Tributos",
+    "Total IVA",
+    "Imp. Total",
+)
+COLUMNAS_MCR = (
+    "Fecha",
+    "Tipo",
+    "Punto de Venta",
+    "Número Desde",
+    "Número Hasta",
+    "Cód. Autorización",
+    "Tipo Doc. Emisor",
+    "Nro. Doc. Emisor",
+    "Denominación Emisor",
+    "Tipo Doc. Receptor",
+    "Nro. Doc. Receptor",
+    "Tipo Cambio",
+    "Moneda",
+    "Neto Grav. IVA 0%",
+    "IVA 2,5%",
+    "Neto Grav. IVA 2,5%",
+    "IVA 5%",
+    "Neto Grav. IVA 5%",
+    "IVA 10,5%",
+    "Neto Grav. IVA 10,5%",
+    "IVA 21%",
+    "Neto Grav. IVA 21%",
+    "IVA 27%",
+    "Neto Grav. IVA 27%",
+    "Neto Gravado Total",
+    "Neto No Gravado",
+    "Op. Exentas",
+    "Otros Tributos",
+    "Total IVA",
+    "Imp. Total",
+)
+# Columnas de importes que V1 rellena con 0 cuando el portal no las informa.
+COLUMNAS_MONETARIAS_MC = (
+    "Neto Grav. IVA 0%",
+    "IVA 2,5%",
+    "Neto Grav. IVA 2,5%",
+    "IVA 5%",
+    "Neto Grav. IVA 5%",
+    "IVA 10,5%",
+    "Neto Grav. IVA 10,5%",
+    "IVA 21%",
+    "Neto Grav. IVA 21%",
+    "IVA 27%",
+    "Neto Grav. IVA 27%",
+    "Neto Gravado Total",
+    "Neto No Gravado",
+    "Op. Exentas",
+    "Otros Tributos",
+    "Total IVA",
+    "Imp. Total",
+)
+# Columnas que V1 agrega al JSON de respuesta (nunca al CSV filtrado).
+COLUMNAS_AUXILIARES_MC = ("MC", "CUIT Cliente", "MC AUX", "Factura AUX")
+# V1 espera el boton ``CSV`` de Mis Comprobantes ``timeout_mc`` segundos, con 30
+# como valor por defecto (``comprobantes_bot.py``).
+TIMEOUT_MC_SEGUNDOS_POR_DEFECTO = 30
+TIMEOUT_MC_MS_POR_DEFECTO = TIMEOUT_MC_SEGUNDOS_POR_DEFECTO * 1000
+_COLUMNA_ISO = "Fecha"
+_INT_RE = re.compile(r"^-?\d+$")
+_DECIMAL_COMA_RE = re.compile(r"^-?\d+,\d+$")
+_ENTERO_MAX = 2**63 - 1
+_ENTERO_MIN = -(2**63)
 
 
 def materializar_csv_descargado(origen: Path) -> None:
@@ -140,3 +238,195 @@ def _normalizar_desde(valor: str) -> str:
         except ValueError:
             continue
     raise ValueError(f"fecha debe tener formato dd/mm/aaaa: {texto!r}")
+
+
+def _detectar_delimitador(muestra: str) -> str:
+    """Delimitador real de la planilla, con el ``;`` de ARCA como fallback."""
+    try:
+        return csv.Sniffer().sniff(muestra, delimiters=";,\t|").delimiter
+    except csv.Error:
+        return ";" if ";" in muestra else ","
+
+
+def columnas_mis_comprobantes(tipo: str) -> tuple[str, ...]:
+    """Nombres estándar que V1 aplica por posición según el tipo de planilla."""
+    return COLUMNAS_MCE if tipo == "emitidos" else COLUMNAS_MCR
+
+
+def _normalizar_columna_pandas(
+    valores: list[str], *, rellenar_cero: bool, es_fecha: bool = False
+) -> list[str]:
+    """Replica la inferencia de tipos de pandas al leer y reescribir la planilla.
+
+    V1 lee la planilla con ``pd.read_csv(sep=';', decimal=',')`` y la reescribe
+    con ``to_csv(sep=';')``: los números vuelven sin ceros a la izquierda
+    (``00001`` -> ``1``) y con punto decimal (``1234,56`` -> ``1234.56``),
+    mientras que los textos se conservan tal cual. ``rellenar_cero`` reproduce
+    el ``fillna(0)`` que V1 aplica a las columnas de importes; en el resto de
+    las columnas una celda vacía se escribe vacía (``na_rep=''``).
+    """
+    if es_fecha:
+        return [
+            dia.strftime("%Y-%m-%d") if (dia := parsear_fecha_planilla(valor)) else ""
+            for valor in valores
+        ]
+    parseados: list[int | float | str | None] = []
+    todo_entero = True
+    hay_ausente = False
+    hay_texto = False
+    for valor in valores:
+        texto = valor.strip()
+        if not texto:
+            parseados.append(None)
+            hay_ausente = True
+            continue
+        if _INT_RE.match(texto):
+            numero = int(texto)
+            if _ENTERO_MIN <= numero <= _ENTERO_MAX and not hay_texto:
+                parseados.append(numero)
+                continue
+            hay_texto = True
+            parseados.append(texto)
+            continue
+        if _DECIMAL_COMA_RE.match(texto):
+            parseados.append(float(texto.replace(",", ".")))
+            todo_entero = False
+            continue
+        hay_texto = True
+        parseados.append(texto)
+    if hay_texto:
+        # Columna de objetos: ``fillna(0)`` escribe 0, el resto queda textual.
+        return [
+            ("0" if rellenar_cero else "") if valor is None else str(valor)
+            for valor in parseados
+        ]
+    if todo_entero and not hay_ausente:
+        return [str(valor) for valor in parseados]
+    return [
+        ("0.0" if rellenar_cero else "") if valor is None else repr(float(valor))
+        for valor in parseados
+    ]
+
+
+def filtrar_csv_comprobantes(
+    origen: Path,
+    destino: Path,
+    desde: str,
+    hasta: str,
+    tipo: str,
+) -> int:
+    """Filtra una planilla de Mis Comprobantes con el criterio de V1.
+
+    Porta ``filtrar_csv_por_rango`` de ``comprobantes_bot.py``: renombra las
+    columnas por posición con los nombres estándar del tipo (``mce_xlsx`` o
+    ``mcr_xlsx``), rellena con 0 los importes que el portal no informa, recorta
+    el rango inclusive y reescribe la planilla separada por ``;``. A diferencia
+    de V1, tolera que el portal agregue o quite columnas: en ese caso conserva
+    los nombres originales y solo aplica el filtro por fecha.
+    """
+    inicio = datetime.strptime(_normalizar_desde(desde), "%d/%m/%Y").date()
+    fin = datetime.strptime(_normalizar_desde(hasta), "%d/%m/%Y").date()
+    texto = leer_texto_planilla(origen)
+    delimitador = _detectar_delimitador(texto[:8192])
+    with io.StringIO(texto, newline="") as fh:
+        lector = csv.reader(fh, delimiter=delimitador)
+        filas_crudas = [fila for fila in lector if fila]
+    if not filas_crudas:
+        raise ValueError("la planilla del portal no tiene encabezado")
+    encabezado, datos = filas_crudas[0], filas_crudas[1:]
+    esperadas = columnas_mis_comprobantes(tipo)
+    renombrada = len(encabezado) == len(esperadas)
+    columnas = esperadas if renombrada else tuple(encabezado)
+    indice_fecha = next(
+        (i for i, nombre in enumerate(columnas) if nombre in COLUMNAS_FECHA), None
+    )
+    if indice_fecha is None:
+        raise ValueError("la planilla del portal no trae columna de fecha conocida")
+
+    def _en_rango(fila: list[str]) -> bool:
+        if len(fila) <= indice_fecha:
+            return False
+        dia = parsear_fecha_planilla(fila[indice_fecha])
+        return dia is not None and inicio <= dia <= fin
+
+    conservadas = [fila for fila in datos if _en_rango(fila)]
+    monetarias = set(COLUMNAS_MONETARIAS_MC)
+    salida: list[list[str]] = []
+    for indice, nombre in enumerate(columnas):
+        valores = [
+            fila[indice] if indice < len(fila) else "" for fila in conservadas
+        ]
+        salida.append(
+            _normalizar_columna_pandas(
+                valores,
+                rellenar_cero=nombre in monetarias,
+                es_fecha=nombre == _COLUMNA_ISO,
+            )
+        )
+    with open(destino, "w", encoding="utf-8", newline="") as fh:
+        escritor = csv.writer(fh, delimiter=";", lineterminator="\n")
+        escritor.writerow(list(columnas))
+        for fila in zip(*salida):
+            escritor.writerow(fila)
+    return len(conservadas)
+
+
+def normalizar_numero_comprobante(valor: Any) -> str:
+    """Entero textual como lo imprime pandas: ``00001`` -> ``1``.
+
+    V1 arma las columnas auxiliares con ``df['...'].astype(str)``: los valores
+    numéricos del portal pierden los ceros a la izquierda.
+    """
+    texto = str(valor or "").strip()
+    if _INT_RE.match(texto):
+        numero = int(texto)
+        if _ENTERO_MIN <= numero <= _ENTERO_MAX:
+            return str(numero)
+    return texto
+
+
+def columnas_auxiliares_mc(
+    fila: Mapping[str, str], tipo: str, cuit: str
+) -> dict[str, str]:
+    """Columnas que V1 agrega al JSON: MC, CUIT Cliente, MC AUX y Factura AUX."""
+    tipo_doc_receptor = normalizar_numero_comprobante(fila.get("Nro. Doc. Receptor"))
+    comun = "-".join(
+        (
+            cuit,
+            normalizar_numero_comprobante(fila.get("Tipo")),
+            normalizar_numero_comprobante(fila.get("Punto de Venta")),
+            normalizar_numero_comprobante(fila.get("Número Desde")),
+            tipo_doc_receptor,
+        )
+    )
+    if tipo == "emitidos":
+        mc_aux = f"{comun}-{cuit}"
+        factura_aux = (
+            f"{cuit}-{normalizar_numero_comprobante(fila.get('Tipo'))}"
+            f"-{normalizar_numero_comprobante(fila.get('Punto de Venta'))}"
+            f"-{normalizar_numero_comprobante(fila.get('Número Desde'))}"
+        )
+    else:
+        mc_aux = f"{comun}-{normalizar_numero_comprobante(fila.get('Nro. Doc. Emisor'))}"
+        # V1 deja ``NaN`` en Factura AUX para recibidos; el JSON lo serializa "nan".
+        factura_aux = "nan"
+    mc = "MCE" if tipo == "emitidos" else "MCR"
+    return {"MC": mc, "CUIT Cliente": cuit, "MC AUX": mc_aux, "Factura AUX": factura_aux}
+
+
+def leer_muestra_mis_comprobantes(
+    archivo: Path, tipo: str, cuit: str, limite: int
+) -> list[dict[str, str]]:
+    """Primeras ``limite`` filas de la planilla ya filtrada, con auxiliares."""
+    texto = leer_texto_planilla(archivo)
+    delimitador = _detectar_delimitador(texto[:8192])
+    with io.StringIO(texto, newline="") as fh:
+        lector = csv.DictReader(fh, delimiter=delimitador)
+        filas = list(lector)[:limite]
+    muestra: list[dict[str, str]] = []
+    for fila in filas:
+        limpia = {k: v for k, v in fila.items() if k is not None}
+        limpia = {clave: str(valor) for clave, valor in limpia.items()}
+        limpia.update(columnas_auxiliares_mc(limpia, tipo, cuit))
+        muestra.append(limpia)
+    return muestra

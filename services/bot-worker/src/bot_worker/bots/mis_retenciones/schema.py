@@ -40,7 +40,7 @@ TIPOS_POR_IMPUESTO: dict[str, tuple[str, ...]] = {
 
 
 class _Base(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
 
 def limpiar_cuit(valor: Any) -> str:

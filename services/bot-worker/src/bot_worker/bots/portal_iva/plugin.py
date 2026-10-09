@@ -187,7 +187,24 @@ class PortalIvaPlugin:
                     cuit_objetivo,
                     cuit_representante=runtime.credentials.cuit_representante,
                 )
-                await servicio.seleccionar_periodo(entrada.periodo)
+                preparar_periodo = getattr(servicio, "preparar_periodo", None)
+                if preparar_periodo is not None:
+                    periodos = await preparar_periodo(
+                        entrada.periodo,
+                        operaciones_ng_o_e=getattr(entrada, "operaciones_ng_o_e", False),
+                        prorrateo_global=getattr(entrada, "prorrateo_global", False),
+                        prorrateo_asignacion_directa=getattr(entrada, "prorrateo_asignacion_directa", False),
+                        prorrateo_ambos=getattr(entrada, "prorrateo_ambos", False),
+                        importacion_definitiva_bienes=getattr(entrada, "importacion_definitiva_bienes", False),
+                        importacion_servicios=getattr(entrada, "importacion_servicios", False),
+                        regimen_turiva=getattr(entrada, "regimen_turiva", False),
+                        bienes_usados=getattr(entrada, "bienes_usados", False),
+                        ninguna_anteriores=getattr(entrada, "ninguna_anteriores", True),
+                    )
+                    if periodos:
+                        setattr(entrada, "periodos_seleccionables", periodos)
+                else:
+                    await servicio.seleccionar_periodo(entrada.periodo)
                 if operacion == "importar":
                     datos, artefactos = await self._importar(
                         servicio, entrada, runtime, cuit_objetivo
@@ -223,6 +240,8 @@ class PortalIvaPlugin:
             "representado_cuit": cuit_objetivo,
             "periodo": entrada.periodo,
         }
+        if getattr(entrada, "periodos_seleccionables", None):
+            datos["periodos_seleccionables"] = entrada.periodos_seleccionables
         artefactos: list[dict[str, Any]] = []
         for libro, artifact_id in (
             ("ventas", ID_ARTEFACTO_VENTAS),
@@ -235,7 +254,12 @@ class PortalIvaPlugin:
             await runtime.cancellation.raise_if_cancelled()
             base = nombre_base_archivo(cuit_objetivo, entrada.periodo, libro)
             destino = runtime.artifact_store.resolve(f"{base}.csv")
-            await servicio.descargar_libro(libro=libro, destino=destino)
+            await servicio.descargar_libro(
+                libro=libro,
+                destino=destino,
+                refrescar_desde_arca=bool(getattr(entrada, "refrescar_desde_arca", False)),
+                limpiar_despues=bool(getattr(entrada, "limpiar_despues", False)),
+            )
             await runtime.event_sink.progress(
                 phase="PROCESANDO", percent=65, message=f"Procesando {libro}"
             )
@@ -274,18 +298,23 @@ class PortalIvaPlugin:
             "periodo": entrada.periodo,
             "importaciones": [],
         }
-        for libro, contenido in (
-            ("ventas", entrada.ventas_txt),
-            ("compras", entrada.compras_txt),
+        for libro, contenido, alicuotas in (
+            ("ventas", entrada.ventas_txt, entrada.ventas_alicuotas_txt),
+            ("compras", entrada.compras_txt, entrada.compras_alicuotas_txt),
         ):
             if not contenido:
                 continue
             await runtime.cancellation.raise_if_cancelled()
-            fuente = runtime.artifact_store.resolve(
-                f"{nombre_base_archivo(cuit_objetivo, entrada.periodo, libro)}.txt"
-            )
+            base = nombre_base_archivo(cuit_objetivo, entrada.periodo, libro)
+            fuente = runtime.artifact_store.resolve(f"{base}.txt")
             fuente.write_text(str(contenido), encoding="utf-8")
-            ok = await servicio.importar_txt(libro=libro, fuente=fuente)
+            fuente_alicuotas = None
+            if alicuotas:
+                fuente_alicuotas = runtime.artifact_store.resolve(f"{base} - alicuotas.txt")
+                fuente_alicuotas.write_text(str(alicuotas), encoding="utf-8")
+            ok = await servicio.importar_libro(
+                libro=libro, comprobantes=fuente, alicuotas=fuente_alicuotas
+            )
             datos["importaciones"].append({"libro": libro, "ok": bool(ok)})
         return datos, []
 

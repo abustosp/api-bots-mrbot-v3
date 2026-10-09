@@ -4,9 +4,9 @@ Porta ``api-bots-mrbot-v2/app/bot/facturometro_bot.py`` (``bot_facturometro``)
 al contrato worker V3. Cambios obligatorios respecto de V2:
 
 - Sin ``SessionLocal``: la central persiste tras el callback.
-- Sin ``tempfile``/``screenshot`` a MinIO: el bot es de solo lectura;
-  deja una copia redactada del resultado en ``work_dir/resultado.json``
-  para trazabilidad local (se borra con el workspace).
+- Sin ``tempfile``/MinIO: la captura del panel (PNG) y su subida se
+  resuelven con ``artifact_store`` (slot ``facturometro_captura``); V1 la
+  subia a MinIO y devolvia ``screenshot_url``.
 - Sin ``os.environ`` ni ``get_proxy_config()``: proxy y credenciales
   llegan por ``runtime`` desde el sobre sellado.
 - Sin credenciales en logs: categoria + diagnostico redactado.
@@ -14,7 +14,9 @@ al contrato worker V3. Cambios obligatorios respecto de V2:
 V2 lee ``#spanFacturometroMonto``, ``#spanFacturometroCategoriaTope`` y
 ``#spanFacturometroCategoria2`` con fallback al endpoint
 ``inicio.aspx/CalcularFacturacion``; el plugin delega esa lectura al
-handle del servicio y solo normaliza el trio resultante.
+handle del servicio y solo normaliza el trio resultante. Ademas deja una
+copia redactada del resultado en ``work_dir/resultado.json`` (se borra con
+el workspace).
 
 La seccion ``service`` del sobre sellado (vía :meth:`configure`) solo
 ajusta el nombre visible del servicio.
@@ -26,6 +28,7 @@ import json
 from typing import Any, Mapping
 
 from bot_worker.bots.errors import (
+    ArtifactUploadError,
     BrowserCrashedError,
     CaptchaUnsolvableError,
     CredentialsRejectedError,
@@ -36,7 +39,7 @@ from bot_worker.bots.errors import (
     sin_secretos,
 )
 from bot_worker.bots.facturometro.schema import ENTRADAS, esquema_entrada
-from bot_worker.bots.registry import BotManifest
+from bot_worker.bots.registry import ArtifactSpec, BotManifest
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -47,6 +50,9 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "MONOTRIBUTO"
 #: Portal que implementa ``leer_facturometro`` (``runtime/portals``).
 PORTAL_ARCA = "facturometro"
+#: V1 sube la captura del panel con este nombre (``bot_facturometro``).
+ID_ARTEFACTO_CAPTURA = "facturometro_captura"
+NOMBRE_CAPTURA = "facturometro_seccion.png"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -69,7 +75,14 @@ class FacturometroPlugin:
         version="3.0.0",
         operaciones=("consultar",),
         esquema_entrada=esquema_entrada(),
-        artefactos_produce=(),
+        artefactos_produce=(
+            ArtifactSpec(
+                nombre="facturometro_captura",
+                content_types=("image/png",),
+                max_bytes=20_971_520,
+                obligatorio=False,
+            ),
+        ),
         timeout_por_defecto_seconds=600,
         requiere_credenciales_fiscales=True,
         requiere_proxy=False,
@@ -123,6 +136,13 @@ class FacturometroPlugin:
         operacion, entrada = payload
         if runtime.credentials is None:
             raise CredentialsRejectedError("el plugin requiere credenciales fiscales")
+        representado = (
+            entrada.representado_cuit
+            or entrada.cuit_representante
+            or runtime.credentials.cuit_representante
+        )
+        if not representado:
+            raise InvalidInputError("falta el CUIT representado y el de la credencial")
         secretos = [runtime.credentials.clave]
         await runtime.cancellation.raise_if_cancelled()
         await runtime.event_sink.progress(
@@ -130,6 +150,7 @@ class FacturometroPlugin:
         )
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
+        captura = None
         try:
             async with runtime.browser_factory.arca_session(
                 credentials=runtime.credentials,
@@ -146,8 +167,10 @@ class FacturometroPlugin:
                     self._servicio, portal=PORTAL_ARCA
                 )
                 lectura = await servicio.leer_facturometro(
-                    representado_cuit=entrada.representado_cuit,
+                    representado_cuit=representado,
                 )
+                if getattr(entrada, "incluir_captura", True):
+                    captura = await self._capturar(servicio, representado, runtime)
         except ErrorDeBot:
             raise
         except Exception as exc:
@@ -168,11 +191,36 @@ class FacturometroPlugin:
             )
         datos = {
             "operacion": operacion,
-            "representado_cuit": entrada.representado_cuit,
+            "representado_cuit": representado,
             "monto": lectura.get("monto"),
             "tope": lectura.get("tope"),
             "categoria": lectura.get("categoria"),
+            # V1 devolvía la URL de MinIO; en V3 la captura sube por slot
+            # prefirmado y la central arma la URL a partir del ``object_key``.
+            "screenshot_url": None,
         }
+        artefactos: list[dict[str, Any]] = []
+        if captura is not None:
+            await runtime.event_sink.progress(
+                phase="SUBIENDO", percent=80, message="Subiendo captura"
+            )
+            try:
+                referencia = await runtime.artifact_store.upload(
+                    ID_ARTEFACTO_CAPTURA, captura.name
+                )
+            except ValueError as exc:
+                raise ArtifactUploadError(str(exc)) from exc
+            artefactos.append(referencia)
+            datos["captura"] = {
+                "archivo": referencia["name"],
+                "sha256": referencia["sha256"],
+                "size_bytes": referencia["size_bytes"],
+            }
+            datos["screenshot_url"] = referencia.get("object_key") or None
+        elif getattr(entrada, "incluir_captura", True):
+            datos["warnings"] = [
+                "sin panel #divFacturometro para la captura"
+            ]
         copia = runtime.work_dir / "resultado.json"
         copia.write_text(
             json.dumps(datos, ensure_ascii=False, separators=(",", ":"))[:1_048_576],
@@ -181,4 +229,14 @@ class FacturometroPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos)
+        return BotResult(result="OK", data=datos, artifacts=artefactos)
+
+    async def _capturar(
+        self, servicio: Any, representado: str, runtime: BotRuntime
+    ) -> Any:
+        """Captura el panel del facturometro en ``work_dir`` (port V1)."""
+        capturar = getattr(servicio, "capturar_facturometro", None)
+        if capturar is None:  # pragma: no cover - portales alternativos
+            return None
+        destino = runtime.artifact_store.resolve(NOMBRE_CAPTURA)
+        return await capturar(destino)

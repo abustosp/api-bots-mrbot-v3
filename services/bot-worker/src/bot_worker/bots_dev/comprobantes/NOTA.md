@@ -19,7 +19,16 @@ central y NO toca `registry.py`. Para probar el plugin sin navegador:
 ## Notas del port
 
 - Entrada: CUIT de 11 digitos, rango `dd/mm/aaaa`, al menos un tipo
-  (emitidos/recibidos) y al menos una salida (json/csv).
+  (emitidos/recibidos) y al menos una salida (json/csv/base64). Acepta los
+  campos de V1: `descarga_emitidos`/`descarga_recibidos`, `carga_json`,
+  `carga_minio`, `puntos_venta_emitidos`/`recibidos`, `timeout_mc`,
+  `carga_b64`, `eliminar_descargas` y `verbose`.
+- Puntos de venta y `timeout_mc` (30 s por defecto, como V1) viajan al
+  portal; `carga_b64` devuelve el archivo descargado en base64.
+- El filtro de la planilla renombra las columnas por posicion (mce_xlsx /
+  mcr_xlsx), rellena con 0 los importes que el portal no informa y agrega
+  las columnas auxiliares de V1 (MC, CUIT Cliente, MC AUX, Factura AUX) al
+  JSON de respuesta.
 - `solicitar` devuelve solo ids de consulta (continuacion); las cookies de
   sesion nunca salen del worker.
 - Errores por categoria (`ENVELOPE_INVALID`, `CREDENTIALS_REJECTED`,

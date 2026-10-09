@@ -38,6 +38,7 @@ from typing import Any, Mapping
 from bot_worker.bots.errors import (
     ArtifactUploadError,
     BrowserCrashedError,
+    Categoria,
     CredentialsRejectedError,
     DeadlineExceededError,
     ErrorDeBot,
@@ -189,7 +190,7 @@ class SiperRealPlugin:
                     portal="siper",
                 )
                 await servicio.seleccionar_representado(entrada.representado_cuit)
-                datos, artefactos = await self._capturar(
+                datos, artefactos, errores = await self._capturar(
                     servicio, entrada, runtime
                 )
         except ErrorDeBot:
@@ -201,12 +202,17 @@ class SiperRealPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos, artifacts=artefactos)
+        resultado = "OK" if not errores else "PARCIAL"
+        return BotResult(
+            result=resultado, data=datos, artifacts=artefactos, errors=errores
+        )
 
     async def _capturar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], list[Any]]:
         """Captura las vistas pedidas y las sube por slot prefirmado."""
+        from bot_worker.runtime.context import BotError
+
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Capturando vistas SIPER"
         )
@@ -221,6 +227,7 @@ class SiperRealPlugin:
             "vistas": [],
         }
         artefactos: list[dict[str, Any]] = []
+        errores: list[Any] = []
         for vista, artifact_id in vistas:
             await runtime.cancellation.raise_if_cancelled()
             nombre = nombre_captura_siper(entrada.representado_cuit, vista)
@@ -253,4 +260,22 @@ class SiperRealPlugin:
                 datos["vistas"].append(fila)
         if not getattr(entrada, "incluir_json", True):
             datos.pop("vistas", None)
-        return datos, artefactos
+        if getattr(entrada, "extraer_campos", True):
+            # Como V1: los campos del detalle se extraen siempre. Si fallan,
+            # las capturas ya subidas se conservan y queda un error no fatal.
+            try:
+                datos["campos"] = await servicio.extraer_campos_detalle(
+                    representado_cuit=entrada.representado_cuit
+                )
+            except ErrorDeBot as exc:
+                errores.append(
+                    BotError(
+                        category=Categoria.TARGET_UNAVAILABLE,
+                        internal_diagnostic=(
+                            "extraccion de campos SIPER: "
+                            f"{getattr(exc, 'diagnostic_code', None) or exc.diagnostico}"
+                        ),
+                        retryable=False,
+                    )
+                )
+        return datos, artefactos, errores

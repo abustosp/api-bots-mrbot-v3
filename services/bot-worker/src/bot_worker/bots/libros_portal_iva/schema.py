@@ -20,7 +20,7 @@ PERIODO_PATTERN = r"^\d{6}$"
 
 
 class _Base(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
 
 def limpiar_cuit(valor: Any) -> str:
@@ -113,9 +113,14 @@ class LibrosPortalIvaDdjjInput(_RangoPeriodos):
     """Operacion ``descargar_ddjj``: DDJJ del rango."""
 
 
-OperacionLibrosPortalIva = Literal["descargar_libros", "descargar_ddjj"]
+class LibrosPortalIvaDescargarInput(_RangoPeriodos):
+    """Flujo V1: descarga libros IVA y DDJJ para cada período."""
+
+
+OperacionLibrosPortalIva = Literal["descargar", "descargar_libros", "descargar_ddjj"]
 
 ENTRADAS: dict[str, type[BaseModel]] = {
+    "descargar": LibrosPortalIvaDescargarInput,
     "descargar_libros": LibrosPortalIvaLibrosInput,
     "descargar_ddjj": LibrosPortalIvaDdjjInput,
 }
@@ -125,11 +130,11 @@ def esquema_entrada() -> dict[str, Any]:
     """JSON Schema combinado de ambas operaciones, sin credenciales."""
     return {
         "type": "object",
-        "required": ["operacion", "periodo_desde", "periodo_hasta"],
+        "required": ["periodo_desde", "periodo_hasta"],
         "properties": {
             "operacion": {
                 "type": "string",
-                "enum": ["descargar_libros", "descargar_ddjj"],
+                "enum": ["descargar", "descargar_libros", "descargar_ddjj"],
             },
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
             "periodo_desde": {"type": "string", "pattern": PERIODO_PATTERN},

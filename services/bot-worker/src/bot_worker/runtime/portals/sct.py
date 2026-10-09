@@ -63,6 +63,40 @@ class SctPortal(PortalArca):
                 diagnostic_code="sct_frame_missing",
             ) from exc
 
+    async def contar_pestana(self, seccion: str) -> int | None:
+        """Numero de la insignia de la pestaña de ``seccion`` (port de ``tab_badge_count``).
+
+        Devuelve ``None`` si la pestaña no tiene insignia legible. La sección
+        se omite solo cuando la insignia vale 0, como en V1.
+        """
+        seccion = str(seccion or "").strip().lower()
+        rotulos = PESTANAS.get(seccion)
+        if rotulos is None:
+            return None
+        marco = self.page.frame_locator(_IFRAME)
+        candidatos = [
+            marco.get_by_role("tab", name=re.compile(r, re.I)) for r in rotulos
+        ] + [
+            marco.get_by_role("link", name=re.compile(r, re.I)) for r in rotulos
+        ]
+        pestana = await self._primero_visible(candidatos, total_ms=3_000)
+        if pestana is None:
+            return None
+        insignia = pestana.locator("span.badge, span.badge-danger, span.badge-pill, [class*=badge]")
+        try:
+            if await insignia.count() > 0:
+                texto = (await insignia.first.inner_text() or "").strip()
+            else:
+                texto = (await pestana.inner_text() or "").strip()
+                coincidencia = re.search(r"\b(\d+)\b", texto)
+                texto = coincidencia.group(1) if coincidencia else ""
+        except Exception:
+            return None
+        try:
+            return int(texto)
+        except ValueError:
+            return None
+
     async def descargar_reporte(self, seccion: str, formato: str, destino: Path) -> Path:
         """Descarga la sección en el formato pedido dentro de ``destino``."""
         seccion = str(seccion or "").strip().lower()

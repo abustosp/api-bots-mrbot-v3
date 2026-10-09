@@ -1,9 +1,11 @@
 """Esquemas de entrada del plugin ``retper_iibb_agip``.
 
-Porta la validacion de V2
-(``api-bots-mrbot-v2/app/bot/retper_iibb_agip_bot.py``:
+Porta la validacion de V1
+(``api-bots-mrbot/app/bot/retper_iibb_agip_bot.py``:
 ``bot_retper_iibb_agip``): CUIT de 11 digitos, denominacion no vacia y
-periodos ``AAAAMM`` con ``desde <= hasta``.
+periodos ``AAAAMM`` con ``desde <= hasta``. Acepta los nombres de V1
+(``cuit``/``cuit_representado``, ``desde``/``hasta``, ``carga_minio``) y
+descarta las credenciales y ``proxy_request`` del sobre sellado.
 """
 
 from __future__ import annotations
@@ -15,6 +17,16 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 CUIT_PATTERN = r"^\d{11}$"
 PERIODO_PATTERN = r"^\d{6}$"
+#: Campos del contrato compartido con V1 que V3 no toma del payload.
+CAMPOS_SOBRE_SELLADO = (
+    "clave",
+    "clave_representante",
+    "clave_encriptada",
+    "cuit_representante",
+    "cuit_inicio_sesion",
+    "proxy_request",
+    "proxy",
+)
 
 
 class _Base(BaseModel):
@@ -51,7 +63,7 @@ class RetperIibbAgipConsultarInput(_Base):
     """Operacion ``consultar``: retenciones/percepciones AGIP del rango."""
 
     representado_cuit: str = Field(
-        validation_alias=AliasChoices("representado_cuit", "cuit"),
+        validation_alias=AliasChoices("representado_cuit", "cuit", "cuit_representado"),
         min_length=11,
         max_length=14,
     )
@@ -68,7 +80,12 @@ class RetperIibbAgipConsultarInput(_Base):
         max_length=7,
     )
     incluir_json: bool = True
-    subir_archivo: bool = True
+    subir_archivo: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "subir_archivo", "carga_minio", "minio_upload", "archivo_historico_minio"
+        ),
+    )
     #: Alternativa con pantalla virtual (Xvfb). Ausente o ``null`` significa el
     #: camino de siempre; solo un valor verdadero elige la variante ``_xvfb``.
     pv: bool = False
@@ -78,7 +95,9 @@ class RetperIibbAgipConsultarInput(_Base):
     def _normalizar(cls, datos: Any) -> Any:
         if isinstance(datos, dict):
             datos = dict(datos)
-            for clave in ("representado_cuit", "cuit"):
+            for clave in CAMPOS_SOBRE_SELLADO:
+                datos.pop(clave, None)
+            for clave in ("representado_cuit", "cuit", "cuit_representado"):
                 if clave in datos and datos[clave] is not None:
                     datos[clave] = limpiar_cuit(datos[clave])
             if datos.get("pv") is None:
@@ -116,12 +135,17 @@ def esquema_entrada() -> dict[str, Any]:
         "properties": {
             "operacion": {"type": "string", "enum": ["consultar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "cuit_representado": {"type": "string", "pattern": CUIT_PATTERN},
             "usuario": {"type": "string", "minLength": 1, "maxLength": 256},
             "denominacion": {"type": "string", "minLength": 1},
             "periodo_desde": {"type": "string", "pattern": PERIODO_PATTERN},
+            "desde": {"type": "string"},
             "periodo_hasta": {"type": "string", "pattern": PERIODO_PATTERN},
+            "hasta": {"type": "string"},
             "incluir_json": {"type": "boolean"},
             "subir_archivo": {"type": "boolean"},
+            "carga_minio": {"type": "boolean"},
             "pv": {"type": "boolean"},
         },
     }

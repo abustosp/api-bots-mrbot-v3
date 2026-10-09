@@ -37,6 +37,7 @@ from bot_worker.bots.errors import (
     ArtifactUploadError,
     BrowserCrashedError,
     CaptchaUnsolvableError,
+    Categoria,
     CredentialsRejectedError,
     DeadlineExceededError,
     ErrorDeBot,
@@ -200,7 +201,7 @@ class SrtPlugin:
                 # SRT debe resolverse con el perfil capmonster_srt provisionado
                 # en la factoría para este mismo job.
                 _configurar_captcha_srt(servicio, runtime.browser_factory)
-                datos, artefactos = await self._consultar_lote(
+                datos, artefactos, errores = await self._consultar_lote(
                     servicio, entrada, runtime
                 )
         except ErrorDeBot:
@@ -212,21 +213,47 @@ class SrtPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos, artifacts=artefactos)
+        resultado = "OK" if not errores else "PARCIAL"
+        return BotResult(
+            result=resultado, data=datos, artifacts=artefactos, errors=errores
+        )
 
     async def _consultar_lote(
         self, servicio: Any, entrada: Any, runtime: BotRuntime
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], list[Any]]:
         """Consulta cada CUIT y guarda el consolidado en ``work_dir``."""
+        from bot_worker.runtime.context import BotError
+
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Consultando alicuotas SRT"
         )
         consultas: list[dict[str, Any]] = []
+        errores: list[Any] = []
         total = len(entrada.cuits_consulta)
         for indice, cuit in enumerate(entrada.cuits_consulta):
             await runtime.cancellation.raise_if_cancelled()
-            respuesta = await servicio.consultar_cuit(cuit=cuit)
-            fila: dict[str, Any] = {"cuit": cuit, **dict(respuesta or {})}
+            # Como V1: cada CUIT tiene su propio estado. Si uno falla, se registra
+            # como ERROR y el lote sigue con el siguiente CUIT.
+            try:
+                respuesta = await servicio.consultar_cuit(cuit=cuit)
+                fila: dict[str, Any] = {"cuit": cuit, **dict(respuesta or {})}
+                fila.setdefault("status", "OK")
+                fila.setdefault("message", None)
+                fila.setdefault("data", None)
+            except ErrorDeBot as exc:
+                fila = {
+                    "cuit": cuit,
+                    "status": "ERROR",
+                    "message": getattr(exc, "diagnostic_code", None) or exc.diagnostico,
+                    "data": None,
+                }
+                errores.append(
+                    BotError(
+                        category=Categoria.TARGET_UNAVAILABLE,
+                        internal_diagnostic=f"CUIT {cuit}: {fila['message']}",
+                        retryable=False,
+                    )
+                )
             consultas.append(fila)
             await runtime.event_sink.progress(
                 phase="CONSULTA",
@@ -236,6 +263,10 @@ class SrtPlugin:
         datos: dict[str, Any] = {
             "operacion": "consultar_alicuotas",
             "cantidad": len(consultas),
+            "consultas_ok": sum(
+                1 for c in consultas if c["status"] in ("OK", "SIN_AFILIACION_VIGENTE")
+            ),
+            "consultas_error": sum(1 for c in consultas if c["status"] == "ERROR"),
         }
         artefactos: list[dict[str, Any]] = []
         consolidado = runtime.artifact_store.resolve("srt_alicuotas.json")
@@ -258,4 +289,4 @@ class SrtPlugin:
             datos["size_bytes"] = referencia["size_bytes"]
         if getattr(entrada, "incluir_json", True):
             datos["consultas"] = consultas
-        return datos, artefactos
+        return datos, artefactos, errores

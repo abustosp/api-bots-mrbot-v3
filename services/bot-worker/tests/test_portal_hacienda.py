@@ -157,6 +157,101 @@ def test_consultar_rechaza_tipo_desconocido() -> None:
     assert exc.value.diagnostic_code == "hacienda_query_invalid"
 
 
+def test_recorrer_consulta_junta_filas_y_pdfs_en_una_sola_pasada(tmp_path: Path) -> None:
+    """V1 navega la consulta una vez: de ahi salen el cuadro y los PDF."""
+    portal = HaciendaPortal(_Pagina())
+    pasos: list[str] = []
+
+    async def abrir_seccion(*_: Any) -> None:
+        pasos.append("abrir")
+
+    async def completar_fechas(*_: Any) -> None:
+        pasos.append("fechas")
+
+    async def tablas_actuales() -> list[dict[str, Any]]:
+        return [{"headers": ["Fecha", "Importe"], "rows": [["01/09/2026", "$123"]]}]
+
+    async def pdfs_de_pagina(
+        consulta_key: str,
+        representado_cuit: str,
+        destino_dir: Any,
+        pagina: int,
+        vistos: set[str],
+    ) -> list[dict[str, Any]]:
+        pasos.append("pdf")
+        return [{"consulta": consulta_key, "pagina": pagina, "archivo": "A.pdf"}]
+
+    async def no_hay_siguiente() -> bool:
+        pasos.append("fin")
+        return False
+
+    portal._abrir_seccion_consulta = abrir_seccion  # type: ignore[method-assign]
+    portal._completar_fechas_y_buscar = completar_fechas  # type: ignore[method-assign]
+    portal._tablas_actuales = tablas_actuales  # type: ignore[method-assign]
+    portal._pdfs_de_pagina = pdfs_de_pagina  # type: ignore[method-assign]
+    portal._siguiente_pagina = no_hay_siguiente  # type: ignore[method-assign]
+
+    resultado = asyncio.run(
+        portal.recorrer_consulta(
+            consulta_key="por_emisor",
+            desde="01/09/2026",
+            hasta="30/09/2026",
+            destino_dir=tmp_path / "pdf",
+        )
+    )
+
+    assert resultado["filas"] == [
+        {
+            "consulta": "por_emisor",
+            "pagina": 1,
+            "Fecha": "01/09/2026",
+            "Importe": "$123",
+        }
+    ]
+    assert resultado["pdfs"] == [
+        {"consulta": "por_emisor", "pagina": 1, "archivo": "A.pdf"}
+    ]
+    # Una sola navegacion: abrir + fechas, y en la misma pasada el PDF.
+    assert pasos == ["abrir", "fechas", "pdf", "fin"]
+
+
+def test_recorrer_consulta_sin_pdf_conserva_solo_las_filas() -> None:
+    portal = HaciendaPortal(_Pagina())
+
+    async def abrir_seccion(*_: Any) -> None:
+        return None
+
+    async def completar_fechas(*_: Any) -> None:
+        return None
+
+    async def tablas_actuales() -> list[dict[str, Any]]:
+        return [{"headers": ["Fecha"], "rows": [["01/09/2026"]]}]
+
+    async def sin_pdfs(*_: Any) -> list[dict[str, Any]]:  # pragma: no cover
+        raise AssertionError("no debe bajar PDFs")
+
+    async def no_hay_siguiente() -> bool:
+        return False
+
+    portal._abrir_seccion_consulta = abrir_seccion  # type: ignore[method-assign]
+    portal._completar_fechas_y_buscar = completar_fechas  # type: ignore[method-assign]
+    portal._tablas_actuales = tablas_actuales  # type: ignore[method-assign]
+    portal._pdfs_de_pagina = sin_pdfs  # type: ignore[method-assign]
+    portal._siguiente_pagina = no_hay_siguiente  # type: ignore[method-assign]
+
+    resultado = asyncio.run(
+        portal.recorrer_consulta(
+            consulta_key="por_receptor",
+            desde="01/09/2026",
+            hasta="30/09/2026",
+            descargar_pdf=False,
+        )
+    )
+
+    assert resultado["pdfs"] is None
+    assert [fila["Fecha"] for fila in resultado["filas"]] == ["01/09/2026"]
+
+
 def test_plugin_abre_mis_comprobantes_con_portal_hacienda() -> None:
     class _ServicioHacienda:
         async def seleccionar_denominacion(self, _: str) -> None:

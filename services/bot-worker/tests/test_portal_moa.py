@@ -198,3 +198,151 @@ def test_plugin_abre_servicio_con_portal_moa() -> None:
         "MOA – REINGENIERIA",
         {"portal": "moa"},
     )
+
+
+# --- Paridad V1: aplanado de caratula/estado y despachos con error -------
+
+
+def test_csv_aplana_caratula_y_estado_en_columnas_separadas(tmp_path) -> None:
+    import csv
+
+    from bot_worker.bots.moa.plugin import MoaPlugin, _fila_despacho
+
+    registro = {
+        "despacho": "TEST-1",
+        "metodo": "url",
+        "timestamp": "2026-10-08T00:00:00+00:00",
+        "datos_caratula": {"DUA": "dato ficticio", "Aduana": "001"},
+        "estado_presentacion": {"Estado": "presentado"},
+        "error": None,
+    }
+    destino = tmp_path / "moa.csv"
+    MoaPlugin._escribir_csv(destino, [_fila_despacho(registro)])
+
+    with destino.open(encoding="utf-8", newline="") as fh:
+        cabecera = next(csv.reader(fh))
+    with destino.open(encoding="utf-8", newline="") as fh:
+        filas = list(csv.DictReader(fh))
+
+    assert filas[0]["caratula_DUA"] == "dato ficticio"
+    assert filas[0]["caratula_Aduana"] == "001"
+    assert filas[0]["estado_Estado"] == "presentado"
+    assert filas[0]["error"] == ""
+    assert "datos_caratula" not in cabecera
+    assert "estado_presentacion" not in cabecera
+    assert all("{" not in valor for valor in filas[0].values())
+
+
+def test_csv_incluye_columna_error_para_despacho_fallido(tmp_path) -> None:
+    import csv
+
+    from bot_worker.bots.errors import TargetUnavailableError
+    from bot_worker.bots.moa.plugin import (
+        MoaPlugin,
+        _fila_despacho,
+        _registro_despacho_con_error,
+    )
+
+    registro = _registro_despacho_con_error(
+        "TEST-9", "url", TargetUnavailableError("no apareció en resultados")
+    )
+    destino = tmp_path / "moa.csv"
+    MoaPlugin._escribir_csv(destino, [_fila_despacho(registro)])
+
+    with destino.open(encoding="utf-8", newline="") as fh:
+        filas = list(csv.DictReader(fh))
+
+    assert filas[0]["despacho"] == "TEST-9"
+    assert filas[0]["error"] == "no apareció en resultados"
+    assert filas[0]["timestamp"]
+    assert "caratula_DUA" not in filas[0]
+
+
+def _runtime_moa(tmp_path):
+    from bot_worker.runtime.context import ArtifactStore
+
+    class _Servicio:
+        def __init__(self, respuestas: dict[str, Any]) -> None:
+            self.respuestas = respuestas
+
+        async def navegar_arbol_empresa(self, **_: Any) -> None:
+            return None
+
+        async def scrapear_despacho(self, despacho: str, metodo: str) -> dict[str, Any]:
+            valor = self.respuestas[despacho]
+            if isinstance(valor, Exception):
+                raise valor
+            return valor
+
+    async def no_op(*_: Any, **__: Any) -> None:
+        return None
+
+    runtime = SimpleNamespace(
+        cancellation=SimpleNamespace(raise_if_cancelled=no_op),
+        event_sink=SimpleNamespace(progress=no_op),
+        artifact_store=ArtifactStore(tmp_path, {}),
+    )
+    return runtime, _Servicio
+
+
+def test_despacho_con_error_no_falla_el_job_y_se_reporta(tmp_path) -> None:
+    from bot_worker.bots.errors import TargetUnavailableError
+
+    runtime, Servicio = _runtime_moa(tmp_path)
+    servicio = Servicio({
+        "OK-1": {
+            "despacho": "OK-1",
+            "metodo": "url",
+            "timestamp": "t",
+            "datos_caratula": {"DUA": "x"},
+            "estado_presentacion": {},
+        },
+        "MAL-2": TargetUnavailableError("no apareció en resultados MOA"),
+    })
+    plugin = MoaPlugin()
+    entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "despachos": ["OK-1", "MAL-2"],
+        "subir_csv": False,
+    }))[1]
+
+    datos, artefactos = asyncio.run(plugin._consultar(servicio, entrada, runtime))
+
+    assert datos["despachos_procesados"] == 2
+    assert datos["despachos_exitosos"] == 1
+    assert datos["despachos_con_error"] == 1
+    assert datos["errores"][0]["despacho"] == "MAL-2"
+    # Mismo shape que V1: cada despacho aparece en ``datos`` con ``error``.
+    assert [r["despacho"] for r in datos["datos"]] == ["OK-1", "MAL-2"]
+    assert datos["datos"][0]["error"] is None
+    assert datos["datos"][1]["error"] == "no apareció en resultados MOA"
+    assert artefactos == []
+
+
+def test_todos_los_despachos_con_error_siguen_siendo_exito_del_job(tmp_path) -> None:
+    from bot_worker.bots.errors import TargetUnavailableError
+
+    runtime, Servicio = _runtime_moa(tmp_path)
+    servicio = Servicio({
+        "MAL-1": TargetUnavailableError("detalle vacio"),
+        "MAL-2": TargetUnavailableError("detalle vacio"),
+    })
+    plugin = MoaPlugin()
+    entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "despachos": ["MAL-1", "MAL-2"],
+        "subir_csv": False,
+    }))[1]
+
+    datos, _ = asyncio.run(plugin._consultar(servicio, entrada, runtime))
+
+    assert datos["despachos_exitosos"] == 0
+    assert datos["despachos_con_error"] == 2
+    assert len(datos["errores"]) == 2
+    assert len(datos["datos"]) == 2
+    # El CSV conserva una fila por despacho fallido, con su error.
+    csv_path = tmp_path / "MOA - 20123456789.csv"
+    assert csv_path.is_file()
+    assert "detalle vacio" in csv_path.read_text(encoding="utf-8")

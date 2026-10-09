@@ -1,8 +1,9 @@
-"""Acceso de solo lectura a libros CSV de Portal IVA (port desde V1/V2).
+"""Acceso a libros de Portal IVA (port desde V1/V2).
 
-Este portal contiene exclusivamente los pasos de selección de representado,
-período y descarga. No implementa importación de TXT ni acciones de carga o
-presentación de declaraciones.
+Incluye la selección de representado y período, la descarga de libros CSV,
+la importación desde ARCA, el borrado de registros del libro y la importación
+de TXT de comprobantes con alícuotas opcionales. No implementa presentación
+de declaraciones.
 """
 from __future__ import annotations
 
@@ -208,43 +209,106 @@ class PortalIvaPortal(PortalArca):
         )
         await self._esperar(1_000)
 
-    async def descargar_libro(self, libro: str, destino: Path) -> Path:
-        """Abre el libro existente pedido y guarda su CSV en ``destino``."""
-        book = str(libro or "").strip().lower()
-        if book not in {"ventas", "compras"}:
-            raise TargetUnavailableError(
-                "tipo de libro desconocido para Portal IVA",
-                diagnostic_code="portal_iva_book_unknown",
-            )
+    async def preparar_periodo(
+        self,
+        periodo: str,
+        *,
+        operaciones_ng_o_e: bool = False,
+        prorrateo_global: bool = False,
+        prorrateo_asignacion_directa: bool = False,
+        prorrateo_ambos: bool = False,
+        importacion_definitiva_bienes: bool = False,
+        importacion_servicios: bool = False,
+        regimen_turiva: bool = False,
+        bienes_usados: bool = False,
+        ninguna_anteriores: bool = True,
+    ) -> list[dict[str, str]]:
+        """Port V1 ``prepare_period`` including the declarations options.
+
+        The period selector is retained by :meth:`seleccionar_periodo`; once LIVA
+        is open V1 applies all flags and saves them before any import or download.
+        Returning the options keeps V1's ``periodos_seleccionables`` observable.
+        """
+        disponibles: list[dict[str, str]] = []
+        selector = self.page.locator("#periodo")
+        try:
+            opciones = selector.locator("option")
+            for indice in range(await opciones.count()):
+                opcion = opciones.nth(indice)
+                valor = str(await opcion.get_attribute("value") or "").strip()
+                etiqueta = str(await opcion.text_content() or "").strip()
+                if valor or etiqueta:
+                    disponibles.append({"value": valor, "label": etiqueta})
+        except Exception:
+            pass
+        await self.seleccionar_periodo(periodo)
+
+        async def marcar(selector_css: str, activo: bool) -> None:
+            control = self.page.locator(selector_css)
+            try:
+                if not await control.count():
+                    return
+                marcado = await control.first.is_checked()
+                if activo and not marcado:
+                    await control.first.check(timeout=5_000)
+                elif not activo and marcado:
+                    await control.first.uncheck(timeout=5_000)
+            except Exception:
+                return
+
+        await marcar("#operacionesNoGravadasExentas", operaciones_ng_o_e)
+        if operaciones_ng_o_e:
+            prorrateo = "3" if prorrateo_ambos else "2" if prorrateo_global else "1" if prorrateo_asignacion_directa else ""
+            if prorrateo:
+                try:
+                    await self.page.locator("#tipoProrrateo").select_option(value=prorrateo)
+                except Exception:
+                    pass
+        await marcar("#importacionDefinitivaBienes", importacion_definitiva_bienes)
+        await marcar("#importacionServicios", importacion_servicios)
+        await marcar("#regimenTurIVA", regimen_turiva)
+        await marcar("#bienesUsadosMaterialReciclable", bienes_usados)
+        await marcar("#ningunaOperacion", ninguna_anteriores)
+        try:
+            guardar = self.page.locator("#btnGuardar")
+            if await guardar.count():
+                await guardar.first.click(timeout=10_000)
+                await self._esperar(2_000)
+        except Exception:
+            pass
+        return disponibles
+
+    async def descargar_libro(
+        self,
+        libro: str,
+        destino: Path,
+        *,
+        refrescar_desde_arca: bool = False,
+        limpiar_despues: bool = False,
+    ) -> Path:
+        """Abre el libro existente pedido y guarda su CSV en ``destino``.
+
+        ``refrescar_desde_arca`` ejecuta 'Importar desde ARCA' antes de bajar
+        el CSV y ``limpiar_despues`` borra los registros al terminar (flujo V1
+        ``ejecutar_descarga``). Ambos son opt-in porque modifican el libro del
+        organismo.
+        """
+        book = _libro_valido(libro)
         destino = Path(destino)
-        href = "verVentas.do" if book == "ventas" else "verCompras.do"
-        nombre = "Ventas" if book == "ventas" else "Compras"
         locators_csv = (
             self.page.get_by_role("button", name=re.compile(r"CSV", re.I)),
             self.page.get_by_role("link", name=re.compile(r"CSV", re.I)),
             self.page.get_by_text("CSV", exact=True),
         )
         if await self._primero_visible(locators_csv, total_ms=500) is None:
-            registrados = re.compile(rf"Libro\s+{nombre}\s+Registr", re.I)
-            continuar = re.compile(rf"Continuar\s+al\s+Libro\s+{nombre}", re.I)
-            titulo = re.compile(rf"Libro\s+{nombre}", re.I)
-            abierto = await self._clickear(
-                (
-                    self.page.get_by_role("link", name=registrados),
-                    self.page.get_by_role("link", name=continuar),
-                    self.page.get_by_role("link", name=titulo),
-                    self.page.locator(f"a[href*='{href}']").filter(has_text=titulo),
-                    self.page.locator(f"a[href*='{href}']"),
-                    self.page.get_by_role("button", name=continuar),
-                ),
-                total_ms=10_000,
-            )
-            if not abierto:
-                raise TargetUnavailableError(
-                    f"no se encontró el acceso al libro de {book} en Portal IVA",
-                    diagnostic_code="portal_iva_book_not_visible",
-                )
-            await self._esperar(1_500)
+            await self._abrir_libro(book)
+
+        if refrescar_desde_arca:
+            try:
+                await self.importar_desde_arca(book)
+            except TargetUnavailableError:
+                # V1 ignora la falla de la importación previa y baja el CSV igual.
+                pass
 
         async def descargar_csv() -> None:
             if not await self._clickear(locators_csv, total_ms=10_000):
@@ -255,8 +319,175 @@ class PortalIvaPortal(PortalArca):
 
         await self.capturar_descarga(destino, descargar_csv, espera_ms=45_000)
         _extraer_csv_si_es_zip(destino)
+        if limpiar_despues:
+            await self.eliminar_todos_registros(book)
         await self._volver_al_menu()
         return destino
+
+    async def importar_libro(
+        self, libro: str, comprobantes: Path, alicuotas: Path | None = None
+    ) -> bool:
+        """Reemplaza los registros del libro por los TXT dados (flujo V1 ``ejecutar_carga``).
+
+        Abre el libro, borra sus registros, importa los archivos y vuelve al menú.
+        """
+        book = _libro_valido(libro)
+        await self._abrir_libro(book)
+        await self.eliminar_todos_registros(book)
+        await self.importar_txt(book, comprobantes, alicuotas)
+        await self._volver_al_menu()
+        return True
+
+    async def importar_desde_arca(self, libro: str) -> bool:
+        """Pulsa 'Importar desde ARCA' en el libro abierto (port de ``import_from_arca``)."""
+        _libro_valido(libro)
+        if not await self._clickear(
+            (
+                self.page.get_by_role("button", name=re.compile(r"Importar", re.I)),
+                self.page.get_by_text("Importar", exact=False),
+            ),
+            total_ms=10_000,
+        ):
+            raise TargetUnavailableError(
+                "no se encontró el menú Importar de Portal IVA",
+                diagnostic_code="portal_iva_import_menu_missing",
+            )
+        if not await self._clickear(
+            (
+                self.page.get_by_role("link", name=re.compile(r"Importar desde ARCA", re.I)),
+                self.page.get_by_text(re.compile(r"Importar desde ARCA", re.I)),
+            ),
+            total_ms=12_000,
+        ):
+            raise TargetUnavailableError(
+                "no se encontró 'Importar desde ARCA' en Portal IVA",
+                diagnostic_code="portal_iva_import_arca_missing",
+            )
+        await self._esperar(2_000)
+        if not await self._clickear(
+            (self.page.locator("#btnImportarAFIPImportar"),), total_ms=5_000
+        ):
+            raise TargetUnavailableError(
+                "no se encontró el botón de importación desde ARCA",
+                diagnostic_code="portal_iva_import_arca_button_missing",
+            )
+        await self._esperar(8_000)
+        await self._cerrar_modal_procesado()
+        await self._esperar(3_000)
+        return True
+
+    async def eliminar_todos_registros(self, libro: str) -> bool:
+        """Pulsa 'Eliminar Todos...' y confirma (port de ``delete_all_records``).
+
+        Devuelve ``False`` sin error cuando el libro no tiene registros para borrar.
+        """
+        _libro_valido(libro)
+        if not await self._clickear(
+            (
+                self.page.get_by_role("button", name="Eliminar Todos..."),
+                self.page.get_by_text("Eliminar Todos...", exact=False),
+            ),
+            total_ms=8_000,
+        ):
+            return False
+        confirmado = await self._clickear(
+            (
+                self.page.locator(".bootstrap-dialog .btn-danger"),
+                self.page.locator(".modal.in .btn-danger"),
+                self.page.locator(".modal-dialog .btn-danger"),
+            ),
+            total_ms=5_000,
+        )
+        if not confirmado:
+            await self._cerrar_modal_procesado()
+            return False
+        await self._esperar(3_000)
+        return True
+
+    async def importar_txt(
+        self, libro: str, comprobantes: Path, alicuotas: Path | None = None
+    ) -> bool:
+        """Sube el TXT de comprobantes y, si se pasa, el de alícuotas (port de ``import_files``)."""
+        book = _libro_valido(libro)
+        etiqueta_cbte, etiqueta_alic = _ETIQUETAS_ARCHIVOS[book]
+        if not await self._clickear(
+            (
+                self.page.get_by_role("button", name=re.compile(r"Importar", re.I)),
+                self.page.get_by_text("Importar", exact=False),
+            ),
+            total_ms=10_000,
+        ):
+            raise TargetUnavailableError(
+                "no se encontró el menú Importar de Portal IVA",
+                diagnostic_code="portal_iva_import_menu_missing",
+            )
+        if not await self._clickear(
+            (
+                self.page.get_by_role("link", name=re.compile(r"Importar Archivos", re.I)),
+                self.page.get_by_text(re.compile(r"Importar Archivos", re.I)),
+            ),
+            total_ms=12_000,
+        ):
+            raise TargetUnavailableError(
+                f"no se encontró 'Importar Archivos' para {book}",
+                diagnostic_code="portal_iva_import_files_missing",
+            )
+        boton = self.page.locator("#btnImportarArchivosImportar")
+        await self.page.get_by_label(etiqueta_cbte).set_input_files(str(comprobantes))
+        await self._clickear((boton,), total_ms=5_000)
+        await self._esperar(2_000)
+        if alicuotas is not None:
+            await self.page.get_by_label(etiqueta_alic).set_input_files(str(alicuotas))
+            await self._clickear((boton,), total_ms=5_000)
+            await self._esperar(2_000)
+        await self._clickear((boton,), total_ms=5_000)
+        await self._esperar(5_000)
+        await self._cerrar_modal_procesado()
+        await self._esperar(3_000)
+        return True
+
+    async def _abrir_libro(self, book: str) -> None:
+        """Entra al libro de ventas o compras desde el menú de Portal IVA."""
+        href = "verVentas.do" if book == "ventas" else "verCompras.do"
+        nombre = "Ventas" if book == "ventas" else "Compras"
+        registrados = re.compile(rf"Libro\s+{nombre}\s+Registr", re.I)
+        continuar = re.compile(rf"Continuar\s+al\s+Libro\s+{nombre}", re.I)
+        titulo = re.compile(rf"Libro\s+{nombre}", re.I)
+        abierto = await self._clickear(
+            (
+                self.page.get_by_role("link", name=registrados),
+                self.page.get_by_role("link", name=continuar),
+                self.page.get_by_role("link", name=titulo),
+                self.page.locator(f"a[href*='{href}']").filter(has_text=titulo),
+                self.page.locator(f"a[href*='{href}']"),
+                self.page.get_by_role("button", name=continuar),
+            ),
+            total_ms=10_000,
+        )
+        if not abierto:
+            raise TargetUnavailableError(
+                f"no se encontró el acceso al libro de {book} en Portal IVA",
+                diagnostic_code="portal_iva_book_not_visible",
+            )
+        await self._esperar(1_500)
+
+    async def _cerrar_modal_procesado(self) -> None:
+        """Marca 'Procesada' y cierra el diálogo, como ``maybe_click_processed`` y ``maybe_close_modal``."""
+        await self._clickear(
+            (
+                self.page.get_by_text("Procesada", exact=False),
+                self.page.get_by_text("Procesando", exact=False),
+            ),
+            total_ms=5_000,
+        )
+        await self._clickear(
+            (
+                self.page.locator(".bootstrap-dialog .close"),
+                self.page.locator(".bootstrap-dialog [data-dismiss='modal']"),
+                self.page.get_by_role("button", name=re.compile(r"Cancelar|Cerrar|Close", re.I)),
+            ),
+            total_ms=5_000,
+        )
 
     async def _representado_activo(self, formatted: str) -> bool:
         banner = self.page.get_by_text(
@@ -327,6 +558,22 @@ class PortalIvaPortal(PortalArca):
                 await self.abrir_url(f"{LIVA_BASE}/menuPresentacion.do", timeout_ms=15_000)
             except Exception:
                 return
+
+
+_ETIQUETAS_ARCHIVOS = {
+    "ventas": ("Archivo Ventas *", "Archivo IVA Ventas *"),
+    "compras": ("Archivo Compras *", "Archivo IVA Compras *"),
+}
+
+
+def _libro_valido(libro: str) -> str:
+    book = str(libro or "").strip().lower()
+    if book not in _ETIQUETAS_ARCHIVOS:
+        raise TargetUnavailableError(
+            "tipo de libro desconocido para Portal IVA",
+            diagnostic_code="portal_iva_book_unknown",
+        )
+    return book
 
 
 def _extraer_csv_si_es_zip(destino: Path) -> None:

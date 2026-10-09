@@ -12,6 +12,10 @@ worker S7 (`manifest` + `validate` + `execute` + `configure`).
 - Sin `SessionLocal`, sin entorno, sin MinIO directo, sin credenciales
   en logs (errores por categoría).
 - `payload_ejemplo.json`: operación `descargar`. Sin `representado_cuit`
-  se usa el CUIT de la credencial, igual que V2.
+  se usa el CUIT de la credencial, igual que V2. Acepta los campos de V1
+  (`cuit_representado`, `archivo_historico_b64`, `archivo_historico_minio`,
+  `cuit_representante`, `clave_representante`, `proxy_request`).
+- El botón `INGRESAR` se busca con el mismo patrón sin distinguir mayúsculas
+  (10 s) que V1.
 - Stub dev: `validate` y el nombrado son probables offline; el flujo con
   navegador requiere sobre sellado + slots de la central.

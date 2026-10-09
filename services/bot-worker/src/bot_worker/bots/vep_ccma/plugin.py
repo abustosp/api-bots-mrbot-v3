@@ -49,6 +49,7 @@ from bot_worker.bots.errors import (
 )
 from bot_worker.bots.vep_ccma.schema import ENTRADAS, esquema_entrada
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from bot_worker.runtime.portals.vep_ccma import indices_a_seleccionar
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -161,7 +162,9 @@ class VepCcmaPlugin:
             ) as sesion:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
-                servicio = await sesion.open_service(self._servicio_nombre)
+                servicio = await sesion.open_service(
+                    self._servicio_nombre, portal="vep_ccma"
+                )
                 await servicio.seleccionar_representado(entrada.representado_cuit)
                 datos, artefactos = await self._generar(
                     servicio, entrada, runtime
@@ -180,7 +183,11 @@ class VepCcmaPlugin:
     async def _generar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Lista obligaciones, genera el volante y sube PDF+QR."""
+        """Lista obligaciones, genera el volante y sube PDF+QR.
+
+        Paridad con V1: los filtros de capital e intereses eligen las filas a
+        tildar y ``total_seleccionado`` cuenta las filas ya filtradas.
+        """
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=30, message="Listando obligaciones CCMA"
         )
@@ -191,14 +198,25 @@ class VepCcmaPlugin:
             "impuestos": impuestos if entrada.seleccionar_impuestos else [],
             "intereses": intereses if entrada.seleccionar_intereses else [],
         }
+        # Cuenta las filas que el portal tildaria con los mismos filtros de V1,
+        # tambien cuando no se genera el volante (V1 calcula antes del corte).
+        seleccionadas = indices_a_seleccionar(
+            seleccion["impuestos"],
+            seleccion["intereses"],
+            filtro_impuestos=entrada.filtro_impuestos,
+            filtro_intereses=entrada.filtro_intereses,
+        )
+        filtros = {
+            "filtro_impuestos": entrada.filtro_impuestos,
+            "filtro_intereses": entrada.filtro_intereses,
+        }
         datos: dict[str, Any] = {
             "operacion": "generar",
             "representado_cuit": entrada.representado_cuit,
             "medio_pago": entrada.medio_pago,
             "total_impuestos": len(impuestos),
             "total_intereses": len(intereses),
-            "total_seleccionado": len(seleccion["impuestos"])
-            + len(seleccion["intereses"]),
+            "total_seleccionado": len(seleccionadas),
         }
         artefactos: list[dict[str, Any]] = []
         if entrada.generar_volante:
@@ -206,9 +224,11 @@ class VepCcmaPlugin:
                 phase="GENERANDO", percent=55, message="Generando volante VEP"
             )
             volante = await servicio.generar_volante(
-                seleccion=seleccion, medio_pago=entrada.medio_pago
+                seleccion=seleccion, medio_pago=entrada.medio_pago, **filtros
             )
-            datos["volante"] = list((volante or {}).get("volante", []))
+            filas = list((volante or {}).get("volante", []))
+            datos["volante"] = filas
+            datos["total_seleccionado"] = len(filas)
             detalle = runtime.artifact_store.resolve(
                 f"{entrada.representado_cuit} - VEP CCMA.pdf"
             )
@@ -230,6 +250,8 @@ class VepCcmaPlugin:
                 f"{entrada.representado_cuit} - VEP CCMA - QR.png"
             )
             qr_generado = await servicio.descargar_qr(destino=qr)
+            if qr_generado:
+                datos["nombre_qr"] = qr.name
             if qr_generado and getattr(entrada, "subir_pdf", True):
                 try:
                     referencia_qr = await runtime.artifact_store.upload(

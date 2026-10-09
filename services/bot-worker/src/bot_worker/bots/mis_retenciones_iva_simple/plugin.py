@@ -59,10 +59,20 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 
 SERVICIO_ARCA = "MIS RETENCIONES"
 ID_ARTEFACTO_CSV = "retenciones_csv"
+IVA_SIMPLE_OPERACIONES = (
+    "RETENCIONES IMPOSITIVAS",
+    "PERCEPCIONES IMPOSITIVAS",
+    "PERCEPCIONES ADUANERAS",
+)
 
 
 def nombre_base_archivo(
-    representado_cuit: str, desde: str, hasta: str, denominacion: str
+    representado_cuit: str,
+    desde: str,
+    hasta: str,
+    denominacion: str,
+    operacion: str = "",
+    formato: str = "",
 ) -> str:
     """Replica el patron de nombres V2 ``'<fin> - <cuit> - ...'``."""
     digitos = re.sub(r"\D", "", representado_cuit or "")
@@ -73,6 +83,8 @@ def nombre_base_archivo(
         normalizar_fecha(desde).replace("/", ""),
         normalizar_fecha(hasta).replace("/", ""),
         "IVA-SIMPLE",
+        operacion,
+        formato,
         re.sub(r'[\\\\/:*?"<>|]', "_", (denominacion or "").strip()),
     ]
     return " - ".join(p for p in partes if p)
@@ -202,63 +214,64 @@ class MisRetencionesIvaSimplePlugin:
         self, servicio: Any, entrada: Any, runtime: BotRuntime
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Activa el modo IVA Simple y descarga el CSV a ``work_dir`` (V2)."""
+        from bot_worker.runtime.context import JobCancelled
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Consultando IVA Simple"
         )
         await servicio.activar_modo_iva_simple()
-        await runtime.cancellation.raise_if_cancelled()
-        base = nombre_base_archivo(
-            entrada.representado_cuit,
-            entrada.fecha_desde,
-            entrada.fecha_hasta,
-            entrada.representado_nombre,
-        )
-        destino = runtime.artifact_store.resolve(f"{base}.csv")
-        try:
-            await servicio.descargar_csv(
-                destino=destino,
-                desde=entrada.fecha_desde,
-                hasta=entrada.fecha_hasta,
-            )
-        except TargetUnavailableError as exc:
-            # Como V2: sin retenciones en el rango es una respuesta válida.
-            if getattr(exc, "diagnostic_code", "") != "retenciones_no_results":
-                raise
-            return {
-                "operacion": "consultar",
-                "representado_cuit": entrada.representado_cuit,
-                "fecha_desde": entrada.fecha_desde,
-                "fecha_hasta": entrada.fecha_hasta,
-                "filas": 0,
-                "mensaje": "No se encontraron resultados",
-            }, []
-        await runtime.event_sink.progress(
-            phase="PROCESANDO", percent=65, message="Procesando retenciones"
-        )
         datos: dict[str, Any] = {
             "operacion": "consultar",
             "representado_cuit": entrada.representado_cuit,
             "fecha_desde": entrada.fecha_desde,
             "fecha_hasta": entrada.fecha_hasta,
-            "filas": self._contar_filas(destino),
-            "archivo": destino.name,
+            "operaciones": {},
         }
         artefactos: list[dict[str, Any]] = []
-        if entrada.subir_csv:
-            await runtime.event_sink.progress(
-                phase="SUBIENDO", percent=80, message="Subiendo CSV"
-            )
-            try:
-                referencia = await runtime.artifact_store.upload(
-                    ID_ARTEFACTO_CSV, destino.name
+        for operacion in IVA_SIMPLE_OPERACIONES:
+            resultados_operacion: dict[str, Any] = {}
+            datos["operaciones"][operacion] = resultados_operacion
+            for formato in ("iva_simple", "xls"):
+                await runtime.cancellation.raise_if_cancelled()
+                base = nombre_base_archivo(
+                    entrada.representado_cuit,
+                    entrada.fecha_desde,
+                    entrada.fecha_hasta,
+                    entrada.representado_nombre,
+                    operacion,
+                    formato,
                 )
-            except ValueError as exc:
-                raise ArtifactUploadError(str(exc)) from exc
-            artefactos.append(referencia)
-            datos["sha256"] = referencia["sha256"]
-            datos["size_bytes"] = referencia["size_bytes"]
-        if entrada.incluir_json:
-            datos["muestra"] = self._muestra(destino)
+                destino = runtime.artifact_store.resolve(f"{base}.csv")
+                try:
+                    await servicio.descargar_csv(
+                        destino=destino,
+                        desde=entrada.fecha_desde,
+                        hasta=entrada.fecha_hasta,
+                        operacion=operacion,
+                        export_option=formato,
+                        required_result_marker=entrada.required_result_marker,
+                    )
+                except (JobCancelled, DeadlineExceededError, CredentialsRejectedError):
+                    raise
+                except Exception as exc:  # V1 continues with the next operation/format.
+                    resultados_operacion[formato] = {
+                        "filas": 0,
+                        "mensaje": str(exc),
+                        "diagnostic_code": getattr(exc, "diagnostic_code", ""),
+                    }
+                    continue
+                resumen: dict[str, Any] = {
+                    "filas": self._contar_filas(destino), "archivo": destino.name
+                }
+                if entrada.subir_csv:
+                    try:
+                        referencia = await runtime.artifact_store.upload(ID_ARTEFACTO_CSV, destino.name)
+                    except ValueError as exc:
+                        raise ArtifactUploadError(str(exc)) from exc
+                    artefactos.append(referencia)
+                    resumen.update(sha256=referencia["sha256"], size_bytes=referencia["size_bytes"])
+                if entrada.incluir_json:
+                    resumen["muestra"] = self._muestra(destino)
+                resultados_operacion[formato] = resumen
         return datos, artefactos
 
     @staticmethod

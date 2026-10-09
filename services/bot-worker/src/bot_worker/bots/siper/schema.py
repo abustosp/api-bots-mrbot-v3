@@ -44,7 +44,15 @@ class SiperConsultarInput(_Base):
     incluir_detalle: bool = True
     incluir_categorias: bool = True
     incluir_json: bool = True
-    subir: bool = True
+    # V1 usa ``detalle_minio``/``categorias_minio``/``carga_minio``: decide si las
+    # capturas se suben. Alias de ``subir``.
+    subir: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir", "detalle_minio", "categorias_minio", "carga_minio"),
+    )
+    # Por defecto extrae los campos del detalle (contribuyente, categoría,
+    # motivo, disconformidad), como V1 (siper_bot.py). Se puede apagar.
+    extraer_campos: bool = True
 
     @model_validator(mode="before")
     @classmethod

@@ -46,6 +46,7 @@ from bot_worker.bots.errors import (
 )
 from bot_worker.bots.mis_retenciones.schema import (
     ENTRADAS,
+    IMPUESTOS_SIAP,
     IMPUESTOS_VALIDOS,
     TIPOS_POR_IMPUESTO,
     esquema_entrada,
@@ -69,7 +70,7 @@ def _sanitizar_componente(valor: str) -> str:
 
 
 def nombre_base_archivo(
-    representado_cuit: str, desde: str, hasta: str, impuesto: str, tipo: str
+    representado_cuit: str, desde: str, hasta: str, impuesto: str, tipo: str, denominacion: str = ""
 ) -> str:
     """Replica el patron de nombres V2 ``'<fin> - <cuit> - ...'``."""
     digitos = re.sub(r"\D", "", representado_cuit or "")
@@ -81,6 +82,7 @@ def nombre_base_archivo(
         normalizar_fecha(hasta).replace("/", ""),
         impuesto,
         tipo,
+        denominacion,
     ]
     return " - ".join(_sanitizar_componente(p) for p in partes if p)
 
@@ -211,16 +213,22 @@ class MisRetencionesPlugin:
         self, servicio: Any, entrada: Any, runtime: BotRuntime
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Consulta cada impuesto/tipo y exporta CSV a ``work_dir`` (port V2)."""
+        from bot_worker.runtime.context import JobCancelled
         await runtime.event_sink.progress(
             phase="CONSULTA", percent=45, message="Consultando retenciones"
         )
-        impuestos = list(entrada.impuestos) if entrada.impuestos else list(IMPUESTOS_VALIDOS)
+        impuestos = (
+            list(entrada.impuestos)
+            if entrada.impuestos
+            else list(IMPUESTOS_SIAP if entrada.exportar_para_aplicativo else IMPUESTOS_VALIDOS)
+        )
         datos: dict[str, Any] = {
             "operacion": "consultar",
             "representado_cuit": entrada.representado_cuit,
             "fecha_desde": entrada.fecha_desde,
             "fecha_hasta": entrada.fecha_hasta,
             "impuestos": {},
+            "errores": [],
         }
         artefactos: list[dict[str, Any]] = []
         for codigo in impuestos:
@@ -237,52 +245,49 @@ class MisRetencionesPlugin:
                     entrada.fecha_hasta,
                     codigo,
                     tipo,
+                    entrada.representado_nombre,
                 )
-                destino = runtime.artifact_store.resolve(f"{base}.csv")
-                try:
-                    await servicio.descargar_csv(
-                        impuesto=codigo,
-                        tipo=tipo,
-                        destino=destino,
-                        desde=entrada.fecha_desde,
-                        hasta=entrada.fecha_hasta,
-                        para_aplicativo=entrada.exportar_para_aplicativo,
-                    )
-                except TargetUnavailableError as exc:
-                    # Como V2: sin retenciones en el rango es una respuesta
-                    # válida del portal, no una falla.
-                    if getattr(exc, "diagnostic_code", "") != "retenciones_no_results":
-                        raise
-                    datos["impuestos"][codigo][tipo] = {
-                        "filas": 0,
-                        "mensaje": "No se encontraron resultados",
-                    }
-                    continue
-                await runtime.event_sink.progress(
-                    phase="PROCESANDO",
-                    percent=65,
-                    message=f"Procesando {codigo} {tipo}",
-                )
-                resumen: dict[str, Any] = {
-                    "filas": self._contar_filas(destino),
-                    "archivo": destino.name,
-                }
-                if entrada.subir_csv:
-                    await runtime.event_sink.progress(
-                        phase="SUBIENDO", percent=80, message=f"Subiendo {codigo}"
-                    )
+                formatos = ("siap", "xls") if entrada.exportar_para_aplicativo else (None,)
+                resultados_formato: dict[str, Any] = {}
+                for formato in formatos:
+                    sufijo = f" - {formato}" if formato else ""
+                    destino = runtime.artifact_store.resolve(f"{base}{sufijo}.csv")
                     try:
-                        referencia = await runtime.artifact_store.upload(
-                            ID_ARTEFACTO_CSV, destino.name
+                        await servicio.descargar_csv(
+                            impuesto=codigo, tipo=tipo, destino=destino,
+                            desde=entrada.fecha_desde, hasta=entrada.fecha_hasta,
+                            para_aplicativo=entrada.exportar_para_aplicativo,
+                            export_option=formato,
                         )
-                    except ValueError as exc:
-                        raise ArtifactUploadError(str(exc)) from exc
-                    artefactos.append(referencia)
-                    resumen["sha256"] = referencia["sha256"]
-                    resumen["size_bytes"] = referencia["size_bytes"]
-                if entrada.incluir_json:
-                    resumen["muestra"] = self._muestra(destino)
-                datos["impuestos"][codigo][tipo] = resumen
+                    except (JobCancelled, DeadlineExceededError, CredentialsRejectedError):
+                        raise
+                    except Exception as exc:  # V1 logs per tax and continues.
+                        # V1 logs and continues with the next tax/type/export.
+                        datos["errores"].append(
+                            f"{codigo} {tipo} {formato or 'csv'}: {exc}"
+                        )
+                        resultados_formato[formato or "csv"] = {
+                            "filas": 0, "mensaje": str(exc),
+                            "diagnostic_code": getattr(exc, "diagnostic_code", ""),
+                        }
+                        continue
+                    await runtime.event_sink.progress(
+                        phase="PROCESANDO",
+                        percent=65,
+                        message=f"Procesando {codigo} {tipo}",
+                    )
+                    resumen: dict[str, Any] = {"filas": self._contar_filas(destino), "archivo": destino.name}
+                    if entrada.subir_csv:
+                        try:
+                            referencia = await runtime.artifact_store.upload(ID_ARTEFACTO_CSV, destino.name)
+                        except ValueError as exc:
+                            raise ArtifactUploadError(str(exc)) from exc
+                        artefactos.append(referencia)
+                        resumen.update(sha256=referencia["sha256"], size_bytes=referencia["size_bytes"])
+                    if entrada.incluir_json:
+                        resumen["muestra"] = self._muestra(destino)
+                    resultados_formato[formato or "csv"] = resumen
+                datos["impuestos"][codigo][tipo] = resultados_formato
         return datos, artefactos
 
     @staticmethod

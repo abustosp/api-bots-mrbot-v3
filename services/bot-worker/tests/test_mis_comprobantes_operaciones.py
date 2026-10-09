@@ -82,12 +82,24 @@ class _ServicioSolicitar:
     def __init__(self) -> None:
         self.consultas: list[tuple[str, str, str]] = []
         self.representados: list[str] = []
+        self.puntos_venta: list[list[str] | None] = []
+        self.timeouts: list[int | None] = []
 
     async def seleccionar_representado(self, cuit: str) -> None:
         self.representados.append(cuit)
 
-    async def solicitar_consulta(self, *, tipo: str, desde: str, hasta: str) -> str:
+    async def solicitar_consulta(
+        self,
+        *,
+        tipo: str,
+        desde: str,
+        hasta: str,
+        puntos_venta: list[str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> str:
         self.consultas.append((tipo, desde, hasta))
+        self.puntos_venta.append(puntos_venta)
+        self.timeouts.append(timeout_ms)
         return f"id-{tipo}"
 
     async def descargar_csv(self, **kwargs: Any) -> None:  # pragma: no cover
@@ -168,4 +180,7 @@ def test_solicitar_devuelve_ids_y_no_produce_artefactos(
         "emitidos": "id-emitidos",
         "recibidos": "id-recibidos",
     }
+    # Sin puntos de venta en el payload rige el default de V1 (30 segundos).
+    assert servicio.puntos_venta == [None, None]
+    assert servicio.timeouts == [30_000, 30_000]
     assert list(tmp_path.iterdir()) == []

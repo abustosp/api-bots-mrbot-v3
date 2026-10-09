@@ -180,8 +180,18 @@ class ConsultaPagosVepPortal(PortalArca):
         await self._esperar(1_500)
 
     async def _seleccionar_periodo(self, periodo: str) -> None:
+        """Elige el período como V1 (``_select_periodo``).
+
+        V1 busca primero un combo cuyo nombre sea el período con ``72`` cambiado
+        por ``12``. Si no existe, usa el último combo numérico de la página.
+        """
         pedido = str(periodo or "72")
-        combo = self.page.get_by_role("combobox", name=re.compile(r"^\d+$")).last
+        nombre_combo = pedido.replace("72", "12")
+        combo = self.page.get_by_role(
+            "combobox", name=re.compile(rf"^{re.escape(nombre_combo)}$", re.I)
+        )
+        if await combo.count() == 0:
+            combo = self.page.get_by_role("combobox", name=re.compile(r"^\d+$")).last
         if await combo.count() == 0:
             return
         try:

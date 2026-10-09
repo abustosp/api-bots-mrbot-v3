@@ -8,6 +8,7 @@ inicia la generación de VEP.
 from __future__ import annotations
 
 import re
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -62,11 +63,72 @@ _TABLA_JS = r"""
 }
 """
 
+# Expansion previa a la lectura de tablas (port de V1 EXPAND_CUOTAS_SCRIPT y
+# EXPAND_OBLIGACIONES_SCRIPT). Las filas de cuotas y obligaciones vienen ocultas:
+# _TABLA_JS las descarta, asi que hay que mostrarlas antes de leer.
+EXPAND_CUOTAS_JS = r"""
+(selector) => {
+  const table = document.querySelector(selector);
+  if (!table) return false;
+  const rows = table.querySelectorAll("tbody tr[id^='ContentPlaceHolder1_rptDetallePlanPago_trRpt_']");
+  for (const row of rows) row.style.display = 'table-row';
+  return true;
+}
+"""
+
+EXPAND_OBLIGACIONES_JS = r"""
+(selector) => {
+  const table = document.querySelector(selector);
+  if (!table) return false;
+  table.style.width = '100%';
+  table.style.tableLayout = 'auto';
+  for (const row of table.querySelectorAll('tbody tr')) row.style.display = 'table-row';
+  for (const cell of table.querySelectorAll('th, td')) {
+    cell.style.display = 'table-cell';
+    cell.style.visibility = 'visible';
+  }
+  for (const el of table.querySelectorAll('.hidden-print')) el.classList.remove('hidden-print');
+  let parent = table.parentElement;
+  while (parent) {
+    const style = window.getComputedStyle(parent);
+    const overflow = [style.overflow, style.overflowX, style.overflowY];
+    if (overflow.some(v => v === 'auto' || v === 'scroll' || v === 'hidden')) {
+      parent.style.overflow = 'visible';
+      parent.style.height = 'auto';
+      parent.style.maxHeight = 'none';
+    }
+    parent = parent.parentElement;
+  }
+  return true;
+}
+"""
+
+_SELECTOR_CUOTAS = "#tableDetallePlanPago"
+_SELECTOR_OBLIGACIONES = "table[id^='tableDetalleDeuda']"
+
 _NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _NS_REL_DOC = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _NS_REL_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
 _NS_CONTENT = "http://schemas.openxmlformats.org/package/2006/content-types"
 _NS_XML = "http://www.w3.org/XML/1998/namespace"
+
+
+def _etiqueta_vista(titulo: str) -> str:
+    """Etiqueta de archivo de V1 para una vista: pagos, cuotas u obligaciones.
+
+    V1 usa ``pagos``, ``cuotas``, ``obligaciones`` y ``obligaciones_previsionales``.
+    """
+    plano = unicodedata.normalize("NFKD", titulo or "")
+    sin_acentos = "".join(c for c in plano if not unicodedata.combining(c)).lower()
+    if "previsional" in sin_acentos:
+        return "obligaciones_previsionales"
+    if "obligacion" in sin_acentos:
+        return "obligaciones"
+    if "cuota" in sin_acentos or "plan de pago" in sin_acentos:
+        return "cuotas"
+    if "pago" in sin_acentos:
+        return "pagos"
+    return re.sub(r"\W+", "_", sin_acentos).strip("_") or "vista"
 
 
 class MisFacilidadesPortal(PortalArca):
@@ -136,6 +198,36 @@ class MisFacilidadesPortal(PortalArca):
                 return
             raise
 
+    async def cuits_disponibles(self) -> list[str]:
+        """CUITs que ofrece el combo de representados (port de V1 get_available_cuits).
+
+        Devuelve ``[]`` si la pantalla no tiene combo. El plugin usa esta lista
+        para ``cuits_disponibles`` en el resultado, como V1.
+        """
+        combo = self.page.locator("#ContentPlaceHolder1_ddlCUIT")
+        try:
+            if await combo.count() == 0:
+                return []
+        except Exception:
+            return []
+        encontrados: list[str] = []
+        opciones = combo.locator("option")
+        try:
+            cantidad = await opciones.count()
+        except Exception:
+            return []
+        for indice in range(cantidad):
+            opcion = opciones.nth(indice)
+            valor = (await opcion.get_attribute("value")) or ""
+            etiqueta = (await opcion.text_content()) or ""
+            # V1 toma el CUIT del valor o, si no, de la etiqueta.
+            digitos = solo_digitos(valor)
+            if len(digitos) != 11:
+                digitos = solo_digitos(etiqueta)
+            if len(digitos) == 11 and digitos not in encontrados:
+                encontrados.append(digitos)
+        return encontrados
+
     async def listar_planes(self) -> list[dict[str, str]]:
         """Lee los planes del listado, conservando el identificador de detalle."""
         return await self.paso("listar_planes", self._leer_planes())
@@ -168,6 +260,53 @@ class MisFacilidadesPortal(PortalArca):
                     pass
         self._validar_archivo(destino, b"%PDF", "mis_facilidades_pdf_empty")
         return destino
+
+    async def exportar_vistas_pdf(
+        self, *, numero: str, destino_dir: Path, base: str
+    ) -> list[dict[str, Any]]:
+        """Un PDF por vista del plan (Pagos, Cuotas, cada Obligacion), como V1.
+
+        V1 guarda ``save_pdf_from_page`` por cada vista. Aqui cada seccion
+        capturada se renderiza a su propio PDF y se devuelve el listado de
+        archivos con su titulo, para que el plugin los nombre y suba.
+        """
+        numero = str(numero or "").strip()
+        secciones = await self._obtener_secciones(numero)
+        destino_dir = Path(destino_dir)
+        destino_dir.mkdir(parents=True, exist_ok=True)
+        resultado: list[dict[str, Any]] = []
+        for indice, seccion in enumerate(secciones, start=1):
+            titulo = str(seccion.get("titulo") or f"vista_{indice}")
+            etiqueta = _etiqueta_vista(titulo)
+            destino = destino_dir / f"{base} - {etiqueta}.pdf"
+            await self._escribir_pdf_vista(destino, numero, seccion)
+            resultado.append({"vista": etiqueta, "titulo": titulo, "destino": destino})
+        return resultado
+
+    async def _escribir_pdf_vista(
+        self, destino: Path, numero: str, seccion: dict[str, Any]
+    ) -> None:
+        pagina = None
+        try:
+            if self._context is None:
+                raise RuntimeError("contexto de navegador no disponible para exportar PDF")
+            pagina = await self._context.new_page()
+            html = self._html_reporte(numero, [seccion])
+            await pagina.set_content(html, wait_until="load")
+            await pagina.emulate_media(media="screen")
+            await pagina.pdf(path=str(destino), format="A4", print_background=True)
+        except Exception as exc:
+            raise TargetUnavailableError(
+                "no se pudo exportar el PDF de una vista del plan",
+                diagnostic_code="mis_facilidades_pdf_failed",
+            ) from exc
+        finally:
+            if pagina is not None:
+                try:
+                    await pagina.close()
+                except Exception:
+                    pass
+        self._validar_archivo(destino, b"%PDF", "mis_facilidades_pdf_empty")
 
     async def exportar_plan_xlsx(self, *, numero: str, destino: Path) -> Path:
         """Exporta Pagos, Cuotas y obligaciones a un XLSX sin dependencias extra."""
@@ -286,6 +425,7 @@ class MisFacilidadesPortal(PortalArca):
             await localizador.first.wait_for(state="visible", timeout=15_000)
         except Exception:
             pass
+        await self._expandir_tablas(selector)
         cantidad = await localizador.count()
         if cantidad == 0 and obligatorio:
             await self._volver_a_detalle()
@@ -372,6 +512,24 @@ class MisFacilidadesPortal(PortalArca):
             "no se pudo abrir el detalle del plan",
             diagnostic_code="mis_facilidades_plan_open_failed",
         ) from ultimo_error
+
+    async def _expandir_tablas(self, selector: str) -> None:
+        """Muestra las filas ocultas de cuotas y obligaciones (port de V1).
+
+        Solo aplica a las tablas que V1 expandia. Un fallo de script no corta la
+        captura: la tabla se lee tal como queda, igual que en V1.
+        """
+        if selector == _SELECTOR_CUOTAS:
+            script = EXPAND_CUOTAS_JS
+        elif selector == _SELECTOR_OBLIGACIONES:
+            script = EXPAND_OBLIGACIONES_JS
+        else:
+            return
+        try:
+            await self.page.evaluate(script, selector)
+            await self._esperar(300)
+        except Exception:
+            pass
 
     async def _volver_a_detalle(self) -> None:
         enlace = self.page.get_by_role("link", name=re.compile(r"Volver", re.I))

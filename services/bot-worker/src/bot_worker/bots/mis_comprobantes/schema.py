@@ -8,8 +8,14 @@ el navegador:
 
 - CUIT de 11 digitos (se aceptan guiones, puntos y espacios).
 - Fechas ``dd/mm/aaaa`` con ``desde <= hasta``.
-- Al menos un tipo (emitidos o recibidos) y al menos una salida.
-- Aliases de compatibilidad V1/V2: ``desde``/``hasta`` y ``cuit``.
+- Alias de compatibilidad V1/V2: ``desde``/``hasta``, ``cuit`` y los nombres
+  de V1 de los tipos y las salidas (``descarga_emitidos``,
+  ``descarga_recibidos``, ``carga_json``, ``carga_minio``).
+- Puntos de venta por tipo (``puntos_venta_emitidos`` /
+  ``puntos_venta_recibidos``): se conservan como texto para no perder los ceros
+  a la izquierda con los que V1 llena el portal.
+- ``timeout_mc`` (segundos de espera del boton CSV, 30 en V1) y ``carga_b64``
+  (devolver el archivo descargado en base64, False en V1).
 """
 
 from __future__ import annotations
@@ -17,10 +23,43 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 CUIT_PATTERN = r"^\d{11}$"
 FORMATO_FECHA = "%d/%m/%Y"
+TIMEOUT_MC_POR_DEFECTO = 30
+MAX_PUNTOS_VENTA = 200
+
+
+def normalizar_puntos_venta(valor: Any) -> list[str] | None:
+    """Normaliza los puntos de venta a texto, como los acepta V1.
+
+    V1 une la lista con comas (``",".join(puntos_venta)``) para llenar el
+    campo ``Punto de Venta`` del portal: los valores viajan como texto para no
+    perder los ceros a la izquierda (``002`` sigue siendo ``002``).
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, (str, int)):
+        valor = [valor]
+    if not isinstance(valor, list):
+        raise ValueError("puntos de venta debe ser una lista")
+    if len(valor) > MAX_PUNTOS_VENTA:
+        raise ValueError(f"puntos de venta admite hasta {MAX_PUNTOS_VENTA} valores")
+    puntos: list[str] = []
+    for punto in valor:
+        texto = str(punto).strip()
+        if not texto or not texto.isdigit():
+            raise ValueError(f"punto de venta invalido: {punto!r}")
+        puntos.append(texto)
+    return puntos
 
 
 class _Base(BaseModel):
@@ -95,10 +134,28 @@ class _Representado(_Base):
 
 
 class _TiposComprobante(_Base):
-    emitidos: bool = False
-    recibidos: bool = False
-    puntos_venta_emitidos: list[int] | None = None
-    puntos_venta_recibidos: list[int] | None = None
+    emitidos: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("emitidos", "descarga_emitidos"),
+    )
+    recibidos: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("recibidos", "descarga_recibidos"),
+    )
+    puntos_venta_emitidos: list[int | str] | None = None
+    puntos_venta_recibidos: list[int | str] | None = None
+    timeout_mc: int | None = Field(default=None, ge=1, le=86400)
+    carga_b64: bool = False
+    proxy_request: bool | None = None
+    eliminar_descargas: bool = True
+    verbose: bool = False
+
+    @field_validator("puntos_venta_emitidos", "puntos_venta_recibidos", mode="after")
+    @classmethod
+    def _normalizar_puntos(
+        cls, valor: list[int | str] | None
+    ) -> list[str] | None:
+        return normalizar_puntos_venta(valor)
 
     @model_validator(mode="after")
     def _al_menos_un_tipo(self) -> _TiposComprobante:
@@ -106,35 +163,44 @@ class _TiposComprobante(_Base):
             raise ValueError("seleccionar al menos emitidos o recibidos")
         return self
 
+    def puntos_venta(self, tipo: str) -> list[str] | None:
+        """Puntos de venta pedidos para ``emitidos`` o ``recibidos``."""
+        return (
+            self.puntos_venta_emitidos
+            if tipo == "emitidos"
+            else self.puntos_venta_recibidos
+        )
 
-class MisComprobantesConsultarInput(_RangoFechas, _Representado, _TiposComprobante):
-    """Operacion ``consultar``: descarga emitidos/recibidos del rango."""
 
-    incluir_json: bool = True
-    subir_csv: bool = True
+class _SalidasComprobante(_Base):
+    incluir_json: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("incluir_json", "carga_json"),
+    )
+    subir_csv: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir_csv", "carga_minio"),
+    )
 
     @model_validator(mode="after")
-    def _al_menos_una_salida(self) -> MisComprobantesConsultarInput:
-        if not self.incluir_json and not self.subir_csv:
-            raise ValueError("seleccionar al menos una salida (json o csv)")
+    def _al_menos_una_salida(self) -> _SalidasComprobante:
+        if not self.incluir_json and not self.subir_csv and not self.carga_b64:
+            raise ValueError("seleccionar al menos una salida (json, csv o base64)")
         return self
+
+
+class MisComprobantesConsultarInput(_RangoFechas, _Representado, _TiposComprobante, _SalidasComprobante):
+    """Operacion ``consultar``: descarga emitidos/recibidos del rango."""
 
 
 class MisComprobantesSolicitarInput(_RangoFechas, _Representado, _TiposComprobante):
     """Operacion ``solicitar``: pide la consulta async sin descargar."""
 
 
-class MisComprobantesHistorialInput(_RangoFechas, _Representado, _TiposComprobante):
+class MisComprobantesHistorialInput(_RangoFechas, _Representado, _TiposComprobante, _SalidasComprobante):
     """Operacion ``historial``: descarga CSV del historial existente."""
 
-    incluir_json: bool = True
-    subir_csv: bool = True
-
-    @model_validator(mode="after")
-    def _al_menos_una_salida(self) -> MisComprobantesHistorialInput:
-        if not self.incluir_json and not self.subir_csv:
-            raise ValueError("seleccionar al menos una salida (json o csv)")
-        return self
+    cookies_header: str | None = Field(default=None, repr=False, max_length=8192)
 
 
 OperacionMisComprobantes = Literal["consultar", "solicitar", "historial"]
@@ -164,12 +230,14 @@ def esquema_entrada() -> dict[str, Any]:
             "recibidos": {"type": "boolean"},
             "puntos_venta_emitidos": {
                 "type": "array",
-                "items": {"type": "integer", "minimum": 1},
+                "items": {"type": ["integer", "string"]},
             },
             "puntos_venta_recibidos": {
                 "type": "array",
-                "items": {"type": "integer", "minimum": 1},
+                "items": {"type": ["integer", "string"]},
             },
+            "timeout_mc": {"type": "integer", "minimum": 1, "maximum": 86400},
+            "carga_b64": {"type": "boolean"},
             "incluir_json": {"type": "boolean"},
             "subir_csv": {"type": "boolean"},
         },

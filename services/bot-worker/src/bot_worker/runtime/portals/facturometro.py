@@ -26,6 +26,7 @@ Dos diferencias deliberadas con V2:
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 from bot_worker.bots.errors import TargetUnavailableError
@@ -255,6 +256,30 @@ class FacturometroPortal(PortalArca):
                 "categoria": ajax.get("categoria"),
             }
         return {}
+
+    # ------------------------------------------------------------------
+    # Captura del panel (V1 la sube a MinIO como PNG)
+
+    async def capturar_facturometro(self, destino: Path) -> Path | None:
+        """Captura PNG del panel del facturometro (port de V1).
+
+        V1 hacía ``page.locator('#divFacturometro').screenshot(...)`` y, si el
+        div no estaba, seguía sin captura (solo dejaba un aviso). Devuelve la
+        ruta escrita o ``None`` cuando no hay panel o el navegador no pudo
+        capturarlo.
+        """
+        try:
+            seccion = self.page.locator("#divFacturometro")
+            if await seccion.count() == 0:
+                return None
+            destino = Path(destino)
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            await seccion.screenshot(path=str(destino))
+        except Exception:
+            return None
+        if not destino.is_file() or destino.stat().st_size == 0:
+            return None
+        return destino
 
     # ------------------------------------------------------------------
     # Utilidades de página

@@ -52,10 +52,19 @@ class MisFacilidadesConsultarInput(_Base):
         max_length=14,
     )
     denominacion: str | None = Field(default=None, min_length=1, max_length=128)
-    situacion_excluyente: list[str] = Field(default_factory=list, max_length=20)
+    # V1 usa ``lista_exclusion_situacion``; V3 usa ``situacion_excluyente``. Se aceptan ambos.
+    situacion_excluyente: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        validation_alias=AliasChoices("situacion_excluyente", "lista_exclusion_situacion"),
+    )
     incluir_pdf: bool = True
     incluir_xlsx: bool = True
-    subir_archivos: bool = True
+    # V1 usa ``carga_minio``: decide si los archivos se suben. Alias de ``subir_archivos``.
+    subir_archivos: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir_archivos", "carga_minio"),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -95,8 +104,14 @@ def esquema_entrada() -> dict[str, Any]:
                 "maxItems": 20,
                 "items": {"type": "string", "minLength": 1},
             },
+            "lista_exclusion_situacion": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {"type": "string", "minLength": 1},
+            },
             "incluir_pdf": {"type": "boolean"},
             "incluir_xlsx": {"type": "boolean"},
             "subir_archivos": {"type": "boolean"},
+            "carga_minio": {"type": "boolean"},
         },
     }

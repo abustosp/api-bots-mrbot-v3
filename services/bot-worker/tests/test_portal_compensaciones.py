@@ -270,4 +270,235 @@ def test_plugin_abre_portal_y_delega_seleccion_consulta_y_exportacion(
     assert ("consultar", "01/09/2026", "30/09/2026") in llamadas
     assert ("exportar", "XLS") in llamadas
     assert resultado.result == "OK"
-    assert resultado.data["xls"]["archivo"].endswith("compensaciones.xls")
+    # El resumen por formato usa el nombre del flag (igual que la clave V1
+    # ``compensaciones_excel_minio_url``) y el archivo sigue el patron V1.
+    archivo = resultado.data["excel"]["archivo"]
+    assert archivo.startswith("sct_compensaciones_20123456789_")
+    assert archivo.endswith(".xls")
+    assert "compensaciones_excel_minio_url" in resultado.data
+
+
+def _runtime_compensaciones(tmp_path: Path, sesion: Any, subidas: list[Any]) -> Any:
+    from bot_worker.runtime.context import ArtifactStore, CancellationToken
+
+    async def presign(artifact_id: str, content_type: str, size: int) -> dict[str, Any]:
+        return {"upload_url": "", "object_key": f"compensaciones/{artifact_id}"}
+
+    store = ArtifactStore(
+        work_dir=tmp_path,
+        slots={},
+        presign=presign,
+        declarados={
+            spec.nombre: (tuple(spec.content_types), spec.max_bytes)
+            for spec in CompensacionesPlugin.manifest.artefactos_produce
+        },
+    )
+    original = store.upload
+
+    async def upload_registrado(artifact_id: str, rel_path: str, client: Any = None) -> Any:
+        subidas.append((artifact_id, rel_path))
+        return await original(artifact_id, rel_path, client)
+
+    store.upload = upload_registrado  # type: ignore[method-assign]
+
+    class _Factory:
+        @asynccontextmanager
+        async def arca_session(self, **_: Any):
+            yield sesion
+
+    async def no_op(*_: Any, **__: Any) -> None:
+        return None
+
+    return SimpleNamespace(
+        credentials=SimpleNamespace(
+            cuit_representante="20111222333", clave="clave-ficticia"
+        ),
+        cancellation=CancellationToken(),
+        event_sink=SimpleNamespace(progress=no_op),
+        deadline=SimpleNamespace(remaining_seconds=lambda: 60),
+        browser_factory=_Factory(),
+        artifact_store=store,
+        proxy=None,
+    )
+
+
+def test_plugin_expone_los_campos_de_resultado_de_v1(tmp_path: Path) -> None:
+    """``compensaciones_<formato>_minio_url`` con el object_key del slot."""
+
+    class _Servicio:
+        async def seleccionar_representado(self, cuit: str) -> None:
+            return None
+
+        async def consultar(self, desde: str, hasta: str) -> str:
+            return "con_resultados"
+
+        async def exportar(self, formato: str, destino: Path) -> Path:
+            Path(destino).write_bytes(b"contenido")
+            return Path(destino)
+
+    class _Sesion:
+        async def login(self) -> None:
+            return None
+
+        async def open_service(self, nombre: str, **kwargs: Any) -> _Servicio:
+            return _Servicio()
+
+    subidas: list[Any] = []
+
+    async def _ir() -> Any:
+        plugin = CompensacionesPlugin()
+        entrada = await plugin.validate(
+            {
+                "operacion": "consultar",
+                "cuit_representado": "20123456789",
+                "desde": "01/09/2026",
+                "hasta": "30/09/2026",
+                "excel": True,
+                "csv": True,
+                "carga_minio": True,
+            }
+        )
+        return await plugin.execute(
+            entrada, _runtime_compensaciones(tmp_path, _Sesion(), subidas)
+        )
+
+    resultado = asyncio.run(_ir())
+
+    assert resultado.data["compensaciones_excel_minio_url"] == "compensaciones/compensaciones.xls"
+    assert resultado.data["compensaciones_csv_minio_url"] == "compensaciones/compensaciones.csv"
+    assert [a["artifact_id"] for a in resultado.artifacts] == [
+        "compensaciones.xls",
+        "compensaciones.csv",
+    ]
+    assert [ruta for _, ruta in subidas] == list(resultado.data[f]["archivo"] for f in ("excel", "csv"))
+
+
+def test_plugin_sin_resultados_devuelve_el_message_de_v1(tmp_path: Path) -> None:
+    class _Servicio:
+        async def seleccionar_representado(self, cuit: str) -> None:
+            return None
+
+        async def consultar(self, desde: str, hasta: str) -> str:
+            return "sin_resultados"
+
+        async def exportar(self, formato: str, destino: Path) -> Path:  # pragma: no cover
+            raise AssertionError("sin resultados no exporta")
+
+    class _Sesion:
+        async def login(self) -> None:
+            return None
+
+        async def open_service(self, nombre: str, **kwargs: Any) -> _Servicio:
+            return _Servicio()
+
+    async def _ir() -> Any:
+        plugin = CompensacionesPlugin()
+        entrada = await plugin.validate(
+            {
+                "operacion": "consultar",
+                "representado_cuit": "20123456789",
+                "fecha_desde": "01/09/2026",
+                "fecha_hasta": "30/09/2026",
+                "pdf": True,
+            }
+        )
+        return await plugin.execute(
+            entrada, _runtime_compensaciones(tmp_path, _Sesion(), [])
+        )
+
+    resultado = asyncio.run(_ir())
+
+    assert resultado.result == "OK"
+    assert resultado.data["message"] == "No se encontraron resultados"
+    assert resultado.data["mensaje"] == "No se encontraron resultados"
+    assert resultado.artifacts == []
+
+
+def test_plugin_sigue_con_otros_formatos_si_uno_falla(tmp_path: Path) -> None:
+    """V1 continuaba con el resto de los formatos y avisaba."""
+
+    class _Servicio:
+        async def seleccionar_representado(self, cuit: str) -> None:
+            return None
+
+        async def consultar(self, desde: str, hasta: str) -> str:
+            return "con_resultados"
+
+        async def exportar(self, formato: str, destino: Path) -> Path:
+            if formato == "PDF":
+                raise TargetUnavailableError(
+                    "no hay botón de exportación",
+                    diagnostic_code="portal_download_missing",
+                )
+            Path(destino).write_bytes(b"contenido")
+            return Path(destino)
+
+    class _Sesion:
+        async def login(self) -> None:
+            return None
+
+        async def open_service(self, nombre: str, **kwargs: Any) -> _Servicio:
+            return _Servicio()
+
+    async def _ir() -> Any:
+        plugin = CompensacionesPlugin()
+        entrada = await plugin.validate(
+            {
+                "operacion": "consultar",
+                "representado_cuit": "20123456789",
+                "fecha_desde": "01/09/2026",
+                "fecha_hasta": "30/09/2026",
+                "csv": True,
+                "pdf": True,
+            }
+        )
+        return await plugin.execute(
+            entrada, _runtime_compensaciones(tmp_path, _Sesion(), [])
+        )
+
+    resultado = asyncio.run(_ir())
+
+    assert "csv" in resultado.data and "pdf" not in resultado.data
+    assert "portal_download_missing" in resultado.data["warnings"][0]
+
+
+def test_plugin_falla_si_ningun_formato_se_pudo_exportar(tmp_path: Path) -> None:
+    class _Servicio:
+        async def seleccionar_representado(self, cuit: str) -> None:
+            return None
+
+        async def consultar(self, desde: str, hasta: str) -> str:
+            return "con_resultados"
+
+        async def exportar(self, formato: str, destino: Path) -> Path:
+            raise TargetUnavailableError(
+                "no hay botón de exportación",
+                diagnostic_code="portal_download_missing",
+            )
+
+    class _Sesion:
+        async def login(self) -> None:
+            return None
+
+        async def open_service(self, nombre: str, **kwargs: Any) -> _Servicio:
+            return _Servicio()
+
+    async def _ir() -> Any:
+        plugin = CompensacionesPlugin()
+        entrada = await plugin.validate(
+            {
+                "operacion": "consultar",
+                "representado_cuit": "20123456789",
+                "fecha_desde": "01/09/2026",
+                "fecha_hasta": "30/09/2026",
+                "excel": True,
+            }
+        )
+        return await plugin.execute(
+            entrada, _runtime_compensaciones(tmp_path, _Sesion(), [])
+        )
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(_ir())
+
+    assert error.value.diagnostic_code == "portal_download_missing"

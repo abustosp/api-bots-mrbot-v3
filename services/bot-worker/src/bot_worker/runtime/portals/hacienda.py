@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import xml.etree.ElementTree as ET
+import zipfile
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
@@ -23,6 +26,213 @@ _CONSULTA_EMISOR = re.compile(
 _CONSULTA_RECEPTOR = re.compile(
     r"Consulta\s+y\s+ajuste\s+de\s+Liquidaciones\s*-\s*Por\s+Receptor", re.I
 )
+_SELECTOR_DESCARGA = (
+    "a[onclick*='pd.jsp'], a[href*='pd.jsp'], a.imprimir, a[onclick*='.pdf'], "
+    "a[href*='.pdf'], a[title*='Imprimir'], a.btnImprimir, a[title*='Descargar'], "
+    "button[onclick*='pd.jsp'], button[onclick*='.pdf'], button[title*='Imprimir'], "
+    "button[onclick*='descarg'], [role='button'][onclick*='pd.jsp'], "
+    "[role='button'][onclick*='.pdf']"
+)
+
+# Namespaces OpenXML del escritor XLSX stdlib (mismo esquema que el escritor de
+# ``mis_facilidades``: celdas ``inlineStr``, sin estilos ni formulas).
+_NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_NS_REL_DOC = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_NS_REL_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+_NS_CONTENT = "http://schemas.openxmlformats.org/package/2006/content-types"
+_NS_XML = "http://www.w3.org/XML/1998/namespace"
+MAX_NOMBRE_HOJA = 31
+
+
+def letra_columna(numero: int) -> str:
+    """Letra de columna estilo Excel para el número 1-based indicado."""
+    letras = ""
+    while numero:
+        numero, resto = divmod(numero - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
+
+
+def escribir_xlsx(
+    destino: Path, hojas: list[tuple[str, list[str], list[list[str]]]]
+) -> None:
+    """Escribe un XLSX OpenXML mínimo con una o más hojas (stdlib, sin pandas).
+
+    Port del escritor de ``runtime/portals/mis_facilidades.py``: mismo esquema
+    de celdas ``inlineStr`` y mismos nombres de partes, para no depender de
+    pandas ni de openpyxl en el worker. Los valores se escriben como texto, que
+    es lo que devuelven las tablas HTML del portal.
+    """
+    ET.register_namespace("", _NS_MAIN)
+    ET.register_namespace("r", _NS_REL_DOC)
+    workbook = ET.Element(f"{{{_NS_MAIN}}}workbook")
+    sheets = ET.SubElement(workbook, f"{{{_NS_MAIN}}}sheets")
+    for idx, (nombre, _, _) in enumerate(hojas, start=1):
+        ET.SubElement(
+            sheets,
+            f"{{{_NS_MAIN}}}sheet",
+            {"name": nombre, "sheetId": str(idx), f"{{{_NS_REL_DOC}}}id": f"rId{idx}"},
+        )
+    workbook_xml = ET.tostring(workbook, encoding="utf-8", xml_declaration=True)
+
+    rels = ET.Element(f"{{{_NS_REL_PKG}}}Relationships")
+    for idx in range(1, len(hojas) + 1):
+        ET.SubElement(
+            rels,
+            f"{{{_NS_REL_PKG}}}Relationship",
+            {
+                "Id": f"rId{idx}",
+                "Type": (
+                    "http://schemas.openxmlformats.org/officeDocument/2006/"
+                    "relationships/worksheet"
+                ),
+                "Target": f"worksheets/sheet{idx}.xml",
+            },
+        )
+    rels_xml = ET.tostring(rels, encoding="utf-8", xml_declaration=True)
+
+    tipos = ET.Element(f"{{{_NS_CONTENT}}}Types")
+    ET.SubElement(
+        tipos,
+        f"{{{_NS_CONTENT}}}Default",
+        {
+            "Extension": "rels",
+            "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
+        },
+    )
+    ET.SubElement(
+        tipos,
+        f"{{{_NS_CONTENT}}}Default",
+        {"Extension": "xml", "ContentType": "application/xml"},
+    )
+    ET.SubElement(
+        tipos,
+        f"{{{_NS_CONTENT}}}Override",
+        {
+            "PartName": "/xl/workbook.xml",
+            "ContentType": (
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet.main+xml"
+            ),
+        },
+    )
+    for idx in range(1, len(hojas) + 1):
+        ET.SubElement(
+            tipos,
+            f"{{{_NS_CONTENT}}}Override",
+            {
+                "PartName": f"/xl/worksheets/sheet{idx}.xml",
+                "ContentType": (
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.worksheet+xml"
+                ),
+            },
+        )
+    content_types_xml = ET.tostring(tipos, encoding="utf-8", xml_declaration=True)
+
+    root_rels = ET.Element(f"{{{_NS_REL_PKG}}}Relationships")
+    ET.SubElement(
+        root_rels,
+        f"{{{_NS_REL_PKG}}}Relationship",
+        {
+            "Id": "rId1",
+            "Type": (
+                "http://schemas.openxmlformats.org/officeDocument/2006/"
+                "relationships/officeDocument"
+            ),
+            "Target": "xl/workbook.xml",
+        },
+    )
+    root_rels_xml = ET.tostring(root_rels, encoding="utf-8", xml_declaration=True)
+
+    with zipfile.ZipFile(destino, "w", compression=zipfile.ZIP_DEFLATED) as archivo:
+        archivo.writestr("[Content_Types].xml", content_types_xml)
+        archivo.writestr("_rels/.rels", root_rels_xml)
+        archivo.writestr("xl/workbook.xml", workbook_xml)
+        archivo.writestr("xl/_rels/workbook.xml.rels", rels_xml)
+        for idx, (_, headers, filas) in enumerate(hojas, start=1):
+            worksheet = ET.Element(f"{{{_NS_MAIN}}}worksheet")
+            sheet_data = ET.SubElement(worksheet, f"{{{_NS_MAIN}}}sheetData")
+            for numero_fila, valores in enumerate([headers, *filas], start=1):
+                row_node = ET.SubElement(
+                    sheet_data, f"{{{_NS_MAIN}}}row", {"r": str(numero_fila)}
+                )
+                for numero_columna, valor in enumerate(valores, start=1):
+                    celda = ET.SubElement(
+                        row_node,
+                        f"{{{_NS_MAIN}}}c",
+                        {
+                            "r": f"{letra_columna(numero_columna)}{numero_fila}",
+                            "t": "inlineStr",
+                        },
+                    )
+                    inline = ET.SubElement(celda, f"{{{_NS_MAIN}}}is")
+                    texto = ET.SubElement(
+                        inline, f"{{{_NS_MAIN}}}t", {f"{{{_NS_XML}}}space": "preserve"}
+                    )
+                    texto.text = str(valor)
+            archivo.writestr(
+                f"xl/worksheets/sheet{idx}.xml",
+                ET.tostring(worksheet, encoding="utf-8", xml_declaration=True),
+            )
+
+
+def normalizar_nombre_hoja(nombre: str, usados: set[str]) -> str:
+    """Nombre de hoja válido (31 chars, sin ``[]:*?/\\``) y único."""
+    base = re.sub(r"[\\/*?:\[\]]", "_", str(nombre))[:MAX_NOMBRE_HOJA]
+    base = base or "Hoja"
+    candidato = base
+    sufijo = 2
+    while candidato.lower() in usados:
+        cola = f" {sufijo}"
+        candidato = f"{base[: MAX_NOMBRE_HOJA - len(cola)]}{cola}"
+        sufijo += 1
+    usados.add(candidato.lower())
+    return candidato
+
+
+def extraer_data_id(texto: str) -> str:
+    """Id del comprobante para ``getPdf`` (port V1 ``extract_data_id``)."""
+    for patron in (
+        r'data-id(?:comprobante)?[=:\\"\s]+(\d+)',
+        r"getPdf\?id=(\d+)",
+        r"[?&](?:id|idComprobante|idLiquidacion)=(\d+)",
+    ):
+        coincidencia = re.search(patron, texto or "", flags=re.I)
+        if coincidencia:
+            return coincidencia.group(1)
+    return ""
+
+
+def extraer_clave_fila(texto: str) -> str:
+    """Clave estable de la fila para no bajar dos veces el mismo PDF (port V1)."""
+    for patron, etiqueta in (
+        (r"liqCodigo=(\d+)", "liqCodigo"),
+        (r"coe=(\d+)", "coe"),
+        (r"codigo=(\d+)", "codigo"),
+        (r"\b(\d{6,})\b", "numero"),
+    ):
+        coincidencia = re.search(patron, texto or "", flags=re.I)
+        if coincidencia:
+            return f"{etiqueta}={coincidencia.group(1)}"
+    return ""
+
+
+def inferir_identificadores(texto: str) -> tuple[str, str]:
+    """CUIT de referencia y código de comprobante del texto de la fila (port V1)."""
+    digitos = re.findall(r"\b\d{6,20}\b", texto or "")
+    cuit = next((d for d in digitos if len(d) == 11), "SIN_CUIT")
+    codigo = next((d for d in digitos if len(d) >= 8 and d != cuit), "")
+    return cuit, codigo or "SIN_CODIGO"
+
+
+def nombre_pdf_hacienda(consulta: str, cuit_representado: str, cuit_ref: str, codigo: str) -> str:
+    """Nombre V1 del PDF: ``HACIENDA - <CONSULTA> - <CUIT> - <CUIT_REF> - <CODIGO>.pdf``."""
+    crudo = f"HACIENDA - {consulta.upper()} - {cuit_representado} - {cuit_ref} - {codigo}.pdf"
+    limpio = re.sub(r"[\\/:*?\"<>|]+", "_", crudo)
+    return re.sub(r"\s+", " ", limpio).strip()
+
+
 _SIGUIENTE = re.compile(r"^\s*(Siguiente|Sig\.?|Next|>|>>|›|»)\s*$", re.I)
 _CONSULTAS = {
     "por_emisor": _CONSULTA_EMISOR,
@@ -302,6 +512,238 @@ class HaciendaPortal(PortalArca):
             self._completar_fechas_y_buscar(consulta_key, desde, hasta),
         )
         return await self.paso("leer_resultados", self._leer_resultados(consulta_key))
+
+    async def descargar_pdfs_consulta(
+        self,
+        *,
+        consulta_key: str,
+        desde: str,
+        hasta: str,
+        destino_dir: Path,
+        representado_cuit: str,
+    ) -> list[dict[str, Any]]:
+        """Recorre las páginas de resultados y baja el PDF de cada comprobante.
+
+        Port de ``descargar_todas_las_paginas`` (V1). Los PDF se guardan en
+        ``destino_dir`` con el nombre V1 ``HACIENDA - <CONSULTA> - <CUIT> -
+        <CUIT_REF> - <CODIGO>.pdf``. Los comprobantes que no se pueden bajar
+        no detienen la consulta: quedan en la lista de salida con ``error``.
+        """
+        patron = _CONSULTAS.get(str(consulta_key or "").strip().lower())
+        if patron is None:
+            raise TargetUnavailableError(
+                "tipo de consulta Hacienda no reconocido",
+                diagnostic_code="hacienda_query_invalid",
+            )
+        destino_dir = Path(destino_dir)
+        destino_dir.mkdir(parents=True, exist_ok=True)
+        await self.paso(
+            "abrir_seccion_consulta",
+            self._abrir_seccion_consulta(consulta_key, patron),
+        )
+        await self.paso(
+            "completar_fechas",
+            self._completar_fechas_y_buscar(consulta_key, desde, hasta),
+        )
+        return await self.paso(
+            "descargar_pdfs",
+            self._recorrer_y_descargar(consulta_key, representado_cuit, destino_dir),
+        )
+
+    async def recorrer_consulta(
+        self,
+        *,
+        consulta_key: str,
+        desde: str,
+        hasta: str,
+        destino_dir: Path | None = None,
+        representado_cuit: str = "",
+        descargar_pdf: bool = True,
+    ) -> dict[str, Any]:
+        """Recorre una consulta una sola vez juntando filas y PDF (port de V1).
+
+        V1 (``descargar_todas_las_paginas``) navega la consulta una vez y de
+        cada página guarda el cuadro (para el Excel consolidado) y baja el PDF
+        de cada comprobante. Devuelve ``{"filas": [...], "pdfs": [...] | None}``.
+        """
+        patron = _CONSULTAS.get(str(consulta_key or "").strip().lower())
+        if patron is None:
+            raise TargetUnavailableError(
+                "tipo de consulta Hacienda no reconocido",
+                diagnostic_code="hacienda_query_invalid",
+            )
+        bajar_pdf = bool(descargar_pdf) and destino_dir is not None
+        if bajar_pdf:
+            destino = Path(destino_dir)  # type: ignore[arg-type]
+            destino.mkdir(parents=True, exist_ok=True)
+        await self.paso(
+            "abrir_seccion_consulta",
+            self._abrir_seccion_consulta(consulta_key, patron),
+        )
+        await self.paso(
+            "completar_fechas",
+            self._completar_fechas_y_buscar(consulta_key, desde, hasta),
+        )
+        filas: list[dict[str, Any]] = []
+        pdfs: list[dict[str, Any]] = []
+        claves: set[str] = set()
+        firmas: set[str] = set()
+        for pagina in range(1, 101):
+            actuales = self._filas_de_tablas(
+                await self._tablas_actuales(), consulta_key, pagina
+            )
+            firma = repr(
+                [
+                    {clave: valor for clave, valor in fila.items() if clave != "pagina"}
+                    for fila in actuales
+                ]
+            )
+            if firma and firma in firmas:
+                break
+            if firma:
+                firmas.add(firma)
+            filas.extend(actuales)
+            if bajar_pdf:
+                pdfs.extend(
+                    await self._pdfs_de_pagina(
+                        consulta_key,
+                        representado_cuit,
+                        Path(destino_dir),  # type: ignore[arg-type]
+                        pagina,
+                        claves,
+                    )
+                )
+            if not await self._siguiente_pagina():
+                break
+        return {"filas": filas, "pdfs": pdfs if bajar_pdf else None}
+
+    async def _pdfs_de_pagina(
+        self,
+        consulta_key: str,
+        representado_cuit: str,
+        destino_dir: Path,
+        pagina: int,
+        vistos: set[str],
+    ) -> list[dict[str, Any]]:
+        """Baja los PDF de los comprobantes de la página actual (port V1)."""
+        resultados: list[dict[str, Any]] = []
+        for fila in await self._filas_con_descarga():
+            clave = fila["clave"]
+            if clave in vistos:
+                continue
+            vistos.add(clave)
+            nombre = nombre_pdf_hacienda(
+                consulta_key, representado_cuit, fila["cuit_ref"], fila["codigo"]
+            )
+            entrada: dict[str, Any] = {
+                "consulta": consulta_key,
+                "pagina": pagina,
+                "archivo": nombre,
+            }
+            try:
+                ruta = await self._bajar_pdf_fila(fila, destino_dir / nombre)
+                entrada["ruta"] = str(ruta)
+            except TargetUnavailableError as exc:
+                entrada["error"] = exc.diagnostic_code
+            resultados.append(entrada)
+        return resultados
+
+    async def _recorrer_y_descargar(
+        self, consulta_key: str, representado_cuit: str, destino_dir: Path
+    ) -> list[dict[str, Any]]:
+        resultados: list[dict[str, Any]] = []
+        vistos: set[str] = set()
+        firmas_paginas: set[str] = set()
+        for pagina in range(1, 101):
+            filas = await self._filas_con_descarga()
+            # Guarda contra bucles: si la página repite las mismas filas, se corta
+            # aunque "Siguiente" siga visible (port del control de firmas de V1).
+            firma = "|".join(sorted(f["clave"] for f in filas))
+            if firma and firma in firmas_paginas:
+                break
+            if firma:
+                firmas_paginas.add(firma)
+            for fila in filas:
+                clave = fila["clave"]
+                if clave in vistos:
+                    continue
+                vistos.add(clave)
+                nombre = nombre_pdf_hacienda(
+                    consulta_key, representado_cuit, fila["cuit_ref"], fila["codigo"]
+                )
+                entrada: dict[str, Any] = {
+                    "consulta": consulta_key,
+                    "pagina": pagina,
+                    "archivo": nombre,
+                }
+                try:
+                    ruta = await self._bajar_pdf_fila(fila, destino_dir / nombre)
+                    entrada["ruta"] = str(ruta)
+                except TargetUnavailableError as exc:
+                    entrada["error"] = exc.diagnostic_code
+                resultados.append(entrada)
+            if not await self._siguiente_pagina():
+                break
+        return resultados
+
+    async def _filas_con_descarga(self) -> list[dict[str, Any]]:
+        """Filas de la página actual con un control de descarga (port V1)."""
+        filas: list[dict[str, Any]] = []
+        for contexto in self._contextos():
+            try:
+                grupo = contexto.locator("#resultTable tbody tr")
+                cantidad = await grupo.count()
+            except Exception:
+                continue
+            for indice in range(cantidad):
+                fila = grupo.nth(indice)
+                try:
+                    control = fila.locator(_SELECTOR_DESCARGA).first
+                    if await control.count() == 0:
+                        continue
+                    texto = await self._texto_candidato(fila)
+                except Exception:
+                    continue
+                onclick = str(await control.get_attribute("onclick") or "")
+                href = str(await control.get_attribute("href") or "")
+                data_id = extraer_data_id(" ".join((onclick, href, texto)))
+                clave = extraer_clave_fila(" ".join((onclick, href, texto))) or f"fila_{indice + 1}"
+                cuit_ref, codigo = inferir_identificadores(texto)
+                filas.append(
+                    {
+                        "clave": clave,
+                        "control": control,
+                        "data_id": data_id,
+                        "cuit_ref": cuit_ref,
+                        "codigo": codigo,
+                        "texto": texto,
+                    }
+                )
+            if filas:
+                break
+        return filas
+
+    async def _bajar_pdf_fila(self, fila: dict[str, Any], destino: Path) -> Path:
+        """Primero por ``getPdf?id=`` del mismo origen; si falla, click y descarga."""
+        if fila.get("data_id"):
+            url = urljoin(str(getattr(self.page, "url", "") or ""), f"/lsp-web/consultaLiquidacion/getPdf?id={fila['data_id']}")
+            try:
+                respuesta = await self.page.request.get(url, timeout=60_000)
+                if respuesta.status == 200:
+                    cuerpo = await respuesta.body()
+                    if cuerpo[:5] == b"%PDF-":
+                        destino.write_bytes(cuerpo)
+                        return destino
+            except Exception:
+                pass
+        control = fila["control"]
+        try:
+            return await self.capturar_descarga(destino, lambda: control.click(timeout=15_000), espera_ms=30_000)
+        except TargetUnavailableError:
+            raise TargetUnavailableError(
+                "no se pudo descargar el PDF del comprobante",
+                diagnostic_code="hacienda_pdf_unavailable",
+            )
 
     async def _buscar_consulta(self, patron: re.Pattern[str]) -> Any | None:
         for contexto in self._contextos():

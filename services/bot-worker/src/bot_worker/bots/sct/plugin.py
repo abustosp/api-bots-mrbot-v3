@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime
 from typing import Any, Mapping
 
 from bot_worker.bots.errors import (
@@ -54,13 +55,20 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "SISTEMA DE CUENTAS"
 ID_ARTEFACTO_BASE = "sct_reporte"
 EXTENSIONES = {"xlsx": "xlsx", "csv": "csv", "pdf": "pdf"}
+# V1 descarga el XLS nativo de ARCA y lo guarda como .xls.
+EXTENSIONES_V1 = {"xlsx": "xls", "csv": "csv", "pdf": "pdf"}
 
 
-def nombre_reporte_sct(cuit: str, seccion: str, formato: str) -> str:
-    """Replica el patron de nombres V2 ``'{fin} - SCT - ...'``."""
+def nombre_reporte_sct(cuit: str, seccion: str, formato: str, marca: str = "") -> str:
+    """Nombre del reporte con el patron de V1 ``sct_<seccion>_<cuit>_<marca>.<ext>``.
+
+    V1 guarda el XLS nativo de ARCA con extension ``.xls`` y nombra cada
+    archivo con su seccion, el CUIT y la fecha-hora de descarga.
+    """
     digitos = re.sub(r"\D", "", cuit or "")
-    fin = digitos[-1:] if digitos else "X"
-    return f"{fin} - SCT - {seccion} - {digitos}.{EXTENSIONES[formato]}"
+    extension = EXTENSIONES_V1.get(formato, formato)
+    sello = marca or datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"sct_{seccion}_{digitos}_{sello}.{extension}"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -177,6 +185,18 @@ class SctPlugin:
         )
         return BotResult(result="OK", data=datos, artifacts=artefactos)
 
+    @staticmethod
+    async def _sin_registros(servicio: Any, seccion: str) -> bool:
+        """True si la insignia de la seccion vale 0 (port de V1).
+
+        Sin insignia legible, o con un servicio que no la expone, la seccion se
+        descarga igual: omitir solo ante un 0 explicito evita perder reportes.
+        """
+        contar = getattr(servicio, "contar_pestana", None)
+        if contar is None:
+            return False
+        return await contar(seccion) == 0
+
     async def _descargar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -190,11 +210,20 @@ class SctPlugin:
             "reportes": [],
         }
         artefactos: list[dict[str, Any]] = []
+        # Un solo sello por corrida: como V1, todos los archivos de la corrida
+        # comparten la fecha-hora, y xlsx/csv de una misma seccion no se pisan.
+        sello = datetime.now().strftime("%Y%m%d_%H%M%S")
         for seccion in entrada.secciones:
+            if getattr(entrada, "omitir_vacias", True) and await self._sin_registros(servicio, seccion):
+                if getattr(entrada, "incluir_json", True):
+                    datos["reportes"].append(
+                        {"seccion": seccion, "omitido": True, "motivo": "sin_registros"}
+                    )
+                continue
             for formato in entrada.formatos:
                 await runtime.cancellation.raise_if_cancelled()
                 nombre = nombre_reporte_sct(
-                    entrada.representado_cuit, seccion, formato
+                    entrada.representado_cuit, seccion, formato, marca=sello
                 )
                 destino = runtime.artifact_store.resolve(nombre)
                 await servicio.descargar_reporte(

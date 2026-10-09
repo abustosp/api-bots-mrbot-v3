@@ -76,11 +76,28 @@ class _ServicioZipeado:
     def __init__(self) -> None:
         self.destinos: list[Path] = []
         self.representados: list[str] = []
+        self.llamadas: list[dict[str, Any]] = []
 
     async def seleccionar_representado(self, cuit: str) -> None:
         self.representados.append(cuit)
 
-    async def descargar_csv(self, *, tipo: str, destino: Path, desde: str, hasta: str) -> None:
+    async def descargar_csv(
+        self,
+        *,
+        tipo: str,
+        destino: Path,
+        desde: str,
+        hasta: str,
+        puntos_venta: list[str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> None:
+        self.llamadas.append(
+            {
+                "tipo": tipo,
+                "puntos_venta": puntos_venta,
+                "timeout_ms": timeout_ms,
+            }
+        )
         self.destinos.append(Path(destino))
         _zip_con_planilla(
             Path(destino),
@@ -170,12 +187,21 @@ def test_execute_desempaqueta_el_zip_del_portal_antes_de_filtrar(tmp_path: Path)
     assert resultado.result == "OK"
     assert servicio.representados == [CUIT]
     assert resultado.data["emitidos"]["filas"] == 1
+    # Sin puntos de venta en el payload rige el default de V1 (30 segundos).
+    assert servicio.llamadas == [
+        {"tipo": "emitidos", "puntos_venta": None, "timeout_ms": 30_000}
+    ]
     assert eventos == ["emitidos_csv"]
+    # V1 reescribe la planilla: números sin ceros a la izquierda y fecha ISO.
+    filtrado = (
+        "Fecha de Emisión;Tipo de Comprobante;Punto de Venta;Número Desde;Imp. Total\n"
+        "2026-01-10;11;1;101;2\n"
+    )
     assert [(a["artifact_id"], a["size_bytes"]) for a in resultado.artifacts] == [
-        ("emitidos_csv", len(_planilla([("2026-01-10", "11", "2")]).encode()))
+        ("emitidos_csv", len(filtrado.encode("utf-8")))
     ]
     # El ZIP quedó reemplazado por el CSV filtrado dentro de work_dir.
     archivos = list(tmp_path.glob("*.csv"))
     assert len(archivos) == 1
-    assert "2026-01-10" in archivos[0].read_text(encoding="utf-8")
+    assert archivos[0].read_text(encoding="utf-8") == filtrado
     assert not servicio.destinos[0].exists() or not zipfile.is_zipfile(servicio.destinos[0])

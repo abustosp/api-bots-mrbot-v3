@@ -111,13 +111,43 @@ def _periodo_valido(periodo: str) -> bool:
     return bool(match and 1 <= int(match.group(1)) <= 12)
 
 
-def _nombre_archivo(cuit: str, tipo: str, desde: str, hasta: str, extension: str) -> str:
-    """Nombre seguro para las descargas temporales que se empaquetan."""
+def _safe_filename_part(value: str, default: str) -> str:
+    """Sanitiza un tramo de nombre de archivo (port de V1)."""
+    texto = re.sub(r"\s+", " ", (value or "").strip())
+    texto = re.sub(r'[\\/:*?"<>|]+', "", texto).strip()
+    return texto or default
+
+
+def _periodo_compacto(valor: str) -> str:
+    """``MM/AAAA`` -> ``AAAAMM``; otros formatos pierden los separadores."""
+    texto = (valor or "").strip()
+    coincidencia = re.fullmatch(r"(\d{2})/(\d{4})", texto)
+    if coincidencia:
+        return f"{coincidencia.group(2)}{coincidencia.group(1)}"
+    return re.sub(r"\D", "", texto)
+
+
+def _nombre_archivo(
+    cuit: str,
+    tipo: str,
+    desde: str,
+    hasta: str,
+    extension: str,
+    denominacion: str = "",
+) -> str:
+    """Nombre de la descarga temporal (port de ``_build_download_name`` de V1).
+
+    V1 lo usaba tambien como nombre final en MinIO: ``fin - cuit - tipo -
+    AAAAMM - AAAAMM - denominacion.ext``. Aca las salidas viajan dentro del zip.
+    """
     cuit = re.sub(r"\D", "", cuit or "")
-    tipo = re.sub(r"[\\/:*?\"<>|]+", "", tipo).strip()
-    desde_compacto = re.sub(r"\D", "", desde)
-    hasta_compacto = re.sub(r"\D", "", hasta)
-    return f"{cuit[-1:]} - {cuit} - {tipo} - {desde_compacto} - {hasta_compacto}.{extension}"
+    desde_compacto = _periodo_compacto(desde)
+    hasta_compacto = _periodo_compacto(hasta)
+    return (
+        f"{cuit[-1:]} - {cuit} - {_safe_filename_part(tipo, 'SIN_TIPO')} - "
+        f"{desde_compacto} - {hasta_compacto} - "
+        f"{_safe_filename_part(denominacion, 'SIN_DENOMINACION')}.{extension}"
+    )
 
 
 def _empaquetar_descargas(archivos: list[Path], destino: Path) -> None:
@@ -489,8 +519,8 @@ class AgipSession:
     async def _descargar(self, selector: str, destino: Path) -> bool:
         boton = self._page.locator(selector)
         try:
-            if not await boton.count() or not await boton.first.is_visible():
-                return False
+            # V1 espera el boton visible hasta 30 s antes de disparar la descarga.
+            await boton.first.wait_for(state="visible", timeout=30_000)
             destino.parent.mkdir(parents=True, exist_ok=True)
             async with self._page.expect_download(timeout=60_000) as info:
                 await boton.first.click(force=True)
@@ -500,8 +530,19 @@ class AgipSession:
         except Exception:
             return False
 
-    async def consultar_retper(self, desde_mmyyyy: str, hasta_mmyyyy: str, destino: Path) -> None:
-        """Consulta el período y guarda en destino ZIP con todas las salidas AGIP."""
+    async def consultar_retper(
+        self,
+        desde_mmyyyy: str,
+        hasta_mmyyyy: str,
+        destino: Path,
+        denominacion: str = "",
+    ) -> list[dict[str, str]]:
+        """Consulta el período y guarda en destino ZIP con todas las salidas AGIP.
+
+        Devuelve el listado de archivos con la forma de V1
+        (``{'tipo', 'archivo', 'url_minio'}``); en V3 las salidas viajan dentro
+        del zip, asi que ``url_minio`` queda en ``None``.
+        """
         if not self._logged_in:
             raise TargetUnavailableError(
                 "La sesión AGIP no está autenticada",
@@ -530,6 +571,7 @@ class AgipSession:
 
         cuit = self._representado
         descargados: list[Path] = []
+        archivos: list[dict[str, str]] = []
         destino.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="agip_", dir=destino.parent) as temp_dir:
             directorio = Path(temp_dir)
@@ -546,12 +588,14 @@ class AgipSession:
                     continue
                 for selector, tipo, extension in seccion["files"]:
                     nombre = _nombre_archivo(
-                        cuit, tipo, desde_mmyyyy, hasta_mmyyyy, extension
+                        cuit, tipo, desde_mmyyyy, hasta_mmyyyy, extension, denominacion
                     )
                     archivo = directorio / nombre
                     if await self._descargar(selector, archivo):
                         descargados.append(archivo)
+                        archivos.append({"tipo": tipo, "archivo": nombre, "url_minio": None})
             _empaquetar_descargas(descargados, Path(destino))
+        return archivos
 
     async def close(self) -> None:
         """El BrowserFactory cierra el contexto; aquí se sueltan referencias."""

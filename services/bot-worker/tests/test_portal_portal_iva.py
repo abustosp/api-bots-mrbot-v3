@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from bot_worker.bots.errors import TargetUnavailableError
+from bot_worker.bots.errors import InvalidInputError, TargetUnavailableError
 from bot_worker.bots.portal_iva.plugin import PortalIvaPlugin
 from bot_worker.runtime.portals import PORTALES, portal_para
+from bot_worker.runtime.portals.base import PortalArca
 from bot_worker.runtime.portals.portal_iva import PortalIvaPortal, _normalizar_periodo
 
 
@@ -214,10 +217,11 @@ def test_descargar_libro_captura_csv(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert pagina.csv.clicked
 
 
-def test_portal_registrado_sin_metodos_de_carga_ni_presentacion() -> None:
+def test_portal_registrado_con_importacion_sin_presentacion() -> None:
     assert portal_para("portal_iva") is PortalIvaPortal
     assert "portal_iva" in PORTALES
-    assert not hasattr(PortalIvaPortal, "importar_txt")
+    for metodo in ("importar_txt", "importar_desde_arca", "eliminar_todos_registros", "importar_libro"):
+        assert hasattr(PortalIvaPortal, metodo)
     assert not hasattr(PortalIvaPortal, "cargar")
     assert not hasattr(PortalIvaPortal, "presentar")
 
@@ -244,3 +248,271 @@ def test_csv_zipeado_se_extrae_plano(tmp_path) -> None:
     # Un CSV plano queda intacto.
     _extraer_csv_si_es_zip(destino)
     assert destino.read_text().startswith("Fecha;Tipo")
+
+
+# ---------------------------------------------------------------------------
+# Importacion, borrado y alicuotas (port de V1 import_from_arca, delete_all_records
+# e import_files). La pagina es falsa: un control existe si su texto coincide con
+# una etiqueta visible; los clics quedan registrados en orden.
+
+
+def _texto(criterio: Any) -> str:
+    return criterio.pattern if isinstance(criterio, re.Pattern) else str(criterio or "")
+
+
+def _coincide(criterio: Any, etiquetas: set[str]) -> bool:
+    if isinstance(criterio, re.Pattern):
+        return any(criterio.search(e) for e in etiquetas)
+    return any(str(criterio) in e for e in etiquetas)
+
+
+class _Control:
+    def __init__(self, pagina: _PaginaImportacion, descriptor: str, visible: bool) -> None:
+        self.pagina = pagina
+        self.descriptor = descriptor
+        self.visible = visible
+
+    @property
+    def first(self) -> _Control:
+        return self
+
+    def filter(self, **_: Any) -> _Control:
+        return self
+
+    async def count(self) -> int:
+        return 1 if self.visible else 0
+
+    async def is_visible(self, **_: Any) -> bool:
+        return self.visible
+
+    async def scroll_into_view_if_needed(self, **_: Any) -> None:
+        return None
+
+    async def click(self, **_: Any) -> None:
+        self.pagina.clics.append(self.descriptor)
+
+    async def element_handle(self) -> None:
+        return None
+
+    async def set_input_files(self, ruta: str) -> None:
+        self.pagina.archivos.append((self.descriptor, ruta))
+
+
+class _PaginaImportacion:
+    def __init__(self, visibles: set[str]) -> None:
+        self.visibles = visibles
+        self.clics: list[str] = []
+        self.archivos: list[tuple[str, str]] = []
+        self.url = "https://liva.afip.gob.ar/liva/jsp/menuPresentacion.do"
+
+    def _control(self, descriptor: str, criterio: Any) -> _Control:
+        return _Control(self, descriptor, _coincide(criterio, self.visibles))
+
+    def get_by_role(self, role: str, *, name: Any = None, **_: Any) -> _Control:
+        return self._control(f"{role}:{_texto(name)}", name)
+
+    def get_by_text(self, text: Any, **_: Any) -> _Control:
+        return self._control(f"text:{_texto(text)}", text)
+
+    def get_by_label(self, text: Any, **_: Any) -> _Control:
+        return _Control(self, f"label:{_texto(text)}", True)
+
+    def locator(self, selector: str) -> _Control:
+        return self._control(f"css:{selector}", selector)
+
+    async def wait_for_timeout(self, *_: Any) -> None:
+        return None
+
+
+@pytest.fixture
+def sin_esperas(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Evita los sondeos de espera real: solo importa el orden de los clics."""
+
+    async def primero_visible(self: PortalArca, localizadores: Any, *, total_ms: int = 8_000) -> Any:
+        for candidato in localizadores:
+            if await candidato.count() and await candidato.first.is_visible():
+                return candidato.first
+        return None
+
+    monkeypatch.setattr(PortalArca, "_primero_visible", primero_visible)
+
+
+VISIBLES_IMPORTACION = {
+    "Importar",
+    "Importar Archivos",
+    "#btnImportarArchivosImportar",
+    "Libro Ventas Registrados",
+    "Eliminar Todos...",
+    ".bootstrap-dialog .btn-danger",
+    "Procesada",
+}
+
+
+def test_importar_txt_sube_comprobantes_y_alicuotas(sin_esperas: None, tmp_path: Path) -> None:
+    cbte = tmp_path / "cbte.txt"
+    cbte.write_text("cbte", encoding="utf-8")
+    alic = tmp_path / "alic.txt"
+    alic.write_text("alic", encoding="utf-8")
+    pagina = _PaginaImportacion(set(VISIBLES_IMPORTACION))
+
+    assert asyncio.run(PortalIvaPortal(pagina).importar_txt("ventas", cbte, alic))
+
+    assert pagina.archivos == [
+        ("label:Archivo Ventas *", str(cbte)),
+        ("label:Archivo IVA Ventas *", str(alic)),
+    ]
+    assert pagina.clics.count("css:#btnImportarArchivosImportar") == 3
+
+
+def test_importar_txt_sin_alicuotas_solo_sube_comprobantes(sin_esperas: None, tmp_path: Path) -> None:
+    cbte = tmp_path / "cbte.txt"
+    cbte.write_text("cbte", encoding="utf-8")
+    pagina = _PaginaImportacion(set(VISIBLES_IMPORTACION))
+
+    asyncio.run(PortalIvaPortal(pagina).importar_txt("compras", cbte))
+
+    assert pagina.archivos == [("label:Archivo Compras *", str(cbte))]
+
+
+def test_importar_libro_borra_registros_antes_de_importar(sin_esperas: None, tmp_path: Path) -> None:
+    cbte = tmp_path / "cbte.txt"
+    cbte.write_text("cbte", encoding="utf-8")
+    pagina = _PaginaImportacion(set(VISIBLES_IMPORTACION))
+
+    assert asyncio.run(PortalIvaPortal(pagina).importar_libro("ventas", cbte))
+
+    clics = pagina.clics
+    assert clics[0].startswith("link:Libro")
+    assert clics.index("button:Eliminar Todos...") < clics.index("button:Importar")
+    assert "css:.bootstrap-dialog .btn-danger" in clics
+
+
+def test_eliminar_todos_registros_sin_boton_devuelve_false(sin_esperas: None) -> None:
+    pagina = _PaginaImportacion(set())
+
+    assert asyncio.run(PortalIvaPortal(pagina).eliminar_todos_registros("compras")) is False
+    assert pagina.clics == []
+
+
+def test_importar_desde_arca_pulsa_importacion(sin_esperas: None) -> None:
+    pagina = _PaginaImportacion({"Importar", "Importar desde ARCA", "#btnImportarAFIPImportar", "Procesada"})
+
+    assert asyncio.run(PortalIvaPortal(pagina).importar_desde_arca("ventas"))
+
+    assert pagina.clics.index("button:Importar") < pagina.clics.index("link:Importar desde ARCA")
+    assert "css:#btnImportarAFIPImportar" in pagina.clics
+
+
+def test_importar_desde_arca_sin_boton_falla_con_diagnostico(sin_esperas: None) -> None:
+    pagina = _PaginaImportacion({"Importar", "Importar desde ARCA"})
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(PortalIvaPortal(pagina).importar_desde_arca("ventas"))
+    assert error.value.diagnostic_code == "portal_iva_import_arca_button_missing"
+
+
+def test_descargar_libro_limpia_registros_solo_si_se_pide(
+    sin_esperas: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pagina = _PaginaImportacion({"CSV", "Eliminar Todos...", ".bootstrap-dialog .btn-danger"})
+
+    async def capturar(self: PortalIvaPortal, ruta: Path, accion: Any, **_: Any) -> Path:
+        await accion()
+        ruta.write_text("fecha\n", encoding="utf-8")
+        return ruta
+
+    async def volver(self: PortalIvaPortal) -> None:
+        return None
+
+    monkeypatch.setattr(PortalIvaPortal, "capturar_descarga", capturar)
+    monkeypatch.setattr(PortalIvaPortal, "_volver_al_menu", volver)
+    portal = PortalIvaPortal(pagina)
+
+    asyncio.run(portal.descargar_libro("ventas", tmp_path / "ventas.csv"))
+    assert "button:Eliminar Todos..." not in pagina.clics
+
+    asyncio.run(portal.descargar_libro("ventas", tmp_path / "ventas2.csv", limpiar_despues=True))
+    assert "button:Eliminar Todos..." in pagina.clics
+
+
+class _ServicioFalso:
+    def __init__(self) -> None:
+        self.importados: list[tuple[str, str, str | None]] = []
+        self.descargas: list[tuple[str, bool, bool]] = []
+
+    async def importar_libro(self, *, libro: str, comprobantes: Path, alicuotas: Path | None = None) -> bool:
+        self.importados.append(
+            (
+                libro,
+                comprobantes.read_text(encoding="utf-8"),
+                alicuotas.read_text(encoding="utf-8") if alicuotas else None,
+            )
+        )
+        return True
+
+    async def descargar_libro(
+        self, *, libro: str, destino: Path, refrescar_desde_arca: bool = False, limpiar_despues: bool = False
+    ) -> Path:
+        destino.write_text("fecha\n", encoding="utf-8")
+        self.descargas.append((libro, refrescar_desde_arca, limpiar_despues))
+        return destino
+
+
+def _runtime_falso(tmp_path: Path) -> Any:
+    async def progreso(**_: Any) -> None:
+        return None
+
+    async def cancelar() -> None:
+        return None
+
+    return SimpleNamespace(
+        cancellation=SimpleNamespace(raise_if_cancelled=cancelar),
+        event_sink=SimpleNamespace(progress=progreso),
+        artifact_store=SimpleNamespace(resolve=lambda rel: tmp_path / rel),
+    )
+
+
+def _payload(**extra: Any) -> dict[str, Any]:
+    return {"periodo": "06/2025", "representado_cuit": "20123456789", **extra}
+
+
+def test_plugin_importar_envia_comprobantes_y_alicuotas_al_portal(tmp_path: Path) -> None:
+    async def _ejecutar() -> tuple[_ServicioFalso, dict[str, Any]]:
+        _, entrada = await PortalIvaPlugin().validate(
+            _payload(operacion="importar", ventas_txt="LIV", ventas_alicuotas_txt="ALI")
+        )
+        servicio = _ServicioFalso()
+        datos, _ = await PortalIvaPlugin()._importar(servicio, entrada, _runtime_falso(tmp_path), "20123456789")
+        return servicio, datos
+
+    servicio, datos = asyncio.run(_ejecutar())
+    assert servicio.importados == [("ventas", "LIV", "ALI")]
+    assert datos["importaciones"] == [{"libro": "ventas", "ok": True}]
+
+
+def test_plugin_importar_sin_alicuotas_se_rechaza_como_v1() -> None:
+    with pytest.raises(InvalidInputError):
+        asyncio.run(
+            PortalIvaPlugin().validate(_payload(operacion="importar", compras_txt="LIC"))
+        )
+
+
+def test_alicuotas_sin_su_comprobante_se_rechazan() -> None:
+    with pytest.raises(InvalidInputError):
+        asyncio.run(
+            PortalIvaPlugin().validate(
+                _payload(operacion="importar", ventas_txt="LIV", compras_alicuotas_txt="ALI")
+            )
+        )
+
+
+def test_plugin_descargar_refresca_y_limpia_por_defecto_como_v1(tmp_path: Path) -> None:
+    async def _ejecutar() -> _ServicioFalso:
+        _, entrada = await PortalIvaPlugin().validate(
+            _payload(operacion="descargar", descarga_ventas=True, subir_csv=False, limpiar_despues=True)
+        )
+        servicio = _ServicioFalso()
+        await PortalIvaPlugin()._descargar(servicio, entrada, _runtime_falso(tmp_path), "20123456789")
+        return servicio
+
+    assert asyncio.run(_ejecutar()).descargas == [("ventas", True, True)]

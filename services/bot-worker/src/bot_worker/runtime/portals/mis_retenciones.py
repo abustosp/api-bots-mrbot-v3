@@ -224,13 +224,15 @@ class MisRetencionesPortal(PortalArca):
         desde: str,
         hasta: str,
         para_aplicativo: bool = False,
+        export_option: str | None = None,
     ) -> Path:
         """Prepara filtros, consulta y materializa el CSV (port de V2)."""
         destino = Path(destino)
         await self.paso("preparar_consulta", self._preparar_consulta(impuesto, tipo, desde, hasta, para_aplicativo))
+        formato = export_option if export_option is not None else ("siap" if para_aplicativo else None)
         archivo = await self.paso(
             "exportar_csv",
-            self._consultar_y_descargar(destino, export_option="siap" if para_aplicativo else None),
+            self._consultar_y_descargar(destino, export_option=formato),
         )
         self._normalizar_exportacion_csv(Path(archivo))
         return Path(archivo)

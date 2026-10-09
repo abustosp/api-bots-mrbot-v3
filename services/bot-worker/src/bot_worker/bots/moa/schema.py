@@ -58,7 +58,11 @@ class MoaConsultarInput(_Base):
     rol: str = Field(default=ROL_DEFECTO, min_length=1, max_length=128)
     metodo: Literal["url", "form"] = "url"
     incluir_json: bool = True
-    subir_csv: bool = True
+    # V1 usa ``minio_upload``: decide si el CSV se sube. Alias de ``subir_csv``.
+    subir_csv: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir_csv", "minio_upload"),
+    )
 
     @model_validator(mode="before")
     @classmethod

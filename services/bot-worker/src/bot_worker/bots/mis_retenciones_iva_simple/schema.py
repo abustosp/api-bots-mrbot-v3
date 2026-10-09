@@ -25,7 +25,7 @@ FORMATO_FECHA = "%d/%m/%Y"
 
 
 class _Base(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
 
 def limpiar_cuit(valor: Any) -> str:
@@ -96,6 +96,8 @@ class MisRetencionesIvaSimpleConsultarInput(_Base):
     )
     incluir_json: bool = True
     subir_csv: bool = True
+    # V1 used this to reject a visually valid result from the wrong mode.
+    required_result_marker: str = "IVA SIMPLE"
 
     @model_validator(mode="before")
     @classmethod
@@ -145,5 +147,6 @@ def esquema_entrada() -> dict[str, Any]:
             "fecha_hasta": {"type": "string", "pattern": r"^\d{2}/\d{2}/\d{4}$"},
             "incluir_json": {"type": "boolean"},
             "subir_csv": {"type": "boolean"},
+            "required_result_marker": {"type": "string"},
         },
     }

@@ -1,13 +1,15 @@
 """Esquemas de entrada del bot ``arba`` (Ret/Per IIBB).
 
-Porta la validacion de V2
-(``api-bots-mrbot-v2/app/bot/arba_bot.py``: ``_validate_period`` y
+Porta la validacion de V1
+(``api-bots-mrbot/app/bot/arba_bot.py``: ``_validate_period`` y
 ``_build_download_name``):
 
 - CUIT de 11 digitos (se aceptan separadores); alias ``cuit``.
 - Periodo ``AAAAMM`` con mes 01-12 y no futuro.
 - Denominacion obligatoria (alias ``denominacion``); se sanitiza para
-  el nombre de archivo igual que V2.
+  el nombre de archivo igual que V1.
+- ``carga_minio`` (V1) como alias de ``subir``; las credenciales y
+  ``proxy_request`` viajan en el sobre sellado y se descartan.
 """
 
 from __future__ import annotations
@@ -16,11 +18,22 @@ import re
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CUIT_PATTERN = r"^\d{11}$"
 PERIODO_PATTERN = r"^\d{6}$"
 INVALID_FILENAME_RE = re.compile(r"[\\/:*?\"<>|]+")
+#: Campos del contrato compartido con V1 que V3 no toma del payload.
+CAMPOS_SOBRE_SELLADO = (
+    "clave",
+    "clave_representante",
+    "clave_encriptada",
+    "cuit_representante",
+    "cuit_inicio_sesion",
+    "cuit_login",
+    "proxy_request",
+    "proxy",
+)
 
 
 class _Base(BaseModel):
@@ -60,14 +73,14 @@ def validar_periodo(valor: Any) -> str:
 
 
 def sanear_parte_nombre(valor: str, default: str) -> str:
-    """Quita caracteres invalidos para archivos (port de V2)."""
+    """Quita caracteres invalidos para archivos (port de V1)."""
     texto = re.sub(r"\s+", " ", (valor or "").strip())
     texto = INVALID_FILENAME_RE.sub("", texto).strip()
     return texto or default
 
 
 def nombre_archivo_descarga(cuit: str, periodo: str, denominacion: str) -> str:
-    """Replica el patron V2 ``'<fin> - <cuit> - RETPER ARBA - ...zip'``."""
+    """Replica el patron V1 ``'<fin> - <cuit> - RETPER ARBA - ...zip'``."""
     digitos = re.sub(r"\D", "", cuit or "")
     if not digitos:
         raise ValueError("CUIT invalido o vacio.")
@@ -79,7 +92,7 @@ class ArbaDescargarInput(_Base):
     """Operacion ``descargar``: retenciones/percepciones IIBB ARBA."""
 
     representado_cuit: str = Field(
-        validation_alias=AliasChoices("representado_cuit", "cuit"),
+        validation_alias=AliasChoices("representado_cuit", "cuit", "cuit_representado"),
         min_length=11,
         max_length=14,
     )
@@ -89,7 +102,21 @@ class ArbaDescargarInput(_Base):
         min_length=1,
         max_length=128,
     )
-    subir: bool = True
+    subir: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "subir", "carga_minio", "minio_upload", "archivo_historico_minio"
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _descartar_sobre_sellado(cls, datos: Any) -> Any:
+        if isinstance(datos, dict):
+            datos = dict(datos)
+            for clave in CAMPOS_SOBRE_SELLADO:
+                datos.pop(clave, None)
+        return datos
 
     @field_validator("representado_cuit", mode="before")
     @classmethod
@@ -113,8 +140,11 @@ def esquema_entrada() -> dict[str, Any]:
         "properties": {
             "operacion": {"type": "string", "enum": ["descargar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
+            "cuit": {"type": "string", "pattern": CUIT_PATTERN},
             "periodo": {"type": "string", "pattern": PERIODO_PATTERN},
             "representado_nombre": {"type": "string"},
+            "denominacion": {"type": "string"},
             "subir": {"type": "boolean"},
+            "carga_minio": {"type": "boolean"},
         },
     }

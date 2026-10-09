@@ -84,7 +84,7 @@ class LibrosPortalIvaPlugin:
     manifest = BotManifest(
         nombre="libros_portal_iva",
         version="3.0.0",
-        operaciones=("descargar_libros", "descargar_ddjj"),
+        operaciones=("descargar", "descargar_libros", "descargar_ddjj"),
         esquema_entrada=esquema_entrada(),
         artefactos_produce=(
             ArtifactSpec(
@@ -137,7 +137,7 @@ class LibrosPortalIvaPlugin:
         """Valida operacion, CUIT y rango AAAAMM antes del navegador."""
         if not isinstance(payload, Mapping):
             raise InvalidInputError("payload debe ser objeto")
-        operacion = str(payload.get("operacion", "descargar_libros"))
+        operacion = str(payload.get("operacion", "descargar"))
         modelo = ENTRADAS.get(operacion)
         if modelo is None:
             raise InvalidInputError(f"operacion desconocida: {operacion}")
@@ -181,9 +181,32 @@ class LibrosPortalIvaPlugin:
                     self._portal_service, portal="libros_portal_iva"
                 )
                 await portal.seleccionar_representado(representado)
-                datos, artefactos = await self._descargar(
-                    portal, entrada, representado, periodos, operacion, runtime
-                )
+                if operacion == "descargar":
+                    datos_libros, artefactos_libros = await self._descargar(
+                        portal, entrada, representado, periodos, "descargar_libros", runtime
+                    )
+                    datos_ddjj, artefactos_ddjj = await self._descargar(
+                        portal, entrada, representado, periodos, "descargar_ddjj", runtime
+                    )
+                    datos = {
+                        "representado_cuit": representado,
+                        "periodo_desde": entrada.periodo_desde,
+                        "periodo_hasta": entrada.periodo_hasta,
+                        "libros": datos_libros,
+                        "ddjj": datos_ddjj,
+                        "periodos_descargados": (
+                            datos_libros["periodos_descargados"]
+                            + datos_ddjj["periodos_descargados"]
+                        ),
+                        "periodos_error": (
+                            datos_libros["periodos_error"] + datos_ddjj["periodos_error"]
+                        ),
+                    }
+                    artefactos = artefactos_libros + artefactos_ddjj
+                else:
+                    datos, artefactos = await self._descargar(
+                        portal, entrada, representado, periodos, operacion, runtime
+                    )
         except ErrorDeBot:
             raise
         except Exception as exc:

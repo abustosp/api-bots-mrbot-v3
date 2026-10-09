@@ -16,6 +16,11 @@ al contrato S7. Cambios obligatorios respecto de V2:
 - Sin credenciales en logs: el error es categoria + diagnostico
   redactado (``sin_secretos``); la clave fiscal nunca se interpola.
 
+Los campos de resultado de V1 se conservan: ``message`` cuando el portal no
+encuentra resultados y ``compensaciones_<excel|csv|pdf>_minio_url`` por cada
+formato exportado (en V3 el valor es el ``object_key`` del slot prefirmado,
+que la central convierte en URL publica).
+
 La sesion de navegador se obtiene de ``runtime.browser_factory`` con
 ``arca_session``; el plugin nunca importa Playwright directo ni
 desactiva headless/proxy/limpieza.
@@ -26,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 from bot_worker.bots.compensaciones.schema import esquema_entrada
@@ -57,14 +63,23 @@ FORMATOS = (
     ("CSV", "csv", "compensaciones.csv"),
     ("PDF", "pdf", "compensaciones.pdf"),
 )
+#: V1 nombra el objeto subido ``sct_compensaciones_<cuit>_<AAAAMMDD_HHMMSS>.<ext>``.
+PREFIJO_OBJETO = "sct_compensaciones"
 
 
-def nombre_descarga(representado_cuit: str, formato: str, sugerido: str) -> str:
-    """Replica el patron V2 ``'sct_compensaciones_<cuit>_<ts>.<ext>'``."""
-    limpio = re.sub(r"[\\/:*?\"<>|]+", "_", sugerido or "")
-    limpio = re.sub(r"\s+", "_", limpio).strip("_") or f"compensaciones.{formato.lower()}"
+def nombre_descarga(
+    representado_cuit: str, formato: str, sugerido: str = ""
+) -> str:
+    """Nombre del archivo/objeto con el patron V1 ``sct_compensaciones_...``.
+
+    V1 guarda la descarga en un temporal con el nombre sugerido y sube el
+    archivo al bucket como ``sct_compensaciones_<cuit>_<sello><ext>``. En V3 el
+    nombre del artefacto es el del objeto, asi que se usa directamente el
+    patron de V1 conservando la extensión real que entregó el portal.
+    """
+    extension = Path(str(sugerido or "")).suffix or f".{formato.lower()}"
     sello = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"sct_compensaciones_{representado_cuit}_{sello}_{limpio}"
+    return f"{PREFIJO_OBJETO}_{representado_cuit}_{sello}{extension.lower()}"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -206,9 +221,12 @@ class CompensacionesPlugin:
                 }
                 artefactos: list[dict[str, Any]] = []
                 if estado == "sin_resultados":
+                    # V1 devolvia ``message`` con este texto y éxito.
                     datos["mensaje"] = "No se encontraron resultados"
+                    datos["message"] = datos["mensaje"]
                     return BotResult(result="OK", data=datos)
-                for formato, _flag, slot in pedidos:
+                fallos: list[tuple[str, TargetUnavailableError]] = []
+                for formato, flag, slot in pedidos:
                     await runtime.cancellation.raise_if_cancelled()
                     await runtime.event_sink.progress(
                         phase="PROCESANDO",
@@ -219,8 +237,16 @@ class CompensacionesPlugin:
                         entrada.representado_cuit, formato, slot
                     )
                     destino = runtime.artifact_store.resolve(nombre)
-                    await servicio.exportar(formato, destino)
+                    try:
+                        await servicio.exportar(formato, destino)
+                    except TargetUnavailableError as exc:
+                        # V1 seguia con el resto de los formatos y recien fallaba
+                        # si no lograba ningun archivo.
+                        fallos.append((flag, exc))
+                        continue
                     resumen: dict[str, Any] = {"archivo": nombre}
+                    datos[flag] = resumen
+                    datos[f"compensaciones_{flag}_minio_url"] = None
                     if entrada.subir:
                         try:
                             referencia = await runtime.artifact_store.upload(
@@ -231,7 +257,20 @@ class CompensacionesPlugin:
                         artefactos.append(referencia)
                         resumen["sha256"] = referencia["sha256"]
                         resumen["size_bytes"] = referencia["size_bytes"]
-                    datos[formato.lower()] = resumen
+                        # V1 devolvia la URL de MinIO; en V3 el objeto sube por
+                        # slot prefirmado y la central arma la URL publica.
+                        datos[f"compensaciones_{flag}_minio_url"] = (
+                            referencia.get("object_key") or None
+                        )
+                if not artefactos and fallos and len(fallos) == len(pedidos):
+                    raise fallos[0][1]
+                if fallos:
+                    datos.setdefault("warnings", []).append(
+                        "no se pudo exportar: "
+                        + ", ".join(
+                            f"{flag} ({exc.diagnostic_code})" for flag, exc in fallos
+                        )
+                    )
         except ErrorDeBot:
             raise
         except Exception as exc:
