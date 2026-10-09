@@ -19,6 +19,15 @@ de V2:
 - Sin credenciales en logs: el error es categoria + diagnostico
   redactado (``sin_secretos``); la clave fiscal nunca se interpola.
 
+Divergencia deliberada respecto de V1/V2 (no se corrige hacia V1):
+
+- Si el CUIT representado no aparece entre las opciones de LUFE, el portal
+  NO selecciona la primera opcion, como hacen V1/V2. Falla con
+  ``TargetUnavailableError`` y ``diagnostic_code="represented_cuit_not_selectable"``
+  (categoria ``TARGET_UNAVAILABLE``, reintentable). Motivo: V1/V2 podian
+  descargar el certificado de otra entidad. Test que lo fija:
+  ``tests/test_certificado_mipyme_plugin.py::test_cuit_ausente_en_lufe_falla_sin_descargar_ni_subir``.
+
 La sesion de navegador se obtiene de ``runtime.browser_factory`` con
 ``arca_session``; el plugin nunca importa Playwright directo ni
 desactiva headless/proxy/limpieza.

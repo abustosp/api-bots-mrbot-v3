@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 import unicodedata
 from difflib import SequenceMatcher
+import base64
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,91 @@ from .base import PortalArca, solo_digitos
 
 URL_RCEL = "https://fe.afip.gob.ar/rcel/jsp/index_bis.jsp"
 TITULO_PDF = "Ver el documento original para imprimir o reimprimir"
+
+# Campos de la factura y patrones sobre el texto de la primera pagina (port de V1
+# ``extraer_y_procesar_pdf``). Cada patron captura un grupo.
+CAMPOS_FACTURA: dict[str, str] = {
+    "COD": r"(?:CÓD\.|COD\.)\s*(\d+)",
+    "CUIT del Emisor": r"CUIT:\s*(\d+)",
+    "Punto de Venta": r"Punto de Venta:\s*(\d+)",
+    "Número de Factura": r"Comp\. Nro:\s*(\d+)",
+    "Domicilio Vendedor": r"Domicilio Comercial:\s*([A-Za-z0-9\s:.,-]+?)\s*CUIT:",
+    "Condición Vendedor": r"Condición frente al IVA:\s*([A-Za-z0-9\s:.,-]+?)\s*Fecha",
+    "Fecha": r"Fecha de Emisión:\s*(\d{2}/\d{2}/\d{4})",
+    "Desde": r"Desde:\s*(\d{2}/\d{2}/\d{4})",
+    "Hasta": r"Hasta:\s*(\d{2}/\d{2}/\d{4})",
+    "CUIT del Receptor": r"([0-9]{8,11})\sApellido y Nombre",
+    "Nombre del Receptor": r"Apellido y Nombre \/ Razón Social:\s*(.+\n)",
+    "Condición Comprador": r"Condición frente al IVA:\s*([A-Za-z0-9\s:.,-]+?)\s*Domicilio",
+    "Domicilio Cliente": r"Domicilio:\s*(.+)",
+    "Importe Neto Gravado": r"Importe Neto Gravado:\s*\$ ([\d,]+)",
+    "IVA 0%": r"IVA\s*0%:\s*\$ ([\d,]+)",
+    "IVA 2,5%": r"IVA\s*2,5%:\s*\$ ([\d,]+)",
+    "IVA 5%": r"IVA\s*5%:\s*\$ ([\d,]+)",
+    "IVA 10,5%": r"IVA\s*10,5%:\s*\$ ([\d,]+)",
+    "IVA 21%": r"IVA\s*21%:\s*\$ ([\d,]+)",
+    "IVA 27%": r"IVA\s*27%:\s*\$ ([\d,]+)",
+    "Otros Tributos": r"Otros Tributos:\s*\$ ([\d,]+)",
+    "Importe Total": r"Importe Total:\s*\$ ([\d,]+)",
+    "CAE": r"CAE N°:\s*(\d+)",
+    "Vencimiento CAE": r"Fecha de Vto\. de CAE:\s*([\d/]+)",
+}
+
+CAMPOS_FACTURA_VACIOS: tuple[str, ...] = (
+    "CUIT del Emisor", "COD", "Punto de Venta", "Número de Factura",
+    "Domicilio Vendedor", "Condición Vendedor", "Fecha", "Desde", "Hasta",
+    "CUIT del Receptor", "Nombre del Receptor", "Condición Comprador",
+    "Domicilio Cliente", "Importe Neto Gravado", "IVA 0%", "IVA 2,5%",
+    "IVA 5%", "IVA 10,5%", "IVA 21%", "IVA 27%", "Otros Tributos",
+    "Importe Total", "CAE", "Vencimiento CAE", "AUX",
+)
+
+
+def extraer_campos_factura(pdf_data: bytes, incluir_b64: bool = False) -> dict[str, str]:
+    """Extrae los campos de una factura electronica desde su PDF (port de V1).
+
+    Usa pdfplumber sobre la primera pagina. Los campos que no aparecen quedan
+    vacios. ``AUX`` se arma como ``CUIT-COD-PV-Nro``. Con ``incluir_b64`` agrega
+    el PDF completo en base64.
+
+    Lanza ``ValueError`` si el PDF no se puede leer o no tiene paginas.
+    """
+    import pdfplumber
+
+    info: dict[str, str] = {campo: "" for campo in CAMPOS_FACTURA_VACIOS}
+    try:
+        with pdfplumber.open(BytesIO(pdf_data)) as pdf:
+            if not pdf.pages:
+                raise ValueError("El PDF no contiene páginas.")
+            texto = pdf.pages[0].extract_text()
+    except Exception as exc:
+        raise ValueError(f"Error procesando el PDF: {exc}") from exc
+
+    if texto:
+        for campo, patron in CAMPOS_FACTURA.items():
+            coincidencia = re.search(patron, texto)
+            info[campo] = coincidencia.group(1) if coincidencia else ""
+
+        # Si no aparece el domicilio del cliente, V1 toma el texto que sigue a la
+        # segunda aparicion de "Comercial:".
+        if info["Domicilio Cliente"] == "":
+            coincidencia = re.search(
+                r"Domicilio Comercial:\s*([A-Za-z0-9\s:.,-]+?)\s*CUIT:", texto
+            )
+            if coincidencia:
+                segunda = re.search(r"Comercial:\s*(.+)", texto[coincidencia.end():])
+                info["Domicilio Cliente"] = segunda.group(1) if segunda else ""
+
+        # Paridad con V1: AUX se arma siempre que haya texto, aunque falten
+        # partes. Sin datos queda "---"; con solo el CUIT, "CUIT--".
+        info["AUX"] = (
+            f"{info['CUIT del Emisor']}-{info['COD']}-"
+            f"{info['Punto de Venta']}-{info['Número de Factura']}"
+        )
+
+        if incluir_b64:
+            info["B64"] = base64.b64encode(pdf_data).decode("utf-8")
+    return info
 
 
 def _normalizar_nombre(texto: str) -> str:
@@ -77,6 +164,8 @@ class RcelPortal(PortalArca):
         super().__init__(page, **kwargs)
         self._cuit_representado = ""
         self._nombre_representado = ""
+        # Fallos por comprobante durante la descarga. Como V1, no cortan la corrida.
+        self.errores_descarga: list[str] = []
 
     def _contextos(self) -> list[Any]:
         contextos = [self.page]
@@ -308,6 +397,23 @@ class RcelPortal(PortalArca):
         except Exception:
             pass
 
+    async def extraer_campos(self, ruta: Path, incluir_b64: bool = False) -> dict[str, str]:
+        """Campos de la factura descargada en ``ruta`` (ver ``extraer_campos_factura``)."""
+        try:
+            pdf_data = Path(ruta).read_bytes()
+        except OSError as exc:
+            raise TargetUnavailableError(
+                "no se pudo leer el PDF de RCEL para extraer campos",
+                diagnostic_code="rcel_pdf_unreadable",
+            ) from exc
+        try:
+            return extraer_campos_factura(pdf_data, incluir_b64=incluir_b64)
+        except ValueError as exc:
+            raise TargetUnavailableError(
+                "no se pudieron extraer los campos del PDF de RCEL",
+                diagnostic_code="rcel_pdf_fields_failed",
+            ) from exc
+
     async def descargar_facturas(
         self, desde: str, hasta: str, destino_dir: Path
     ) -> list[str]:
@@ -384,22 +490,23 @@ class RcelPortal(PortalArca):
             except Exception:
                 continue
 
+        # Paridad con V1 (``descargar_facturas``): cada PDF se guarda con el nombre
+        # que sugiere el portal (``suggested_filename``). Un comprobante que no se
+        # puede bajar se registra en ``errores_descarga`` y no corta la corrida.
+        # La validez del PDF la decide la extraccion, como en V1.
+        self.errores_descarga = []
         nombres: list[str] = []
-        for indice, enlace in enumerate(enlaces, start=1):
-            nombre = f"comprobante_{indice:03d}.pdf"
-            ruta = await self.capturar_descarga(
-                destino / nombre,
-                lambda enlace=enlace: enlace.click(timeout=15_000),
-                espera_ms=60_000,
-            )
+        for enlace in enlaces:
             try:
-                es_pdf = ruta.read_bytes()[:5] == b"%PDF-"
-            except OSError:
-                es_pdf = False
-            if not es_pdf:
-                raise TargetUnavailableError(
-                    "RCEL entregó un archivo que no es un PDF válido",
-                    diagnostic_code="rcel_pdf_invalid",
+                async with self.page.expect_download(timeout=60_000) as info:
+                    await enlace.click(timeout=15_000)
+                descarga = await info.value
+                nombre = Path(descarga.suggested_filename).name
+                await descarga.save_as(str(destino / nombre))
+            except Exception as exc:
+                self.errores_descarga.append(
+                    f"Error al descargar factura: {type(exc).__name__}"
                 )
+                continue
             nombres.append(nombre)
         return nombres

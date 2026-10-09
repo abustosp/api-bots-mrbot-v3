@@ -212,27 +212,54 @@ class RcelPlugin:
             hasta=entrada.fecha_hasta,
             destino_dir=destino,
         )
+        # Fallos de descarga por comprobante (V1: ``error_logs``). No cortan la corrida.
+        errores: list[Any] = [
+            BotError(
+                category=Categoria.TARGET_UNAVAILABLE,
+                internal_diagnostic=mensaje,
+                retryable=True,
+            )
+            for mensaje in list(getattr(servicio, "errores_descarga", None) or [])
+        ]
         datos: dict[str, Any] = {
             "operacion": "descargar",
             "representado_cuit": entrada.representado_cuit,
             "fecha_desde": entrada.fecha_desde,
             "fecha_hasta": entrada.fecha_hasta,
-            "cantidad": len(nombres),
+            "cantidad": 0,
             "facturas": [],
         }
         artefactos: list[dict[str, Any]] = []
-        errores: list[Any] = []
-        for indice, nombre in enumerate(nombres):
+        # Paridad con V1 (``procesar_pdf`` / ``extraer_y_procesar_pdf``): por PDF se
+        # extraen los campos y, si corresponde, se sube. Si cualquiera de los dos
+        # falla, el PDF se reporta en ``errores``, queda fuera de ``facturas`` y la
+        # corrida sigue con los demas.
+        for nombre in nombres:
             await runtime.cancellation.raise_if_cancelled()
             ruta = runtime.artifact_store.resolve(f"{base}.descargas/{nombre}")
             resumen: dict[str, Any] = {"archivo": nombre}
+            if getattr(entrada, "extraer_campos", True):
+                try:
+                    resumen["campos"] = await servicio.extraer_campos(ruta)
+                except ErrorDeBot as exc:
+                    errores.append(
+                        BotError(
+                            category=Categoria.TARGET_UNAVAILABLE,
+                            internal_diagnostic=(
+                                f"extraccion de {nombre}: "
+                                f"{getattr(exc, 'diagnostic_code', None) or exc.diagnostico}"
+                            ),
+                            retryable=False,
+                        )
+                    )
+                    continue
             if getattr(entrada, "subir_pdf", True):
                 await runtime.event_sink.progress(
                     phase="SUBIENDO", percent=80, message=f"Subiendo {nombre}"
                 )
                 try:
                     referencia = await runtime.artifact_store.upload(
-                        f"rcel_{indice:03d}.pdf", f"{base}.descargas/{nombre}"
+                        f"rcel_{len(artefactos):03d}.pdf", f"{base}.descargas/{nombre}"
                     )
                 except ValueError as exc:
                     errores.append(
@@ -248,6 +275,7 @@ class RcelPlugin:
                 resumen["size_bytes"] = referencia["size_bytes"]
             else:
                 resumen["size_bytes"] = ruta.stat().st_size if ruta.is_file() else 0
+            datos["cantidad"] += 1
             if getattr(entrada, "incluir_json", True):
                 datos["facturas"].append(resumen)
         if not getattr(entrada, "incluir_json", True):

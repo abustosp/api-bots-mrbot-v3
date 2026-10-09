@@ -5,7 +5,8 @@
 # bot_worker.main:app y contratos en packages/mrbot-contracts).
 #
 # Playwright y Chromium los provee la base interna; el paquete declara
-# solo FastAPI, Uvicorn, Pydantic y httpx. No instala psycopg,
+# FastAPI, Uvicorn, Pydantic, httpx y pdfplumber (extraccion de campos de
+# facturas RCEL). No instala psycopg,
 # SQLAlchemy ni Alembic: el worker nunca toca PostgreSQL (invariante
 # W-1). La barrera de imports al final del build es defensa adicional;
 # CI tambien inspecciona el entorno final con pip list.

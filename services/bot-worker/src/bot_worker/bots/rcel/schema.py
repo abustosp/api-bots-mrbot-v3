@@ -64,7 +64,14 @@ class RcelDescargarInput(_Base):
         max_length=10,
     )
     incluir_json: bool = True
-    subir_pdf: bool = True
+    # V1 usa ``minio_upload``: decide si el PDF se sube. Alias de ``subir_pdf``.
+    subir_pdf: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir_pdf", "minio_upload"),
+    )
+    # Por defecto extrae AUX, emisor, receptor e importes de cada PDF, como
+    # V1 (rcel_bot.py extraer_y_procesar_pdf). Se puede apagar explicitamente.
+    extraer_campos: bool = True
 
     @model_validator(mode="before")
     @classmethod
