@@ -72,7 +72,7 @@ def test_public_signup_disables_user_and_admin_can_enable_then_rotate(monkeypatc
         personal = token_response
         assert personal.status_code == 200
         assert personal.json()["estado"] == "habilitado"
-        assert personal.json()["plan"] == "free"
+        assert personal.json()["tipo_cuenta"] == "PRUEBA"
         assert personal.json()["consultas"]["disponibles"] >= 0
 
         changed = client.post(

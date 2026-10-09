@@ -68,7 +68,7 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "Desactivar" in cuerpo and "Activar" in cuerpo
     assert 'data-action="account-save"' in cuerpo
     assert "function accountEditor(user)" in cuerpo
-    for account_type in ("CREDITOS", "TIER", "GRATUITA", "LIBRE"):
+    for account_type in ("PRUEBA", "TESTING", "NORMAL"):
         assert account_type in cuerpo
     assert "/admin/billing/accounts/${encodeURIComponent(userId)}/account-type" in cuerpo
     assert 'data-account-reason="${esc(user.id)}" type="text" minlength="10" maxlength="500"' in cuerpo

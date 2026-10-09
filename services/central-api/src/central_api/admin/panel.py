@@ -206,7 +206,7 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3. Para depuración se admite un nombre sin mail (p. ej. abp). En la columna API Key: «Ver» la muestra, «Copiar» la copia y «Guardar» reemplaza la clave por lo que escribas (vacío = aleatoria). La clave se guarda cifrada, nunca en texto plano.</p>
         <form id="users-filter" class="toolbar"><div class="field wide"><label for="users-email">Buscar por email o usuario</label><input id="users-email" name="email" type="search" placeholder="cliente@example.com o abp"></div><div class="field"><label for="users-state">Estado</label><select id="users-state"><option value="">Todos</option><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><button class="button primary" type="submit">Buscar</button></form>
         <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-plan">Plan</label><select id="new-plan"><option>free</option><option>basico</option><option>pro</option><option>empresa</option></select></div><div class="field"><label for="new-api-key">API key (mínimo 3; las claves cortas son débiles)</label><input id="new-api-key" type="password" minlength="3" placeholder="Vacío = generar automáticamente; mínimo 3 caracteres" autocomplete="new-password"></div><div class="field"><label for="new-state">Estado inicial</label><select id="new-state"><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" minlength="3" maxlength="500" required></div></div><div class="form-actions"><label class="checkbox-inline"><input id="new-send-credentials" type="checkbox"> Enviar credenciales por email</label><button class="button primary" type="submit">Crear usuario</button></div></form></div></details>
-        <div class="table-wrap"><table><thead><tr><th>User ID</th><th>Email / usuario</th><th>Nombre</th><th>Plan</th><th>Tipo de cuenta</th><th>API Key</th><th>Estado</th><th>Créditos</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>User ID</th><th>Email / usuario</th><th>Nombre</th><th>Tipo</th><th>Cuenta</th><th>API Key</th><th>Estado</th><th>Cupo</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="jobs">
@@ -578,15 +578,11 @@ details > .details-body { padding: 0 14px 14px; }
     return `<div class="key-cell">${input}${ver}<button type="button" class="button primary small" data-action="key-save" ${ids}>Guardar</button></div>`;
   }
   function accountEditor(user) {
-    const mode = user.account_type || "CREDITOS";
-    const plan = user.plan_code || "tier-100";
-    const expires = user.account_expires_at ? new Date(user.account_expires_at).toISOString().slice(0, 16) : "";
-    const options = ["CREDITOS", "TIER", "GRATUITA", "LIBRE"].map((value) => `<option value="${value}" ${mode === value ? "selected" : ""}>${value}</option>`).join("");
-    const plans = [100, 500, 1000, 2500, 5000, 10000].map((count) => {
-      const code = `tier-${count}`;
-      return `<option value="${code}" ${plan === code ? "selected" : ""}>${count.toLocaleString("es-AR")} requests</option>`;
-    }).join("");
-    return `<details><summary>${esc(mode)} · configurar</summary><div class="details-body"><div class="form-grid"><div class="field"><label>Tipo de cuenta</label><select data-account-mode="${esc(user.id)}">${options}</select></div><div class="field"><label>Tier mensual</label><select data-account-plan="${esc(user.id)}">${plans}</select></div><div class="field"><label>Límite LIBRE (requests)</label><input data-account-max="${esc(user.id)}" type="number" min="1" max="10000000" value="${esc(user.max_requests ?? "")}" placeholder="Obligatorio para LIBRE"></div><div class="field"><label>Gratuita vigente hasta</label><input data-account-expiry="${esc(user.id)}" type="datetime-local" value="${esc(expires)}"></div><div class="field wide"><label>Motivo obligatorio</label><input data-account-reason="${esc(user.id)}" type="text" minlength="10" maxlength="500" placeholder="Motivo del cambio (mínimo 10 caracteres)"></div></div><div class="form-actions"><button type="button" class="button primary small" data-action="account-save" data-id="${esc(user.id)}">Guardar tipo de cuenta</button></div></div></details>`;
+    const mode = user.account_type || "PRUEBA";
+    const labels = { PRUEBA: "Prueba (100 únicas)", TESTING: "Testing (ilimitada)", NORMAL: "Normal (cupo mensual)" };
+    const options = Object.keys(labels).map((value) => `<option value="${value}" ${mode === value ? "selected" : ""}>${labels[value]}</option>`).join("");
+    const limit = mode === "NORMAL" ? esc(user.max_requests ?? "") : "";
+    return `<details><summary>${esc(mode)} · configurar</summary><div class="details-body"><div class="form-grid"><div class="field"><label>Tipo de cuenta</label><select data-account-mode="${esc(user.id)}">${options}</select></div><div class="field"><label>Cupo mensual NORMAL (requests/mes)</label><input data-account-max="${esc(user.id)}" type="number" min="1" max="10000000" value="${limit}" placeholder="Obligatorio para NORMAL"></div><div class="field wide"><label>Motivo obligatorio</label><input data-account-reason="${esc(user.id)}" type="text" minlength="10" maxlength="500" placeholder="Motivo del cambio (mínimo 10 caracteres)"></div></div><div class="form-actions"><button type="button" class="button primary small" data-action="account-save" data-id="${esc(user.id)}">Guardar tipo de cuenta</button></div></div></details>`;
   }
   async function loadUsers(event) {
     if (event) event.preventDefault();
@@ -596,7 +592,7 @@ details > .details-body { padding: 0 14px 14px; }
       const rows = data.usuarios || [];
       $("#users-table").innerHTML = rows.length ? rows.map((user) => {
         const enabled = user.estado === "habilitado";
-        return `<tr><td><div class="user-id"><code>${esc(user.id)}</code><button type="button" class="button secondary small" data-action="copy-user-id" data-id="${esc(user.id)}" title="Copiar user ID">Copiar</button></div></td><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${accountEditor(user)}</td><td>${userKeyCell(user, enabled)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.saldo_creditos ?? "—")}</td><td class="actions"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button></td></tr>`;
+        return `<tr><td><div class="user-id"><code>${esc(user.id)}</code><button type="button" class="button secondary small" data-action="copy-user-id" data-id="${esc(user.id)}" title="Copiar user ID">Copiar</button></div></td><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${accountEditor(user)}</td><td>${userKeyCell(user, enabled)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.max_requests ?? "∞")}</td><td class="actions"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button></td></tr>`;
       }).join("") : `<tr><td colspan="9" class="empty">No hay usuarios para ese filtro.</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
   }
@@ -723,12 +719,10 @@ details > .details-body { padding: 0 14px 14px; }
       const reason = $(`[data-account-reason="${CSS.escape(userId)}"]`).value.trim();
       if (reason.length < 10 || reason.length > 500) { flash("El motivo debe tener entre 10 y 500 caracteres.", "error"); return; }
       const payload = { account_type: mode, motivo: reason };
-      if (mode === "TIER") payload.plan_code = $(`[data-account-plan="${CSS.escape(userId)}"]`).value;
-      if (mode === "LIBRE") payload.max_requests = Number($(`[data-account-max="${CSS.escape(userId)}"]`).value);
-      if (mode === "GRATUITA") {
-        const value = $(`[data-account-expiry="${CSS.escape(userId)}"]`).value;
-        if (!value) { flash("Indica el vencimiento de la cuenta gratuita.", "error"); return; }
-        payload.expires_at = new Date(value).toISOString();
+      if (mode === "NORMAL") {
+        const max = Number($(`[data-account-max="${CSS.escape(userId)}"]`).value);
+        if (!Number.isInteger(max) || max < 1) { flash("Indica el cupo mensual de la cuenta NORMAL.", "error"); return; }
+        payload.max_requests = max;
       }
       try {
         await api(`/admin/billing/accounts/${encodeURIComponent(userId)}/account-type`, { method: "POST", body: JSON.stringify(payload) });

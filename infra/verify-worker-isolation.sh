@@ -116,7 +116,6 @@ CENTRAL_ONLY = {
     "postgres_app_password",
     "rsa_private_key",
     "smtp_password",
-    "mercadopago_access_token",
     "minio_central_credentials",
     "session_signing_key",
     "api_key_hmac_secret",

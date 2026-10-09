@@ -155,7 +155,6 @@ La separación de dependencias no es cosmética, hace cumplir el invariante W-1.
 | pdfplumber, beautifulsoup4 | sí (utilidades) | sí |
 | minio | sí (firma URLs) | no (usa URLs prefirmadas) |
 | jinja2 | sí (panel) | no |
-| mercadopago | sí | no |
 
 Una verificación de integración continua comprueba que la imagen del worker no
 tiene driver de base de datos instalado.

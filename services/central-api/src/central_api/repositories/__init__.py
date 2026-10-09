@@ -9,7 +9,6 @@ from central_api.repositories.base import (
     RepositoryError,
     assert_no_secretos,
 )
-from central_api.repositories.billing import BillingRepository
 from central_api.repositories.catalog import ArtifactRepository, CatalogRepository
 from central_api.repositories.identities import IdentityRepository
 from central_api.repositories.jobs import CLAIM_SQL, REAP_EXPIRED_SQL, JobRepository
@@ -22,7 +21,6 @@ from central_api.repositories.workers import (
 __all__ = [
     "ArtifactRepository",
     "AuditRepository",
-    "BillingRepository",
     "CLAIM_SQL",
     "CatalogRepository",
     "HEARTBEAT_FRESH_SECONDS",

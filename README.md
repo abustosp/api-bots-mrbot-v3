@@ -259,7 +259,7 @@ X-API-Key: <clave>
 | F1 | Esquema PostgreSQL y migraciones |
 | F2 | Plano de control mínimo y un bot de punta a punta |
 | F3 | Portado de los ~30 bots |
-| F4 | Suscripciones, créditos y MercadoPago |
+| F4 | Cuentas PRUEBA/TESTING/NORMAL con cupo de requests (sin pagos automáticos) |
 | F5 | Panel de administración y observabilidad de la flota |
 | F6 | Endurecimiento, pruebas de carga y caos, cutover |
 

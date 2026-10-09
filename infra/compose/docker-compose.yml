@@ -13,7 +13,7 @@
 #   # crear secretos de desarrollo (placeholders, nunca valores reales):
 #   mkdir -p secrets && for s in postgres_app_password database_url \
 #     api_key_hmac_secret session_signing_key smtp_password \
-#     mercadopago_access_token minio_central_credentials worker_auth_token \
+#     minio_central_credentials worker_auth_token \
 #     proxy_credentials capmonster_arca_key capmonster_srt_key \
 #     cuit_service_key ai_api_key minio_root_user minio_root_password \
 #     oidc_client_secret; do
@@ -138,7 +138,6 @@ services:
       - rsa_private_key
       - assignment_signing_key
       - smtp_password
-      - mercadopago_access_token
       - minio_central_credentials
       - minio_root_user
       - minio_root_password
@@ -392,8 +391,6 @@ secrets:
     file: ./secrets/assignment_signing_key.pem
   smtp_password:
     file: ./secrets/smtp_password.txt
-  mercadopago_access_token:
-    file: ./secrets/mercadopago_access_token.txt
   minio_central_credentials:
     file: ./secrets/minio_central_credentials.txt
   worker_auth_token:

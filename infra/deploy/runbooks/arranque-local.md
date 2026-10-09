@@ -52,7 +52,7 @@ mkdir -p secrets
 [ -s secrets/minio_root_user.txt ] || printf 'mrbot-local\n' > secrets/minio_root_user.txt
 [ -s secrets/minio_root_password.txt ] || openssl rand -hex 32 > secrets/minio_root_password.txt
 for s in api_key_hmac_secret session_signing_key smtp_password \
-  mercadopago_access_token minio_central_credentials worker_auth_token \
+  minio_central_credentials worker_auth_token \
   proxy_credentials capmonster_arca_key capmonster_srt_key \
   cuit_service_key ai_api_key oidc_client_secret; do
   [ -s secrets/$s.txt ] || openssl rand -hex 32 > secrets/$s.txt

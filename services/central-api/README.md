@@ -17,7 +17,7 @@ Servicio central de la V3. Es el **plano de control** completo del sistema.
 | Planificación | Cola de jobs en PostgreSQL y reparto entre workers sanos |
 | Gobierno de la flota | Registro de workers, ingesta de latidos, clasificación de salud |
 | Panel de administración | Usuarios, jobs, flota, suscripciones, auditoría |
-| Facturación | Planes, suscripciones, créditos, webhooks de MercadoPago |
+| Cuentas | Tipos PRUEBA, TESTING y NORMAL con cupo de requests (sin pagos automáticos) |
 
 ## Lo que este servicio es el único en tener
 
@@ -42,7 +42,7 @@ Servicio central de la V3. Es el **plano de control** completo del sistema.
 | `GET` | `/jobs` | Listado propio con filtros y paginación por cursor |
 | `GET` | `/bots` | Catálogo de bots disponibles |
 | `GET` | `/bots/{bot}` | Detalle, operaciones y esquema de entrada |
-| `GET` | `/mi/cuenta` | Plan, consumo del período y saldo de créditos |
+| `GET` | `/mi/cuenta` | Tipo de cuenta, cupo, consumo y período vigente |
 
 ### Middleware de bots y compatibilidad V2
 
@@ -236,7 +236,7 @@ services/central-api/
     ├── models/              # ORM
     ├── schemas/             # entrada y salida
     ├── security/            # claves API, RSA, sesiones
-    ├── billing/             # planes, creditos, MercadoPago
+    ├── billing/             # tipos de cuenta y cupo de requests
     └── observability/       # logging, metricas
 ```
 

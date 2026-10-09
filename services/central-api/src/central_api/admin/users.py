@@ -4,7 +4,7 @@
 - La clave API se muestra UNA sola vez al emitirla; en el store solo quedan
   el prefijo y el verificador HMAC, nunca el valor.
 - Los ajustes de crédito son entradas compensatorias del ledger con motivo
-  obligatorio; nunca una actualización opaca del saldo.
+  obligatorio.
 - Toda operación exige motivo de 3 a 500 caracteres (el mismo mínimo que la
   API key) y genera auditoría.
 """
@@ -49,12 +49,9 @@ class AdminUser:
     email: str
     display_name: str = ""
     estado: str = "habilitado"
-    plan: str = "free"
-    account_type: str = "CREDITOS"
-    plan_code: str | None = None
-    max_requests: int | None = None
-    account_expires_at: object | None = None
-    saldo_creditos: int | None = 0
+    plan: str = "prueba"
+    account_type: str = "PRUEBA"
+    max_requests: int | None = 100
     motivo: str = ""
 
 
@@ -73,23 +70,8 @@ class ApiKeyMeta:
     valor_cifrado: str | None = field(default=None, repr=False)
 
 
-@dataclass
-class CreditEntry:
-    """Entrada compensatoria del ledger de créditos (append-only)."""
-
-    id: str
-    user_id: str
-    delta: int
-    saldo_previo: int
-    saldo_posterior: int
-    motivo: str
-    actor: str
-    creada_en: str
-
-
 USERS: dict[str, AdminUser] = {}
 API_KEYS: dict[str, ApiKeyMeta] = {}
-CREDIT_LEDGER: list[CreditEntry] = []
 
 
 def _nuevo_id() -> str:
@@ -209,38 +191,13 @@ def emitir_clave(
     return meta, valor
 
 
-def aplicar_credito(
-    user_id: str, delta: int, motivo: str, actor: str
-) -> CreditEntry:
-    """Agrega una entrada compensatoria y actualiza el saldo derivado."""
-    usuario = USERS.get(user_id)
-    if usuario is None:
-        raise HTTPException(status_code=404, detail="usuario no encontrado")
-    # Los usuarios hidratados desde PostgreSQL llegan con saldo desconocido
-    # (None): el libro del panel arranca en 0 en vez de fallar con 500.
-    previo = usuario.saldo_creditos or 0
-    posterior = previo + delta
-    if posterior < 0:
-        raise HTTPException(status_code=422, detail="saldo de créditos negativo")
-    usuario.saldo_creditos = posterior
-    entrada = CreditEntry(
-        id=_nuevo_id(),
-        user_id=user_id,
-        delta=delta,
-        saldo_previo=previo,
-        saldo_posterior=posterior,
-        motivo=motivo,
-        actor=actor,
-        creada_en=utcnow().isoformat(),
-    )
-    CREDIT_LEDGER.append(entrada)
-    return entrada
-
-
 class CrearUsuarioBody(BaseModel):
     email: str
     display_name: str = ""
-    plan: str = "free"
+    plan: str = Field(
+        default="",
+        description="Obsoleto: se ignora. Todo usuario nuevo nace con cuenta PRUEBA.",
+    )
     api_key: str = Field(
         default="",
         description=(
@@ -288,16 +245,6 @@ class RotarClaveBody(BaseModel):
         default="",
         description="Nuevo valor opcional, mínimo 3 caracteres y sin espacios.",
     )
-
-
-class AsignarPlanBody(BaseModel):
-    plan: str
-    motivo: str = ""
-
-
-class AjustarCreditoBody(BaseModel):
-    delta: int
-    motivo: str = ""
 
 
 async def _id_pg_por_email(email: str) -> str | None:
@@ -374,10 +321,8 @@ async def _cuentas_billing_pg() -> dict[str, tuple]:
                     select(
                         BillingAccountRow.user_id,
                         BillingAccountRow.account_type,
-                        BillingAccountRow.plan_code,
                         BillingAccountRow.max_requests,
                         BillingAccountRow.starts_at,
-                        BillingAccountRow.expires_at,
                         BillingAccountRow.requests_reserved,
                         BillingAccountRow.requests_consumed,
                     )
@@ -413,12 +358,9 @@ async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
         id=str(row.id),
         email=str(row.email),
         estado="habilitado" if row.habilitado else "deshabilitado",
-        plan="—",
-        account_type=billing_row.account_type if billing_row else "CREDITOS",
-        plan_code=billing_row.plan_code if billing_row else None,
-        max_requests=billing_row.max_requests if billing_row else None,
-        account_expires_at=billing_row.expires_at if billing_row else None,
-        saldo_creditos=None,
+        plan=(billing_row.account_type.lower() if billing_row else "prueba"),
+        account_type=billing_row.account_type if billing_row else "PRUEBA",
+        max_requests=billing_row.max_requests if billing_row else 100,
     )
 
 
@@ -514,7 +456,9 @@ async def _persistir_api_key_pg(
             billing_account = await sesion.get(BillingAccountRow, user_uuid)
             if billing_account is None:
                 sesion.add(
-                    BillingAccountRow(user_id=user_uuid, account_type="CREDITOS")
+                    BillingAccountRow(
+                        user_id=user_uuid, account_type="PRUEBA", max_requests=100
+                    )
                 )
             sesion.add(
                 ApiKey(
@@ -661,7 +605,7 @@ async def crear_usuario(
     usuario = AdminUser(
         id=persisted_user_id or _nuevo_id(),
         email=email, display_name=body.display_name,
-        estado=estado, plan=body.plan, motivo=motivo,
+        estado=estado, plan="prueba", motivo=motivo,
     )
     USERS[usuario.id] = usuario
     meta = None
@@ -705,7 +649,7 @@ async def crear_usuario(
         request_id=request_id or "", reason=motivo,
         metadata={
             "email": email,
-            "plan": body.plan,
+            "account_type": "PRUEBA",
             "estado": estado,
             "api_key_prefijo": meta.prefijo,
             "credenciales_solicitadas": enviar,
@@ -745,8 +689,7 @@ async def listar_usuarios(
                 id=uid,
                 email=str(email_pg),
                 estado="habilitado" if habilitado else "deshabilitado",
-                plan="—",
-                saldo_creditos=None,
+                plan="prueba",
             )
             USERS[uid] = usuario
             usuarios_por_id[uid] = usuario
@@ -755,22 +698,18 @@ async def listar_usuarios(
             usuario.estado = "habilitado" if habilitado else "deshabilitado"
         datos_cuenta = cuentas_billing.get(uid)
         if datos_cuenta is not None:
-            (account_type, plan_code, max_requests, starts_at, expires_at,
+            (account_type, max_requests, starts_at,
              requests_reserved, requests_consumed) = datos_cuenta
             usuario.account_type = str(account_type)
-            usuario.plan_code = plan_code
             usuario.max_requests = max_requests
-            usuario.account_expires_at = expires_at
-            usuario.plan = plan_code or str(account_type).lower()
+            usuario.plan = str(account_type).lower()
             from central_api.billing.entitlements import BillingAccount, BILLING_ACCOUNTS
 
             BILLING_ACCOUNTS[uid] = BillingAccount(
                 user_id=uid,
                 account_type=str(account_type),
-                plan_code=plan_code,
                 max_requests=max_requests,
                 starts_at=starts_at,
-                expires_at=expires_at,
                 requests_reserved=int(requests_reserved or 0),
                 requests_consumed=int(requests_consumed or 0),
             )
@@ -835,7 +774,7 @@ async def ver_usuario(
     response: Response,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """Devuelve un usuario con sus claves (metadatos) y ledger reciente."""
+    """Devuelve un usuario con los metadatos de sus claves."""
     require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     usuario = USERS.get(user_id)
@@ -846,12 +785,10 @@ async def ver_usuario(
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
     claves = [_vista_clave(k) for k in API_KEYS.values() if k.user_id == user_id]
-    ledger = [asdict(e) for e in CREDIT_LEDGER if e.user_id == user_id][-20:]
     return {
         "success": True,
         "usuario": _vista_usuario(usuario),
         "claves": claves,
-        "ledger_reciente": ledger,
     }
 
 
@@ -1030,11 +967,10 @@ async def actualizar_limite_mensual(
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Compatibilidad V1 usando el entitlement ``LIBRE`` durable de V3.
+    """Compatibilidad V1: fija el cupo mensual y pasa la cuenta a ``NORMAL``.
 
-    V3 no almacena contadores en ``users``. El límite vive en
-    ``billing_accounts.max_requests`` y por eso sobrevive reinicios sin exponer
-    ni modificar claves API o secretos.
+    El límite vive en ``billing_accounts.max_requests`` y se renueva cada mes.
+    Si la cuenta ya era NORMAL se conserva el consumo del mes en curso.
     """
     actor = require_admin(authorization)
     content_type = request.headers.get("content-type", "")
@@ -1058,18 +994,17 @@ async def actualizar_limite_mensual(
     usuario = await _get_admin_user(user_id)
     motivo = str(payload.get("motivo", "") or "límite mensual V1")
     motivo = validar_motivo(motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
-    from central_api.billing.entitlements import persist_billing_account, set_billing_account
+    from central_api.billing.entitlements import assign_account
 
     try:
-        account = set_billing_account(user_id, "LIBRE", max_requests=limit)
-        await persist_billing_account(account)
-    except (ValueError, RuntimeError):
+        account = await assign_account(user_id, "NORMAL", max_requests=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except RuntimeError:
         raise HTTPException(status_code=503, detail="Servicio no disponible") from None
     usuario.account_type = account.account_type
-    usuario.plan_code = account.plan_code
     usuario.max_requests = limit
-    usuario.account_expires_at = account.expires_at
-    usuario.plan = "libre"
+    usuario.plan = "normal"
     log_event(
         "user.monthly_limit.updated",
         actor_id=actor,
@@ -1077,7 +1012,7 @@ async def actualizar_limite_mensual(
         target_id=user_id,
         request_id=request_id or "",
         reason=motivo,
-        metadata={"max_requests": limit, "account_type": "LIBRE"},
+        metadata={"max_requests": limit, "account_type": "NORMAL"},
     )
     return {"success": True, "usuario": _vista_usuario(usuario), "maximas_consultas_mensuales": limit}
 
@@ -1287,52 +1222,6 @@ async def rotar_clave_api(
         "valor_unica_vez": valor,
         "revocada": anterior.id,
     }
-
-
-@router.post("/users/{user_id}/plan")
-def asignar_plan(
-    user_id: str,
-    body: AsignarPlanBody,
-    authorization: str | None = Header(default=None),
-    request_id: str | None = Header(default=None, alias="X-Request-ID"),
-) -> dict:
-    """Asigna un plan dejando rastro del anterior y el nuevo con fecha efectiva."""
-    actor = require_admin(authorization)
-    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
-    usuario = USERS.get(user_id)
-    if usuario is None:
-        raise HTTPException(status_code=404, detail="usuario no encontrado")
-    anterior = usuario.plan
-    usuario.plan = body.plan
-    log_event(
-        "user.plan.assigned", actor_id=actor, target_type="user", target_id=user_id,
-        request_id=request_id or "", reason=motivo,
-        metadata={"anterior": anterior, "nuevo": body.plan},
-    )
-    return {"success": True, "usuario": _vista_usuario(usuario)}
-
-
-@router.post("/users/{user_id}/credits")
-def ajustar_creditos(
-    user_id: str,
-    body: AjustarCreditoBody,
-    authorization: str | None = Header(default=None),
-    request_id: str | None = Header(default=None, alias="X-Request-ID"),
-) -> dict:
-    """Crea una entrada compensatoria de créditos con saldos previo/posterior."""
-    actor = require_admin(authorization)
-    motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
-    entrada = aplicar_credito(user_id, body.delta, motivo, actor)
-    log_event(
-        "user.credit.adjusted", actor_id=actor, target_type="user", target_id=user_id,
-        request_id=request_id or "", reason=motivo,
-        metadata={
-            "delta": body.delta,
-            "saldo_previo": entrada.saldo_previo,
-            "saldo_posterior": entrada.saldo_posterior,
-        },
-    )
-    return {"success": True, "entrada": asdict(entrada)}
 
 
 class EditarClaveBody(BaseModel):

@@ -29,7 +29,7 @@ from central_api.api.dependencies import (
     remember_idempotency,
     require_api_principal,
 )
-from central_api.billing.entitlements import BOT_CREDIT_COST, PLANS, get_plan
+from central_api.billing.entitlements import ACCOUNT_TYPES, BOT_CREDIT_COST
 from central_api.billing.reservation import (
     QuotaExhausted,
     reserve_for_job,
@@ -205,7 +205,7 @@ class BotOperationDocumentation(BaseModel):
     id: str = Field(..., description="Nombre de la operación canónica.")
     modo: str = Field(default="job", description="Todas las operaciones son asíncronas.")
     costo_creditos: int = Field(
-        ..., description="Créditos reservados al crear el job.", ge=0
+        ..., description="Peso informativo de la operación. No se cobra: cada request consume 1 del cupo de la cuenta.", ge=0
     )
     input_schema: dict[str, Any] = Field(
         ...,
@@ -248,7 +248,7 @@ class BotDetailResponse(BaseModel):
     estado: str = Field(..., examples=["HABILITADO"])
     operaciones: list[BotOperationDocumentation]
     planes: list[str] = Field(
-        ..., description="Planes que pueden consultar esta metadata de catálogo."
+        ..., description="Tipos de cuenta que pueden consultar esta metadata de catálogo."
     )
 
 
@@ -762,10 +762,8 @@ def bot_detail(
     ]
     if not ops:
         return JSONResponse(status_code=404, content=public_error("not_found"))
-    plan = get_plan("free")
-    _ = plan
     return JSONResponse(
         status_code=200,
         content={"id": bot, "nombre": bot, "estado": "HABILITADO",
-                 "operaciones": ops, "planes": sorted(PLANS)},
+                 "operaciones": ops, "planes": list(ACCOUNT_TYPES)},
     )

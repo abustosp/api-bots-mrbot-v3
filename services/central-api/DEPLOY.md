@@ -20,12 +20,12 @@ docker build -f services/central-api/Dockerfile -t mrbot-central-api:dev .
 
 ## Configuracion
 
-La central recibe solo secretos de control, identidad, base, cobros,
+La central recibe solo secretos de control, identidad, base,
 avisos y broker de artefactos. Variables en
 [ejemplo de entorno](../../infra/compose/.env.example):
 
 - `DATABASE_URL` (via secreto `database_url`), `API_KEY_HMAC_SECRET`,
-  `SESSION_SIGNING_KEY`, clave privada RSA, `SMTP_*`, `MERCADOPAGO_*`,
+  `SESSION_SIGNING_KEY`, clave privada RSA, `SMTP_*`,
   credenciales MinIO de firma.
 - `WORKER_NODES`: lista de IPs o DNS de workers permitidos, unica
   informacion que la central necesita de la flota.

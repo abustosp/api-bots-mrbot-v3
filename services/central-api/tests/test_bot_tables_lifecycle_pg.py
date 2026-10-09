@@ -204,7 +204,7 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
             # API responde 429 quota_exhausted antes de encolar el job.
             cur.execute(
                 "INSERT INTO billing_accounts (user_id, account_type, max_requests)"
-                " VALUES (%s, 'LIBRE', 1000) ON CONFLICT DO NOTHING",
+                " VALUES (%s, 'NORMAL', 1000) ON CONFLICT (user_id) DO UPDATE SET account_type = 'NORMAL', max_requests = 1000",
                 (user_id,),
             )
             cur.execute(

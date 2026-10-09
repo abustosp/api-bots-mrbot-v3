@@ -1,41 +1,42 @@
-"""Dominio de facturación de central-api (plan 04, invariantes B-1 a B-4).
+"""Cuentas y cupo de requests de central-api.
 
-El ``bot-worker`` no conoce precios, planes, cuotas, créditos ni MercadoPago:
-todo el dinero vive aquí. Montos en centavos de ARS (entero, nunca float);
-la conversión a decimal de la API de MercadoPago vive solo en ``facade``.
+El ``bot-worker`` no conoce tipos de cuenta ni cupos: todo vive aquí. No hay
+pagos automáticos ni créditos. Cada usuario tiene un tipo de cuenta asignado
+por un administrador: ``PRUEBA``, ``TESTING`` o ``NORMAL``.
 """
 
 from central_api.billing.entitlements import (
-    CREDIT_PRODUCTS,
-    PLANS,
-    PlanTier,
+    ACCOUNT_NORMAL,
+    ACCOUNT_PRUEBA,
+    ACCOUNT_TESTING,
+    ACCOUNT_TYPES,
+    account_summary,
     close_expired_periods,
-    force_period,
-    get_plan,
+    get_billing_account,
+    set_billing_account,
 )
-from central_api.billing.reconciliation import comparar_pago, conciliar_lote
 from central_api.billing.reservation import (
-    adjust_credits,
+    QuotaExhausted,
     confirm_usage,
-    get_balance,
     get_usage,
+    refund_usage,
     release_usage,
     reserve_for_job,
 )
 
 __all__ = [
-    "CREDIT_PRODUCTS",
-    "PLANS",
-    "PlanTier",
+    "ACCOUNT_NORMAL",
+    "ACCOUNT_PRUEBA",
+    "ACCOUNT_TESTING",
+    "ACCOUNT_TYPES",
+    "QuotaExhausted",
+    "account_summary",
     "close_expired_periods",
-    "force_period",
-    "get_plan",
-    "comparar_pago",
-    "conciliar_lote",
-    "adjust_credits",
     "confirm_usage",
-    "get_balance",
+    "get_billing_account",
     "get_usage",
+    "refund_usage",
     "release_usage",
     "reserve_for_job",
+    "set_billing_account",
 ]

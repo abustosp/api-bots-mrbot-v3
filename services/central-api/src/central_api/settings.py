@@ -51,13 +51,6 @@ class Settings(BaseSettings):
     # Firma de tokens de servicio del borde interno (central <-> worker).
     internal_jwt_signing_key: str = Field(default="", alias="INTERNAL_JWT_SIGNING_KEY")
 
-    # MercadoPago: firma de webhooks, entorno y credencial de reconsulta.
-    # Sin MP_ACCESS_TOKEN la central opera en modo fake documentado: no se
-    # cobra nada real (ver central_api.billing.mercadopago).
-    mp_webhook_secret: str = Field(default="", alias="MP_WEBHOOK_SECRET")
-    mp_environment: str = Field(default="sandbox", alias="MP_ENVIRONMENT")
-    mp_access_token: str = Field(default="", alias="MP_ACCESS_TOKEN")
-
     # Object storage S3/MinIO: SOLO la central firma URLs (plan 02 §7.9 y
     # §11.3). El worker usa URLs prefirmadas, nunca estas credenciales.
     # Sin endpoint/bucket/credenciales no hay firma real: los endpoints de
@@ -198,23 +191,6 @@ class Settings(BaseSettings):
     @classmethod
     def _keep_raw(cls, v: object) -> object:
         return v or ""
-
-    @field_validator("mp_environment", mode="before")
-    @classmethod
-    def _normalizar_entorno(cls, v: object) -> object:
-        """Normaliza el entorno MP a ``sandbox`` o ``production``."""
-        texto = str(v or "sandbox").strip().lower()
-        return texto if texto in ("sandbox", "production") else "sandbox"
-
-    @property
-    def mp_es_produccion(self) -> bool:
-        """Indica si MercadoPago opera contra producción (no sandbox)."""
-        return self.mp_environment == "production"
-
-    @property
-    def mp_modo_fake(self) -> bool:
-        """Indica modo fake: sin access token no hay cobro real posible."""
-        return not bool(self.mp_access_token)
 
     @property
     def object_storage_configurado(self) -> bool:

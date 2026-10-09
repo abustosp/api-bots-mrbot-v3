@@ -55,7 +55,12 @@ class Plan(Base):
 
 
 class BillingAccount(Base):
-    """Estado de entitlement manual independiente del ciclo de pagos."""
+    """Tipo de cuenta y contadores de un usuario (administrado manualmente).
+
+    ``PRUEBA``: 100 requests totales, no renovables. ``TESTING``: sin tope.
+    ``NORMAL``: ``max_requests`` por período mensual renovable; sus contadores
+    viven en ``billing_account_periods``.
+    """
 
     __tablename__ = "billing_accounts"
 
@@ -90,7 +95,7 @@ class BillingAccount(Base):
 
     __table_args__ = (
         sa.CheckConstraint(
-            "account_type IN ('CREDITOS','TIER','GRATUITA','LIBRE')",
+            "account_type IN ('PRUEBA','TESTING','NORMAL')",
             name="billing_accounts_type",
         ),
         sa.CheckConstraint(
@@ -100,12 +105,10 @@ class BillingAccount(Base):
         sa.CheckConstraint("requests_reserved >= 0", name="billing_accounts_reserved"),
         sa.CheckConstraint("requests_consumed >= 0", name="billing_accounts_consumed"),
         sa.CheckConstraint(
-            "(account_type = 'TIER' AND plan_code LIKE 'tier-%'"
-            " AND max_requests IS NULL AND expires_at IS NULL)"
-            " OR (account_type = 'GRATUITA' AND plan_code = 'gratuita'"
-            " AND max_requests = 100 AND expires_at IS NOT NULL)"
-            " OR (account_type = 'LIBRE' AND plan_code IS NULL AND max_requests IS NOT NULL)"
-            " OR (account_type = 'CREDITOS' AND plan_code IS NULL AND max_requests IS NULL)",
+            "plan_code IS NULL AND expires_at IS NULL AND ("
+            "(account_type = 'PRUEBA' AND max_requests = 100)"
+            " OR (account_type = 'TESTING' AND max_requests IS NULL)"
+            " OR (account_type = 'NORMAL' AND max_requests IS NOT NULL))",
             name="billing_accounts_configuration",
         ),
         sa.Index("ix_billing_accounts_type", "account_type"),
@@ -125,8 +128,8 @@ class BillingAccountPeriod(Base):
         sa.ForeignKey("billing_accounts.user_id", ondelete="RESTRICT"),
         nullable=False,
     )
-    plan_code: Mapped[str] = mapped_column(
-        sa.ForeignKey("plans.code", ondelete="RESTRICT"), nullable=False
+    plan_code: Mapped[str | None] = mapped_column(
+        sa.ForeignKey("plans.code", ondelete="RESTRICT")
     )
     account_type: Mapped[str] = mapped_column(sa.String(16), nullable=False)
     starts_at: Mapped[object] = mapped_column(sa.DateTime(timezone=True), nullable=False)
@@ -149,7 +152,7 @@ class BillingAccountPeriod(Base):
 
     __table_args__ = (
         sa.CheckConstraint(
-            "account_type IN ('TIER','GRATUITA')", name="billing_account_periods_type"
+            "account_type IN ('NORMAL','PRUEBA')", name="billing_account_periods_type"
         ),
         sa.CheckConstraint(
             "status IN ('ABIERTO','CERRADO')", name="billing_account_periods_status"
@@ -209,7 +212,7 @@ class BillingUsage(Base):
 
     __table_args__ = (
         sa.CheckConstraint(
-            "account_type IN ('CREDITOS','TIER','GRATUITA','LIBRE')",
+            "account_type IN ('PRUEBA','TESTING','NORMAL')",
             name="billing_usage_account_type",
         ),
         sa.CheckConstraint(
@@ -221,10 +224,7 @@ class BillingUsage(Base):
         ),
         sa.CheckConstraint("units > 0", name="billing_usage_units"),
         sa.CheckConstraint(
-            "(account_type IN ('TIER','GRATUITA') AND billing_source = 'CUOTA' AND account_period_id IS NOT NULL)"
-            " OR (account_type = 'TIER' AND billing_source = 'CREDITOS' AND account_period_id IS NULL)"
-            " OR (account_type = 'LIBRE' AND billing_source = 'CUOTA' AND account_period_id IS NULL)"
-            " OR (account_type = 'CREDITOS' AND billing_source = 'CREDITOS' AND account_period_id IS NULL)",
+            "billing_source = 'CUOTA' OR account_period_id IS NULL",
             name="billing_usage_configuration",
         ),
         sa.UniqueConstraint("job_id", name="uq_billing_usage_job"),

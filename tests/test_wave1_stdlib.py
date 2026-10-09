@@ -1,7 +1,7 @@
 """Verificación E2E wave1 con stdlib-only (sin fastapi/pydantic).
 
-Cubre los módulos puros nuevos: billing (entitlements, facade,
-reservation, reconciliation), claim SQL, sellado worker, contexto del
+Cubre los módulos puros nuevos: billing (entitlements,
+reservation), claim SQL, sellado worker, contexto del
 runtime, reporting del worker y coherencia wire estática central<->worker.
 
 Se ejecuta con: ``python3 -m unittest discover -s tests -v`` desde la raíz.
@@ -41,9 +41,7 @@ class TestCompilacion(unittest.TestCase):
 
         módulos = [
             RAIZ / "services/central-api/src/central_api/billing/entitlements.py",
-            RAIZ / "services/central-api/src/central_api/billing/facade.py",
             RAIZ / "services/central-api/src/central_api/billing/reservation.py",
-            RAIZ / "services/central-api/src/central_api/billing/reconciliation.py",
             RAIZ / "services/central-api/src/central_api/scheduler/claim.py",
             RAIZ / "services/bot-worker/src/bot_worker/runtime/sealed.py",
             RAIZ / "services/bot-worker/src/bot_worker/runtime/context.py",
@@ -126,191 +124,51 @@ class TestAislamientoWorker(unittest.TestCase):
         self.assertIn("/cancel-ack", texto)
 
 
-class TestEntitlements(unittest.TestCase):
-    """Catálogo de tiers y períodos (stdlib-only)."""
+class TestCuentas(unittest.TestCase):
+    """Tipos de cuenta y reserva de requests (stdlib-only)."""
 
     def setUp(self):
         from central_api.billing import entitlements as e
+        from central_api.billing import reservation as r
 
-        self.e = e
+        self.e, self.r = e, r
         e.PERIODS.clear()
+        e.BILLING_ACCOUNTS.clear()
+        r.USAGE.clear()
 
-    def test_tiers_y_concurrencia_tope_5(self):
-        for código in ("free", "basico", "pro", "empresa"):
-            plan = self.e.get_plan(código)
-            self.assertIsNotNone(plan)
-            self.assertLessEqual(plan.concurrencia_max, 5)
-        self.assertEqual(self.e.get_plan("empresa").concurrencia_max, 5)
-        self.assertIsNone(self.e.get_plan("inexistente"))
-
-    def test_bot_habilitado_por_plan(self):
-        free = self.e.get_plan("free")
-        self.assertTrue(self.e.bot_enabled_for_plan(free, "consulta_cuit"))
-        self.assertFalse(self.e.bot_enabled_for_plan(free, "mis_comprobantes"))
-
-    def test_periodo_idempotente_y_forzado(self):
-        p1 = self.e.open_period("u1", "free")
-        p2 = self.e.open_period("u1", "pro")
-        self.assertIs(p1, p2)  # un solo ABIERTO por usuario
-        self.assertIsNotNone(self.e.current_period("u1"))
-        self.assertEqual(self.e.credit_cost("consulta_cuit", "consulta"), 1)
+    def test_solo_tres_tipos(self):
+        self.assertEqual(self.e.ACCOUNT_TYPES, ("PRUEBA", "TESTING", "NORMAL"))
         with self.assertRaises(ValueError):
-            self.e.force_period("u1", "pro", "  ")
-        nuevo = self.e.force_period("u1", "pro", "prueba")
-        self.assertEqual(nuevo.plan_code, "pro")
-        self.assertEqual(p1.estado, "CERRADO")
+            self.e.normalize_assignment("TIER", 10)
 
-
-class TestFacade(unittest.TestCase):
-    """Montos exactos e idempotencia de pagos (stdlib-only)."""
-
-    def setUp(self):
-        from central_api.billing import facade as f
-
-        self.f = f
-        f.PAYMENTS.clear()
-
-    def test_montos_sin_float(self):
-        self.assertEqual(str(self.f.a_monto_mp(19900)), "199")
-        self.assertEqual(self.f.desde_monto_mp("199.00"), 19900)
-        self.assertEqual(self.f.desde_monto_mp(self.f.a_monto_mp(19900)), 19900)
-
-    def test_idempotencia_estable(self):
-        k1 = self.f.mp_idempotency_key("p1", 2)
-        self.assertEqual(k1, self.f.mp_idempotency_key("p1", 2))
-        self.assertNotEqual(k1, self.f.mp_idempotency_key("p1", 3))
-
-    def test_webhook_no_acredita_sin_reconsulta(self):
-        pago = self.f.create_credit_payment("u1", "pack-10", "llave-1")
-        remoto = {
-            "status": "approved",
-            "external_reference": "llave-1",
-            "transaction_amount": "0",
-            "currency_id": "ARS",
-            "id": "mp-1",
-        }
-        self.f.apply_verified_payment(pago, remoto, reconsulted=False)
-        self.assertEqual(pago.estado, "PENDIENTE")
-
-    def test_reconsulta_con_contraste_y_doble_aplicacion(self):
-        from central_api.billing import reservation as r
-
-        r.USAGE.clear()
-        r.CREDIT_MOVES.clear()
-        r.BALANCES.clear()
-        pago = self.f.create_credit_payment("u2", "pack-10", "llave-2")
-        # Importe distinto: no acredita.
-        remoto_malo = {
-            "status": "approved",
-            "external_reference": "llave-2",
-            "transaction_amount": "9999.99",
-            "currency_id": "ARS",
-            "id": "mp-9",
-        }
-        self.f.apply_verified_payment(pago, remoto_malo, reconsulted=True)
-        self.assertEqual(pago.estado, "PENDIENTE")
-        self.assertEqual(r.get_balance("u2"), 0)
-        # Precio real del pack-10 (0 centavos placeholder): acredita 10.
-        remoto_ok = dict(remoto_malo, transaction_amount="0")
-        self.f.apply_verified_payment(pago, remoto_ok, reconsulted=True)
-        self.assertEqual(pago.estado, "APROBADO")
-        self.assertEqual(r.get_balance("u2"), 10)
-        # Reintento: idempotente, no duplica.
-        self.f.apply_verified_payment(pago, remoto_ok, reconsulted=True)
-        self.assertEqual(r.get_balance("u2"), 10)
-
-    def test_payload_hash_no_guarda_payload(self):
-        h1 = self.f.payload_hash(b"hola")
-        self.assertEqual(len(h1), 64)
-        self.assertEqual(h1, self.f.payload_hash(b"hola"))
-        self.assertNotEqual(h1, self.f.payload_hash(b"chau"))
-
-
-class TestReservation(unittest.TestCase):
-    """Reserva/confirmación/liberación con una sola fuente (stdlib-only)."""
-
-    def setUp(self):
-        from central_api.billing import entitlements as e
-        from central_api.billing import reservation as r
-
-        self.e = e
-        self.r = r
-        e.PERIODS.clear()
-        r.USAGE.clear()
-        r.CREDIT_MOVES.clear()
-        r.BALANCES.clear()
-
-    def test_cuota_primero_y_luego_creditos(self):
-        entrada = self.r.reserve_for_job("u1", "job-1", "consulta_cuit", "consulta")
-        self.assertEqual((entrada.fuente_cobro, entrada.estado), ("CUOTA", "RESERVADO"))
-        # Idempotente por job_id.
-        self.assertEqual(self.r.reserve_for_job("u1", "job-1", "consulta_cuit", "consulta").id, entrada.id)
-        # Confirmar mueve reservada -> consumida exactamente una vez.
-        self.r.confirm_usage("job-1")
-        periodo = self.e.current_period("u1")
-        self.assertEqual((periodo.cuota_reservada, periodo.cuota_consumida), (0, 1))
-        # Confirmar de nuevo no duplica.
-        self.r.confirm_usage("job-1")
-        self.assertEqual(periodo.cuota_consumida, 1)
-
-    def test_creditos_como_overflow_y_liberacion(self):
-        periodo = self.e.open_period("u2", "free")
-        periodo.cuota_reservada = periodo.cuota_asignada  # sin cuota libre
-        self.r.credit_purchase("u2", 5, "pay-1", idempotency_key="k-compra-1")
-        # Compra idempotente.
-        self.r.credit_purchase("u2", 5, "pay-1", idempotency_key="k-compra-1")
-        self.assertEqual(self.r.get_balance("u2"), 5)
-        entrada = self.r.reserve_for_job("u2", "job-2", "consulta_cuit", "consulta")
-        self.assertEqual(entrada.fuente_cobro, "CREDITOS")
-        self.assertEqual(self.r.get_balance("u2"), 4)
-        self.r.release_usage("job-2", motivo="cancelado")
-        self.assertEqual(self.r.get_balance("u2"), 5)
-        self.assertEqual(self.r.get_usage("job-2").estado, "LIBERADO")
-
-    def test_sin_fondos_lanza_quota_exhausted(self):
-        periodo = self.e.open_period("u3", "free")
-        periodo.cuota_reservada = periodo.cuota_asignada
+    def test_prueba_tope_100_no_renovable(self):
+        self.e.set_billing_account("u1", "PRUEBA")
+        for i in range(100):
+            self.r.reserve_for_job("u1", f"j{i}", "consulta_cuit", "consultar")
         with self.assertRaises(self.r.QuotaExhausted):
-            self.r.reserve_for_job("u3", "job-3", "consulta_cuit", "consulta")
-        self.assertIsNone(self.r.get_usage("job-3"))
+            self.r.reserve_for_job("u1", "j-extra", "consulta_cuit", "consultar")
 
-    def test_ajuste_exige_motivo_y_es_idempotente(self):
-        with self.assertRaises(ValueError):
-            self.r.adjust_credits("u4", 3, "  ")
-        m1 = self.r.adjust_credits("u4", 3, "cortesía", referencia="ref-1")
-        m2 = self.r.adjust_credits("u4", 3, "cortesía", referencia="ref-1")
-        self.assertEqual(m1.id, m2.id)
-        self.assertEqual(self.r.get_balance("u4"), 3)
+    def test_testing_ilimitado(self):
+        self.e.set_billing_account("u2", "TESTING")
+        for i in range(300):
+            self.r.reserve_for_job("u2", f"t{i}", "consulta_cuit", "consultar")
+        self.assertEqual(self.e.get_billing_account("u2").requests_reserved, 300)
 
+    def test_normal_cupo_mensual_y_periodo_unico(self):
+        self.e.set_billing_account("u3", "NORMAL", max_requests=2)
+        p1 = self.e.open_period("u3")
+        self.assertIs(p1, self.e.open_period("u3"))  # un solo ABIERTO por usuario
+        self.assertIsNotNone(self.e.current_period("u3"))
+        self.r.reserve_for_job("u3", "n1", "consulta_cuit", "consultar")
+        self.r.reserve_for_job("u3", "n2", "consulta_cuit", "consultar")
+        with self.assertRaises(self.r.QuotaExhausted):
+            self.r.reserve_for_job("u3", "n3", "consulta_cuit", "consultar")
 
-class TestReconciliation(unittest.TestCase):
-    """Conciliación local vs remoto reconsultado (stdlib-only)."""
-
-    def test_sin_diferencias_concilia(self):
-        from central_api.billing import reconciliation as c
-
-        local = {"id": "p1", "estado": "approved", "importe": 19900,
-                 "moneda": "ARS", "externo_id": "ref-1"}
-        remoto = {"status": "approved", "transaction_amount": "199.00",
-                  "currency_id": "ARS"}
-        self.assertEqual(c.comparar_pago(local, remoto), [])
-        informe = c.conciliar_lote([local], {"ref-1": remoto})
-        self.assertEqual(informe["conciliados"], ["p1"])
-
-    def test_detecta_estado_monto_moneda_y_falta_remoto(self):
-        from central_api.billing import reconciliation as c
-
-        local = {"id": "p2", "estado": "approved", "importe": 19900,
-                 "moneda": "ARS", "externo_id": "ref-2"}
-        remoto = {"status": "rejected", "transaction_amount": "10.00",
-                  "currency_id": "USD"}
-        difs = c.comparar_pago(local, remoto)
-        self.assertIn("estado_distinto", difs)
-        self.assertIn("monto_distinto", difs)
-        self.assertIn("moneda_distinta", difs)
-        informe = c.conciliar_lote([local], {})
-        self.assertEqual(informe["sin_remoto"], ["p2"])
-        self.assertEqual(informe["conciliados"], [])
+    def test_liberar_devuelve_cupo(self):
+        self.e.set_billing_account("u4", "NORMAL", max_requests=1)
+        self.r.reserve_for_job("u4", "l1", "consulta_cuit", "consultar")
+        self.assertEqual(self.r.release_usage("l1").estado, "LIBERADO")
+        self.r.reserve_for_job("u4", "l2", "consulta_cuit", "consultar")
 
 
 class TestClaimSQL(unittest.TestCase):

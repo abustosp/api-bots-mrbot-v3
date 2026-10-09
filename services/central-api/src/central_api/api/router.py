@@ -3,7 +3,6 @@
 from fastapi import APIRouter
 
 from central_api.api.account import router as account_router
-from central_api.api.billing import router as billing_router
 from central_api.api.bot_compat import router as bot_compat_router
 from central_api.api.bot_logs import router as bot_logs_router
 from central_api.api.bot_routes import router as bot_routes_router
@@ -28,5 +27,4 @@ router.include_router(uploads_router, tags=["uploads"])
 router.include_router(utilities_router, tags=["utilidades"])
 router.include_router(scrapping_router)
 router.include_router(vep_files_router)
-router.include_router(billing_router, tags=["facturacion"])
 router.include_router(security_router, tags=["seguridad"])

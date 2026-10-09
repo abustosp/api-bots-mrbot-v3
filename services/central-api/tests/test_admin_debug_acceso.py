@@ -30,11 +30,9 @@ def admin(monkeypatch):
     get_settings.cache_clear()
     admin_users.USERS.clear()
     admin_users.API_KEYS.clear()
-    admin_users.CREDIT_LEDGER.clear()
     yield admin_users
     admin_users.USERS.clear()
     admin_users.API_KEYS.clear()
-    admin_users.CREDIT_LEDGER.clear()
     get_settings.cache_clear()
 
 

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from central_api.admin.audit import AUDIT_LOG
-from central_api.admin.users import API_KEYS, CREDIT_LEDGER, USERS, AdminUser
+from central_api.admin.users import API_KEYS, USERS, AdminUser
 from central_api.api.dependencies import JOB_META
 from central_api.main import create_app
 from central_api.settings import get_settings
@@ -23,7 +23,6 @@ def client(monkeypatch):
     get_settings.cache_clear()
     USERS.clear()
     API_KEYS.clear()
-    CREDIT_LEDGER.clear()
     AUDIT_LOG.clear()
     JOBS.clear()
     JOB_META.clear()
