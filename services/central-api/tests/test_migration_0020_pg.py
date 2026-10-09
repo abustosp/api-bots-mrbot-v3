@@ -73,7 +73,9 @@ def test_0020_backfills_enabled_free_users_and_roundtrips_on_postgres(monkeypatc
         assert accounts[disabled_id]["max_requests"] is None
         assert accounts[disabled_id]["expires_at"] is None
 
-        command.downgrade(_cfg(), "-1")
+        # Baja explícitamente a 0019 (0020 revertida), sin depender de cuál es
+        # la cabeza actual: migraciones posteriores no deben romper este test.
+        command.downgrade(_cfg(), "0019")
         with engine.connect() as conn:
             assert conn.execute(
                 sa.text("SELECT version_num FROM alembic_version")

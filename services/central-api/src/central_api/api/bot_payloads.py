@@ -123,6 +123,10 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "fecha_hasta": _string(required=True, pattern=DATE),
         "representado_nombre": _string(min_length=1, max_length=128),
         "emitidos": _boolean(), "recibidos": _boolean(),
+        "puntos_venta_emitidos": _list(item=str | int),
+        "puntos_venta_recibidos": _list(item=str | int),
+        "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
+        "carga_b64": _boolean(),
         "incluir_json": _boolean(default=True), "subir_csv": _boolean(default=True),
     },
     "consulta_cuit": {
@@ -804,6 +808,8 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
         return field_name == "excel"
     if field_name in {"descarga_ventas", "descarga_compras"}:
         return field_name == "descarga_ventas"
+    if field_name == "carga_b64":
+        return False
     if field_name.endswith("_b64"):
         if field_name == "archivo_b64" and bot == "vep_archivo":
             return (

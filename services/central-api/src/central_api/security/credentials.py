@@ -87,11 +87,21 @@ def normalize_v2_payload(
         "descarga_csv_ventas": "descarga_ventas",
         "descarga_csv_compras": "descarga_compras",
         "carga_json": "incluir_json",
+        # V1 named this filter after the UI list.  The worker schema uses the
+        # semantic singular name and rejects the V1 name under extra=forbid.
+        "lista_exclusion_situacion": "situacion_excluyente",
     }
     for old_name, new_name in aliases.items():
         if old_name in normalized and new_name not in normalized:
             normalized[new_name] = normalized[old_name]
         normalized.pop(old_name, None)
+
+    # These controls existed only in V1 browser implementations.  The V3
+    # plugins either made them deterministic or intentionally do not expose a
+    # worker equivalent.  Drop them before strict plugin parsing instead of
+    # making an otherwise valid historical request fail with extra_forbidden.
+    for retired in ("timeout_mc", "filtro_impuestos", "filtro_intereses"):
+        normalized.pop(retired, None)
 
     if bot == "arba" and "cuit" in normalized:
         normalized.setdefault("representado_cuit", normalized["cuit"])
@@ -106,6 +116,14 @@ def normalize_v2_payload(
 
     if bot == "rcel" and "nombre_rcel" in normalized:
         normalized.setdefault("representado_nombre", normalized.pop("nombre_rcel"))
+
+    if bot == "retper_iibb_misiones":
+        # V1 selected the same CUIT used to start the fiscal session and did
+        # not expose a second representado field.  Preserve that behavior.
+        normalized.setdefault(
+            "representado_cuit",
+            normalized.get("cuit_representante", normalized.get("cuit_inicio_sesion")),
+        )
 
     if bot == "siper":
         for legacy, current in (
@@ -160,6 +178,21 @@ def normalize_v2_payload(
         )
         normalized.setdefault(destino, normalized[origen])
         normalized.pop(origen, None)
+
+    if bot == "compensaciones":
+        # The historical SCT compensation model documents YYYYMMDD while the
+        # current plugin deliberately validates DD/MM/AAAA.
+        for name in ("fecha_desde", "fecha_hasta"):
+            value = normalized.get(name)
+            if isinstance(value, str) and len(value) == 8 and value.isdigit():
+                normalized[name] = f"{value[6:8]}/{value[4:6]}/{value[:4]}"
+
+    if bot == "mis_retenciones" and "tipos" not in normalized:
+        # V1 did not expose a type selector.  A global Retencion/Percepcion
+        # default is invalid for impuesto 216/787, which only admit Retencion.
+        impuestos = normalized.get("impuestos")
+        if isinstance(impuestos, list) and any(str(code) in {"216", "787"} for code in impuestos):
+            normalized["tipos"] = ["Retencion"]
 
     upload_flag = None
     upload_target_by_bot = {
@@ -266,14 +299,26 @@ def normalize_payload_and_credentials(
     if encrypted not in (None, "") and not isinstance(encrypted, str):
         raise CredentialInputError("clave_encriptada debe ser texto Base64")
     if encrypted:
-        try:
-            decrypted = decrypt_configured_credential(encrypted)
-        except (CredentialDecryptionError, RuntimeError, ValueError) as exc:
-            raise CredentialInputError("no se pudo desencriptar clave_encriptada") from exc
-        if plaintext is not None and plaintext != decrypted:
-            raise CredentialInputError("clave y clave_encriptada no coinciden")
-        plaintext = decrypted
-
+        # OpenAPI must show the historical optional encrypted field alongside
+        # the V1 cleartext credential.  Its documented marker is deliberately
+        # not a ciphertext, so ignore only that marker when an actual cleartext
+        # password was supplied.  Real malformed ciphertext remains rejected.
+        if (
+            plaintext is not None
+            and encrypted in {
+                "BASE64_RSA_OAEP_CIPHERTEXT",
+                "BASE64_RSA_OAEP_CIPHERTEXT_DEMO",
+            }
+        ):
+            encrypted = None
+        else:
+            try:
+                decrypted = decrypt_configured_credential(encrypted)
+            except (CredentialDecryptionError, RuntimeError, ValueError) as exc:
+                raise CredentialInputError("no se pudo desencriptar clave_encriptada") from exc
+            if plaintext is not None and plaintext != decrypted:
+                raise CredentialInputError("clave y clave_encriptada no coinciden")
+            plaintext = decrypted
     if plaintext is None:
         if encrypted:
             raise CredentialInputError("clave_encriptada vacía")

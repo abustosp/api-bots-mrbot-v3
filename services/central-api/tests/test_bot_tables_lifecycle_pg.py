@@ -35,11 +35,14 @@ import os
 import sys
 import threading
 import uuid
+from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import psycopg
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 
 AQUI = Path(__file__).resolve()
@@ -74,6 +77,16 @@ pytestmark = pytest.mark.skipif(
     not os.environ.get(DSN_VAR),
     reason=f"{DSN_VAR} no configurada: prueba contra PostgreSQL real omitida",
 )
+
+
+def _alembic_head() -> str:
+    """Resuelve la única cabeza desde el árbol real, sin congelar revisiones."""
+    service_root = AQUI.parents[1]
+    config = Config(str(service_root / "alembic.ini"))
+    config.set_main_option("script_location", str(service_root / "alembic"))
+    heads = ScriptDirectory.from_config(config).get_heads()
+    assert len(heads) == 1, f"se esperaba una sola cabeza Alembic, recibidas {heads}"
+    return heads[0]
 
 
 class _WorkerStubHandler(BaseHTTPRequestHandler):
@@ -178,7 +191,7 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
             revision = cur.fetchone()[0]
         print(f"\n[1] tablas bot_jobs_*={total_tablas} revision_alembic={revision}")
         assert total_tablas == 32, f"se esperaban 32 tablas físicas, hay {total_tablas}"
-        assert revision == "0015"
+        assert revision == _alembic_head()
 
         # Catálogo mínimo (no hay siembra en las migraciones).
         with conn.cursor() as cur:
@@ -186,6 +199,13 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
                 "INSERT INTO users (id, email, habilitado) VALUES (%s, %s, true)"
                 " ON CONFLICT DO NOTHING",
                 (user_id, f"lifecycle-{user_id}@example.invalid"),
+            )
+            # Desde 0020 el cobro exige una cuenta de facturación: sin ella la
+            # API responde 429 quota_exhausted antes de encolar el job.
+            cur.execute(
+                "INSERT INTO billing_accounts (user_id, account_type, max_requests)"
+                " VALUES (%s, 'LIBRE', 1000) ON CONFLICT DO NOTHING",
+                (user_id,),
             )
             cur.execute(
                 "INSERT INTO bots (id, code, display_name) VALUES (%s, %s, %s)"
@@ -252,6 +272,19 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
             assert creado.status_code == 202, creado.text
             job_id = creado.json()["job_id"]
             print(f"[2] POST /api/v3/bots/{BOT}/{OPERATION} -> {creado.status_code} job_id={job_id}")
+            listado = client.get(
+                "/api/v3/jobs?limit=1",
+                headers={"X-API-Key": f"mbk_{api_key_id}_{api_secret}"},
+            )
+            assert listado.status_code == 200, listado.text
+            pagina = listado.json()
+            assert pagina["jobs"] == [{
+                "job_id": job_id,
+                "status": "PENDIENTE",
+                "bot": BOT,
+                "operacion": OPERATION,
+            }]
+            assert pagina["has_more"] is False and pagina["next_cursor"] is None
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT status, attempts, worker_id FROM jobs WHERE id = %s",
@@ -300,7 +333,7 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
             print(
                 "[3] claim -> status=%s worker_id=%s attempts=%s assigned_at?=%s"
                 " lease?=%s app_version=%s protocol=%s"
-                % claim_row
+                % claim_row[:7]
             )
             assert claim_row[0] == "ASIGNADO"
             assert claim_row[1] == worker_id
@@ -544,6 +577,8 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
         _limpiar_cache_orm()
         with conn.cursor() as cur:
             if job_id is not None:
+                # billing_usage referencia al job (fk_billing_usage_job).
+                cur.execute("DELETE FROM billing_usage WHERE job_id = %s", (job_id,))
                 cur.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
                 # La proyección física se va por FK CASCADE: la evidencia se
                 # imprime arriba, no se conserva estado del test.
@@ -555,5 +590,7 @@ def test_ciclo_de_vida_completo_escribe_tabla_fisica_por_bot(
                 assert cur.fetchone()[0] == 1
             cur.execute("DELETE FROM api_keys WHERE key_prefix = %s", (api_key_id,))
             cur.execute("DELETE FROM workers WHERE endpoint = %s", (node,))
+            cur.execute("DELETE FROM billing_accounts WHERE user_id = %s", (user_id,))
+            cur.execute("DELETE FROM api_idempotency WHERE user_id = %s", (user_id,))
             cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.close()

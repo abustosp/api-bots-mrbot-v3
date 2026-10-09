@@ -12,6 +12,8 @@ from central_api.admin.autoscale import router as autoscale_router
 from central_api.admin.fleet import router as fleet_router
 from central_api.admin.jobs import router as jobs_router
 from central_api.admin.panel import router as panel_router
+from central_api.admin.reporting import router as reporting_router
+from central_api.admin.retention import router as retention_router
 from central_api.admin.subscriptions import router as billing_router
 from central_api.admin.users import router as users_router
 from central_api.admin.workers import router as workers_admin_router
@@ -20,6 +22,8 @@ router = APIRouter()
 router.include_router(panel_router, tags=["admin"])
 router.include_router(workers_admin_router, tags=["admin-workers"])
 router.include_router(users_router, tags=["admin-users"])
+router.include_router(reporting_router, tags=["admin-reporting"])
+router.include_router(retention_router, tags=["admin-retention"])
 router.include_router(jobs_router, tags=["admin-jobs"])
 router.include_router(fleet_router, tags=["admin-fleet"])
 router.include_router(billing_router, tags=["admin-billing"])

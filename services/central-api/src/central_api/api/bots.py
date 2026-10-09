@@ -533,7 +533,7 @@ async def submit_job(
         fingerprint_payload_data["_credential_fingerprint"] = credential_fingerprint
     fingerprint = fingerprint_payload(bot, operacion, fingerprint_payload_data)
     if idempotency_key:
-        hit = check_idempotency(principal.user_id, idempotency_key, fingerprint)
+        hit = await check_idempotency(principal.user_id, idempotency_key, fingerprint)
         if hit.conflict:
             return JSONResponse(
                 status_code=409,
@@ -601,7 +601,7 @@ async def submit_job(
             # Job and reservation commit together. A replay returns the
             # already-persisted job without creating another reservation.
             if idempotency_key:
-                remember_idempotency(
+                await remember_idempotency(
                     principal.user_id, idempotency_key, fingerprint, job_id
                 )
             cached = JOBS.get(job_id)
@@ -637,7 +637,7 @@ async def submit_job(
     JOBS[job.id] = job
     ensure_meta(job.id, principal.user_id)
     if idempotency_key:
-        remember_idempotency(principal.user_id, idempotency_key, fingerprint, job.id)
+        await remember_idempotency(principal.user_id, idempotency_key, fingerprint, job.id)
     return JSONResponse(
         status_code=202,
         content={"success": True, "job_id": job.id, "status": job.status},

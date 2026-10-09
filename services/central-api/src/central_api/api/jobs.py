@@ -507,8 +507,98 @@ def _encode_cursor(job_id: str) -> str:
     ).decode("ascii")
 
 
+def _decode_cursor(cursor: str) -> str | None:
+    """Decodifica y valida el borde UUIDv7 opaco del listado."""
+    try:
+        import uuid
+
+        value = json.loads(
+            base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        )["job_id"]
+        parsed = uuid.UUID(str(value))
+        if parsed.version != 7:
+            return None
+        return str(parsed)
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+        return None
+
+
+async def _list_jobs_db(
+    principal: ApiPrincipal,
+    *,
+    status: str | None,
+    bot: str | None,
+    operacion: str | None,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[dict[str, Any]], bool] | None:
+    """Lista jobs propios desde PostgreSQL con el mismo cursor UUIDv7 que memoria.
+
+    ``id DESC`` es el orden contractual. UUIDv7 hace que el predicado ``id <
+    cursor`` sea estable para la paginación sin offsets, incluso cuando llegan
+    nuevos jobs entre páginas.
+    """
+    if not db_configurado():
+        return None
+    try:
+        import uuid
+        from types import SimpleNamespace
+
+        from sqlalchemy import select
+
+        from central_api.models.execution import Job
+
+        owner = uuid.UUID(str(principal.user_id))
+        border = uuid.UUID(_decode_cursor(cursor)) if cursor else None
+        async with nueva_sesion() as session:
+            statement = select(Job).where(Job.user_id == owner)
+            if status:
+                statement = statement.where(Job.status == status)
+            if bot:
+                statement = statement.where(Job.bot == bot)
+            if operacion:
+                statement = statement.where(Job.operation == operacion)
+            if border is not None:
+                statement = statement.where(Job.id < border)
+            rows = (
+                await session.execute(statement.order_by(Job.id.desc()).limit(limit + 1))
+            ).scalars().all()
+    except Exception:
+        # DATABASE_URL es fuente canónica: no sustituir un error de base por un
+        # store de proceso que podría omitir jobs creados por otra instancia.
+        return None
+
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    items: list[dict[str, Any]] = []
+    for row in page:
+        meta = {
+            "started_at": row.started_at.isoformat().replace("+00:00", "Z")
+            if row.started_at else None,
+            "finished_at": row.finished_at.isoformat().replace("+00:00", "Z")
+            if row.finished_at else None,
+            "cancel_reason": row.cancel_reason,
+            "cancelled_by": row.cancelled_by,
+            "error": row.error_message,
+            "files": [],
+            "data": None,
+        }
+        # ``project_job`` es la proyección pública existente. El namespace evita
+        # serializar UUID/ORM directamente y conserva su contrato V2.
+        public = project_job(
+            SimpleNamespace(
+                id=str(row.id), status=str(row.status), bot=row.bot,
+                operation=row.operation, created_at=row.created_at,
+                result={"result": row.result, "error": row.error_message},
+            ),
+            meta,
+        )
+        items.append(public)
+    return items, has_more
+
+
 @router.get("/jobs")
-def list_jobs(
+async def list_jobs(
     status: str | None = None,
     bot: str | None = None,
     operacion: str | None = None,
@@ -518,6 +608,37 @@ def list_jobs(
 ) -> JSONResponse:
     """Listado propio por cursor UUIDv7 (``job_id DESC``), sin offsets."""
     limit = max(1, min(100, limit))
+    if cursor and _decode_cursor(cursor) is None:
+        return JSONResponse(status_code=400, content=public_error("validation"))
+    db_page = await _list_jobs_db(
+        principal,
+        status=status,
+        bot=bot,
+        operacion=operacion,
+        limit=limit,
+        cursor=cursor,
+    )
+    if db_configurado() and db_page is not None:
+        items, has_more = db_page
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "jobs": [
+                    {
+                        "job_id": item["job_id"], "status": item["status"],
+                        "bot": item["bot"], "operacion": item["operation"],
+                    }
+                    for item in items
+                ],
+                "items": items,
+                "next_cursor": _encode_cursor(items[-1]["job_id"])
+                if has_more and items else None,
+                "has_more": has_more,
+            },
+        )
+    if db_configurado():
+        return JSONResponse(status_code=503, content=public_error("unavailable"))
     owned = [
         job for job in JOBS.values()
         if str(JOB_META.get(job.id, {}).get("owner", principal.user_id))
@@ -531,13 +652,8 @@ def list_jobs(
         owned = [j for j in owned if j.operation == operacion]
     owned.sort(key=lambda j: j.id, reverse=True)
     if cursor:
-        try:
-            border = json.loads(
-                base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
-            )["job_id"]
-            owned = [j for j in owned if j.id < border]
-        except (ValueError, KeyError, TypeError):
-            return JSONResponse(status_code=400, content=public_error("validation"))
+        border = _decode_cursor(cursor)
+        owned = [j for j in owned if j.id < border]
     page = owned[:limit]
     rest = owned[limit:]
     return JSONResponse(

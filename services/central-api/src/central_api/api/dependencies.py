@@ -22,6 +22,7 @@ import hmac
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 
 from fastapi import Header, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
@@ -35,6 +36,7 @@ from central_api.security.api_keys import parse_api_key, verify_presented_secret
 from central_api.security.principals import ANONYMOUS_USER_ID, ApiPrincipal
 from central_api.security.secret_redaction import public_error
 from central_api.settings import get_settings
+from central_api.store import utcnow
 
 # Registro de idempotencia en memoria (en PG: tabla con UNIQUE + retención
 # IDEMPOTENCY_RETENTION_DAYS, reutilizable tras estado terminal, S-2).
@@ -356,12 +358,39 @@ class IdempotencyHit:
     conflict: bool = False
 
 
-def check_idempotency(
+async def check_idempotency(
     user_id: str, key: str, fingerprint: str
 ) -> IdempotencyHit:
     """Busca la llave: replay exacto, conflicto, o vía libre (S-2)."""
     if not key:
         return IdempotencyHit()
+    from central_api.db import db_configurado
+
+    if db_configurado():
+        from sqlalchemy import text
+
+        from central_api.db import nueva_sesion
+
+        try:
+            owner = uuid.UUID(str(user_id))
+        except (TypeError, ValueError, AttributeError):
+            return IdempotencyHit()
+        async with nueva_sesion() as session:
+            row = (await session.execute(
+                text(
+                    "SELECT fingerprint, job_id FROM api_idempotency "
+                    "WHERE user_id = :user_id AND idempotency_key = :key "
+                    "AND expires_at > CURRENT_TIMESTAMP"
+                ),
+                {"user_id": owner, "key": key[:128]},
+            )).mappings().first()
+        if row is None:
+            return IdempotencyHit()
+        if row["fingerprint"] == fingerprint:
+            return IdempotencyHit(
+                job_id=str(row["job_id"]) if row["job_id"] else None
+            )
+        return IdempotencyHit(conflict=True)
     record = IDEMPOTENCY.get((user_id, key))
     if record is None:
         return IdempotencyHit()
@@ -370,10 +399,41 @@ def check_idempotency(
     return IdempotencyHit(conflict=True)
 
 
-def remember_idempotency(user_id: str, key: str, fingerprint: str, job_id: str) -> None:
+async def remember_idempotency(
+    user_id: str, key: str, fingerprint: str, job_id: str
+) -> None:
     """Persiste la identidad de idempotencia junto al job creado."""
-    if key:
-        IDEMPOTENCY[(user_id, key)] = {"fingerprint": fingerprint, "job_id": job_id}
+    if not key:
+        return
+    from central_api.db import db_configurado
+
+    if db_configurado():
+        from sqlalchemy import text
+
+        from central_api.db import nueva_sesion
+
+        try:
+            owner, job = uuid.UUID(str(user_id)), uuid.UUID(str(job_id))
+        except (TypeError, ValueError, AttributeError):
+            return
+        async with nueva_sesion() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO api_idempotency "
+                    "(user_id, idempotency_key, fingerprint, job_id, expires_at) "
+                    "VALUES (:user_id, :key, :fingerprint, :job_id, :expires_at) "
+                    "ON CONFLICT (user_id, idempotency_key) DO NOTHING"
+                ),
+                {
+                    "user_id": owner,
+                    "key": key[:128],
+                    "fingerprint": fingerprint[:128],
+                    "job_id": job,
+                    "expires_at": utcnow() + timedelta(days=30),
+                },
+            )
+        return
+    IDEMPOTENCY[(user_id, key)] = {"fingerprint": fingerprint, "job_id": job_id}
 
 
 def idempotency_conflict_response() -> JSONResponse:

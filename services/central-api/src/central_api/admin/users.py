@@ -21,8 +21,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 from dataclasses import asdict, dataclass, field
+from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from central_api.admin._common import (
@@ -939,6 +940,146 @@ async def deshabilitar_usuario(
     return await _cambiar_estado(
         user_id, "deshabilitado", body.motivo, actor, request_id or "", "user.disabled"
     )
+
+
+async def _bulk_request_values(request) -> tuple[str, list[str], str]:
+    """Lee la forma V1 urlencoded y la forma JSON del panel sin revelar datos."""
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except ValueError:
+            payload = {}
+        payload = payload if isinstance(payload, dict) else {}
+        raw_ids = payload.get("user_ids", [])
+        ids = [str(value) for value in raw_ids] if isinstance(raw_ids, list) else []
+        return str(payload.get("action", "")), ids, str(payload.get("motivo", ""))
+    try:
+        form = await request.form()
+    except Exception:
+        try:
+            parsed = parse_qs((await request.body()).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return "", [], ""
+        return (
+            parsed.get("action", [""])[0],
+            parsed.get("user_ids", []),
+            parsed.get("motivo", [""])[0],
+        )
+    return str(form.get("action", "")), [str(value) for value in form.getlist("user_ids")], str(form.get("motivo", ""))
+
+
+@router.post("/users/bulk")
+async def bulk_users(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    """Equivalente V1 para habilitar o deshabilitar una selección de usuarios.
+
+    Los IDs son UUID V3. Cada usuario se audita individualmente y una clave
+    revocada por deshabilitación no vuelve a activarse de forma implícita.
+    """
+    actor = require_admin(authorization)
+    action, user_ids, motivo_raw = await _bulk_request_values(request)
+    user_ids = list(dict.fromkeys(user_id.strip() for user_id in user_ids if user_id.strip()))
+    if not user_ids:
+        raise HTTPException(status_code=400, detail="No seleccionaste usuarios.")
+    if action not in {"enable", "disable"}:
+        raise HTTPException(status_code=400, detail="Acción inválida.")
+    if len(user_ids) > 200:
+        raise HTTPException(status_code=400, detail="Máximo 200 usuarios por operación.")
+    motivo = motivo_raw or f"operación masiva V1: {action}"
+    estado = "habilitado" if action == "enable" else "deshabilitado"
+    updated, missing = [], []
+    for user_id in user_ids:
+        try:
+            result = await _cambiar_estado(
+                user_id, estado, motivo, actor, request_id or "", f"user.bulk_{action}"
+            )
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                missing.append(user_id)
+                continue
+            raise
+        updated.append(result["usuario"]["id"])
+    return {
+        "success": True,
+        "action": action,
+        "updated": updated,
+        "missing": missing,
+        "count": len(updated),
+    }
+
+
+async def _get_admin_user(user_id: str) -> AdminUser:
+    usuario = USERS.get(user_id)
+    if usuario is None:
+        usuario = await _usuario_pg_por_id(user_id)
+        if usuario is not None:
+            USERS[user_id] = usuario
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="usuario no encontrado")
+    return usuario
+
+
+@router.post("/users/{user_id}/monthly-limit")
+async def actualizar_limite_mensual(
+    user_id: str,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    """Compatibilidad V1 usando el entitlement ``LIBRE`` durable de V3.
+
+    V3 no almacena contadores en ``users``. El límite vive en
+    ``billing_accounts.max_requests`` y por eso sobrevive reinicios sin exponer
+    ni modificar claves API o secretos.
+    """
+    actor = require_admin(authorization)
+    content_type = request.headers.get("content-type", "")
+    try:
+        payload = await request.json() if "application/json" in content_type else await request.form()
+    except Exception:
+        try:
+            payload = {
+                key: values[0] if len(values) == 1 else values
+                for key, values in parse_qs((await request.body()).decode("utf-8")).items()
+            }
+        except (UnicodeDecodeError, ValueError):
+            payload = {}
+    raw_limit = payload.get("maximas_consultas_mensuales", payload.get("max_requests", None))
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="El límite mensual debe ser un entero.") from None
+    if not 1 <= limit <= 10_000_000:
+        raise HTTPException(status_code=400, detail="El límite mensual debe estar entre 1 y 10000000.")
+    usuario = await _get_admin_user(user_id)
+    motivo = str(payload.get("motivo", "") or "límite mensual V1")
+    motivo = validar_motivo(motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
+    from central_api.billing.entitlements import persist_billing_account, set_billing_account
+
+    try:
+        account = set_billing_account(user_id, "LIBRE", max_requests=limit)
+        await persist_billing_account(account)
+    except (ValueError, RuntimeError):
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    usuario.account_type = account.account_type
+    usuario.plan_code = account.plan_code
+    usuario.max_requests = limit
+    usuario.account_expires_at = account.expires_at
+    usuario.plan = "libre"
+    log_event(
+        "user.monthly_limit.updated",
+        actor_id=actor,
+        target_type="user",
+        target_id=user_id,
+        request_id=request_id or "",
+        reason=motivo,
+        metadata={"max_requests": limit, "account_type": "LIBRE"},
+    )
+    return {"success": True, "usuario": _vista_usuario(usuario), "maximas_consultas_mensuales": limit}
 
 
 @router.post("/users/{user_id}/api-keys", status_code=201)

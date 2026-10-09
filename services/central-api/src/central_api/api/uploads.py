@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from central_api.api.bots import OPERATIONS
+from central_api.db import db_configurado, nueva_sesion
 from central_api.security.principals import ApiPrincipal
 from central_api.security.secret_redaction import public_error
 from central_api.api.dependencies import require_api_principal
@@ -46,8 +47,30 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _persist_ticket(ticket: dict) -> None:
+    """Persiste el ticket sin almacenar URLs firmadas ni secretos de storage."""
+    if not db_configurado():
+        return
+    try:
+        from sqlalchemy import text
+
+        async with nueva_sesion() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO upload_tickets "
+                    "(object_key, upload_id, user_id, bot, operation, field, filename, "
+                    "content_type, size_bytes, sha256, confirmed, expires_at) "
+                    "VALUES (:object_key, :upload_id, :user_id, :bot, :operation, :field, "
+                    ":filename, :content_type, :size_bytes, :sha256, :confirmed, :expires_at)"
+                ),
+                ticket,
+            )
+    except Exception as exc:  # nunca emitir una capacidad que no sobrevivirá al reinicio
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from exc
+
+
 @router.post("/uploads", status_code=201)
-def request_upload(
+async def request_upload(
     body: TicketBody,
     principal: ApiPrincipal = Depends(require_api_principal),
 ) -> JSONResponse:
@@ -59,17 +82,27 @@ def request_upload(
     upload_id = str(uuid.uuid4())
     object_key = f"uploads/{upload_id}"
     expires_at = _utcnow() + timedelta(seconds=UPLOAD_TTL_SECONDS)
-    TICKETS[object_key] = {
+    ticket = {
         "upload_id": upload_id,
-        "owner": principal.user_id,
+        "owner": str(principal.user_id),
+        "user_id": str(principal.user_id),
+        "object_key": object_key,
         "bot": body.bot,
         "operacion": body.operacion,
+        "operation": body.operacion,
         "campo": body.campo,
+        "field": body.campo,
         "filename": body.filename,
+        "content_type": body.content_type,
         "size_bytes": body.size_bytes,
+        "sha256": body.sha256,
         "expires_at": expires_at,
-        "confirmado": True,  # el storage confirma por callback en PG; aquí directo
+        "confirmado": True,
+        "confirmed": True,  # callback de storage futuro puede confirmarlo explícitamente
     }
+    await _persist_ticket(ticket)
+    # Mantiene el modo sin DATABASE_URL y permite pruebas locales sin PostgreSQL.
+    TICKETS[object_key] = ticket
     # La central firma la subida (SigV4 real con storage configurado, ticket
     # de desarrollo documentado si no); el cliente sube directo al storage.
     ajustes = get_settings()
@@ -166,13 +199,53 @@ async def download_artifact(
 
 
 def verify_upload_key(object_key: str, user_id: str) -> bool:
-    """Verifica pertenencia, vigencia y confirmación de un object key."""
+    """Fallback síncrono de desarrollo para consumidores legados.
+
+    Con PostgreSQL los routers asíncronos deben usar
+    :func:`verify_upload_key_async`, para no abrir una segunda conexión síncrona
+    ni degradar la verificación durable a una caché de proceso.
+    """
     ticket = TICKETS.get(object_key)
-    if ticket is None or ticket["owner"] != user_id:
+    if ticket is None or ticket["owner"] != str(user_id):
         return False
     if ticket["expires_at"] < _utcnow() or not ticket["confirmado"]:
         return False
     return True
 
 
-__all__ = ["TICKETS", "UPLOAD_TTL_SECONDS", "UPLOAD_MAX_BYTES", "verify_upload_key"]
+async def verify_upload_key_async(object_key: str, user_id: str) -> bool:
+    """Verifica un ticket durable, o el fallback de memoria sin base configurada."""
+    if not db_configurado():
+        return verify_upload_key(object_key, user_id)
+    try:
+        import uuid
+
+        from sqlalchemy import text
+
+        owner = uuid.UUID(str(user_id))
+        async with nueva_sesion() as session:
+            ticket = (
+                await session.execute(
+                    text(
+                        "SELECT 1 FROM upload_tickets "
+                        "WHERE object_key = :object_key AND user_id = :user_id "
+                        "AND confirmed = true AND expires_at > CURRENT_TIMESTAMP"
+                    ),
+                    {"object_key": object_key, "user_id": owner},
+                )
+            ).first()
+        return ticket is not None
+    except (ValueError, TypeError, AttributeError):
+        return False
+    except Exception:
+        # En modo DB no se autoriza por una caché potencialmente obsoleta.
+        return False
+
+
+__all__ = [
+    "TICKETS",
+    "UPLOAD_TTL_SECONDS",
+    "UPLOAD_MAX_BYTES",
+    "verify_upload_key",
+    "verify_upload_key_async",
+]

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
@@ -171,4 +171,24 @@ def get_openapi_examples(bot: str, operation: str) -> dict[str, dict[str, Any]]:
     }
 
 
-__all__ = ["get_request_model", "get_openapi_examples"]
+@lru_cache(maxsize=None)
+def get_result_model(bot: str, operation: str) -> type[BaseModel]:
+    """Return the stable terminal-result envelope for one bot operation.
+
+    Worker output data is intentionally plugin-defined JSON.  This helper gives
+    callers a concrete Pydantic model for the common envelope without claiming
+    a false static schema for each browser result.
+    """
+    model_name = "".join(
+        part.capitalize() for part in f"{bot}_{operation}_result".split("_")
+    )
+    return create_model(
+        model_name,
+        result=(Literal["OK", "PARCIAL", "ERROR"], ...),
+        data=(dict[str, Any], Field(default_factory=dict)),
+        artifacts=(list[dict[str, Any]], Field(default_factory=list)),
+        error=(dict[str, Any] | None, None),
+    )
+
+
+__all__ = ["get_request_model", "get_openapi_examples", "get_result_model"]
