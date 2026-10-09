@@ -7,7 +7,7 @@ asigna un administrador desde el panel o con
 
 | Tipo | Cupo | Renovación |
 |---|---|---|
-| `PRUEBA` | 100 requests en total | **No renovable.** Es el tipo por defecto de todo usuario nuevo. |
+| `PRUEBA` | 100 requests en total | **No renovable.** Es el tipo por defecto de todo usuario nuevo. Al consumirse el request 100, la cuenta pasa a `NORMAL` (cupo 100/mes) y el usuario queda **deshabilitado** hasta que un admin lo habilite. |
 | `TESTING` | Ilimitado | No aplica. El uso se sigue contando. |
 | `NORMAL` | `max_requests` por mes | **Mensual y automática.** Mes calendario en hora de Argentina (UTC-3). |
 
@@ -25,6 +25,16 @@ asigna un administrador desde el panel o con
   períodos vencidos (`POST /admin/billing/periods/close-expired`) es higiene,
   nunca es necesario para que un `NORMAL` se renueve.
 - Toda asignación exige motivo (10 a 500 caracteres en el panel) y queda auditada.
+
+## Fin de la prueba
+
+Cuando se confirma el request 100 de una cuenta `PRUEBA`:
+- la cuenta pasa a `NORMAL` con `max_requests = 100` y contadores en cero;
+- `users.habilitado` queda en `false` (el acceso se corta);
+- se registra el evento de auditoría `billing.prueba.finished`.
+
+Las API keys **no** se revocan: al habilitar al usuario desde el panel recupera
+su acceso. El admin debería ajustar el cupo mensual `NORMAL` si corresponde.
 
 ## Persistencia
 

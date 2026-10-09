@@ -99,8 +99,24 @@ def reserve_for_job(
         return entry
 
 
+def _finish_prueba(account) -> None:
+    """Prueba agotada: pasa a NORMAL y se deshabilita al usuario (sin revocar claves)."""
+    from central_api.billing.entitlements import ACCOUNT_NORMAL, PRUEBA_MAX_REQUESTS
+    from central_api.billing.postgres import _audit_prueba_finished
+
+    account.account_type = ACCOUNT_NORMAL
+    account.max_requests = PRUEBA_MAX_REQUESTS
+    account.requests_reserved = 0
+    account.requests_consumed = 0
+    _audit_prueba_finished(account.user_id)
+
+
 def _settle(job_id: str, estado: str, consume: bool, motivo: str | None):
-    from central_api.billing.entitlements import BILLING_ACCOUNTS, PERIODS
+    from central_api.billing.entitlements import (
+        BILLING_ACCOUNTS,
+        PERIODS,
+        PRUEBA_MAX_REQUESTS,
+    )
 
     entry = USAGE.get(job_id)
     if entry is None or entry.estado != "RESERVADO":
@@ -123,6 +139,12 @@ def _settle(job_id: str, estado: str, consume: bool, motivo: str | None):
                 account.requests_reserved -= 1
                 if consume:
                     account.requests_consumed += 1
+                if (
+                    consume
+                    and account.account_type == "PRUEBA"
+                    and account.requests_consumed >= PRUEBA_MAX_REQUESTS
+                ):
+                    _finish_prueba(account)
         done = UsageEntry(
             id=entry.id, user_id=entry.user_id, job_id=job_id, estado=estado,
             period_id=entry.period_id, motivo=motivo, unidades=entry.unidades,

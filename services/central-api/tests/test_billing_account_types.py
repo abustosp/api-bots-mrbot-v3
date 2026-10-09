@@ -69,35 +69,31 @@ def test_unassigned_user_defaults_to_prueba() -> None:
     assert (account.account_type, account.max_requests) == ("PRUEBA", 100)
 
 
-def test_prueba_allows_exactly_100_and_never_renews() -> None:
+def test_prueba_exhausted_becomes_normal_and_user_is_disabled() -> None:
     user_id = _id()
-    set_billing_account(user_id, "PRUEBA")
-    jobs = []
-    for _ in range(100):
-        entry = _reserve(user_id)
-        jobs.append(entry.job_id)
-    with pytest.raises(QuotaExhausted):
-        _reserve(user_id)
-    # Los 100 se confirman: el cupo sigue agotado y no se renueva.
-    for job_id in jobs:
-        confirm_usage(job_id)
-    with pytest.raises(QuotaExhausted):
-        _reserve(user_id)
-    # Aunque pase el tiempo (mes siguiente) no hay renovación.
-    assert get_billing_account(user_id).requests_consumed == 100
-    assert not close_expired_periods(datetime.now(timezone.utc) + timedelta(days=90))
-    with pytest.raises(QuotaExhausted):
-        _reserve(user_id)
-
-
-def test_prueba_reassigning_same_type_does_not_renew() -> None:
-    user_id = _id()
-    set_billing_account(user_id, "PRUEBA")
-    for _ in range(100):
-        _reserve(user_id)
-    set_billing_account(user_id, "PRUEBA")  # re-guardar no renueva
-    with pytest.raises(QuotaExhausted):
-        _reserve(user_id)
+    USERS[user_id] = AdminUser(id=user_id, email="fin-prueba@example.test")
+    try:
+        set_billing_account(user_id, "PRUEBA")
+        jobs = [_reserve(user_id).job_id for _ in range(100)]
+        with pytest.raises(QuotaExhausted):
+            _reserve(user_id)  # los 100 estan reservados
+        for job_id in jobs[:99]:
+            confirm_usage(job_id)
+        assert get_billing_account(user_id).account_type == "PRUEBA"
+        assert USERS[user_id].estado == "habilitado"
+        confirm_usage(jobs[99])  # el ultimo cierra la prueba
+        account = get_billing_account(user_id)
+        assert account.account_type == "NORMAL"
+        assert (account.max_requests, account.requests_consumed) == (100, 0)
+        assert USERS[user_id].estado == "deshabilitado"
+        assert USERS[user_id].account_type == "NORMAL"
+        assert any(e.action == "billing.prueba.finished" and e.target_id == user_id
+                   for e in AUDIT_LOG)
+        # Rehabilitar es manual y ya no hay prueba que renovar.
+        assert not close_expired_periods(datetime.now(timezone.utc) + timedelta(days=90))
+    finally:
+        USERS.pop(user_id, None)
+        AUDIT_LOG[:] = [e for e in AUDIT_LOG if e.target_id != user_id]
 
 
 def test_prueba_release_and_refund_return_the_slot() -> None:
@@ -200,13 +196,15 @@ def test_normal_quota_change_applies_to_current_month() -> None:
 def test_changing_type_resets_counters() -> None:
     user_id = _id()
     set_billing_account(user_id, "PRUEBA")
-    for _ in range(100):
+    for _ in range(40):
         confirm_usage(_reserve(user_id).job_id)
-    with pytest.raises(QuotaExhausted):
-        _reserve(user_id)
+    assert get_billing_account(user_id).requests_consumed == 40
     account = set_billing_account(user_id, "NORMAL", max_requests=5)
     assert (account.requests_consumed, account.requests_reserved) == (0, 0)
-    _reserve(user_id)
+    for _ in range(5):
+        _reserve(user_id)
+    with pytest.raises(QuotaExhausted):
+        _reserve(user_id)
 
 
 def test_month_bounds_use_argentina_calendar_month() -> None:

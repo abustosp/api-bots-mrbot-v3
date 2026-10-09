@@ -200,8 +200,63 @@ async def settle_in_session(
     usage.status = status
     usage.reason = (reason or None)
     usage.updated_at = now
+    if (
+        consume
+        and usage.account_period_id is None
+        and usage.generation_id == account.generation_id
+        and account.account_type == ACCOUNT_PRUEBA
+        and account.requests_consumed >= PRUEBA_MAX_REQUESTS
+    ):
+        await _finish_prueba(session, account, now)
     await session.flush()
     return _as_usage(usage)
+
+
+async def _finish_prueba(
+    session: AsyncSession, account: BillingAccount, now: datetime
+) -> None:
+    """Agotada la prueba: la cuenta pasa a NORMAL y el usuario se deshabilita.
+
+    Las API keys no se revocan: al habilitar de nuevo desde el panel el usuario
+    recupera su acceso. El cupo mensual queda en el valor de la prueba hasta que
+    el administrador lo ajuste.
+    """
+    from central_api.models.identity import User
+
+    account.account_type = ACCOUNT_NORMAL
+    account.max_requests = PRUEBA_MAX_REQUESTS
+    account.starts_at = now
+    account.requests_reserved = 0
+    account.requests_consumed = 0
+    account.generation_id = uuid.uuid4()
+    user = await session.get(User, account.user_id)
+    if user is not None:
+        user.habilitado = False
+    _audit_prueba_finished(str(account.user_id))
+
+
+def _audit_prueba_finished(user_id: str) -> None:
+    try:
+        from central_api.admin.audit import log_event
+        from central_api.admin.users import USERS
+
+        user = USERS.get(user_id)
+        if user is not None:
+            user.estado = "deshabilitado"
+            user.account_type = ACCOUNT_NORMAL
+            user.max_requests = PRUEBA_MAX_REQUESTS
+            user.plan = "normal"
+        log_event(
+            "billing.prueba.finished",
+            actor_id="system:billing",
+            actor_type="system",
+            target_type="user",
+            target_id=user_id,
+            reason="prueba agotada: pasa a NORMAL y queda deshabilitado",
+            metadata={"nuevo_tipo": ACCOUNT_NORMAL, "habilitado": False},
+        )
+    except ImportError:
+        pass
 
 
 async def assign_account_in_db(

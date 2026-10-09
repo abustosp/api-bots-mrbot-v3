@@ -128,6 +128,7 @@ def _durable_checks(engine, ids):
     from central_api.billing.reservation import QuotaExhausted
     from central_api.models.billing import BillingAccount, BillingAccountPeriod
     from central_api.models.execution import Job
+    from central_api.models.identity import User
     from central_api.settings import get_settings
     from sqlalchemy import select
 
@@ -161,13 +162,17 @@ def _durable_checks(engine, ids):
         prueba = ids["gratuita"]
         for _ in range(63):
             await settle(await reserve(prueba), "CONFIRMADO")
-        with pytest.raises(QuotaExhausted):
-            await reserve(prueba)
-        await assign_account(str(prueba), "PRUEBA")  # re-guardar no renueva
-        with pytest.raises(QuotaExhausted):
-            await reserve(prueba)
+        # Al confirmarse el ultimo request la prueba termina: NORMAL + deshabilitado.
         account = await hydrate_billing_account(str(prueba))
-        assert account.requests_consumed == 100
+        assert (account.account_type, account.max_requests) == ("NORMAL", 100)
+        assert account.requests_consumed == 0
+        async with db.nueva_sesion() as session:
+            user = await session.get(User, prueba)
+            assert user.habilitado is False
+        # El admin habilita manualmente y el usuario ya tiene su cupo mensual.
+        async with db.nueva_sesion() as session:
+            (await session.get(User, prueba)).habilitado = True
+        await reserve(prueba)
 
         # --- concurrencia: nunca se pasa del tope ---------------------------
         racer = ids["creditos"]
@@ -222,10 +227,10 @@ def _durable_checks(engine, ids):
             assert sorted(p.status for p in periods) == ["ABIERTO", "CERRADO"]
 
         # --- cambiar de tipo reinicia contadores ----------------------------
-        await assign_account(str(prueba), "NORMAL", max_requests=5)
-        account = await hydrate_billing_account(str(prueba))
+        await assign_account(str(ids["creditos"]), "NORMAL", max_requests=5)
+        account = await hydrate_billing_account(str(ids["creditos"]))
         assert (account.account_type, account.requests_consumed) == ("NORMAL", 0)
-        await reserve(prueba)
+        await reserve(ids["creditos"])
 
     async def run():
         try:
