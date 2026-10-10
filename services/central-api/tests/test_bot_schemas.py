@@ -130,3 +130,20 @@ def test_worker_schema_copy_has_exact_json_schema_and_example_parity() -> None:
         assert get_openapi_examples(bot, operation) == worker_get_openapi_examples(
             bot, operation
         )
+
+
+def test_normalizacion_conserva_campos_que_el_plugin_si_usa() -> None:
+    from central_api.security.credentials import normalize_v2_payload
+
+    filtros = [{"periodo": "04/2024", "impuesto": "011"}]
+    vep = normalize_v2_payload(
+        "vep_ccma", "generar",
+        {"filtro_impuestos": filtros, "filtro_intereses": filtros, "medio_pago": "qr"},
+    )
+    assert vep["filtro_impuestos"] == filtros
+    assert vep["filtro_intereses"] == filtros
+    mc = normalize_v2_payload("mis_comprobantes", "consultar", {"timeout_mc": 90})
+    assert mc["timeout_mc"] == 90
+    # Los bots que no usan esos campos siguen descartandolos.
+    otro = normalize_v2_payload("ccma", "consultar", {"filtro_impuestos": filtros, "timeout_mc": 5})
+    assert "filtro_impuestos" not in otro and "timeout_mc" not in otro

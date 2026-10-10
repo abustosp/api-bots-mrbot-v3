@@ -36,6 +36,11 @@ _CREDENTIAL_CONTEXT_FIELDS = (
 # ``minio_upload`` los usan varios bots; ``archivo_historico_minio`` es el
 # nombre V1 de Aportes en Línea y sin traducirlo el worker rechaza el cuerpo
 # documentado del alias con ``ENVELOPE_INVALID`` (``extra=forbid``).
+_BOTS_QUE_USAN: dict[str, frozenset[str]] = {
+    "timeout_mc": frozenset({"mis_comprobantes", "comprobantes"}),
+    "filtro_impuestos": frozenset({"vep_ccma"}),
+    "filtro_intereses": frozenset({"vep_ccma"}),
+}
 _UPLOAD_FLAG_SOURCES = ("carga_minio", "minio_upload", "archivo_historico_minio")
 
 
@@ -100,7 +105,12 @@ def normalize_v2_payload(
     # plugins either made them deterministic or intentionally do not expose a
     # worker equivalent.  Drop them before strict plugin parsing instead of
     # making an otherwise valid historical request fail with extra_forbidden.
+    # Solo se descarta lo que el plugin del bot NO acepta: ``timeout_mc`` lo usan
+    # mis_comprobantes/comprobantes y los filtros los usa vep_ccma. Borrarlos
+    # en esos bots cambiaria lo que se ejecuta (p. ej. un VEP por todo el capital).
     for retired in ("timeout_mc", "filtro_impuestos", "filtro_intereses"):
+        if bot in _BOTS_QUE_USAN.get(retired, frozenset()):
+            continue
         normalized.pop(retired, None)
 
     if bot == "arba" and "cuit" in normalized:

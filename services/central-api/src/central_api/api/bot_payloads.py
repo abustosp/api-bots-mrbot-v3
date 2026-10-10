@@ -267,13 +267,13 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
     },
     "vep_archivo": {
         "representado_cuit": _string(pattern=CUIT),
-        "medio_pago": (Literal["link", "pago_mis_cuentas", "internet_banking", "xn_group"], Field(default="internet_banking")),
+        "medio_pago": (Literal["link", "pago_mis_cuentas", "internet_banking", "xn_group", "qr"], Field(default="internet_banking")),
         "archivo_nombre": _string(min_length=1, max_length=128), "archivo_b64": _string(min_length=1),
         "incluir_json": _boolean(default=True), "subir_pdf": _boolean(default=True),
     },
     "vep_ccma": {
         "representado_cuit": _string(pattern=CUIT),
-        "medio_pago": (Literal["link", "pago_mis_cuentas", "internet_banking", "xn_group"], Field(default="internet_banking")),
+        "medio_pago": (Literal["link", "pago_mis_cuentas", "internet_banking", "xn_group", "qr"], Field(default="internet_banking")),
         "seleccionar_impuestos": _boolean(default=True), "seleccionar_intereses": _boolean(default=True),
         "generar_volante": _boolean(default=True), "incluir_json": _boolean(default=True),
         "subir_pdf": _boolean(default=True),
