@@ -1211,15 +1211,27 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
             )
             try:
                 if env.input_files:
-                    from bot_worker.runtime.input_files import descargar_entradas
-
-                    nombres_entrada = await descargar_entradas(
-                        env.input_files, workdir, client
+                    from bot_worker.runtime.input_files import (
+                        descargar_entradas,
+                        descargar_entradas_b64,
                     )
-                    # Los zip se expanden: el payload pasa a listar los
-                    # archivos reales que quedaron en work_dir.
-                    campo_entrada = str(env.input_files[0].get("campo") or "archivos")
-                    env.payload = {**env.payload, campo_entrada: nombres_entrada}
+
+                    en_b64 = [f for f in env.input_files if f.get("modo") == "b64"]
+                    en_disco = [f for f in env.input_files if f.get("modo") != "b64"]
+                    nuevo_payload = dict(env.payload)
+                    if en_disco:
+                        nombres_entrada = await descargar_entradas(
+                            en_disco, workdir, client
+                        )
+                        # Los zip se expanden: el payload pasa a listar los
+                        # archivos reales que quedaron en work_dir.
+                        campo_entrada = str(en_disco[0].get("campo") or "archivos")
+                        nuevo_payload[campo_entrada] = nombres_entrada
+                    if en_b64:
+                        nuevo_payload.update(
+                            await descargar_entradas_b64(en_b64, client)
+                        )
+                    env.payload = nuevo_payload
                 validated = await plugin.validate(validation_payload(env))
                 result = await asyncio.wait_for(
                     plugin.execute(validated, runtime),  # type: ignore[arg-type]

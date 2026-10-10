@@ -43,7 +43,11 @@ from central_api.security.credentials import (
     normalize_v2_payload,
 )
 from central_api.security.secret_redaction import public_error
-from central_api.input_files import INPUT_FILE_FIELDS, campo_de_archivos
+from central_api.input_files import (
+    INPUT_FILE_FIELDS,
+    campo_de_archivos,
+    claves_referenciadas,
+)
 from central_api.store import JOBS, Job, new_job_id
 
 router = APIRouter()
@@ -507,28 +511,30 @@ async def submit_job(
     }
     normalized_payload = normalize_v2_payload(bot, operacion, accepted_payload)
     campo_archivos = campo_de_archivos(bot, operacion)
-    if campo_archivos is not None:
-        claves = normalized_payload.get(campo_archivos)
-        if (
-            not isinstance(claves, list)
-            or not claves
-            or not all(isinstance(c, str) and c for c in claves)
-        ):
-            return JSONResponse(
-                status_code=422,
-                content={"detail": {
-                    "error_code": "validation",
-                    "message": (
-                        f"{campo_archivos} debe ser una lista de object_key "
-                        "emitidas por POST /api/v3/uploads."
-                    ),
-                }},
-                headers={"X-Correlation-ID": corr},
-            )
+    claves_ref = claves_referenciadas(bot, operacion, normalized_payload)
+    lista_invalida = campo_archivos is not None and (
+        not claves_ref or not all(isinstance(c, str) and c for c in claves_ref)
+    )
+    clave_invalida = campo_archivos is None and not all(
+        isinstance(c, str) and c for c in claves_ref
+    )
+    if lista_invalida or clave_invalida:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": {
+                "error_code": "validation",
+                "message": (
+                    "Los archivos deben referenciarse con object_key emitidas "
+                    "por POST /api/v3/uploads."
+                ),
+            }},
+            headers={"X-Correlation-ID": corr},
+        )
+    if claves_ref:
         from central_api.api.uploads import resolver_archivos  # evita ciclo
 
         try:
-            await resolver_archivos(str(principal.user_id), bot, claves)
+            await resolver_archivos(str(principal.user_id), bot, claves_ref)
         except LookupError as exc:
             return JSONResponse(
                 status_code=422,

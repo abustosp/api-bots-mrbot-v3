@@ -21,12 +21,40 @@ from central_api.storage import presign_get_url
 INPUT_FILE_FIELDS: dict[tuple[str, str], str] = {
     ("controladores_fiscales", "presentar"): "archivos",
 }
+#: ``(bot, operacion)`` -> ``{campo_key: campo_b64}``. Alternativa opcional al
+#: base64 inline: el cliente manda ``archivo_key`` (object_key de /uploads) y el
+#: worker rellena ``archivo_b64`` con el contenido antes de validar.
+KEY_FIELDS: dict[tuple[str, str], dict[str, str]] = {
+    ("vep_archivo", "generar"): {"archivo_key": "archivo_b64"},
+    ("carga_portal_iva", "cargar"): {
+        f"{base}_key": f"{base}_b64"
+        for base in (
+            "liv_cbte", "liv_alicuota", "lic_cbte", "lic_alicuota",
+            "csv_cf", "csv_cf_restitucion", "csv_df", "csv_df_restitucion",
+        )
+    },
+}
 #: Vigencia de la URL GET entregada al worker.
 INPUT_GET_TTL_SECONDS = 900
 
 
 def campo_de_archivos(bot: str, operacion: str) -> str | None:
     return INPUT_FILE_FIELDS.get((bot, operacion))
+
+
+def claves_referenciadas(
+    bot: str, operacion: str, payload: dict[str, Any]
+) -> list[str]:
+    """Todas las object keys que el payload referencia (lista o ``*_key``)."""
+    campo = campo_de_archivos(bot, operacion)
+    if campo:
+        valor = payload.get(campo)
+        return [str(c) for c in valor] if isinstance(valor, list) else []
+    claves: list[str] = []
+    for campo_key in KEY_FIELDS.get((bot, operacion), {}):
+        if payload.get(campo_key) is not None:
+            claves.append(payload[campo_key])
+    return claves
 
 
 def nombre_de_clave(object_key: str) -> str:
@@ -48,16 +76,11 @@ def preparar_entrada(
     bot: str, operacion: str, payload: dict[str, Any]
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Payload para el worker y lista ``input_files`` con URLs GET frescas."""
-    campo = campo_de_archivos(bot, operacion)
-    claves = payload.get(campo) if campo else None
-    if not campo or not isinstance(claves, list) or not claves:
-        return payload, []
     ajustes = get_settings()
-    nombres = _nombres_unicos([str(c) for c in claves])
-    archivos: list[dict[str, Any]] = []
-    for clave, nombre in zip(claves, nombres):
+
+    def _url(clave: str) -> str:
         try:
-            url = presign_get_url(
+            return presign_get_url(
                 endpoint=(
                     ajustes.object_storage_public_endpoint
                     or ajustes.object_storage_endpoint
@@ -71,8 +94,32 @@ def preparar_entrada(
             )
         except ValueError:
             # Sin storage configurado: modo desarrollo sin bytes reales.
-            url = ""
-        archivos.append({"campo": campo, "nombre": nombre, "url": url})
+            return ""
+
+    campo = campo_de_archivos(bot, operacion)
+    claves = payload.get(campo) if campo else None
+    if campo and isinstance(claves, list) and claves:
+        nombres = _nombres_unicos([str(c) for c in claves])
+        archivos = [
+            {"campo": campo, "nombre": nombre, "url": _url(clave)}
+            for clave, nombre in zip(claves, nombres)
+        ]
+        nuevo = dict(payload)
+        nuevo[campo] = nombres
+        return nuevo, archivos
+
+    mapa = KEY_FIELDS.get((bot, operacion))
+    if not mapa:
+        return payload, []
     nuevo = dict(payload)
-    nuevo[campo] = nombres
+    archivos = []
+    for campo_key, campo_b64 in mapa.items():
+        clave = nuevo.pop(campo_key, None)
+        if clave:
+            archivos.append({
+                "campo": campo_b64,
+                "nombre": nombre_de_clave(str(clave)),
+                "url": _url(str(clave)),
+                "modo": "b64",
+            })
     return nuevo, archivos

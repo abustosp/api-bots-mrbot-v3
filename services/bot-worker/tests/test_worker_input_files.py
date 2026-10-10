@@ -67,3 +67,17 @@ def test_rechaza_nombre_con_ruta(tmp_path: Path) -> None:
                 _Client({"u": b"x"}),
             )
         )
+
+
+def test_descargar_entradas_b64_devuelve_campos_en_base64() -> None:
+    import base64
+
+    from bot_worker.runtime.input_files import descargar_entradas_b64
+
+    campos = asyncio.run(
+        descargar_entradas_b64(
+            [{"campo": "archivo_b64", "nombre": "vep.txt", "url": "u"}],
+            _Client({"u": b"hola"}),
+        )
+    )
+    assert base64.b64decode(campos["archivo_b64"]) == b"hola"

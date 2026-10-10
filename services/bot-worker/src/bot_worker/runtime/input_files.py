@@ -8,6 +8,7 @@ symlinks, con tope de tamaño) y el zip se elimina, como hacia V1.
 
 from __future__ import annotations
 
+import base64
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -88,3 +89,33 @@ async def descargar_entradas(
         else:
             nombres.append(nombre)
     return nombres
+
+
+async def descargar_entradas_b64(
+    archivos: list[dict[str, Any]], client: Any
+) -> dict[str, str]:
+    """Baja cada archivo y devuelve ``{campo_b64: contenido en base64}``.
+
+    Para bots cuyo contrato sigue siendo base64 (``archivo_b64``, ``liv_cbte_b64``...):
+    el cliente subio el archivo al bucket y manda su clave en vez del contenido.
+    """
+    if client is None:
+        raise TargetUnavailableError("sin canal http para descargar entradas")
+    campos: dict[str, str] = {}
+    for item in archivos:
+        campo = str(item.get("campo") or "")
+        url = str(item.get("url") or "")
+        if not campo or not url:
+            raise InvalidInputError("archivo de entrada incompleto")
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            contenido = resp.content
+        except Exception as exc:  # noqa: BLE001 - la URL prefirmada es secreta
+            raise TargetUnavailableError(
+                f"no se pudo descargar {campo}: {type(exc).__name__}"
+            ) from None
+        if len(contenido) > MAX_ARCHIVO_BYTES:
+            raise InvalidInputError(f"archivo de entrada excede el maximo: {campo}")
+        campos[campo] = base64.b64encode(contenido).decode("ascii")
+    return campos

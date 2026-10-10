@@ -85,3 +85,40 @@ def test_preparar_entrada_entrega_nombres_y_urls_get(monkeypatch) -> None:
     assert all("X-Amz-Signature=" in a["url"] and "/uploads/" in a["url"] for a in archivos)
     sin, vacio = preparar_entrada("ccma", "consultar", {"x": 1})
     assert sin == {"x": 1} and vacio == []
+
+
+def test_preparar_entrada_key_reemplaza_b64_por_input_file(monkeypatch) -> None:
+    import central_api.input_files as mod
+
+    monkeypatch.setattr(mod, "get_settings", lambda: AJUSTES)
+    clave = f"{USER_ID}/vep_archivo/20123456789/vep.txt"
+    payload, archivos = preparar_entrada(
+        "vep_archivo", "generar", {"archivo_key": clave, "medio_pago": "link"}
+    )
+    assert "archivo_key" not in payload and payload["medio_pago"] == "link"
+    assert archivos[0]["campo"] == "archivo_b64" and archivos[0]["modo"] == "b64"
+    assert "/uploads/" in archivos[0]["url"]
+    # Sin clave: el base64 inline sigue funcionando sin cambios.
+    igual, vacio = preparar_entrada("vep_archivo", "generar", {"archivo_b64": "QQ=="})
+    assert igual == {"archivo_b64": "QQ=="} and vacio == []
+
+
+def test_vep_archivo_acepta_key_de_uploads_y_rechaza_ajena(monkeypatch) -> None:
+    monkeypatch.setattr(uploads_api, "get_settings", lambda: AJUSTES)
+    app = create_app()
+    app.dependency_overrides[api_dependencies.require_api_principal] = lambda: PRINCIPAL
+    try:
+        cliente = TestClient(app)
+        r = cliente.post(
+            "/api/v3/uploads",
+            json={"bot": "vep_archivo", "operacion": "generar",
+                  "cuit_representado": "20123456789", "filename": "vep.txt", "size_bytes": 5},
+        )
+        clave = r.json()["object_key"]
+        base = {"cuit_inicio_sesion": "20123456789", "contrasena": "x", "medio_pago": "link"}
+        ok = cliente.post("/api/v3/vep/carga", json={**base, "archivo_key": clave})
+        assert ok.status_code == 202, ok.text
+        ajena = cliente.post("/api/v3/vep/carga", json={**base, "archivo_key": "otro/x.txt"})
+        assert ajena.status_code == 422
+    finally:
+        app.dependency_overrides.clear()

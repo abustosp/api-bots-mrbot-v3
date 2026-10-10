@@ -22,6 +22,7 @@ from central_api.api.jobs import (
     cancel_job,
 )
 from central_api.db import db_configurado
+from central_api.input_files import KEY_FIELDS
 from central_api.security.principals import ApiPrincipal
 
 try:
@@ -166,11 +167,30 @@ def _create_handler(
         # are intentionally generic so Pydantic cannot echo a submitted secret.
         input_body = dict(payload)
         input_body.update(credentials)
+        # Archivo por referencia: el cliente manda ``archivo_key`` (object_key de
+        # /uploads) en lugar del base64. Para validar el esquema historico se
+        # usa un relleno que luego se quita: el worker trae el contenido real.
+        claves_archivo = {
+            campo_key: input_body.get(campo_key)
+            for campo_key in KEY_FIELDS.get((bot, operation), {})
+            if input_body.get(campo_key) is not None
+        }
+        validacion = dict(input_body)
+        rellenos: list[str] = []
+        for campo_key in claves_archivo:
+            campo_b64 = KEY_FIELDS[(bot, operation)][campo_key]
+            validacion.pop(campo_key, None)
+            if validacion.get(campo_b64) is None:
+                validacion[campo_b64] = "QQ=="
+                rellenos.append(campo_b64)
         try:
-            typed_body = request_model.model_validate(input_body)
+            typed_body = request_model.model_validate(validacion)
         except ValidationError:
             return _bad_payload("El cuerpo no coincide con el esquema de la operación.")
         normalized_body = typed_body.model_dump(exclude_unset=True)
+        for campo_b64 in rellenos:
+            normalized_body.pop(campo_b64, None)
+        normalized_body.update(claves_archivo)
         credentials = dict(credentials)
         for field in _SECRET_FIELDS:
             if field in normalized_body:
