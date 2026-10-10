@@ -77,6 +77,8 @@ class ControladoresFiscalesPresentarInput(_Base):
         vistos: list[str] = []
         for item in valor:
             nombre = _nombre_archivo_seguro(item)
+            if not nombre.lower().endswith((".pem", ".zip")):
+                raise ValueError(f"solo se aceptan archivos .pem o .zip: {nombre}")
             if nombre not in vistos:
                 vistos.append(nombre)
         if not vistos:

@@ -11,6 +11,7 @@ import logging
 
 import httpx
 
+from central_api.input_files import preparar_entrada
 from central_api.settings import get_settings
 from central_api.services.apoc_base import read_cached_text
 from central_api.store import Job, WorkerEntry
@@ -172,6 +173,13 @@ def build_envelope(
     settings = get_settings()
     sensitive = {"credentials": job.credentials}
     sensitive.update(provisioned_section(job.bot))
+    # Archivos de entrada del bucket ``uploads``: el worker recibe nombres
+    # simples en el payload y las URLs GET prefirmadas solo en la sección sellada.
+    payload_worker, input_files = preparar_entrada(
+        job.bot, job.operation, job.payload if isinstance(job.payload, dict) else {}
+    )
+    if input_files:
+        sensitive["input_files"] = input_files
     expires_at = default_expiry(settings.worker_ack_lease_seconds)
     envelope: dict = {
         "protocol_version": 1,  # mrbot_contracts.version.PROTOCOL_VERSION
@@ -183,7 +191,7 @@ def build_envelope(
         "attempt": job.assignment_attempt,
         "lease_id": lease_id,
         "lease_expires_at": lease_expires_at,
-        "payload": job.payload,
+        "payload": payload_worker,
         "sealed": False,
         "sealed_section": None,
         "credentials": None,
@@ -198,7 +206,7 @@ def build_envelope(
         )
         envelope["sealed"] = True
     else:
-        if job.credentials:
+        if job.credentials or input_files:
             raise RuntimeError(
                 "worker sin clave pública para recibir credenciales selladas"
             )

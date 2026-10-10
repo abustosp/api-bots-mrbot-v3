@@ -234,6 +234,8 @@ class JobEnvelope(BaseModel):
     assignment_expires_at: str = ""
     captcha_profile: dict[str, Any] | None = None
     service_profile: dict[str, Any] | None = None
+    # Archivos de entrada (sección sellada): [{nombre, url}] con GET prefirmado.
+    input_files: list[dict[str, Any]] = Field(default_factory=list)
     force: bool = False
 
 
@@ -291,6 +293,8 @@ def unseal_envelope(env: JobEnvelope, privkey_pem: bytes) -> JobEnvelope:
         merged.captcha_profile = opened["captcha"]
     if isinstance(opened.get("service"), dict):
         merged.service_profile = opened["service"]
+    if isinstance(opened.get("input_files"), list):
+        merged.input_files = [f for f in opened["input_files"] if isinstance(f, dict)]
     slots = opened.get("artifact_uploads")
     if isinstance(slots, list):
         merged.artifact_uploads = [ArtifactSlotIn(**s) for s in slots if isinstance(s, dict)]
@@ -1206,6 +1210,16 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 settings.job_default_timeout_seconds,
             )
             try:
+                if env.input_files:
+                    from bot_worker.runtime.input_files import descargar_entradas
+
+                    nombres_entrada = await descargar_entradas(
+                        env.input_files, workdir, client
+                    )
+                    # Los zip se expanden: el payload pasa a listar los
+                    # archivos reales que quedaron en work_dir.
+                    campo_entrada = str(env.input_files[0].get("campo") or "archivos")
+                    env.payload = {**env.payload, campo_entrada: nombres_entrada}
                 validated = await plugin.validate(validation_payload(env))
                 result = await asyncio.wait_for(
                     plugin.execute(validated, runtime),  # type: ignore[arg-type]

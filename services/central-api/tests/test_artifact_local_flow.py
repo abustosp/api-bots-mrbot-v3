@@ -35,6 +35,8 @@ def test_upload_route_emite_put_sigv4_con_content_type(monkeypatch):
             object_storage_public_endpoint="http://127.0.0.1:9000",
             object_storage_region="us-east-1",
             object_storage_bucket="mrbot",
+            object_storage_uploads_bucket="uploads",
+            uploads_retention_seconds=3600,
             object_storage_access_key="test-access",
             object_storage_secret_key="not-a-real-secret",
         ),
@@ -56,7 +58,7 @@ def test_upload_route_emite_put_sigv4_con_content_type(monkeypatch):
 
     assert response.status_code == 201
     body = response.json()
-    assert body["object_key"].startswith("uploads/")
+    assert body["object_key"].endswith("/apoc/sin_cuit/entrada.txt")
     assert body["required_headers"] == {"Content-Type": "text/plain"}
     assert "X-Amz-Signature=" in body["upload_url"]
     assert "X-Amz-SignedHeaders=content-type%3Bhost" in body["upload_url"]

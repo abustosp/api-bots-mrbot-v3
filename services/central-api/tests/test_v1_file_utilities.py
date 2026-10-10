@@ -14,6 +14,7 @@ sys.path.insert(0, str(SRC))
 
 from central_api.api import bot_logs  # noqa: E402
 from central_api.api.bot_compat import BOT_ROUTE_ALIASES  # noqa: E402
+from central_api.input_files import INPUT_FILE_FIELDS  # noqa: E402
 from central_api.main import create_app  # noqa: E402
 
 
@@ -63,7 +64,10 @@ def test_cuit_checksum_and_result_fields_are_projected_without_worker_text() -> 
 def test_each_documented_alias_example_is_accepted_by_central() -> None:
     client = TestClient(create_app())
     schema = client.app.openapi()
-    for index, (path, _bot, _operation) in enumerate(BOT_ROUTE_ALIASES):
+    for index, (path, bot, operation) in enumerate(BOT_ROUTE_ALIASES):
+        if (bot, operation) in INPUT_FILE_FIELDS:
+            # Requiere object_key previas de /uploads: ver test_central_input_files.
+            continue
         example = schema["paths"][f"/api/v3{path}"]["post"]["requestBody"]["content"]["application/json"]["examples"]["consulta_habitual"]["value"]
         response = client.post(
             f"/api/v3{path}", json=example,

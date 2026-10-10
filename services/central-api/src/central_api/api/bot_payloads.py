@@ -779,6 +779,8 @@ def _example_value(field_name: str, bot: str, operation: str, default: Any) -> A
     if field_name == "periodo":
         return "8" if bot == "consulta_pagos_vep" else "202608"
     if field_name == "archivos":
+        if bot == "controladores_fiscales":
+            return ["<usuario>/controladores_fiscales/20123456789/F8010.001.pem"]
         return ["ventas-2026-08.csv", "compras-2026-08.csv"]
     if field_name == "despachos":
         return ["23-12345-1", "23-12346-8"]

@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     )
     object_storage_region: str = Field(default="us-east-1", alias="OBJECT_STORAGE_REGION")
     object_storage_bucket: str = Field(default="", alias="OBJECT_STORAGE_BUCKET")
+    # Bucket temporal de archivos de entrada (PEM, TXT, CSV...) que el cliente
+    # sube antes de crear el job. Layout: ``{bot}/{cuit_representado}/{archivo}``.
+    object_storage_uploads_bucket: str = Field(
+        default="uploads", alias="OBJECT_STORAGE_UPLOADS_BUCKET"
+    )
+    # Vigencia de un archivo subido para poder reutilizarlo en varios jobs.
+    uploads_retention_seconds: int = Field(
+        default=86_400, alias="UPLOADS_RETENTION_SECONDS"
+    )
     object_storage_access_key: str = Field(default="", alias="OBJECT_STORAGE_ACCESS_KEY")
     object_storage_secret_key: str = Field(default="", alias="OBJECT_STORAGE_SECRET_KEY")
     object_storage_use_ssl: bool = Field(default=True, alias="OBJECT_STORAGE_USE_SSL")
