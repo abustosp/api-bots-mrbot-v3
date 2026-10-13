@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from central_api.main import app
 
-STATIC_SHELLS = {"/admin/", "/admin/login", "/admin/workers/panel"}
+STATIC_SHELLS = {"/admin/", "/admin/login"}
 
 
 def test_admin_routes_reject_anonymous(monkeypatch) -> None:
@@ -31,9 +31,3 @@ def test_admin_routes_reject_anonymous(monkeypatch) -> None:
             if resp.status_code not in (401, 403):
                 abiertas.append((metodo, path, resp.status_code))
     assert not abiertas, f"rutas admin sin autenticación: {abiertas}"
-
-
-def test_workers_panel_shell_leaks_no_data() -> None:
-    cliente = TestClient(app)
-    html = cliente.get("/admin/workers/panel").text
-    assert "worker2.mrbot" not in html and "bot-worker:8080" not in html

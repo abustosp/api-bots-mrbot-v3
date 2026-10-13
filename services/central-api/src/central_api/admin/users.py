@@ -41,6 +41,40 @@ from central_api.store import utcnow
 router = APIRouter()
 
 
+_RESPUESTAS_ADMIN = {
+    401: {
+        "description": (
+            "Falta la cabecera de autorización Bearer o no tiene el formato esperado. "
+            "Envíe Authorization: Bearer <token> con el token administrativo."
+        )
+    },
+    403: {
+        "description": (
+            "El token administrativo no está configurado o no coincide. "
+            "Solicite al operador configurar el acceso y compruebe que usa el token vigente."
+        )
+    },
+}
+
+_RESPUESTA_422 = {
+    422: {
+        "description": (
+            "El cuerpo o algún parámetro no cumple el formato o tipo esperado. "
+            "Revise los campos indicados en `detail` y envíe valores con el tipo correcto."
+        )
+    }
+}
+
+_RESPUESTA_503 = {
+    503: {
+        "description": (
+            "No se pudo completar la operación por indisponibilidad del servicio de datos "
+            "o de protección de claves. Compruebe la disponibilidad del servicio y vuelva a intentarlo."
+        )
+    }
+}
+
+
 @dataclass
 class AdminUser:
     """Identidad de cliente administrada por el panel."""
@@ -192,11 +226,36 @@ def emitir_clave(
 
 
 class CrearUsuarioBody(BaseModel):
-    email: str
-    display_name: str = ""
+    email: str = Field(
+        description=(
+            "Email con dominio que contiene un punto, o identificador corto de depuración "
+            "de 2–64 caracteres (a-z, 0-9, punto, guion o guion bajo); se normaliza a minúsculas."
+        ),
+        examples=["ana@ejemplo.com"],
+    )
+    display_name: str = Field(default="", description="Nombre visible del usuario.", examples=["Ana Pérez"])
     plan: str = Field(
         default="",
-        description="Obsoleto: se ignora. Todo usuario nuevo nace con cuenta PRUEBA.",
+        description="Obsoleto: se ignora. Use `account_type` y `max_requests`.",
+        examples=["prueba"],
+    )
+    account_type: Literal["PRUEBA", "TESTING", "NORMAL"] = Field(
+        default="PRUEBA",
+        description=(
+            "Tipo de cuenta inicial: PRUEBA (100 consultas en total, no renovables), "
+            "TESTING (ilimitada) o NORMAL (cupo mensual renovable, requiere `max_requests`)."
+        ),
+        examples=["NORMAL"],
+    )
+    max_requests: int | None = Field(
+        default=None,
+        ge=1,
+        le=10_000_000,
+        description=(
+            "Cupo mensual de la cuenta NORMAL (1 a 10000000). Obligatorio para NORMAL; "
+            "se ignora para PRUEBA y TESTING."
+        ),
+        examples=[1000],
     )
     api_key: str = Field(
         default="",
@@ -204,46 +263,96 @@ class CrearUsuarioBody(BaseModel):
             "API key fija opcional, mínimo 3 caracteres sin espacios. "
             "Vacía = generar automáticamente."
         ),
+        examples=["clave-demo-123"],
     )
     valor_fijo: str = Field(
         default="",
         description="Alias de api_key para compatibilidad con el panel de depuración.",
+        examples=["clave-demo-123"],
     )
-    estado: Literal["habilitado", "deshabilitado"] = "habilitado"
+    estado: Literal["habilitado", "deshabilitado"] = Field(
+        default="habilitado",
+        description="Estado inicial de acceso de la cuenta.",
+        examples=["habilitado"],
+    )
     habilitado: bool | None = Field(
         default=None,
         description="Alias booleano compatible con el formulario V1/V2.",
+        examples=[True],
     )
-    enviar_credenciales: bool = False
-    send_credentials: bool | None = None
+    enviar_credenciales: bool = Field(
+        default=False,
+        description="Solicita el envío de las credenciales al email indicado.",
+        examples=[False],
+    )
+    send_credentials: bool | None = Field(
+        default=None,
+        description="Alias compatible con formularios anteriores para solicitar el envío por email.",
+        examples=[True],
+    )
     send_api_key_email: bool | None = Field(
         default=None,
         description="Alias compatible con V1/V2 para solicitar envío por email.",
+        examples=[True],
     )
-    motivo: str = Field(default="", description="Justificación de 3 a 500 caracteres")
+    motivo: str = Field(
+        default="",
+        description="Justificación obligatoria de 3 a 500 caracteres para el alta.",
+        examples=["Alta solicitada por soporte"],
+    )
 
 
 class MotivoBody(BaseModel):
-    motivo: str = ""
+    motivo: str = Field(
+        default="",
+        description="Justificación de la operación, entre 3 y 500 caracteres.",
+        examples=["Solicitud confirmada por soporte"],
+    )
 
 
 class EmitirClaveBody(BaseModel):
-    scopes: list[str] = Field(default_factory=list)
-    expira_en: str = ""
-    motivo: str = ""
+    scopes: list[str] = Field(
+        default_factory=list,
+        description="Permisos asociados a la clave.",
+        examples=[["jobs:read", "jobs:write"]],
+    )
+    expira_en: str = Field(
+        default="",
+        description="Fecha y hora de expiración ISO 8601; vacío indica que no se fija vencimiento.",
+        examples=["2027-12-31T23:59:59Z"],
+    )
+    motivo: str = Field(
+        default="",
+        description="Justificación obligatoria de 3 a 500 caracteres.",
+        examples=["Emisión solicitada por el cliente"],
+    )
     valor_fijo: str = Field(
         default="",
         description="Valor literal con mínimo 3 caracteres y sin espacios. Vacío = aleatorio.",
+        examples=["clave-demo-123"],
     )
 
 
 class RotarClaveBody(BaseModel):
-    key_id: str = ""
-    periodo_gracia_horas: int = 0
-    motivo: str = ""
+    key_id: str = Field(
+        default="",
+        description="Identificador de la clave activa que se reemplazará.",
+        examples=["0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f"],
+    )
+    periodo_gracia_horas: int = Field(
+        default=0,
+        description="Campo de compatibilidad registrado en auditoría; la clave anterior se revoca al completar la rotación.",
+        examples=[0],
+    )
+    motivo: str = Field(
+        default="",
+        description="Justificación obligatoria de 3 a 500 caracteres.",
+        examples=["Rotación preventiva de credenciales"],
+    )
     valor_fijo: str = Field(
         default="",
         description="Nuevo valor opcional, mínimo 3 caracteres y sin espacios.",
+        examples=["clave-nueva-456"],
     )
 
 
@@ -564,18 +673,44 @@ async def _rotar_api_key_pg(
         raise HTTPException(status_code=503, detail="Servicio no disponible") from None
 
 
-@router.post("/users", status_code=201)
+@router.post(
+    "/users",
+    status_code=201,
+    summary="Crear un usuario y su primera clave API",
+    description=(
+        "Registra una identidad nueva y emite una clave API en una sola operación. "
+        "La identidad puede ser un email o un identificador corto de depuración. "
+        "La cuenta inicial es de PRUEBA salvo que se indique `account_type` (TESTING o NORMAL con `max_requests`); `plan` se acepta por compatibilidad, pero se ignora. "
+        "La clave fija es opcional y, si se genera o se proporciona, su valor se devuelve únicamente "
+        "en esta respuesta. El motivo debe tener entre 3 y 500 caracteres."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        201: {
+            "description": "Usuario y clave creados. El valor de la clave solo se muestra en esta respuesta.",
+            "content": {"application/json": {"examples": {"creado": {"summary": "Alta correcta", "value": {
+                "success": True,
+                "usuario": {"id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "email": "ana@ejemplo.com", "display_name": "Ana Pérez", "estado": "habilitado", "plan": "prueba", "account_type": "PRUEBA", "max_requests": 100, "motivo": "Alta solicitada por soporte"},
+                "credenciales": {"clave": {"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "mrk_demo", "scopes": [], "expira_en": "", "revocada": False, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True}, "solicitado": False, "enviadas": False, "destino": "", "motivo": "no_solicitado", "valor_unica_vez": "mrk_valor_de_ejemplo"}
+            }}}}},
+        },
+        400: {"description": "Identidad o motivo inválido, los alias `api_key` y `valor_fijo` discrepan, o se solicita email de credenciales sin una dirección con dominio. Corrija el dato señalado y reenvíe la solicitud."},
+        409: {"description": "La identidad ya está registrada o el valor de clave elegido ya está activo. Use otra identidad o un valor de clave distinto."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def crear_usuario(
     body: CrearUsuarioBody,
     response: Response,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Da de alta usuario y API key en una sola operación administrativa.
+    """Crea un usuario con su tipo de cuenta y emite su primera clave API.
 
-    La forma moderna usa ``api_key``, ``estado`` y ``enviar_credenciales``.
-    También se aceptan ``valor_fijo``, ``habilitado`` y ``send_api_key_email``
-    para conservar el flujo de alta de V1/V2.
+    Acepta los nombres actuales y los alias de formularios anteriores. El valor
+    de la clave solo se devuelve en esta respuesta y no debe registrarse ni
+    reutilizarse en listados posteriores.
     """
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
@@ -602,10 +737,16 @@ async def crear_usuario(
             status_code=400,
             detail="enviar_credenciales requiere un email con dominio",
         )
+    from central_api.billing.entitlements import normalize_assignment
+
+    try:
+        tipo_cuenta, cupo_cuenta = normalize_assignment(body.account_type, body.max_requests)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     usuario = AdminUser(
         id=persisted_user_id or _nuevo_id(),
         email=email, display_name=body.display_name,
-        estado=estado, plan="prueba", motivo=motivo,
+        estado=estado, plan=tipo_cuenta.lower(), motivo=motivo,
     )
     USERS[usuario.id] = usuario
     meta = None
@@ -617,6 +758,20 @@ async def crear_usuario(
         if meta is not None:
             API_KEYS.pop(meta.id, None)
         raise
+
+    if tipo_cuenta != "PRUEBA":
+        # Todo usuario nace en PRUEBA; si se pidio otro tipo se asigna ahora.
+        from central_api.billing.entitlements import assign_account
+
+        try:
+            cuenta = await assign_account(usuario.id, tipo_cuenta, max_requests=cupo_cuenta)
+            usuario.account_type = cuenta.account_type
+            usuario.max_requests = cuenta.max_requests
+        except Exception:
+            USERS.pop(usuario.id, None)
+            if meta is not None:
+                API_KEYS.pop(meta.id, None)
+            raise
 
     credenciales = {
         "clave": _vista_clave(meta),
@@ -649,7 +804,8 @@ async def crear_usuario(
         request_id=request_id or "", reason=motivo,
         metadata={
             "email": email,
-            "account_type": "PRUEBA",
+            "account_type": tipo_cuenta,
+            "max_requests": cupo_cuenta,
             "estado": estado,
             "api_key_prefijo": meta.prefijo,
             "credenciales_solicitadas": enviar,
@@ -663,7 +819,21 @@ async def crear_usuario(
     }
 
 
-@router.get("/users")
+@router.get(
+    "/users",
+    summary="Listar y filtrar usuarios",
+    description=(
+        "Devuelve usuarios con sus metadatos de claves API, sin incluir valores secretos. "
+        "Los filtros `email`, `estado` y `plan` se combinan; `limit` se acota a 1–200 y "
+        "`offset` permite recorrer los resultados."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Página de usuarios y metadatos no secretos de sus claves.", "content": {"application/json": {"examples": {"lista": {"summary": "Página con resultados", "value": {"success": True, "total": 1, "usuarios": [{"id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "email": "ana@ejemplo.com", "display_name": "Ana Pérez", "estado": "habilitado", "plan": "prueba", "account_type": "PRUEBA", "max_requests": 100, "motivo": "", "claves_api": [{"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "prefijo": "mrk_demo", "estado": "activa", "emitida_en": "2026-10-12T16:30:00+00:00", "scopes": [], "expira_en": "", "revelable": True}]}]}}}}}},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def listar_usuarios(
     response: Response,
     authorization: str | None = Header(default=None),
@@ -673,7 +843,7 @@ async def listar_usuarios(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """Busca usuarios por email, estado y plan con paginación por offset."""
+    """Lista usuarios y metadatos de claves aplicando filtros y paginación."""
     require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     filas_usuarios, filas_claves = await _filas_identidad_pg()
@@ -768,13 +938,26 @@ async def listar_usuarios(
     }
 
 
-@router.get("/users/{user_id}")
+@router.get(
+    "/users/{user_id}",
+    summary="Consultar un usuario",
+    description=(
+        "Obtiene el estado y los datos administrativos de un usuario junto con los metadatos "
+        "de sus claves API. Nunca incluye el valor de una clave."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Datos del usuario y metadatos de sus claves.", "content": {"application/json": {"examples": {"usuario": {"summary": "Usuario encontrado", "value": {"success": True, "usuario": {"id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "email": "ana@ejemplo.com", "display_name": "Ana Pérez", "estado": "habilitado", "plan": "prueba", "account_type": "PRUEBA", "max_requests": 100, "motivo": ""}, "claves": [{"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "mrk_demo", "scopes": [], "expira_en": "", "revocada": False, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True}]}}}}}},
+        404: {"description": "No existe un usuario con el identificador indicado. Compruebe el ID y consulte primero el listado."},
+        **_RESPUESTA_503,
+    },
+)
 async def ver_usuario(
     user_id: str,
     response: Response,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """Devuelve un usuario con los metadatos de sus claves."""
+    """Devuelve los datos administrativos del usuario y sus claves no secretas."""
     require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     usuario = USERS.get(user_id)
@@ -851,28 +1034,56 @@ async def _cambiar_estado(
     return {"success": True, "usuario": _vista_usuario(usuario)}
 
 
-@router.post("/users/{user_id}/enable")
+@router.post(
+    "/users/{user_id}/enable",
+    summary="Habilitar un usuario",
+    description="Habilita el acceso de la cuenta indicada y registra la justificación en la auditoría. El motivo debe tener entre 3 y 500 caracteres.",
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Cuenta habilitada.", "content": {"application/json": {"examples": {"habilitado": {"summary": "Cambio aplicado", "value": {"success": True, "usuario": {"id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "email": "ana@ejemplo.com", "display_name": "Ana Pérez", "estado": "habilitado", "plan": "prueba", "account_type": "PRUEBA", "max_requests": 100, "motivo": "Acceso restablecido"}}}}}}},
+        400: {"description": "El motivo falta o no tiene entre 3 y 500 caracteres. Envíe una justificación válida."},
+        404: {"description": "No se encontró el usuario. Compruebe el identificador antes de reintentar."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def habilitar_usuario(
     user_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Habilita un usuario con motivo y evento auditado."""
+    """Habilita la cuenta indicada y registra la operación administrativa."""
     actor = require_admin(authorization)
     return await _cambiar_estado(
         user_id, "habilitado", body.motivo, actor, request_id or "", "user.enabled"
     )
 
 
-@router.post("/users/{user_id}/disable")
+@router.post(
+    "/users/{user_id}/disable",
+    summary="Deshabilitar un usuario",
+    description=(
+        "Deshabilita la cuenta, revoca sus claves activas e impide que se inicien nuevos trabajos. "
+        "La revocación no se revierte automáticamente al volver a habilitar la cuenta. "
+        "El motivo debe tener entre 3 y 500 caracteres."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Cuenta deshabilitada y claves activas revocadas.", "content": {"application/json": {"examples": {"deshabilitado": {"summary": "Cambio aplicado", "value": {"success": True, "usuario": {"id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "email": "ana@ejemplo.com", "display_name": "Ana Pérez", "estado": "deshabilitado", "plan": "prueba", "account_type": "PRUEBA", "max_requests": 100, "motivo": "Baja solicitada por soporte"}}}}}}},
+        400: {"description": "El motivo falta o no tiene entre 3 y 500 caracteres. Envíe una justificación válida."},
+        404: {"description": "No se encontró el usuario. Compruebe el identificador antes de reintentar."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def deshabilitar_usuario(
     user_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Deshabilita un usuario, revoca sus claves y bloquea nuevos jobs."""
+    """Deshabilita la cuenta, revoca sus claves activas y registra el cambio."""
     actor = require_admin(authorization)
     return await _cambiar_estado(
         user_id, "deshabilitado", body.motivo, actor, request_id or "", "user.disabled"
@@ -906,17 +1117,28 @@ async def _bulk_request_values(request) -> tuple[str, list[str], str]:
     return str(form.get("action", "")), [str(value) for value in form.getlist("user_ids")], str(form.get("motivo", ""))
 
 
-@router.post("/users/bulk")
+@router.post(
+    "/users/bulk",
+    summary="Habilitar o deshabilitar usuarios en lote",
+    description=(
+        "Aplica la acción `enable` o `disable` a una selección de hasta 200 IDs únicos. "
+        "Acepta JSON o formulario. Los IDs inexistentes se devuelven en `missing` y no "
+        "detienen el procesamiento de los demás usuarios. Si se omite el motivo, se registra "
+        "una justificación predeterminada de la operación masiva."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Resultado agregado de la operación; incluye IDs actualizados y no encontrados.", "content": {"application/json": {"examples": {"resultado": {"summary": "Operación parcial", "value": {"success": True, "action": "disable", "updated": ["e7f291a4-1a3d-4a16-8a65-cc9142a5812b"], "missing": ["no-existe"], "count": 1}}}}}},
+        400: {"description": "No se seleccionaron usuarios, la acción no es `enable`/`disable` o hay más de 200 IDs. Envíe una acción admitida y una selección de 1 a 200 usuarios."},
+        **_RESPUESTA_503,
+    },
+)
 async def bulk_users(
     request: Request,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Equivalente V1 para habilitar o deshabilitar una selección de usuarios.
-
-    Los IDs son UUID V3. Cada usuario se audita individualmente y una clave
-    revocada por deshabilitación no vuelve a activarse de forma implícita.
-    """
+    """Aplica una acción de estado a varios usuarios y devuelve el resultado por ID."""
     actor = require_admin(authorization)
     action, user_ids, motivo_raw = await _bulk_request_values(request)
     user_ids = list(dict.fromkeys(user_id.strip() for user_id in user_ids if user_id.strip()))
@@ -960,18 +1182,31 @@ async def _get_admin_user(user_id: str) -> AdminUser:
     return usuario
 
 
-@router.post("/users/{user_id}/monthly-limit")
+@router.post(
+    "/users/{user_id}/monthly-limit",
+    summary="Actualizar el límite mensual de consultas",
+    description=(
+        "Asigna al usuario una cuenta NORMAL con el límite mensual indicado. "
+        "El límite admite valores enteros de 1 a 10 000 000. Acepta JSON o formulario; "
+        "se admiten los nombres `maximas_consultas_mensuales` y `max_requests`. "
+        "Si la cuenta ya era NORMAL, se conserva el consumo del mes en curso."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Cuenta NORMAL actualizada con el nuevo límite.", "content": {"application/json": {"examples": {"actualizado": {"summary": "Límite aplicado", "value": {"success": True, "usuario": {"id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "email": "ana@ejemplo.com", "display_name": "Ana Pérez", "estado": "habilitado", "plan": "normal", "account_type": "NORMAL", "max_requests": 2500, "motivo": ""}, "maximas_consultas_mensuales": 2500}}}}}},
+        400: {"description": "El límite no es un entero o está fuera del rango 1–10 000 000. Envíe un valor válido."},
+        404: {"description": "No se encontró el usuario indicado. Compruebe su ID."},
+        422: {"description": "El tipo de cuenta o el límite no superó la validación de asignación. Envíe un límite entre 1 y 10 000 000 y vuelva a solicitar el cambio a cuenta NORMAL."},
+        **_RESPUESTA_503,
+    },
+)
 async def actualizar_limite_mensual(
     user_id: str,
     request: Request,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Compatibilidad V1: fija el cupo mensual y pasa la cuenta a ``NORMAL``.
-
-    El límite vive en ``billing_accounts.max_requests`` y se renueva cada mes.
-    Si la cuenta ya era NORMAL se conserva el consumo del mes en curso.
-    """
+    """Asigna una cuenta NORMAL con el cupo mensual solicitado."""
     actor = require_admin(authorization)
     content_type = request.headers.get("content-type", "")
     try:
@@ -1017,7 +1252,25 @@ async def actualizar_limite_mensual(
     return {"success": True, "usuario": _vista_usuario(usuario), "maximas_consultas_mensuales": limit}
 
 
-@router.post("/users/{user_id}/api-keys", status_code=201)
+@router.post(
+    "/users/{user_id}/api-keys",
+    status_code=201,
+    summary="Emitir una clave API",
+    description=(
+        "Crea una clave para el usuario indicado y devuelve su valor en claro una sola vez. "
+        "El valor no se incluye en listados ni en la auditoría. Se puede proporcionar `valor_fijo` "
+        "o dejarlo vacío para generar uno automáticamente."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        201: {"description": "Clave emitida; copie y guarde `valor_unica_vez`, ya que no se mostrará en listados.", "content": {"application/json": {"examples": {"emitida": {"summary": "Clave creada", "value": {"success": True, "clave": {"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "mrk_demo", "scopes": ["jobs:read"], "expira_en": "", "revocada": False, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True}, "valor_unica_vez": "mrk_valor_de_ejemplo", "aviso": "Consérvela ahora: no volverá a mostrarse ni quedará en caché."}}}}}},
+        400: {"description": "El motivo no cumple la longitud requerida o el valor fijo tiene menos de 3 caracteres o contiene espacios. Corrija esos campos y reenvíe la solicitud."},
+        404: {"description": "No se encontró el usuario propietario. Compruebe su ID."},
+        409: {"description": "El valor fijo ya está registrado en otra clave activa. Elija un valor distinto o solicite una clave aleatoria."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def emitir_clave_api(
     user_id: str,
     body: EmitirClaveBody,
@@ -1025,7 +1278,7 @@ async def emitir_clave_api(
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Emite una clave y la revela una única vez; la auditoría guarda el prefijo."""
+    """Emite una clave para el usuario y revela su valor únicamente en esta respuesta."""
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
@@ -1057,7 +1310,22 @@ async def emitir_clave_api(
     }
 
 
-@router.post("/users/{user_id}/api-keys/{key_id}/reveal")
+@router.post(
+    "/users/{user_id}/api-keys/{key_id}/reveal",
+    summary="Revelar una clave API recuperable",
+    description=(
+        "Devuelve el valor de una clave existente solo si pertenece al usuario indicado, "
+        "la cuenta está habilitada y la clave no fue revocada ni venció. Las claves emitidas "
+        "antes de que pudiera recuperarse su valor deben reemplazarse mediante una nueva emisión."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Valor de la clave recuperado. La respuesta es privada y no se almacena en caché.", "content": {"application/json": {"examples": {"revelada": {"summary": "Clave disponible", "value": {"success": True, "api_key": "mrk_valor_de_ejemplo"}}}}}},
+        404: {"description": "No se encontró la clave para el usuario indicado. Compruebe ambos identificadores y que la clave pertenece a esa cuenta."},
+        409: {"description": "La cuenta o la clave no está activa, o la clave no conserva un valor recuperable. Habilite la cuenta si procede; si la clave no es recuperable, emita una nueva."},
+        **_RESPUESTA_503,
+    },
+)
 async def revelar_clave_api(
     user_id: str,
     key_id: str,
@@ -1065,11 +1333,7 @@ async def revelar_clave_api(
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Revela una clave activa al administrador para permitir copiarla.
-
-    El ciphertext nunca se entrega al navegador. Solo se devuelve el secreto
-    tras autorización, validación de vigencia/HMAC y registro de auditoría.
-    """
+    """Recupera el valor de una clave vigente y perteneciente al usuario indicado."""
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     from central_api.db import db_configurado, nueva_sesion
@@ -1163,7 +1427,24 @@ async def revelar_clave_api(
     return {"success": True, "api_key": api_key}
 
 
-@router.post("/users/{user_id}/api-keys/rotate")
+@router.post(
+    "/users/{user_id}/api-keys/rotate",
+    summary="Rotar una clave API",
+    description=(
+        "Emite una clave nueva con los permisos y vencimiento de la clave anterior y revoca esta última "
+        "en la misma operación. El campo `periodo_gracia_horas` se conserva por compatibilidad y "
+        "se registra en auditoría, pero no demora la revocación. El nuevo valor solo se devuelve aquí."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Clave nueva emitida y clave anterior revocada.", "content": {"application/json": {"examples": {"rotada": {"summary": "Rotación completada", "value": {"success": True, "clave": {"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e70", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "clave-nu", "scopes": ["jobs:read"], "expira_en": "", "revocada": False, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True}, "valor_unica_vez": "clave-nueva-de-ejemplo", "revocada": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f"}}}}}},
+        400: {"description": "El motivo no cumple la longitud requerida o el valor fijo nuevo tiene menos de 3 caracteres o contiene espacios. Corrija el campo antes de reintentar."},
+        404: {"description": "No se encontró el usuario o la clave anterior no pertenece a esa cuenta. Compruebe los identificadores."},
+        409: {"description": "La clave anterior está revocada o el valor de la clave nueva ya está activo. Seleccione una clave anterior activa o use un valor nuevo."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def rotar_clave_api(
     user_id: str,
     body: RotarClaveBody,
@@ -1171,7 +1452,7 @@ async def rotar_clave_api(
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Emite una clave nueva y revoca la anterior; audita ambos IDs."""
+    """Emite la clave sustituta y revoca la clave anterior de forma conjunta."""
     actor = require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
@@ -1225,10 +1506,26 @@ async def rotar_clave_api(
 
 
 class EditarClaveBody(BaseModel):
-    scopes: list[str] | None = None
-    expira_en: str | None = None
-    revocada: bool | None = None
-    motivo: str = ""
+    scopes: list[str] | None = Field(
+        default=None,
+        description="Nuevos permisos; si se omite, se conservan los actuales.",
+        examples=[["jobs:read"]],
+    )
+    expira_en: str | None = Field(
+        default=None,
+        description="Nueva fecha ISO 8601 o cadena vacía para quitar el vencimiento; si se omite, no cambia.",
+        examples=["2027-12-31T23:59:59Z"],
+    )
+    revocada: bool | None = Field(
+        default=None,
+        description="Nuevo estado de revocación; si se omite, no cambia.",
+        examples=[False],
+    )
+    motivo: str = Field(
+        default="",
+        description="Justificación obligatoria de 3 a 500 caracteres.",
+        examples=["Ajuste solicitado por soporte"],
+    )
 
 
 def _estado_clave(meta: ApiKeyMeta) -> str:
@@ -1350,7 +1647,20 @@ async def _actualizar_clave_pg(
         raise HTTPException(status_code=503, detail="Servicio no disponible") from None
 
 
-@router.get("/api-keys")
+@router.get(
+    "/api-keys",
+    summary="Listar y filtrar claves API",
+    description=(
+        "Devuelve metadatos administrativos de claves, nunca sus valores. Permite filtrar por "
+        "usuario, estado y texto coincidente con prefijo, email o permisos; `limit` se acota a 1–200."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Página de claves con metadatos y datos de su usuario propietario.", "content": {"application/json": {"examples": {"lista": {"summary": "Claves encontradas", "value": {"success": True, "total": 1, "claves": [{"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "mrk_demo", "scopes": ["jobs:read"], "expira_en": "", "revocada": False, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True, "usuario_email": "ana@ejemplo.com", "estado": "activa", "owner_enabled": True}]}}}}}},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def listar_claves_api(
     response: Response,
     authorization: str | None = Header(default=None),
@@ -1360,7 +1670,7 @@ async def listar_claves_api(
     limit: int = 100,
     offset: int = 0,
 ) -> dict:
-    """Lista metadatos de claves API (nunca valores) con filtros de panel."""
+    """Lista metadatos no secretos de claves y aplica filtros con paginación."""
     require_admin(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     from central_api.db import db_configurado
@@ -1447,14 +1757,30 @@ async def listar_claves_api(
     }
 
 
-@router.patch("/api-keys/{key_id}")
+@router.patch(
+    "/api-keys/{key_id}",
+    summary="Editar una clave API",
+    description=(
+        "Actualiza uno o más de estos datos: permisos, vencimiento y estado de revocación. "
+        "Los campos omitidos se conservan. Cada cambio requiere un motivo de 3 a 500 caracteres."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Metadatos actualizados de la clave.", "content": {"application/json": {"examples": {"actualizada": {"summary": "Cambios aplicados", "value": {"success": True, "clave": {"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "mrk_demo", "scopes": ["jobs:read"], "expira_en": "2027-12-31T23:59:59+00:00", "revocada": False, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True, "usuario_email": "ana@ejemplo.com", "estado": "activa"}}}}}}},
+        400: {"description": "El motivo es obligatorio y debe tener entre 3 y 500 caracteres, o `expira_en` no es una fecha ISO 8601 válida. Corrija esos valores."},
+        404: {"description": "No existe la clave indicada. Compruebe el identificador."},
+        409: {"description": "No se puede volver a activar una clave ya reemplazada, o su valor ya está activo en otra clave. Mantenga la clave sustituta vigente o evite duplicar el valor."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def editar_clave_api(
     key_id: str,
     body: EditarClaveBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Edita scopes, expiración o estado de una clave con motivo auditado."""
+    """Actualiza permisos, vencimiento o revocación y registra el cambio."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = await _meta_clave(key_id)
@@ -1487,14 +1813,26 @@ async def editar_clave_api(
     return {"success": True, "clave": _vista_clave_admin(meta)}
 
 
-@router.post("/api-keys/{key_id}/revoke")
+@router.post(
+    "/api-keys/{key_id}/revoke",
+    summary="Revocar una clave API",
+    description="Revoca la clave indicada sin eliminar su registro y guarda el motivo en la auditoría. El motivo debe tener entre 3 y 500 caracteres.",
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Clave revocada.", "content": {"application/json": {"examples": {"revocada": {"summary": "Revocación completada", "value": {"success": True, "clave": {"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "mrk_demo", "scopes": [], "expira_en": "", "revocada": True, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True, "usuario_email": "ana@ejemplo.com", "estado": "revocada"}}}}}}},
+        400: {"description": "El motivo falta o no tiene entre 3 y 500 caracteres. Envíe una justificación válida."},
+        404: {"description": "No existe la clave indicada. Compruebe el identificador."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def revocar_clave_api(
     key_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Revoca una clave sin borrar evidencia, con motivo auditado."""
+    """Revoca la clave sin eliminar su registro histórico."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = await _meta_clave(key_id)
@@ -1508,14 +1846,31 @@ async def revocar_clave_api(
     return {"success": True, "clave": _vista_clave_admin(meta)}
 
 
-@router.post("/api-keys/{key_id}/restore")
+@router.post(
+    "/api-keys/{key_id}/restore",
+    summary="Restaurar una clave API revocada",
+    description=(
+        "Quita la revocación de la clave y registra la justificación. Solo se puede restaurar "
+        "si no fue reemplazada y su valor no está activo en otra clave. El motivo debe tener "
+        "entre 3 y 500 caracteres."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: {"description": "Clave restaurada.", "content": {"application/json": {"examples": {"restaurada": {"summary": "Restauración completada", "value": {"success": True, "clave": {"id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f", "user_id": "e7f291a4-1a3d-4a16-8a65-cc9142a5812b", "prefijo": "mrk_demo", "scopes": ["jobs:read"], "expira_en": "", "revocada": False, "emitida_en": "2026-10-12T16:30:00+00:00", "revelable": True, "usuario_email": "ana@ejemplo.com", "estado": "activa"}}}}}}},
+        400: {"description": "El motivo falta o no tiene entre 3 y 500 caracteres. Envíe una justificación válida."},
+        404: {"description": "No existe la clave indicada. Compruebe el identificador."},
+        409: {"description": "La clave fue reemplazada o su valor ya está activo en otra clave. No se puede restaurar hasta resolver el conflicto; utilice la clave vigente."},
+        **_RESPUESTA_422,
+        **_RESPUESTA_503,
+    },
+)
 async def restaurar_clave_api(
     key_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Restaura una clave revocada con motivo auditado."""
+    """Restaura una clave revocada cuando no existe una clave sustituta activa."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = await _meta_clave(key_id)

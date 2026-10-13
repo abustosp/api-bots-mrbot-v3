@@ -84,7 +84,69 @@ def log_event(
     return evento
 
 
-@router.get("/audit")
+@router.get(
+    "/audit",
+    summary="Consultar el registro de auditoría",
+    description=(
+        "Lista eventos administrativos de auditoría, ordenados desde el evento más reciente "
+        "que se agregó, con filtros por prefijo de acción, actor, objetivo y resultado. "
+        "`limit` se acota entre 1 y cuatro veces el tamaño de página configurado; `offset` "
+        "negativo se interpreta como cero. Los metadatos sensibles se devuelven redactados."
+    ),
+    responses={
+        200: {
+            "description": "Página de eventos que coincide con los filtros solicitados.",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "eventos": {
+                            "summary": "Eventos de auditoría",
+                            "value": {
+                                "success": True,
+                                "total": 1,
+                                "eventos": [
+                                    {
+                                        "id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e6f",
+                                        "occurred_at": "2026-10-12T16:30:00+00:00",
+                                        "actor_type": "admin_user",
+                                        "actor_id": "admin:token",
+                                        "action": "user.api_key.issued",
+                                        "target_type": "api_key",
+                                        "target_id": "0194f8b2-8c4d-7a12-9b34-1a2b3c4d5e70",
+                                        "request_id": "req-7f4a2d",
+                                        "remote_addr": "",
+                                        "user_agent": "",
+                                        "result": "success",
+                                        "reason": "Emisión solicitada por el cliente",
+                                        "metadata_redacted": {"prefijo": "mrk_demo"},
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                }
+            },
+        },
+        401: {
+            "description": (
+                "Falta la cabecera de autorización Bearer o no tiene el formato esperado. "
+                "Envíe Authorization: Bearer <token> con el token administrativo."
+            )
+        },
+        403: {
+            "description": (
+                "El token administrativo no está configurado o no coincide. "
+                "Solicite al operador configurar el acceso y compruebe que usa el token vigente."
+            )
+        },
+        422: {
+            "description": (
+                "`limit` u `offset` no es un entero válido. Corrija el parámetro indicado "
+                "en `detail`; ambos deben enviarse como números enteros."
+            )
+        },
+    },
+)
 def listar_auditoria(
     authorization: str | None = Header(default=None),
     accion: str = "",
@@ -94,7 +156,7 @@ def listar_auditoria(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """Lista eventos de auditoría con filtros y paginación por offset."""
+    """Devuelve eventos de auditoría filtrados y paginados, con metadatos redactados."""
     require_admin(authorization)
     top = max(1, min(limit, get_settings().admin_audit_page_size * 4))
     eventos = list(AUDIT_LOG)

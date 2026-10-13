@@ -19,9 +19,11 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+from itertools import count
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from central_api.admin._common import require_admin, validar_motivo
 from central_api.admin.audit import log_event, nuevo_uuid7
@@ -350,21 +352,151 @@ def _resumen_filas(filas: list[dict]) -> dict:
 
 
 class ComentarioBody(BaseModel):
-    comentario: str = Field(min_length=3, max_length=500)
+    comentario: str = Field(
+        min_length=3,
+        max_length=500,
+        description="Comentario que deja constancia del reconocimiento de la alerta.",
+        examples=["Revisando el nodo y coordinando su recuperación."],
+    )
 
 
 class SilencioBody(BaseModel):
-    horas: float = Field(gt=0)
-    motivo: str = ""
+    horas: float = Field(
+        gt=0,
+        description="Duración del silencio en horas; no puede superar el máximo configurado.",
+        examples=[1.5],
+    )
+    motivo: str = Field(
+        default="",
+        description="Motivo de auditoría para silenciar las notificaciones.",
+        examples=["Ventana de mantenimiento programada"],
+    )
 
 
 class MotivoFleetBody(BaseModel):
-    motivo: str = ""
+    motivo: str = Field(
+        default="",
+        description="Motivo de auditoría de la operación sobre el worker.",
+        examples=["Mantenimiento programado del nodo"],
+    )
 
 
-@router.get("/fleet")
+_SECUENCIA_MODELOS_OPENAPI = count(1)
+_DESCRIPCIONES_CAMPOS_RESPUESTA = {
+    "success": "Indica que la consulta o acción terminó correctamente.",
+    "latest_version": "Versión de worker más reciente conocida por la flota.",
+    "latest_digest": "Identificador de imagen más reciente conocido por la flota.",
+    "flota": "Inventario consolidado de workers manuales y efímeros.",
+    "manuales": "Workers administrados fuera del grupo efímero.",
+    "efimeros": "Workers efímeros y datos de su instancia.",
+    "resumen": "Totales de capacidad, estado y versiones de la flota.",
+    "worker": "Estado, capacidad y métricas actuales del worker.",
+    "asignaciones_activas": "Identificadores de trabajos activos en el worker.",
+    "ultimos_terminales": "Identificadores de los trabajos finalizados más recientes.",
+    "compatibilidad": "Versión de protocolo y resultado de compatibilidad.",
+    "alertas": "Alertas encontradas, con su estado e historial.",
+    "activas": "Alertas activas detectadas durante la evaluación.",
+    "alerta": "Alerta actualizada con su historial de cambios.",
+    "restantes": "Cantidad de trabajos que aún permanecen en el worker drenado.",
+    "estado": "Nuevo estado operativo asignado al worker.",
+}
+
+
+def _tipo_campo_respuesta(valor: object) -> Any:
+    """Infiere el tipo JSON de primer nivel de un ejemplo de salida."""
+    if isinstance(valor, bool):
+        return bool
+    if isinstance(valor, (str, int, float)):
+        return type(valor)
+    if isinstance(valor, list):
+        return list[Any]
+    if isinstance(valor, dict):
+        return dict[str, Any]
+    return Any
+
+
+def _respuesta_json(descripcion: str, ejemplo: dict) -> dict:
+    """Prepara la descripción de cada campo sin filtrar la respuesta real."""
+    campos = {
+        nombre: (
+            _tipo_campo_respuesta(valor),
+            Field(
+                description=_DESCRIPCIONES_CAMPOS_RESPUESTA.get(
+                    nombre, f"Campo «{nombre}» incluido en la respuesta de la operación."
+                ),
+                examples=[valor],
+            ),
+        )
+        for nombre, valor in ejemplo.items()
+    }
+    modelo = create_model(
+        f"FleetOpenApiResponse{next(_SECUENCIA_MODELOS_OPENAPI)}", **campos
+    )
+    return {
+        "description": descripcion,
+        "model": modelo,
+        "content": {"application/json": {"example": ejemplo}},
+    }
+
+
+def _errores_admin() -> dict:
+    """Respuestas de autenticación comunes a las rutas administrativas."""
+    return {
+        401: {
+            "description": (
+                "No se recibió una cabecera Bearer válida. Envíe "
+                "Authorization: Bearer <ADMIN_TOKEN>."
+            )
+        },
+        403: {
+            "description": (
+                "El token administrativo no está configurado o no coincide. "
+                "Configure ADMIN_TOKEN en el servicio o use el valor vigente."
+            )
+        },
+    }
+
+
+_ERROR_VALIDACION = {
+    422: {
+        "description": (
+            "El cuerpo no cumple el formato o los límites indicados. Revise los "
+            "campos obligatorios, longitudes y valores numéricos y vuelva a enviar la solicitud."
+        )
+    }
+}
+
+
+@router.get(
+    "/fleet",
+    summary="Consultar el estado de la flota",
+    description=(
+        "Devuelve los workers manuales y efímeros, su estado operativo, capacidad, "
+        "trabajos, alertas, versiones reportadas y resúmenes de flota y costo estimado. "
+        "Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        200: _respuesta_json(
+            "Inventario y resúmenes de la flota.",
+            {
+                "success": True,
+                "latest_version": "2.4.1",
+                "latest_digest": "sha256:abc123",
+                "flota": [{"node": "10.0.0.13:8080", "estado": "SANO", "capacidad": 5}],
+                "manuales": [{"node": "10.0.0.13:8080", "estado": "SANO"}],
+                "efimeros": [],
+                "resumen": {
+                    "manuales": {"total": 1, "sanos": 1, "capacidad": 5, "en_ejecucion": 1},
+                    "efimeros": {"total": 0, "sanos": 0, "capacidad": 0, "en_ejecucion": 0, "costo_estimado_usd": 0.0},
+                    "versiones": {"latest_version": "2.4.1", "latest_digest": "sha256:abc123", "total": 1, "outdated": 0, "unknown": 0},
+                },
+            },
+        ),
+    },
+)
 def ver_flota(authorization: str | None = Header(default=None)) -> dict:
-    """Tabla paginada de la flota con estado derivado y métricas accionables."""
+    """Entrega el inventario consolidado, el estado y las métricas de cada worker."""
     require_admin(authorization)
     settings = get_settings()
     nodos = merge_nodes(settings.worker_node_list, _admin_nodes())
@@ -403,9 +535,36 @@ def ver_flota(authorization: str | None = Header(default=None)) -> dict:
     }
 
 
-@router.get("/fleet/workers/{node}")
+@router.get(
+    "/fleet/workers/{node}",
+    summary="Consultar el detalle de un worker",
+    description=(
+        "Muestra el estado y las métricas del worker registrado, sus trabajos "
+        "activos, los últimos trabajos finalizados y la compatibilidad de protocolo. "
+        "Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        200: _respuesta_json(
+            "Detalle del worker solicitado.",
+            {
+                "success": True,
+                "worker": {"node": "10.0.0.13:8080", "estado": "SANO", "capacidad": 5, "jobs_activos": 1},
+                "asignaciones_activas": ["job-123"],
+                "ultimos_terminales": ["job-122"],
+                "compatibilidad": {"protocolo": "1", "estado": "compatible"},
+            },
+        ),
+        404: {
+            "description": (
+                "No existe un worker registrado con ese identificador. Verifique el "
+                "valor de node y consulte primero el inventario de la flota."
+            )
+        },
+    },
+)
 def ver_worker(node: str, authorization: str | None = Header(default=None)) -> dict:
-    """Detalle de un worker: asignaciones, terminales, protocolo y alertas."""
+    """Entrega las métricas, asignaciones e historial reciente del worker."""
     require_admin(authorization)
     entrada = WORKERS.get(node)
     if entrada is None:
@@ -421,11 +580,26 @@ def ver_worker(node: str, authorization: str | None = Header(default=None)) -> d
     }
 
 
-@router.get("/fleet/alerts")
+@router.get(
+    "/fleet/alerts",
+    summary="Listar alertas de la flota",
+    description=(
+        "Devuelve las alertas conocidas y su historial, ordenadas con las alertas "
+        "no resueltas antes que las resueltas. El parámetro estado filtra por el "
+        "estado exacto. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        200: _respuesta_json(
+            "Alertas que coinciden con el filtro solicitado.",
+            {"success": True, "alertas": [{"id": "019abc", "tipo": "worker_degradado", "worker": "10.0.0.13:8080", "severidad": "advertencia", "estado": "NOTIFICADA", "contador": 1, "historial": []}]},
+        ),
+    },
+)
 def listar_alertas(
     authorization: str | None = Header(default=None), estado: str = ""
 ) -> dict:
-    """Lista alertas con banner implícito (abiertas primero) y su historial."""
+    """Lista las alertas de la flota, opcionalmente filtradas por estado."""
     require_admin(authorization)
     alertas = list(ALERTS.values())
     if estado:
@@ -434,12 +608,27 @@ def listar_alertas(
     return {"success": True, "alertas": [asdict(a) for a in alertas]}
 
 
-@router.post("/fleet/evaluate")
+@router.post(
+    "/fleet/evaluate",
+    summary="Evaluar el estado de la flota",
+    description=(
+        "Ejecuta una evaluación inmediata de los nodos conocidos con los umbrales "
+        "configurados y devuelve las alertas activas detectadas. La operación queda "
+        "registrada en la auditoría y requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        200: _respuesta_json(
+            "Resultado de la evaluación inmediata.",
+            {"success": True, "activas": [{"id": "019abc", "tipo": "worker_caido", "worker": "10.0.0.13:8080", "severidad": "critica", "estado": "NOTIFICADA", "contador": 1}]},
+        ),
+    },
+)
 def forzar_evaluacion(
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Ejecuta el detector con los umbrales versionados de settings."""
+    """Evalúa la flota ahora y devuelve las alertas activas resultantes."""
     actor = require_admin(authorization)
     activas = evaluar_flota()
     log_event(
@@ -449,14 +638,36 @@ def forzar_evaluacion(
     return {"success": True, "activas": activas}
 
 
-@router.post("/fleet/alerts/{alerta_id}/ack")
+@router.post(
+    "/fleet/alerts/{alerta_id}/ack",
+    summary="Reconocer una alerta",
+    description=(
+        "Asocia el administrador y el comentario proporcionado a una alerta. "
+        "El reconocimiento deja constancia, pero no cambia el estado técnico "
+        "de la alerta. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        200: _respuesta_json(
+            "Alerta reconocida con el comentario aportado.",
+            {"success": True, "alerta": {"id": "019abc", "tipo": "worker_degradado", "worker": "10.0.0.13:8080", "estado": "NOTIFICADA", "reconocida_por": "admin:token", "comentario": "Revisando el nodo y coordinando su recuperación."}},
+        ),
+        404: {
+            "description": (
+                "No se encontró una alerta con ese identificador. Confirme el ID "
+                "consultando la lista actual de alertas."
+            )
+        },
+    },
+)
 def reconocer_alerta(
     alerta_id: str,
     body: ComentarioBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Reconoce una alerta con comentario; no cambia el estado técnico."""
+    """Registra quién reconoce la alerta y el comentario asociado."""
     actor = require_admin(authorization)
     alerta = next((a for a in ALERTS.values() if a.id == alerta_id), None)
     if alerta is None:
@@ -472,14 +683,43 @@ def reconocer_alerta(
     return {"success": True, "alerta": asdict(alerta)}
 
 
-@router.post("/fleet/alerts/{alerta_id}/silence")
+@router.post(
+    "/fleet/alerts/{alerta_id}/silence",
+    summary="Silenciar temporalmente una alerta",
+    description=(
+        "Define por cuántas horas se silencian las notificaciones de una alerta, "
+        "hasta el máximo permitido por la configuración, y registra el motivo. "
+        "El silencio no resuelve la alerta. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        200: _respuesta_json(
+            "Alerta silenciada hasta la fecha indicada.",
+            {"success": True, "alerta": {"id": "019abc", "tipo": "worker_degradado", "worker": "10.0.0.13:8080", "estado": "NOTIFICADA", "silenciada_hasta": "2026-10-12T18:00:00+00:00"}},
+        ),
+        400: {
+            "description": (
+                "El motivo está vacío o fuera de longitud, o las horas solicitadas "
+                "superan el máximo configurado. Proporcione un motivo válido y una "
+                "duración positiva dentro del límite permitido."
+            )
+        },
+        404: {
+            "description": (
+                "No se encontró una alerta con ese identificador. Confirme el ID "
+                "consultando la lista actual de alertas."
+            )
+        },
+    },
+)
 def silenciar_alerta(
     alerta_id: str,
     body: SilencioBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Silencia notificaciones externas con vencimiento (máximo 4 horas)."""
+    """Silencia temporalmente las notificaciones de una alerta."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     maximo = get_settings().fleet_silence_max_hours
@@ -498,14 +738,42 @@ def silenciar_alerta(
     return {"success": True, "alerta": asdict(alerta)}
 
 
-@router.post("/fleet/workers/{node}/drain")
+@router.post(
+    "/fleet/workers/{node}/drain",
+    summary="Drenar un worker",
+    description=(
+        "Marca el worker como DRENANDO para evitar nuevas asignaciones y devuelve "
+        "cuántos trabajos asignados o en ejecución quedan por terminar. No cancela "
+        "los trabajos existentes. Requiere autorización administrativa y motivo."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        200: _respuesta_json(
+            "Worker marcado para drenaje.",
+            {"success": True, "worker": "10.0.0.13:8080", "estado": "DRENANDO", "restantes": 2},
+        ),
+        400: {
+            "description": (
+                "El motivo es obligatorio y debe tener entre 10 y 500 caracteres. "
+                "Indique una justificación válida para la operación."
+            )
+        },
+        404: {
+            "description": (
+                "El worker no está registrado. Revise el identificador del nodo y "
+                "consulte el inventario antes de solicitar el drenaje."
+            )
+        },
+    },
+)
 def drenar_worker(
     node: str,
     body: MotivoFleetBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Marca un worker DRENANDO: no recibe jobs nuevos hasta liberarse."""
+    """Impide nuevas asignaciones al worker y conserva los trabajos en curso."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     entrada = WORKERS.get(node)
@@ -524,14 +792,49 @@ def drenar_worker(
     return {"success": True, "worker": node, "estado": "DRENANDO", "restantes": restantes}
 
 
-@router.post("/fleet/workers/{node}/retire")
+@router.post(
+    "/fleet/workers/{node}/retire",
+    summary="Retirar un worker",
+    description=(
+        "Marca como RETIRADO un worker registrado que no tenga trabajos asignados "
+        "ni en ejecución. Si hay trabajos en vuelo, drene primero el worker y espere "
+        "a que termine. Requiere autorización administrativa y motivo."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        200: _respuesta_json(
+            "Worker retirado.",
+            {"success": True, "worker": "10.0.0.13:8080", "estado": "RETIRADO"},
+        ),
+        400: {
+            "description": (
+                "El motivo es obligatorio y debe tener entre 10 y 500 caracteres. "
+                "Indique una justificación válida para la operación."
+            )
+        },
+        404: {
+            "description": (
+                "El worker no está registrado. Revise el identificador del nodo y "
+                "consulte el inventario antes de solicitar el retiro."
+            )
+        },
+        409: {
+            "description": (
+                "El worker todavía tiene trabajos asignados o en ejecución. Drene el "
+                "worker, espere a que el contador de trabajos pendientes llegue a cero "
+                "y repita la solicitud."
+            )
+        },
+    },
+)
 def retirar_worker(
     node: str,
     body: MotivoFleetBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Da de baja explícita un worker sin jobs en vuelo (conserva auditoría)."""
+    """Retira un worker sin trabajos en vuelo y conserva la auditoría."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     entrada = WORKERS.get(node)

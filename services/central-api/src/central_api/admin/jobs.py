@@ -912,26 +912,131 @@ def _validar_uuid(valor: str) -> str:
 
 
 class MotivoBody(BaseModel):
-    motivo: str = ""
+    motivo: str = Field(
+        default="",
+        description=(
+            "Justificación de la operación. Debe contener entre 10 y 500 "
+            "caracteres no blancos."
+        ),
+        examples=["El proceso quedó detenido y requiere revisión."],
+    )
 
 
 class PrioridadBody(BaseModel):
-    prioridad: int = Field(ge=0, le=100)
-    motivo: str = ""
+    prioridad: int = Field(
+        ge=0,
+        le=100,
+        description="Prioridad administrativa entre 0 (menor) y 100 (mayor).",
+        examples=[80],
+    )
+    motivo: str = Field(
+        default="",
+        description=(
+            "Justificación del cambio. Debe contener entre 10 y 500 "
+            "caracteres no blancos."
+        ),
+        examples=["Atender antes del cierre operativo."],
+    )
 
 
-@router.get("/executions")
+def _respuesta_ejemplo(descripcion: str, ejemplo: dict[str, Any]) -> dict[str, Any]:
+    """Construye una respuesta JSON documentada sin intervenir en la ejecución."""
+    return {
+        "description": descripcion,
+        "content": {
+            "application/json": {
+                "schema": {"type": "object"},
+                "example": ejemplo,
+            }
+        },
+    }
+
+
+def _respuesta_error(descripcion: str, detalle: str) -> dict[str, Any]:
+    """Describe el formato de error HTTP usado por las rutas administrativas."""
+    return {
+        "description": descripcion,
+        "content": {
+            "application/json": {
+                "schema": {"type": "object"},
+                "example": {"detail": detalle},
+            }
+        },
+    }
+
+
+_RESPUESTAS_ADMIN = {
+    401: _respuesta_error(
+        "Falta una credencial Bearer válida en Authorization. Envíe "
+        "`Authorization: Bearer <token>` y vuelva a intentar.",
+        "Falta Bearer",
+    ),
+    403: _respuesta_error(
+        "El token administrativo no está configurado o no coincide. "
+        "Solicite al responsable habilitarlo o use el token vigente.",
+        "ADMIN_TOKEN inválido",
+    ),
+}
+
+
+_RESPUESTA_422 = {
+    "description": (
+        "Uno o más parámetros o campos del cuerpo no cumplen el tipo o el "
+        "formato esperado. Revise `detail`, corrija los campos indicados y "
+        "repita la solicitud."
+    ),
+    "content": {
+        "application/json": {
+            "schema": {"type": "object"},
+            "example": {
+                "detail": [
+                    {
+                        "loc": ["query", "limit"],
+                        "msg": "Input should be a valid integer",
+                        "type": "int_parsing",
+                    }
+                ]
+            },
+        }
+    },
+}
+
+
+@router.get(
+    "/executions",
+    summary="Listar ejecuciones",
+    description=(
+        "Devuelve ejecuciones filtradas opcionalmente por código de bot y "
+        "estado. Cada registro reúne el resumen del job, su solicitud y "
+        "respuesta saneadas, artefactos y eventos disponibles. La respuesta "
+        "incluye el total, secciones agrupadas por bot y el origen de los datos. "
+        "Los valores sensibles y las direcciones de descarga no se exponen."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Listado obtenido. `records` contiene las ejecuciones de la página.",
+            {
+                "success": True,
+                "total": 0,
+                "records": [],
+                "bot_sections": [],
+                "fuente": "memoria",
+            },
+        ),
+        422: _RESPUESTA_422,
+    },
+)
 async def listar_ejecuciones_admin(
     authorization: str | None = Header(default=None),
     bot: str = "",
     estado: str = "",
     limit: int = 100,
 ) -> dict:
-    """Lista el registro unificado de ejecuciones de todos los bots.
+    """Lista ejecuciones con filtros opcionales por bot y estado.
 
-    El registro reúne ``jobs``, ``job_results``, ``job_artifacts`` y
-    ``job_events``. Esto reemplaza la vista fragmentada de las tablas
-    ``consulta_*_logs`` de V2 sin perder sus datos operativos.
+    El resultado incluye el total, los registros agrupados por bot y datos
+    operativos saneados. `limit` determina el máximo de filas devueltas.
     """
     require_admin(authorization)
     registros = await _ejecuciones_db(bot=bot, estado=estado, limit=limit)
@@ -954,12 +1059,55 @@ async def listar_ejecuciones_admin(
     }
 
 
-@router.get("/executions/{job_id}")
+@router.get(
+    "/executions/{job_id}",
+    summary="Consultar una ejecución",
+    description=(
+        "Devuelve el detalle de una ejecución identificada por su UUID, "
+        "incluidos el resumen, la solicitud, la respuesta, los artefactos y "
+        "los eventos disponibles. Los campos sensibles se ocultan."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Ejecución encontrada.",
+            {
+                "success": True,
+                "record": {
+                    "job": {
+                        "id": "8b3b7b8e-2f14-4f50-9d6f-193d3fc4a112",
+                        "bot": "portal_iva",
+                        "operacion": "consulta",
+                        "estado": "COMPLETO",
+                        "intento": 1,
+                    },
+                    "request": {},
+                    "response": None,
+                    "credentials": {"available": False, "fields": [], "context": {}},
+                    "result": None,
+                    "artifacts": [],
+                    "events": [],
+                    "source": "memoria",
+                },
+            },
+        ),
+        400: _respuesta_error(
+            "El identificador no tiene formato UUID. Envíe el UUID completo "
+            "del job y vuelva a intentar.",
+            "job_id con formato inválido",
+        ),
+        404: _respuesta_error(
+            "No existe una ejecución con ese identificador. Verifique el UUID "
+            "o consulte primero el listado.",
+            "job no encontrado",
+        ),
+    },
+)
 async def ver_ejecucion_admin(
     job_id: str,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """Devuelve el agregado completo de una ejecución."""
+    """Devuelve el registro operativo completo de una ejecución existente."""
     require_admin(authorization)
     job_id = _validar_uuid(job_id)
     registros = await _ejecuciones_db(job_id=job_id, limit=1)
@@ -973,7 +1121,55 @@ async def ver_ejecucion_admin(
     return {"success": True, "record": registros[0]}
 
 
-@router.get("/records")
+@router.get(
+    "/records",
+    summary="Consultar registros de ejecución",
+    description=(
+        "Explora los registros con filtros por tabla, job, bot, estado, "
+        "operación, usuario y texto libre. `limit` se limita a 100 filas y "
+        "`offset` negativo se normaliza a cero. La respuesta informa si hay "
+        "otra página y separa los resultados por tabla. Las tablas por bot "
+        "solo muestran campos permitidos y datos sensibles saneados."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Consulta completada; no se encontraron filas para los filtros indicados.",
+            {
+                "success": True,
+                "tabla": "all",
+                "tabla_resuelta": "all",
+                "limit": 50,
+                "offset": 0,
+                "has_more": False,
+                "next_offset": None,
+                "total": 0,
+                "records": [],
+                "tables": {
+                    "jobs": [],
+                    "job_results": [],
+                    "job_artifacts": [],
+                    "job_events": [],
+                },
+                "bot_sections": [],
+                "fuente": "memoria",
+            },
+        ),
+        400: _respuesta_error(
+            "El filtro `job_id` no es un UUID válido, la tabla no pertenece al "
+            "catálogo permitido o el bot no coincide con la tabla elegida. "
+            "Corrija el UUID o seleccione una tabla y un bot compatibles.",
+            "tabla no válida",
+        ),
+        503: _respuesta_error(
+            "No se pudo consultar una tabla de registros o su estructura no es "
+            "compatible. Verifique la disponibilidad de los datos y solicite "
+            "asistencia si el problema persiste.",
+            "No se pudo consultar la tabla física del bot",
+        ),
+        422: _RESPUESTA_422,
+    },
+)
 async def listar_registros_tablas_admin(
     authorization: str | None = Header(default=None),
     tabla: str = "all",
@@ -986,11 +1182,11 @@ async def listar_registros_tablas_admin(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """Lista cada tabla de ejecución con una forma compatible con V1/V2.
+    """Busca y pagina registros usando los filtros administrativos disponibles.
 
-    ``jobs``, ``job_results``, ``job_artifacts`` y ``job_events`` se mantienen
-    separados en ``tables``. Los artefactos exponen únicamente nombre y
-    metadatos, nunca URLs prefirmadas ni ``object_key``.
+    `tabla=all` consulta el conjunto de datos; una tabla específica limita la
+    salida a esa vista. Los registros incluyen metadatos saneados y no revelan
+    direcciones privadas de descarga.
     """
     require_admin(authorization)
     if job_id:
@@ -1149,9 +1345,39 @@ async def listar_registros_tablas_admin(
     }
 
 
-@router.get("/table-catalog")
+@router.get(
+    "/table-catalog",
+    summary="Listar tablas consultables",
+    description=(
+        "Devuelve el catálogo de tablas que el panel puede consultar, con "
+        "nombre, tipo, columnas visibles y operaciones asociadas cuando "
+        "corresponde. Use los nombres devueltos en el filtro `tabla` de "
+        "`/records`; no se admiten nombres arbitrarios."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Catálogo disponible.",
+            {
+                "success": True,
+                "tables": [
+                    {
+                        "name": "jobs",
+                        "label": "jobs",
+                        "kind": "canonical",
+                        "bot": None,
+                        "columns": ["id", "user_id", "bot", "operacion", "estado"],
+                        "legacy": [],
+                    }
+                ],
+                "canonical_tables": ["jobs", "job_results", "job_artifacts", "job_events"],
+                "bot_tables": [],
+            },
+        ),
+    },
+)
 def catalogo_tablas_admin(authorization: str | None = Header(default=None)) -> dict:
-    """Catálogo allowlistado para seleccionar una tabla sin renderizar todo."""
+    """Devuelve los nombres y columnas de las tablas disponibles para consulta."""
     require_admin(authorization)
     return {
         "success": True,
@@ -1161,7 +1387,43 @@ def catalogo_tablas_admin(authorization: str | None = Header(default=None)) -> d
     }
 
 
-@router.get("/jobs")
+@router.get(
+    "/jobs",
+    summary="Listar jobs",
+    description=(
+        "Lista trabajos ordenados de forma estable y permite filtrar por "
+        "estado, bot, usuario y worker. `limit` se limita a 200 elementos. "
+        "Cuando hay más resultados, `siguiente_cursor` permite pedir la página "
+        "siguiente enviándolo como `cursor`."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Listado obtenido.",
+            {
+                "success": True,
+                "total": 1,
+                "jobs": [
+                    {
+                        "job_id": "8b3b7b8e-2f14-4f50-9d6f-193d3fc4a112",
+                        "estado": "PENDIENTE",
+                        "bot": "portal_iva",
+                        "operacion": "consulta",
+                        "usuario": "usuario-123",
+                        "usuario_email": None,
+                        "worker": None,
+                        "intento": 0,
+                        "claves_payload": ["periodo"],
+                        "credenciales": {"available": False, "fields": []},
+                        "prioridad_admin": None,
+                    }
+                ],
+                "siguiente_cursor": None,
+            },
+        ),
+        422: _RESPUESTA_422,
+    },
+)
 async def listar_jobs_admin(
     authorization: str | None = Header(default=None),
     estado: str = "",
@@ -1171,7 +1433,7 @@ async def listar_jobs_admin(
     limit: int = 50,
     cursor: str = "",
 ) -> dict:
-    """Lista jobs por estado, bot, usuario y worker con cursor estable."""
+    """Lista jobs aplicando filtros y paginación por cursor."""
     require_admin(authorization)
     # Con base configurada la grilla lee PostgreSQL (models); si no hay
     # filas o no hay base, cae al fallback en memoria de desarrollo.
@@ -1203,17 +1465,54 @@ async def listar_jobs_admin(
     }
 
 
-@router.get("/jobs/{job_id}/credentials")
+@router.get(
+    "/jobs/{job_id}/credentials",
+    summary="Consultar credencial custodiada de un job",
+    description=(
+        "Devuelve la credencial asociada al job únicamente a un administrador "
+        "autorizado. La consulta queda auditada y la respuesta indica que no "
+        "debe almacenarse en caché. El valor mostrado en el ejemplo es "
+        "demostrativo, no una credencial utilizable."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Credencial recuperada. El valor del ejemplo es ficticio.",
+            {
+                "success": True,
+                "job_id": "8b3b7b8e-2f14-4f50-9d6f-193d3fc4a112",
+                "credentials": {"clave": "VALOR_DE_EJEMPLO"},
+                "credential_metadata": {"fields": ["clave"], "context": {}},
+            },
+        ),
+        400: _respuesta_error(
+            "El identificador no tiene formato UUID. Envíe el UUID completo "
+            "del job y vuelva a intentar.",
+            "job_id con formato inválido",
+        ),
+        404: _respuesta_error(
+            "El job no existe o no tiene una credencial custodiada. Verifique "
+            "el identificador y confirme que la solicitud original incluyó "
+            "una credencial.",
+            "job sin credencial custodiada",
+        ),
+        503: _respuesta_error(
+            "La información del job no está disponible temporalmente o no se "
+            "pudo recuperar la credencial. Reintente más tarde y solicite "
+            "asistencia si el error persiste.",
+            "credencial no disponible",
+        ),
+    },
+)
 async def revelar_credencial_admin(
     job_id: str,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> JSONResponse:
-    """Revela temporalmente una clave descifrada y deja auditoría.
+    """Devuelve la credencial del job a un administrador y audita la consulta.
 
-    PostgreSQL solo contiene el ciphertext RSA. El texto claro se crea en la
-    respuesta una vez validado el token administrativo y nunca se escribe en
-    logs, eventos, resultados ni payloads.
+    La respuesta no admite caché. Trate el valor recibido como información
+    confidencial y no lo copie a registros o canales compartidos.
     """
     actor = require_admin(authorization)
     job_id = _validar_uuid(job_id)
@@ -1282,9 +1581,32 @@ async def revelar_credencial_admin(
     )
 
 
-@router.get("/jobs/metrics")
+@router.get(
+    "/jobs/metrics",
+    summary="Consultar métricas de la cola",
+    description=(
+        "Devuelve el conteo de jobs por estado, los totales de pendientes y en "
+        "ejecución, y la cantidad de comandos de control registrados. Las "
+        "ejecuciones cuyo worker no tiene actividad reciente no se cuentan "
+        "como activas."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Métricas actuales de la cola.",
+            {
+                "success": True,
+                "por_estado": {"PENDIENTE": 3, "CORRIENDO": 1, "FALLIDO": 2},
+                "pendientes": 3,
+                "en_ejecucion": 1,
+                "comandos_durables": 1,
+                "fuente": "memoria",
+            },
+        ),
+    },
+)
 async def metricas_cola(authorization: str | None = Header(default=None)) -> dict:
-    """Combina métricas de la cola en memoria con el estado de la flota."""
+    """Resume el volumen de jobs y comandos de control por estado."""
     require_admin(authorization)
     # Con base configurada los conteos salen de PostgreSQL (GROUP BY).
     conteo_db = await _conteo_estados_db()
@@ -1317,23 +1639,84 @@ async def metricas_cola(authorization: str | None = Header(default=None)) -> dic
     }
 
 
-@router.get("/jobs/{job_id}")
-def ver_job_admin(
+@router.get(
+    "/jobs/{job_id}",
+    summary="Consultar el detalle de un job",
+    description=(
+        "Devuelve el resumen, el resultado saneado y los comandos asociados "
+        "a un job. Con `diagnostico=true` agrega información operativa segura "
+        "y registra la consulta para auditoría; nunca incluye valores de "
+        "credenciales."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Detalle del job encontrado.",
+            {
+                "success": True,
+                "job": {
+                    "job_id": "8b3b7b8e-2f14-4f50-9d6f-193d3fc4a112",
+                    "estado": "FALLIDO",
+                    "bot": "portal_iva",
+                    "operacion": "consulta",
+                    "intento": 1,
+                    "claves_payload": ["periodo"],
+                    "credenciales": {"available": True, "fields": ["clave"]},
+                    "prioridad_admin": None,
+                },
+                "resultado": {"error": "No se pudo completar la consulta"},
+                "artefactos": [],
+                "comandos": [],
+            },
+        ),
+        400: _respuesta_error(
+            "El identificador no tiene formato UUID. Envíe el UUID completo "
+            "del job y vuelva a intentar.",
+            "job_id con formato inválido",
+        ),
+        404: _respuesta_error(
+            "No existe un job con ese identificador. Verifique el UUID o "
+            "consulte primero el listado.",
+            "job no encontrado",
+        ),
+        422: _RESPUESTA_422,
+    },
+)
+async def ver_job_admin(
     job_id: str,
     authorization: str | None = Header(default=None),
     diagnostico: bool = False,
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Detalle con resultado saneado; el diagnóstico se audita y no sale a /api/v3."""
+    """Devuelve el detalle saneado y, si se solicita, el diagnóstico auditado."""
     actor = require_admin(authorization)
     job = JOBS.get(_validar_uuid(job_id))
     if job is None:
-        raise HTTPException(status_code=404, detail="job no encontrado")
+        # Jobs históricos: solo viven en PostgreSQL. Se devuelve el agregado
+        # saneado (job, request, response, credenciales sin valores).
+        registros = await _ejecuciones_db(job_id=_validar_uuid(job_id), limit=1)
+        if not registros:
+            raise HTTPException(status_code=404, detail="job no encontrado")
+        registro = registros[0]
+        return {
+            "success": True,
+            "job": registro["job"],
+            "request": registro.get("request") or {},
+            "response": registro.get("response"),
+            "resultado": registro.get("result"),
+            "credentials": registro.get("credentials"),
+            "artefactos": registro.get("artifacts") or [],
+            "comandos": [],
+            "fuente": registro.get("source", "postgresql"),
+        }
     comandos = [asdict(c) for c in JOB_COMMANDS.get(job.id, [])]
     respuesta: dict = {
         "success": True,
         "job": _resumen_job(job),
         "resultado": _sanear_resultado(job),
+        "request": _registro_memoria(job)["request"],
+        "response": _registro_memoria(job)["response"],
+        "credentials": _registro_memoria(job)["credentials"],
         "artefactos": [],
         "comandos": comandos,
     }
@@ -1353,14 +1736,58 @@ def ver_job_admin(
     return respuesta
 
 
-@router.post("/jobs/{job_id}/cancel", status_code=202)
+@router.post(
+    "/jobs/{job_id}/cancel",
+    status_code=202,
+    summary="Solicitar la cancelación de un job",
+    description=(
+        "Registra una solicitud de cancelación para un job que aún no terminó. "
+        "La respuesta 202 confirma que la solicitud fue aceptada, no que la "
+        "ejecución ya se haya detenido. El motivo es obligatorio y queda "
+        "asociado a la auditoría de la acción."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        202: _respuesta_ejemplo(
+            "Solicitud aceptada; el job queda pendiente del acuse de cancelación.",
+            {
+                "success": True,
+                "estado": "PENDIENTE",
+                "comando": {
+                    "id": "2a7a60ae-31f7-4d49-9b83-29fbba4c8eba",
+                    "job_id": "8b3b7b8e-2f14-4f50-9d6f-193d3fc4a112",
+                    "tipo": "cancelar",
+                    "estado": "PENDIENTE",
+                    "motivo": "El proceso quedó detenido y requiere revisión.",
+                    "acuse": "PENDIENTE: comando durable registrado, el worker debe acusar",
+                },
+            },
+        ),
+        400: _respuesta_error(
+            "El UUID del job es inválido o el motivo está vacío, tiene menos "
+            "de 10 caracteres o supera 500. Corrija ambos campos antes de "
+            "reintentar.",
+            "motivo obligatorio",
+        ),
+        404: _respuesta_error(
+            "No existe el job indicado. Verifique el UUID y consulte el listado.",
+            "job no encontrado",
+        ),
+        409: _respuesta_error(
+            "El job ya está en un estado terminal y no admite cancelación. "
+            "Consulte su estado actual antes de realizar otra acción.",
+            "job ya terminal, no cancelable",
+        ),
+        422: _RESPUESTA_422,
+    },
+)
 def cancelar_job(
     job_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Persiste un comando durable de cancelación y devuelve el acuse inicial."""
+    """Registra la cancelación solicitada y devuelve su acuse inicial."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     job = JOBS.get(_validar_uuid(job_id))
@@ -1382,14 +1809,56 @@ def cancelar_job(
     return {"success": True, "estado": "PENDIENTE", "comando": asdict(comando)}
 
 
-@router.post("/jobs/{job_id}/requeue", status_code=202)
+@router.post(
+    "/jobs/{job_id}/requeue",
+    status_code=202,
+    summary="Reencolar un job fallido",
+    description=(
+        "Vuelve a poner en cola un job en estado FALLIDO si todavía dispone de "
+        "intentos. La operación limpia la asignación anterior, incrementa el "
+        "contador y conserva un motivo de auditoría. No crea un segundo job."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        202: _respuesta_ejemplo(
+            "Job reencolado y listo para un nuevo intento.",
+            {
+                "success": True,
+                "job": {
+                    "job_id": "8b3b7b8e-2f14-4f50-9d6f-193d3fc4a112",
+                    "estado": "PENDIENTE",
+                    "bot": "portal_iva",
+                    "operacion": "consulta",
+                    "intento": 2,
+                },
+            },
+        ),
+        400: _respuesta_error(
+            "El UUID del job es inválido o el motivo está vacío, tiene menos "
+            "de 10 caracteres o supera 500. Corrija ambos campos antes de "
+            "reintentar.",
+            "motivo obligatorio",
+        ),
+        404: _respuesta_error(
+            "No existe el job indicado. Verifique el UUID y consulte el listado.",
+            "job no encontrado",
+        ),
+        409: _respuesta_error(
+            "El job no está FALLIDO o ya alcanzó el máximo de intentos. "
+            "Consulte el estado y los intentos disponibles; solo se pueden "
+            "reencolar jobs FALLIDO que aún admitan otro intento.",
+            "solo jobs FALLIDO son reencolables",
+        ),
+        422: _RESPUESTA_422,
+    },
+)
 def reencolar_job(
     job_id: str,
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Reencola un job fallido sin duplicar consumo ni superar intentos."""
+    """Reencola un job fallido cuando todavía tiene intentos disponibles."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     job = JOBS.get(_validar_uuid(job_id))
@@ -1412,8 +1881,22 @@ def reencolar_job(
 
 
 class ForzarBody(BaseModel):
-    worker: str = Field(default="", description="Nodo ip:port destino; vacío = mejor SANO")
-    motivo: str = ""
+    worker: str = Field(
+        default="",
+        description=(
+            "Destino ip:port. Déjelo vacío para seleccionar automáticamente "
+            "un worker sano y disponible."
+        ),
+        examples=["10.0.0.12:8080"],
+    )
+    motivo: str = Field(
+        default="",
+        description=(
+            "Justificación obligatoria de la ejecución forzada; entre 10 y "
+            "500 caracteres no blancos."
+        ),
+        examples=["Reprocesar el caso por solicitud operativa."],
+    )
 
 
 async def _hidratar_job_memoria(job_id: str) -> Job:
@@ -1462,20 +1945,68 @@ async def _hidratar_job_memoria(job_id: str) -> Job:
     return job
 
 
-@router.post("/jobs/{job_id}/force", status_code=202)
+@router.post(
+    "/jobs/{job_id}/force",
+    status_code=202,
+    summary="Forzar la ejecución de un job",
+    description=(
+        "Solicita el despacho inmediato de un job pendiente o asignado, con "
+        "un motivo auditado. Puede exceder la capacidad habitual del worker, "
+        "pero exige que el destino esté habilitado, sano y con actividad "
+        "reciente. Indique `worker` para elegir un destino concreto o déjelo "
+        "vacío para seleccionar uno disponible. La respuesta 202 informa el "
+        "resultado del intento de despacho."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        202: _respuesta_ejemplo(
+            "Solicitud de ejecución forzada despachada.",
+            {
+                "success": True,
+                "estado": "ASIGNADO",
+                "worker": "10.0.0.12:8080",
+                "forzado": True,
+                "advertencia": "La ejecución forzada puede superar el cupo habitual.",
+            },
+        ),
+        400: _respuesta_error(
+            "El UUID del job es inválido o el motivo no tiene entre 10 y 500 "
+            "caracteres no blancos. Corrija el identificador o la justificación.",
+            "motivo obligatorio",
+        ),
+        404: _respuesta_error(
+            "No se encontró el job o el worker elegido no está habilitado para "
+            "recibirlo. Verifique el UUID y el destino o deje `worker` vacío "
+            "para seleccionar uno disponible.",
+            "worker no inventariado",
+        ),
+        409: _respuesta_error(
+            "El job ya terminó, está ejecutándose, tiene una cancelación "
+            "pendiente, el destino no está sano o no hay un worker disponible. "
+            "Actualice el estado y reintente solo cuando el job y el destino "
+            "sean aptos.",
+            "job ya terminal, no forzable",
+        ),
+        503: _respuesta_error(
+            "No se pudo completar la asignación o el destino todavía no está "
+            "listo para aceptar trabajos. Reintente más tarde o solicite que "
+            "se vuelva a habilitar el worker.",
+            "claim forzado no disponible",
+        ),
+        422: _RESPUESTA_422,
+    },
+)
 async def forzar_job(
     job_id: str,
     body: ForzarBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Fuerza la ejecución inmediata de un job, aunque supere el cupo.
+    """Solicita el despacho inmediato de un job pendiente o asignado.
 
-    Es la única vía que puede exceder el máximo de workers: el claim durable
-    omite el tope de capacidad y el sobre viaja firmado bajo el alcance
-    ``assign-force``. Salud, latido fresco, protocolo e inventario se siguen
-    exigiendo en ambos lados. Solo admite PENDIENTE/ASIGNADO con motivo
-    auditado.
+    Requiere un motivo auditable y un destino habilitado, sano y recientemente
+    activo. Puede superar la capacidad habitual del worker, pero no omite las
+    condiciones de disponibilidad ni admite jobs terminados o en ejecución.
     """
     from central_api.scheduler import reaper as reaper_mod
     from central_api.scheduler.loop import dispatch_claimed
@@ -1584,14 +2115,54 @@ async def forzar_job(
     }
 
 
-@router.post("/jobs/{job_id}/priority")
+@router.post(
+    "/jobs/{job_id}/priority",
+    summary="Cambiar la prioridad de un job pendiente",
+    description=(
+        "Asigna una prioridad administrativa entre 0 y 100 a un job "
+        "PENDIENTE. El cambio requiere un motivo de entre 10 y 500 caracteres "
+        "y queda auditado. El valor se devuelve junto con el resumen del job."
+    ),
+    responses={
+        **_RESPUESTAS_ADMIN,
+        200: _respuesta_ejemplo(
+            "Prioridad actualizada.",
+            {
+                "success": True,
+                "job": {
+                    "job_id": "8b3b7b8e-2f14-4f50-9d6f-193d3fc4a112",
+                    "estado": "PENDIENTE",
+                    "bot": "portal_iva",
+                    "operacion": "consulta",
+                    "intento": 0,
+                    "prioridad_admin": 80,
+                },
+            },
+        ),
+        400: _respuesta_error(
+            "El UUID del job es inválido o el motivo no tiene entre 10 y 500 "
+            "caracteres no blancos. Corrija el identificador o la justificación.",
+            "motivo obligatorio",
+        ),
+        404: _respuesta_error(
+            "No existe el job indicado. Verifique el UUID y consulte el listado.",
+            "job no encontrado",
+        ),
+        409: _respuesta_error(
+            "El job ya no está PENDIENTE y no admite cambios de prioridad. "
+            "Consulte su estado actual y aplique el cambio solo si sigue pendiente.",
+            "solo jobs PENDIENTE se priorizan",
+        ),
+        422: _RESPUESTA_422,
+    },
+)
 def priorizar_job(
     job_id: str,
     body: PrioridadBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
-    """Ajusta la prioridad de un job pendiente con cambio auditado."""
+    """Actualiza la prioridad de un job pendiente y registra el motivo."""
     actor = require_admin(authorization)
     motivo = validar_motivo(body.motivo)
     job = JOBS.get(_validar_uuid(job_id))

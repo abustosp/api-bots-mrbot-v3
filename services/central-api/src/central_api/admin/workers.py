@@ -7,8 +7,6 @@
   con ``ADMIN_TOKEN`` (bearer); sin token configurado es 403.
 - ``DELETE /admin/workers/{nodo}``: quita el nodo del inventario del panel
   y marca su entrada DRENANDO para que el scheduler deje de asignarle.
-- ``GET /admin/workers/panel``: página HTML mínima con la misma información,
-  formulario de alta y baja, auto-refresco cada 15 s.
 
 El estado deriva de los umbrales ya configurados
 (``worker_degraded_after_seconds`` / ``worker_down_after_seconds``), igual
@@ -19,10 +17,11 @@ from __future__ import annotations
 
 import hmac
 from datetime import datetime, timedelta
+from itertools import count
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from central_api.db import db_configurado, nueva_sesion
 from central_api.scheduler import dispatcher
@@ -82,8 +81,98 @@ async def vista_worker(node: str) -> dict:
 
 class AddWorkerBody(BaseModel):
     node: str = Field(
-        description="Dirección ip:port del worker, p.ej. 10.0.0.13:8080 (con o sin http://)"
+        description=(
+            "Dirección del worker en formato ip:puerto o como URL. El nodo se agrega "
+            "al inventario aunque no responda al sondeo inicial."
+        ),
+        examples=["10.0.0.13:8080"],
     )
+
+
+_SECUENCIA_MODELOS_OPENAPI = count(1)
+_DESCRIPCIONES_CAMPOS_RESPUESTA = {
+    "success": "Indica que la consulta o acción terminó correctamente.",
+    "workers": "Workers del inventario y su estado observado.",
+    "node": "Dirección normalizada del worker.",
+    "alcanzable": "Indica si el worker respondió al sondeo inicial.",
+    "detalle": "Estado observado durante el sondeo, o tipo de fallo si no respondió.",
+    "vista": "Estado, capacidad y métricas iniciales del worker agregado.",
+}
+
+
+def _tipo_campo_respuesta(valor: object) -> Any:
+    """Infiere el tipo JSON de primer nivel de un ejemplo de salida."""
+    if isinstance(valor, bool):
+        return bool
+    if isinstance(valor, (str, int, float)):
+        return type(valor)
+    if isinstance(valor, list):
+        return list[Any]
+    if isinstance(valor, dict):
+        return dict[str, Any]
+    return Any
+
+
+def _respuesta_json(descripcion: str, ejemplo: dict) -> dict:
+    """Prepara la descripción de cada campo sin filtrar la respuesta real."""
+    campos = {
+        nombre: (
+            _tipo_campo_respuesta(valor),
+            Field(
+                description=_DESCRIPCIONES_CAMPOS_RESPUESTA.get(
+                    nombre, f"Campo «{nombre}» incluido en la respuesta de la operación."
+                ),
+                examples=[valor],
+            ),
+        )
+        for nombre, valor in ejemplo.items()
+    }
+    modelo = create_model(
+        f"WorkersOpenApiResponse{next(_SECUENCIA_MODELOS_OPENAPI)}", **campos
+    )
+    return {
+        "description": descripcion,
+        "model": modelo,
+        "content": {"application/json": {"example": ejemplo}},
+    }
+
+
+def _errores_admin() -> dict:
+    """Respuestas de autenticación comunes a las rutas del inventario."""
+    return {
+        401: {
+            "description": (
+                "No se recibió una cabecera Bearer válida. Envíe "
+                "Authorization: Bearer <ADMIN_TOKEN>."
+            )
+        },
+        403: {
+            "description": (
+                "El token administrativo no está configurado o no coincide. "
+                "Configure ADMIN_TOKEN en el servicio o use el valor vigente."
+            )
+        },
+    }
+
+
+_ERROR_VALIDACION = {
+    422: {
+        "description": (
+            "Falta el campo node o no tiene el tipo esperado. Envíe un cuerpo JSON "
+            "con node como texto, por ejemplo 10.0.0.13:8080."
+        )
+    }
+}
+
+
+_ERROR_NODO = {
+    400: {
+        "description": (
+            "La dirección está vacía o no incluye host y puerto en un formato "
+            "reconocible. Indique una dirección como 10.0.0.13:8080 o una URL del nodo."
+        )
+    }
+}
 
 
 def derive_state(entry: WorkerEntry | None) -> str:
@@ -149,16 +238,51 @@ def _coerce_node(raw: str) -> str:
     return text
 
 
-@router.get("/workers")
+@router.get(
+    "/workers",
+    summary="Listar workers registrados",
+    description=(
+        "Devuelve el inventario combinado de los workers configurados y los agregados "
+        "desde el panel. Cada elemento incluye su origen, estado operativo, capacidad, "
+        "trabajos en ejecución y último latido. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        200: _respuesta_json(
+            "Inventario actual de workers.",
+            {"success": True, "workers": [{"node": "10.0.0.13:8080", "worker_id": "worker-01", "origen": "panel", "registrado": True, "estado": "SANO", "en_ejecucion": 1, "capacidad": 5, "sellado": False, "ultimo_latido": "2026-10-12T16:30:00+00:00", "fuente": "memoria"}]},
+        ),
+    },
+)
 async def list_workers(authorization: str | None = Header(default=None)) -> dict:
+    """Devuelve el inventario y el estado observado de cada worker."""
     require_admin(authorization)
     settings = get_settings()
     nodes = merge_nodes(settings.worker_node_list, ADMIN_NODES)
     return {"success": True, "workers": [await vista_worker(n) for n in nodes]}
 
 
-@router.post("/workers", status_code=201)
+@router.post(
+    "/workers",
+    status_code=201,
+    summary="Agregar un worker al inventario",
+    description=(
+        "Agrega una dirección de worker al inventario administrado y realiza un "
+        "sondeo inicial. Si el nodo no responde, igualmente queda agregado y la "
+        "respuesta informa alcanzable=false. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        **_ERROR_NODO,
+        201: _respuesta_json(
+            "Worker agregado al inventario; alcanzable indica el resultado del sondeo inicial.",
+            {"success": True, "node": "10.0.0.13:8080", "alcanzable": True, "detalle": "SANO", "vista": {"node": "10.0.0.13:8080", "estado": "DESCONOCIDO", "registrado": False, "capacidad": 5}},
+        ),
+    },
+)
 async def add_worker(body: AddWorkerBody, authorization: str | None = Header(default=None)) -> dict:
+    """Agrega el nodo al inventario e informa si responde al sondeo inicial."""
     require_admin(authorization)
     try:
         node = _coerce_node(body.node)
@@ -183,8 +307,26 @@ async def add_worker(body: AddWorkerBody, authorization: str | None = Header(def
     }
 
 
-@router.delete("/workers/{node}")
+@router.delete(
+    "/workers/{node}",
+    summary="Quitar un worker del inventario administrado",
+    description=(
+        "Quita el nodo de la lista agregada desde el panel. Si existe una entrada "
+        "activa del worker, la marca como DRENANDO para que no reciba nuevas "
+        "asignaciones; las fuentes de inventario externas no se modifican. "
+        "Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_NODO,
+        200: _respuesta_json(
+            "Nodo quitado del inventario administrado.",
+            {"success": True, "node": "10.0.0.13:8080"},
+        ),
+    },
+)
 def remove_worker(node: str, authorization: str | None = Header(default=None)) -> dict:
+    """Quita el nodo del inventario administrado y, si está activo, lo drena."""
     require_admin(authorization)
     try:
         norm = _coerce_node(node)
@@ -195,73 +337,3 @@ def remove_worker(node: str, authorization: str | None = Header(default=None)) -
     if entry is not None:
         entry.status = "DRENANDO"
     return {"success": True, "node": norm}
-
-
-@router.get("/workers/panel", response_class=HTMLResponse)
-def workers_panel() -> HTMLResponse:
-    """Cascarón estático sin datos: el inventario se pide a ``GET /admin/workers``
-    con el bearer ADMIN_TOKEN y se renderiza con ``textContent`` (sin XSS)."""
-    return HTMLResponse(
-        _PANEL_HTML,
-        headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
-                 "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; "
-                 "style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"},
-    )
-
-
-_PANEL_HTML = """<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Workers - MrBot central</title>
-<style>
-body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; max-width: 70rem; }
-table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; font-size: .9rem; }
-th { background: #f0f0f0; } .muted { color: #555; font-size: .85rem; }
-input, button { font-size: .9rem; padding: .35rem .6rem; }
-</style></head><body>
-<h1>Workers</h1>
-<p class="muted">Requiere bearer ADMIN_TOKEN. Sin token no se muestra ni se modifica nada.</p>
-<table><thead><tr><th>Nodo</th><th>Origen</th><th>Estado</th><th>Ejec/Cap</th><th>Sellado</th><th>Ultimo latido</th><th></th></tr></thead>
-<tbody id="rows"></tbody></table>
-<form id="alta"><input id="node" placeholder="10.0.0.13:8080" required>
-<button type="submit">Agregar worker</button></form>
-<p class="muted" id="msg"></p>
-<script>
-const msg = document.getElementById("msg"), rows = document.getElementById("rows");
-function token() {
-  let t = sessionStorage.getItem("admin_token");
-  if (!t) { t = prompt("ADMIN_TOKEN:") || ""; if (t) sessionStorage.setItem("admin_token", t); }
-  return t;
-}
-async function call(method, path, body) {
-  const r = await fetch(path, {method, headers: {"Content-Type": "application/json",
-    "Authorization": "Bearer " + token()}, body: body ? JSON.stringify(body) : undefined});
-  if (r.status === 401 || r.status === 403) sessionStorage.removeItem("admin_token");
-  return r;
-}
-function cell(tr, text) { const td = document.createElement("td"); td.textContent = text; tr.appendChild(td); return td; }
-async function load() {
-  const r = await call("GET", "/admin/workers");
-  if (!r.ok) { msg.textContent = "Error " + r.status; return; }
-  rows.replaceChildren();
-  for (const w of (await r.json()).workers) {
-    const tr = document.createElement("tr");
-    cell(tr, w.node); cell(tr, w.origen); cell(tr, w.estado);
-    cell(tr, w.en_ejecucion + "/" + w.capacidad); cell(tr, w.sellado ? "si" : "no");
-    cell(tr, w.ultimo_latido || "-");
-    const b = document.createElement("button"); b.textContent = "Dar de baja";
-    b.addEventListener("click", async () => {
-      const d = await call("DELETE", "/admin/workers/" + encodeURIComponent(w.node));
-      msg.textContent = d.ok ? "Worker dado de baja." : "Error " + d.status; if (d.ok) load();
-    });
-    cell(tr, "").appendChild(b); rows.appendChild(tr);
-  }
-}
-document.getElementById("alta").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const r = await call("POST", "/admin/workers", {node: document.getElementById("node").value});
-  msg.textContent = r.ok ? "Worker agregado." : "Error " + r.status; if (r.ok) load();
-});
-load(); setInterval(load, 15000);
-</script></body></html>"""

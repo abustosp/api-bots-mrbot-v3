@@ -141,8 +141,8 @@ def test_aportes_en_linea_traduce_la_bandera_de_subida_v1() -> None:
         "aportes_en_linea",
         "descargar",
         {
-            "cuit_login": "20123456789",
-            "cuit_representado": "20123456789",
+            "cuit_login": "20123456786",
+            "cuit_representado": "20123456786",
             "archivo_historico_minio": True,
             "proxy_request": False,
         },
@@ -150,15 +150,15 @@ def test_aportes_en_linea_traduce_la_bandera_de_subida_v1() -> None:
     assert normalizado["subir"] is True
     assert "archivo_historico_minio" not in normalizado
     assert "proxy_request" not in normalizado
-    assert normalizado["representado_cuit"] == "20123456789"
-    assert normalizado["cuit_representante"] == "20123456789"
+    assert normalizado["representado_cuit"] == "20123456786"
+    assert normalizado["cuit_representante"] == "20123456786"
 
     # ``carga_minio`` sigue siendo el nombre de la bandera en los demás bots.
     arba = normalize_v2_payload(
         "arba",
         "descargar",
         {
-            "cuit": "20123456789",
+            "cuit": "20123456786",
             "periodo": "202608",
             "denominacion": "Empresa",
             "carga_minio": False,
@@ -177,7 +177,7 @@ def test_cuerpo_v2_plano_separa_credencial_y_normaliza_aliases(monkeypatch) -> N
             "ccma",
             "consultar",
             {
-                "cuit_representado": "20123456789",
+                "cuit_representado": "20123456786",
                 "movimientos": True,
                 "pdf": True,
                 "desde": "01/08/2026",
@@ -185,14 +185,14 @@ def test_cuerpo_v2_plano_separa_credencial_y_normaliza_aliases(monkeypatch) -> N
                 "proxy_request": {"host": "ignored"},
             },
         )
-        assert normalized["representado_cuit"] == "20123456789"
+        assert normalized["representado_cuit"] == "20123456786"
         assert normalized["incluir_movimientos"] is True
         assert normalized["incluir_pdf"] is True
         assert "proxy_request" not in normalized
         encrypted = _encrypted(private_pem, "secreto-v2")
         payload, credentials, ciphertext, fingerprint = normalize_payload_and_credentials(
             {
-                "cuit_representado": "20123456789",
+                "cuit_representado": "20123456786",
                 "desde": "01/08/2026",
                 "clave_encriptada": encrypted,
             },
@@ -221,14 +221,17 @@ def test_normalizacion_de_descargas_respeta_campos_del_worker() -> None:
     siper = normalize_v2_payload(
         "siper", "consultar", {"detalle_minio": True, "categorias_minio": False}
     )
+    # V2: las banderas *_minio solo deciden que capturas se suben; el detalle
+    # y las categorias se consultan siempre.
     assert siper["incluir_detalle"] is True
-    assert siper["incluir_categorias"] is False
+    assert siper["incluir_categorias"] is True
+    assert siper["subir"] is True
     assert "detalle_minio" not in siper and "categorias_minio" not in siper
     sct = normalize_v2_payload(
         "sct",
         "consultar",
         {
-            "cuit_representado": "20123456789",
+            "cuit_representado": "20123456786",
             "vencimientos_csv_minio": True,
             "deudas_pdf_minio": True,
             "deudas_excel_minio": False,
@@ -250,9 +253,9 @@ def test_alias_v2_plano_crea_registro_sin_credencial_en_payload(monkeypatch) -> 
             "/api/v3/ccma/consulta",
             headers={"Idempotency-Key": "v2-flat-credential-contract"},
             json={
-                "cuit_representante": "20123456789",
+                "cuit_representante": "20123456786",
                 "clave_representante": "secreto-solo-memoria",
-                "cuit_representado": "20123456789",
+                "cuit_representado": "20123456786",
                 "movimientos": True,
                 "pdf": True,
             },
@@ -280,7 +283,7 @@ def test_admin_registra_ejecuciones_y_revela_solo_con_auth(monkeypatch) -> None:
         created = cliente.post(
             "/api/v3/ccma/consulta",
             headers={"Idempotency-Key": "admin-record-contract"},
-            json={"cuit_representante": "20123456789", "clave_representante": "admin-secret", "cuit_representado": "20123456789"},
+            json={"cuit_representante": "20123456786", "clave_representante": "admin-secret", "cuit_representado": "20123456786"},
         )
         job_id = created.json()["job_id"]
         assert cliente.get(f"/admin/jobs/{job_id}/credentials").status_code == 401
@@ -309,9 +312,9 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
             "/api/v3/ccma/consulta",
             headers={"Idempotency-Key": "admin-table-contract"},
             json={
-                "cuit_representante": "20123456789",
+                "cuit_representante": "20123456786",
                 "clave_representante": "table-secret",
-                "cuit_representado": "20123456789",
+                "cuit_representado": "20123456786",
             },
         )
         assert created.status_code == 202
@@ -338,7 +341,7 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         assert all("url" not in key.lower() for key in job_record)
         sections = body["bot_sections"]
         assert len(sections) == len(CATALOGUE)
-        assert sum(len(section["operaciones"]) for section in sections) == 42
+        assert sum(len(section["operaciones"]) for section in sections) == 43
         ccma = next(section for section in sections if section["bot"] == "ccma")
         assert ccma["tablas"] == ["jobs", "job_results", "job_artifacts", "job_events"]
         assert "consulta_ccma_logs" in ccma["tablas_legacy"]
@@ -408,7 +411,7 @@ def test_admin_table_catalogo_y_tabla_virtual_por_bot(monkeypatch) -> None:
             created = cliente.post(
                 "/api/v3/ccma/consulta",
                 headers={"Idempotency-Key": f"admin-bot-table-{suffix}"},
-                json={"cuit_representante": "20123456789", "clave_representante": "catalog-secret", "cuit_representado": "20123456789"},
+                json={"cuit_representante": "20123456786", "clave_representante": "catalog-secret", "cuit_representado": "20123456786"},
             )
             assert created.status_code == 202
         for job in JOBS.values():
@@ -513,7 +516,7 @@ def test_admin_records_consulta_tabla_fisica_por_bot_con_filtros_y_redaccion(mon
                 "cancelled_by": None,
                 "error_code": None,
                 "request_payload": {
-                    "representado_cuit": "20123456789",
+                    "representado_cuit": "20123456786",
                     "password": "plain-table-secret",
                 },
                 "response_payload": {
@@ -560,7 +563,7 @@ def test_admin_records_consulta_tabla_fisica_por_bot_con_filtros_y_redaccion(mon
         assert body["display_columns"] == [*admin_jobs.BOT_TABLE_COLUMNS, "usuario_email"]
         row = body["records"][0]
         assert row["usuario_email"] == "cliente@example.com"
-        assert row["request_payload"]["representado_cuit"] == "20123456789"
+        assert row["request_payload"]["representado_cuit"] == "20123456786"
         assert row["request_payload"]["password"] == "[REDACTED]"
         assert row["response_payload"]["items"][0]["token"] == "[REDACTED]"
         # La metadata de credencial se abre a los nombres de campo usados: son

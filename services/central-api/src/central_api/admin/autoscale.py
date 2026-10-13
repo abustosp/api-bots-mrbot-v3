@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from itertools import count
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, create_model, model_validator
 
 from central_api.admin._common import require_admin, validar_motivo
 from central_api.admin.audit import log_event
@@ -19,14 +20,34 @@ router = APIRouter()
 
 
 class ScaleUpBody(BaseModel):
-    count: int = Field(ge=1, le=100)
-    motivo: str
+    count: int = Field(
+        ge=1,
+        le=100,
+        description="Cantidad de instancias efímeras que se solicita iniciar.",
+        examples=[2],
+    )
+    motivo: str = Field(
+        description="Justificación de auditoría para aumentar la capacidad.",
+        examples=["Aumento temporal por crecimiento de la cola"],
+    )
 
 
 class TerminateBody(BaseModel):
-    instance_ids: list[str] = Field(default_factory=list, max_length=100)
-    all: bool = False
-    motivo: str
+    instance_ids: list[str] = Field(
+        default_factory=list,
+        max_length=100,
+        description="Identificadores de instancias efímeras registradas que se terminarán.",
+        examples=[["i-0123456789abcdef0"]],
+    )
+    all: bool = Field(
+        default=False,
+        description="Si es true, selecciona todas las instancias efímeras registradas.",
+        examples=[False],
+    )
+    motivo: str = Field(
+        description="Justificación de auditoría para terminar las instancias.",
+        examples=["Retiro de capacidad temporal sobrante"],
+    )
 
     @model_validator(mode="after")
     def _select_instances(self):
@@ -38,7 +59,107 @@ class TerminateBody(BaseModel):
 
 
 class MotivoBody(BaseModel):
-    motivo: str
+    motivo: str = Field(
+        description="Justificación de auditoría para cambiar el autoscaler.",
+        examples=["Pausa solicitada durante mantenimiento"],
+    )
+
+
+_SECUENCIA_MODELOS_OPENAPI = count(1)
+_DESCRIPCIONES_CAMPOS_RESPUESTA = {
+    "success": "Indica si la operación se completó correctamente.",
+    "config": "Configuración efectiva y límites del escalado automático.",
+    "snapshot": "Mediciones actuales de demanda y capacidad.",
+    "efimeros": "Instancias efímeras conocidas y su estado operativo.",
+    "costo_estimado": "Costo estimado de las instancias, si pudo calcularse.",
+    "costo_moneda": "Moneda en la que se expresa el costo estimado.",
+    "aws_error": "Tipo de error al consultar el servicio de instancias, o null si no hubo error.",
+    "eventos": "Eventos operativos recientes del escalador.",
+    "requested": "Cantidad de instancias solicitadas.",
+    "launched": "Datos de las instancias iniciadas y registradas.",
+    "terminated": "Instancias cuya terminación ya fue confirmada.",
+    "draining": "Instancias que aún esperan finalizar sus trabajos activos.",
+    "pending": "Instancias cuya terminación está solicitada pero pendiente de confirmación.",
+    "ignored": "Instancias que no requirieron una nueva solicitud de terminación.",
+    "enabled": "Indica si el escalado automático está habilitado.",
+    "audit_orphans": "Informe de instancias activas sin correspondencia en el inventario.",
+    "error": "Tipo de error de auditoría, o null si la revisión terminó correctamente.",
+}
+
+
+def _tipo_campo_respuesta(valor: object) -> Any:
+    """Infiere el tipo JSON de primer nivel de un ejemplo de salida."""
+    if isinstance(valor, bool):
+        return bool
+    if isinstance(valor, (str, int, float)):
+        return type(valor)
+    if isinstance(valor, list):
+        return list[Any]
+    if isinstance(valor, dict):
+        return dict[str, Any]
+    return Any
+
+
+def _respuesta_json(descripcion: str, ejemplo: dict) -> dict:
+    """Prepara la descripción de cada campo sin filtrar la respuesta real."""
+    campos = {
+        nombre: (
+            _tipo_campo_respuesta(valor),
+            Field(
+                description=_DESCRIPCIONES_CAMPOS_RESPUESTA.get(
+                    nombre, f"Campo «{nombre}» incluido en la respuesta de la operación."
+                ),
+                examples=[valor],
+            ),
+        )
+        for nombre, valor in ejemplo.items()
+    }
+    modelo = create_model(
+        f"AutoscaleOpenApiResponse{next(_SECUENCIA_MODELOS_OPENAPI)}", **campos
+    )
+    return {
+        "description": descripcion,
+        "model": modelo,
+        "content": {"application/json": {"example": ejemplo}},
+    }
+
+
+def _errores_admin() -> dict:
+    """Respuestas de autenticación comunes a las rutas administrativas."""
+    return {
+        401: {
+            "description": (
+                "No se recibió una cabecera Bearer válida. Envíe "
+                "Authorization: Bearer <ADMIN_TOKEN>."
+            )
+        },
+        403: {
+            "description": (
+                "El token administrativo no está configurado o no coincide. "
+                "Configure ADMIN_TOKEN en el servicio o use el valor vigente."
+            )
+        },
+    }
+
+
+_ERROR_VALIDACION = {
+    422: {
+        "description": (
+            "El cuerpo no cumple el formato, los límites o la selección requerida. "
+            "Revise los campos y vuelva a enviar una solicitud coherente."
+        )
+    }
+}
+
+
+_ERROR_MOTIVO = {
+    400: {
+        "description": (
+            "El motivo está vacío o no tiene entre 10 y 500 caracteres. Proporcione "
+            "una justificación clara dentro de ese rango y repita la solicitud."
+        )
+    }
+}
 
 
 def _require_reason(motivo: str) -> str:
@@ -108,8 +229,35 @@ def _serialize_ephemeral(instance_id: str, item: dict) -> dict:
     return result
 
 
-@router.get("/autoscale")
+@router.get(
+    "/autoscale",
+    summary="Consultar el estado del escalado automático",
+    description=(
+        "Devuelve la configuración efectiva, la instantánea de demanda, las "
+        "instancias efímeras conocidas, el costo estimado y los eventos recientes. "
+        "Si no se puede consultar el servicio de instancias, el estado sigue disponible: "
+        "los campos relacionados indican el error y los datos no obtenidos quedan vacíos. "
+        "Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        200: _respuesta_json(
+            "Estado y configuración del escalado automático; aws_error puede indicar que faltan datos externos.",
+            {
+                "success": True,
+                "config": {"enabled": True, "dry_run": False, "queue_threshold": 10, "max_instances": 8, "capacity_per_worker": 5, "ec2": {"region": "sa-east-1", "instance_type": "c6i.xlarge", "worker_concurrency": 5}},
+                "snapshot": {"queued": 3, "running": 2},
+                "efimeros": [{"instance_id": "i-0123456789abcdef0", "state": "running", "node": "10.0.0.13:8080"}],
+                "costo_estimado": 0.12,
+                "costo_moneda": "USD",
+                "aws_error": None,
+                "eventos": [],
+            },
+        ),
+    },
+)
 async def get_autoscale(authorization: str | None = Header(default=None)) -> dict:
+    """Consulta configuración, demanda, instancias y costo estimado."""
     require_admin(authorization)
     snapshot = await controller.build_snapshot()
     workers = []
@@ -159,12 +307,44 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
     }
 
 
-@router.post("/autoscale/scale-up")
+@router.post(
+    "/autoscale/scale-up",
+    summary="Aumentar la capacidad del autoscaler",
+    description=(
+        "Solicita iniciar la cantidad indicada de instancias efímeras. La cantidad "
+        "debe estar entre 1 y 100 y la operación requiere un motivo de al menos 10 "
+        "caracteres. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        **_ERROR_MOTIVO,
+        200: _respuesta_json(
+            "Solicitud procesada; launched contiene las instancias iniciadas.",
+            {
+                "success": True,
+                "requested": 2,
+                "launched": [
+                    {"instance_id": "i-0123456789abcdef0", "node": "10.0.0.13:8080", "state": "running", "instance_type": "c6i.xlarge", "concurrency": 5},
+                    {"instance_id": "i-abcdef0123456789", "node": "10.0.0.14:8080", "state": "running", "instance_type": "c6i.xlarge", "concurrency": 5},
+                ],
+            },
+        ),
+        503: {
+            "description": (
+                "No se pudo consultar o iniciar capacidad en el servicio de instancias. "
+                "Revise su disponibilidad, permisos y configuración, y vuelva a intentar "
+                "cuando el servicio esté operativo."
+            )
+        },
+    },
+)
 async def autoscale_scale_up(
     body: ScaleUpBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
+    """Solicita nuevas instancias efímeras para ampliar la capacidad."""
     actor = require_admin(authorization)
     motivo = _require_reason(body.motivo)
     try:
@@ -185,12 +365,49 @@ async def autoscale_scale_up(
     return {"success": True, "requested": body.count, "launched": launched}
 
 
-@router.post("/autoscale/terminate")
+@router.post(
+    "/autoscale/terminate",
+    summary="Terminar instancias efímeras",
+    description=(
+        "Termina las instancias registradas que se indiquen en instance_ids o todas "
+        "las registradas cuando all sea true. Debe usarse una sola modalidad de selección "
+        "y aportar un motivo válido. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        200: _respuesta_json(
+            "Resultado de la terminación de las instancias seleccionadas.",
+            {
+                "success": True,
+                "terminated": ["i-0123456789abcdef0"],
+                "draining": [],
+                "pending": [],
+                "ignored": [],
+            },
+        ),
+        400: {
+            "description": (
+                "El motivo está vacío o no tiene entre 10 y 500 caracteres, o uno o más "
+                "identificadores no corresponden a instancias efímeras registradas. "
+                "Proporcione un motivo válido y consulte el inventario para enviar "
+                "únicamente identificadores conocidos."
+            )
+        },
+        503: {
+            "description": (
+                "No se pudo terminar las instancias en el servicio de capacidad. Revise "
+                "su disponibilidad, permisos y configuración y vuelva a intentar."
+            )
+        },
+    },
+)
 async def autoscale_terminate(
     body: TerminateBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
+    """Termina instancias efímeras registradas según la selección solicitada."""
     actor = require_admin(authorization)
     motivo = _require_reason(body.motivo)
     targets = list(EPHEMERAL_WORKERS) if body.all else body.instance_ids
@@ -231,28 +448,75 @@ async def _set_enabled(enabled: bool, motivo: str, actor: str, request_id: str) 
     return {"success": True, "enabled": enabled}
 
 
-@router.post("/autoscale/enable")
+@router.post(
+    "/autoscale/enable",
+    summary="Habilitar el autoscaler",
+    description=(
+        "Activa el escalado automático y pone en marcha su ciclo de evaluación. "
+        "El cuerpo debe incluir un motivo de al menos 10 caracteres. "
+        "Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        **_ERROR_MOTIVO,
+        200: _respuesta_json("Autoscaler habilitado.", {"success": True, "enabled": True}),
+    },
+)
 async def autoscale_enable(
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
+    """Habilita el ajuste automático de capacidad."""
     actor = require_admin(authorization)
     return await _set_enabled(True, body.motivo, actor, request_id or "")
 
 
-@router.post("/autoscale/disable")
+@router.post(
+    "/autoscale/disable",
+    summary="Deshabilitar el autoscaler",
+    description=(
+        "Desactiva el escalado automático y detiene su ciclo de evaluación. "
+        "El cuerpo debe incluir un motivo de al menos 10 caracteres. "
+        "Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_VALIDACION,
+        **_ERROR_MOTIVO,
+        200: _respuesta_json("Autoscaler deshabilitado.", {"success": True, "enabled": False}),
+    },
+)
 async def autoscale_disable(
     body: MotivoBody,
     authorization: str | None = Header(default=None),
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict:
+    """Deshabilita el ajuste automático de capacidad."""
     actor = require_admin(authorization)
     return await _set_enabled(False, body.motivo, actor, request_id or "")
 
 
-@router.get("/autoscale/audit")
+@router.get(
+    "/autoscale/audit",
+    summary="Revisar instancias sin correspondencia",
+    description=(
+        "Compara las instancias administradas con las conocidas por el servicio y "
+        "devuelve el informe de instancias huérfanas junto con eventos recientes. "
+        "Si la consulta no está disponible, devuelve success=false y el tipo de error "
+        "en lugar de interrumpir la respuesta. Requiere autorización administrativa."
+    ),
+    responses={
+        **_errores_admin(),
+        200: _respuesta_json(
+            "Informe de auditoría; audit_orphans y error informan si la revisión pudo completarse.",
+            {"success": True, "audit_orphans": {"orphans": []}, "error": None, "eventos": []},
+        ),
+    },
+)
 async def autoscale_audit(authorization: str | None = Header(default=None)) -> dict:
+    """Comprueba si existen instancias activas sin correspondencia registrada."""
     actor = require_admin(authorization)
     try:
         fleet = controller._make_fleet()

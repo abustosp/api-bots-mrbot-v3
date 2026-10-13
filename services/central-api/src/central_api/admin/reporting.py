@@ -23,6 +23,62 @@ router = APIRouter()
 REPORT_TYPES = frozenset({"resumen", "desglose_cuit"})
 MAX_PREVIEW_ROWS = 200
 
+_AUTH_RESPONSES = {
+    401: {
+        "description": (
+            "No se recibió una credencial administrativa Bearer válida en la "
+            "cabecera Authorization. Envíe Authorization: Bearer <ADMIN_TOKEN>."
+        ),
+        "content": {"application/json": {"example": {"detail": "Falta Bearer [REDACTED]"}}},
+    },
+    403: {
+        "description": (
+            "La credencial no coincide con la configurada o la administración "
+            "no está habilitada. Verifique el token y su configuración antes "
+            "de volver a enviar la solicitud."
+        ),
+        "content": {
+            "application/json": {
+                "examples": {
+                    "token_invalido": {"value": {"detail": "ADMIN_TOKEN inválido"}},
+                    "administracion_no_configurada": {"value": {"detail": "ADMIN_TOKEN no configurado"}},
+                }
+            }
+        },
+    },
+}
+
+_SERVICE_UNAVAILABLE = {
+    503: {
+        "description": (
+            "No se pudo consultar el historial de uso en este momento. "
+            "Compruebe que el servicio esté disponible y vuelva a intentar "
+            "la misma solicitud más tarde."
+        ),
+        "content": {"application/json": {"example": {"detail": "Servicio no disponible"}}},
+    }
+}
+
+_VALIDATION_RESPONSE = {
+    422: {
+        "description": (
+            "La solicitud contiene algún parámetro que no pudo validarse antes "
+            "de procesarse. Revise el nombre y formato de los parámetros "
+            "indicados en el detalle; para fechas o tipos de reporte no "
+            "admitidos, use los valores descritos en los errores 400."
+        ),
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": [
+                        {"loc": ["query", "desde"], "msg": "Input should be a valid string", "type": "string_type"}
+                    ]
+                }
+            }
+        },
+    }
+}
+
 
 def _parse_date(value: str, field: str) -> datetime:
     try:
@@ -142,17 +198,74 @@ def _csv_response(kind: str, desde: str, hasta: str, rows: list[dict[str, Any]])
     )
 
 
-@router.get("/reporting")
+@router.get(
+    "/reporting",
+    summary="Previsualizar un reporte de uso",
+    description=(
+        "Devuelve totales y hasta 200 filas agrupadas por usuario y servicio. "
+        "Sin fechas, la respuesta contiene una vista vacía; con fechas, envíe "
+        "ambos extremos inclusivos en formato YYYY-MM-DD. El tipo resumen "
+        "agrupa por usuario y servicio; desglose_cuit añade el CUIT representado. "
+        "Se aceptan fecha_desde/fecha_hasta y tipo_reporte como nombres "
+        "alternativos. Requiere autorización administrativa Bearer."
+    ),
+    responses={
+        200: {
+            "description": "Vista previa, totales y enlace de descarga si se indicó un rango.",
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object"},
+                    "examples": {
+                        "vista_previa": {
+                            "summary": "Reporte resumen con una fila",
+                            "value": {
+                                "success": True,
+                                "report_type": "resumen",
+                                "columns": ["user_id", "user_email", "servicio", "requests_exitosas", "requests_no_exitosas"],
+                                "rows": [{"user_id": "11111111-1111-4111-8111-111111111111", "user_email": "operador@example.com", "servicio": "consulta_cuit:consulta", "requests_exitosas": 18, "requests_no_exitosas": 2}],
+                                "total_rows": 1,
+                                "preview_truncated": False,
+                                "totals": {"requests_exitosas": 18, "requests_no_exitosas": 2},
+                                "download_url": "/admin/reporting/download?desde=2026-10-01&hasta=2026-10-12&tipo=resumen",
+                            },
+                        }
+                    },
+                }
+            },
+        },
+        400: {
+            "description": (
+                "Falta uno de los extremos del rango, una fecha no tiene formato "
+                "YYYY-MM-DD, la fecha inicial es posterior a la final o el tipo "
+                "no es resumen/desglose_cuit. Corrija esos valores y reenvíe "
+                "ambas fechas o quite las dos para obtener una vista vacía."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "falta_fecha": {"value": {"detail": "Debes indicar fecha de inicio y fin."}},
+                        "formato_fecha": {"value": {"detail": "Formato inválido para fecha_desde. Usa YYYY-MM-DD."}},
+                        "rango_invertido": {"value": {"detail": "fecha_desde no puede ser mayor a fecha_hasta."}},
+                        "tipo_invalido": {"value": {"detail": "Tipo de reporte inválido."}},
+                    }
+                }
+            },
+        },
+        **_AUTH_RESPONSES,
+        **_SERVICE_UNAVAILABLE,
+        **_VALIDATION_RESPONSE,
+    },
+)
 async def reporting(
-    desde: str | None = Query(default=None),
-    hasta: str | None = Query(default=None),
-    tipo: str = Query(default="resumen"),
-    fecha_desde: str | None = Query(default=None),
-    fecha_hasta: str | None = Query(default=None),
-    tipo_reporte: str | None = Query(default=None),
+    desde: str | None = Query(default=None, description="Fecha inicial inclusiva YYYY-MM-DD; debe enviarse junto con hasta.", examples=["2026-10-01"]),
+    hasta: str | None = Query(default=None, description="Fecha final inclusiva YYYY-MM-DD; debe enviarse junto con desde.", examples=["2026-10-12"]),
+    tipo: str = Query(default="resumen", description="Tipo de agrupación: resumen o desglose_cuit.", examples=["resumen"]),
+    fecha_desde: str | None = Query(default=None, description="Nombre alternativo de desde para clientes existentes.", examples=["2026-10-01"]),
+    fecha_hasta: str | None = Query(default=None, description="Nombre alternativo de hasta para clientes existentes.", examples=["2026-10-12"]),
+    tipo_reporte: str | None = Query(default=None, description="Nombre alternativo de tipo; acepta resumen o desglose_cuit.", examples=["desglose_cuit"]),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Preview V1-compatible limitado a 200 filas, sin payloads sensibles."""
+    """Previsualiza uso agregado sin incluir payloads de solicitudes ni credenciales."""
     actor = require_admin(authorization)
     raw_desde, raw_hasta = (desde or fecha_desde or "").strip(), (hasta or fecha_hasta or "").strip()
     kind = _report_type(tipo_reporte or tipo)
@@ -179,16 +292,59 @@ async def reporting(
     }
 
 
-@router.get("/reporting/download")
+@router.get(
+    "/reporting/download",
+    summary="Descargar un reporte de uso en CSV",
+    description=(
+        "Genera un archivo CSV con todas las filas del reporte para el rango "
+        "indicado, sin el límite de filas de la vista previa. Las dos fechas "
+        "son obligatorias en la práctica y deben usar YYYY-MM-DD. Puede elegir "
+        "resumen o desglose_cuit y usar los nombres alternativos de consulta "
+        "fecha_desde, fecha_hasta y tipo_reporte. Requiere autorización "
+        "administrativa Bearer."
+    ),
+    responses={
+        200: {
+            "description": "Archivo CSV con encabezados y una fila por usuario, servicio y, si aplica, CUIT.",
+            "content": {
+                "text/csv": {
+                    "schema": {"type": "string"},
+                    "example": "user_id,user_email,servicio,requests_exitosas,requests_no_exitosas\nusr_123,operador@example.com,consulta_cuit:consulta,18,2\n",
+                }
+            },
+        },
+        400: {
+            "description": (
+                "Falta una fecha, alguna no tiene formato YYYY-MM-DD, el rango "
+                "está invertido o el tipo no es resumen/desglose_cuit. Corrija "
+                "las fechas y el tipo del reporte antes de solicitar el archivo."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "fecha_ausente": {"value": {"detail": "Formato inválido para fecha_desde. Usa YYYY-MM-DD."}},
+                        "formato_fecha": {"value": {"detail": "Formato inválido para fecha_hasta. Usa YYYY-MM-DD."}},
+                        "rango_invertido": {"value": {"detail": "fecha_desde no puede ser mayor a fecha_hasta."}},
+                        "tipo_invalido": {"value": {"detail": "Tipo de reporte inválido."}},
+                    }
+                }
+            },
+        },
+        **_AUTH_RESPONSES,
+        **_SERVICE_UNAVAILABLE,
+        **_VALIDATION_RESPONSE,
+    },
+)
 async def download_reporting(
-    desde: str | None = Query(default=None),
-    hasta: str | None = Query(default=None),
-    tipo: str = Query(default="resumen"),
-    fecha_desde: str | None = Query(default=None),
-    fecha_hasta: str | None = Query(default=None),
-    tipo_reporte: str | None = Query(default=None),
+    desde: str | None = Query(default=None, description="Fecha inicial inclusiva YYYY-MM-DD.", examples=["2026-10-01"]),
+    hasta: str | None = Query(default=None, description="Fecha final inclusiva YYYY-MM-DD.", examples=["2026-10-12"]),
+    tipo: str = Query(default="resumen", description="Tipo de agrupación: resumen o desglose_cuit.", examples=["resumen"]),
+    fecha_desde: str | None = Query(default=None, description="Nombre alternativo de desde.", examples=["2026-10-01"]),
+    fecha_hasta: str | None = Query(default=None, description="Nombre alternativo de hasta.", examples=["2026-10-12"]),
+    tipo_reporte: str | None = Query(default=None, description="Nombre alternativo de tipo.", examples=["desglose_cuit"]),
     authorization: str | None = Header(default=None),
 ) -> StreamingResponse:
+    """Devuelve el reporte completo como archivo CSV descargable."""
     actor = require_admin(authorization)
     raw_desde, raw_hasta = (desde or fecha_desde or "").strip(), (hasta or fecha_hasta or "").strip()
     kind = _report_type(tipo_reporte or tipo)
@@ -198,14 +354,69 @@ async def download_reporting(
     return _csv_response(kind, raw_desde, raw_hasta, rows)
 
 
-@router.get("/reports/download")
+@router.get(
+    "/reports/download",
+    summary="Descargar el reporte por la ruta compatible",
+    description=(
+        "Entrega el mismo archivo CSV del reporte usando los nombres de "
+        "consulta fecha_desde, fecha_hasta y tipo_reporte. Ambas fechas son "
+        "obligatorias y deben tener formato YYYY-MM-DD. Requiere autorización "
+        "administrativa Bearer."
+    ),
+    responses={
+        200: {
+            "description": "Archivo CSV del reporte completo.",
+            "content": {
+                "text/csv": {
+                    "schema": {"type": "string"},
+                    "example": "user_id,user_email,servicio,requests_exitosas,requests_no_exitosas\nusr_123,operador@example.com,consulta_cuit:consulta,18,2\n",
+                }
+            },
+        },
+        400: {
+            "description": (
+                "Una fecha falta o no usa YYYY-MM-DD, las fechas están "
+                "invertidas o el tipo de reporte es inválido. Envíe ambas "
+                "fechas válidas y un tipo admitido."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "fecha_ausente": {"value": {"detail": "Formato inválido para fecha_desde. Usa YYYY-MM-DD."}},
+                        "formato_fecha": {"value": {"detail": "Formato inválido para fecha_hasta. Usa YYYY-MM-DD."}},
+                        "rango_invertido": {"value": {"detail": "fecha_desde no puede ser mayor a fecha_hasta."}},
+                        "tipo_invalido": {"value": {"detail": "Tipo de reporte inválido."}},
+                    }
+                }
+            },
+        },
+        422: {
+            "description": (
+                "Falta uno de los parámetros obligatorios fecha_desde o "
+                "fecha_hasta. Incluya ambos con formato YYYY-MM-DD y vuelva "
+                "a solicitar el archivo."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {"loc": ["query", "fecha_desde"], "msg": "Field required", "type": "missing"}
+                        ]
+                    }
+                }
+            },
+        },
+        **_AUTH_RESPONSES,
+        **_SERVICE_UNAVAILABLE,
+    },
+)
 async def download_reporting_legacy(
-    fecha_desde: str,
-    fecha_hasta: str,
-    tipo_reporte: str = "resumen",
+    fecha_desde: str = Query(..., description="Fecha inicial inclusiva YYYY-MM-DD.", examples=["2026-10-01"]),
+    fecha_hasta: str = Query(..., description="Fecha final inclusiva YYYY-MM-DD.", examples=["2026-10-12"]),
+    tipo_reporte: str = Query(default="resumen", description="Tipo de agrupación: resumen o desglose_cuit.", examples=["resumen"]),
     authorization: str | None = Header(default=None),
 ) -> StreamingResponse:
-    """Alias legacy exacto de la descarga CSV V1."""
+    """Mantiene la descarga CSV disponible con los nombres de consulta anteriores."""
     return await download_reporting(
         desde=fecha_desde,
         hasta=fecha_hasta,

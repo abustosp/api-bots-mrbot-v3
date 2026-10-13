@@ -69,6 +69,7 @@ button { cursor: pointer; }
 .button.secondary { background: #fff8f1; border-color: var(--line); }
 .button.danger { color: #fff; background: var(--bad); }
 .button.small { padding: 7px 11px; font-size: 13px; }
+.copy-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .user-box { display: flex; align-items: center; gap: 8px; }
 .user-box .muted { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 main { margin: 0 1.4%; }
@@ -130,11 +131,40 @@ h3 { margin: 0 0 7px; font-size: 17px; }
 .status-neutral, .status-DESCONOCIDO, .status-REGISTRANDO { color: var(--muted); }
 .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; border: 1px solid #e9cfb8; background: #f3e2cf; color: #5b463a; font-size: 12px; }
 .table-wrap { overflow-x: auto; margin-top: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-strong); }
+
+/* Filtros por columna estilo ERP: multiseleccion en cascada */
+th.cf-th { position: relative; white-space: nowrap; }
+th.cf-th .cf-btn { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; max-width: 100%; }
+th.cf-th .cf-btn:hover { color: var(--accent-strong); }
+th.cf-th .cf-caret { font-size: 9px; opacity: .55; }
+th.cf-th.cf-active { background: #fff3cd; }
+th.cf-th.cf-active .cf-caret { opacity: 1; color: var(--accent-strong); }
+.cf-badge { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; letter-spacing: 0; }
+.cf-menu { position: fixed; z-index: 1000; width: 260px; max-width: 92vw; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 10px 28px rgba(60,40,20,.22); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); }
+.cf-menu input[type=search] { width: 100%; margin-bottom: 6px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.cf-menu .cf-toggle { display: flex; gap: 6px; padding: 2px 2px 6px; font-size: 12px; border-bottom: 1px solid #eee; }
+.cf-menu .cf-toggle a { cursor: pointer; color: var(--accent-strong); text-decoration: none; }
+.cf-menu .cf-toggle a:hover { text-decoration: underline; }
+.cf-menu .cf-list { max-height: 240px; overflow-y: auto; margin-top: 4px; }
+.cf-menu .cf-item { display: flex; align-items: center; gap: 7px; padding: 4px 3px; font-size: 12.5px; cursor: pointer; border-radius: 6px; }
+.cf-menu .cf-item:hover { background: #f6ede3; }
+.cf-menu .cf-item.cf-off { opacity: .45; cursor: not-allowed; }
+.cf-menu .cf-item.cf-off:hover { background: transparent; }
+.cf-menu .cf-item input { margin: 0; }
+.cf-menu .cf-item .cf-n { margin-left: auto; color: var(--muted); font-size: 11px; }
+.cf-menu .cf-actions { display: flex; gap: 6px; margin-top: 8px; }
+.cf-menu .cf-actions .button { flex: 1; padding: 6px 10px; font-size: 12px; }
+.cf-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+.cf-bar .cf-count { color: var(--muted); }
+.cf-bar .cf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; border: 1px solid #e9cfb8; background: #f3e2cf; font-size: 12px; }
+
 table { width: 100%; min-width: 760px; border-collapse: collapse; }
 th, td { padding: 12px 11px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
 th { color: var(--muted); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; }
 tr:last-child td { border-bottom: 0; }
+td.actions { display: table-cell; white-space: nowrap; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+td.actions > .actions-inner { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
 .user-id { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .user-id code { font-size: 12px; }
 .key-cell { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
@@ -205,7 +235,7 @@ details > .details-body { padding: 0 14px 14px; }
       <section class="view hidden" data-panel="users">
         <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3. Para depuración se admite un nombre sin mail (p. ej. abp). En la columna API Key: «Ver» la muestra, «Copiar» la copia y «Guardar» reemplaza la clave por lo que escribas (vacío = aleatoria). La clave se guarda cifrada, nunca en texto plano.</p>
         <form id="users-filter" class="toolbar"><div class="field wide"><label for="users-email">Buscar por email o usuario</label><input id="users-email" name="email" type="search" placeholder="cliente@example.com o abp"></div><div class="field"><label for="users-state">Estado</label><select id="users-state"><option value="">Todos</option><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><button class="button primary" type="submit">Buscar</button></form>
-        <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-plan">Plan</label><select id="new-plan"><option>free</option><option>basico</option><option>pro</option><option>empresa</option></select></div><div class="field"><label for="new-api-key">API key (mínimo 3; las claves cortas son débiles)</label><input id="new-api-key" type="password" minlength="3" placeholder="Vacío = generar automáticamente; mínimo 3 caracteres" autocomplete="new-password"></div><div class="field"><label for="new-state">Estado inicial</label><select id="new-state"><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" minlength="3" maxlength="500" required></div></div><div class="form-actions"><label class="checkbox-inline"><input id="new-send-credentials" type="checkbox"> Enviar credenciales por email</label><button class="button primary" type="submit">Crear usuario</button></div></form></div></details>
+        <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-account-type">Tipo de cuenta</label><select id="new-account-type"><option value="PRUEBA">Prueba (100 consultas únicas)</option><option value="TESTING">Testing (ilimitada)</option><option value="NORMAL">Normal (cupo mensual)</option></select></div><div class="field hidden" id="new-max-field"><label for="new-max-requests">Cupo mensual NORMAL (requests/mes)</label><input id="new-max-requests" type="number" min="1" max="10000000" step="1" placeholder="Ej.: 1000"></div><div class="field"><label for="new-api-key">API key (mínimo 3; las claves cortas son débiles)</label><input id="new-api-key" type="password" minlength="3" placeholder="Vacío = generar automáticamente; mínimo 3 caracteres" autocomplete="new-password"></div><div class="field"><label for="new-state">Estado inicial</label><select id="new-state"><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" minlength="3" maxlength="500" required></div></div><div class="form-actions"><label class="checkbox-inline"><input id="new-send-credentials" type="checkbox"> Enviar credenciales por email</label><button class="button primary" type="submit">Crear usuario</button></div></form></div></details>
         <div class="table-wrap"><table><thead><tr><th>User ID</th><th>Email / usuario</th><th>Nombre</th><th>Tipo</th><th>Cuenta</th><th>API Key</th><th>Estado</th><th>Cupo</th><th>Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
@@ -226,7 +256,7 @@ details > .details-body { padding: 0 14px 14px; }
 
       <section class="view hidden" data-panel="fleet">
         <div class="kicker">Operación de workers</div><h2>Flota</h2><p class="subtle">Estado derivado, capacidad, protocolo y alertas del plano de ejecución. Agrega nodos al inventario en caliente sin tocar WORKER_NODES.</p>
-        <div class="form-actions"><button class="button primary" type="button" id="fleet-refresh">Actualizar</button><button class="button secondary" type="button" id="fleet-evaluate">Evaluar alertas</button><a class="button secondary" href="/admin/workers/panel" target="_blank" rel="noreferrer">Vista clásica</a></div>
+        <div class="form-actions"><button class="button primary" type="button" id="fleet-refresh">Actualizar</button><button class="button secondary" type="button" id="fleet-evaluate">Evaluar alertas</button></div>
         <div class="form-actions"><strong id="fleet-version-summary" class="muted" aria-live="polite">Versiones: cargando...</strong><label class="checkbox-inline"><input id="fleet-outdated-only" type="checkbox"> Solo desactualizados</label></div>
         <form id="add-worker-form" class="toolbar"><div class="field wide"><label for="new-worker-node">Agregar worker (ip:puerto)</label><input id="new-worker-node" type="text" placeholder="10.0.0.13:8080 o bot-worker:8080" required></div><button class="button primary" type="submit">Agregar</button><span class="muted">Se sondea best-effort; igual se registra aunque aún no responda.</span></form>
         <h3>Workers manuales <span class="pill" id="fleet-manual-count">0</span></h3>
@@ -358,7 +388,7 @@ details > .details-body { padding: 0 14px 14px; }
       const request = flattenRequest(record.request || {});
       const requestCells = requestFields.map((field) => `<td>${requestCell(request[field])}</td>`).join("");
       const responseReceived = response?.received_at ? `<br><span class="muted">${esc(date(response.received_at))}</span>` : "";
-      return `<tr><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td>${requestCells}<td>${payloadView(response, "Ver response")}${responseReceived}</td><td>${artifactListView(record.artifacts)}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${esc(date(job.finalizado_en))}</td></tr>`;
+      return `<tr><td><code>${esc(short(job.id, 22))}</code></td><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td>${requestCells}<td>${payloadView(response, "Ver response")}${responseReceived}${copyButtons(copyContext({ request: record.request, response, credentials: record.credentials }, job))}</td><td>${artifactListView(record.artifacts)}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${esc(date(job.finalizado_en))}</td></tr>`;
     }).join("") : `<tr><td colspan="${headings.length}" class="empty">Sin ejecuciones para este bot.</td></tr>`;
     node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr>${headings.map((heading) => `<th>${esc(heading)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
@@ -386,12 +416,12 @@ details > .details-body { padding: 0 14px 14px; }
       if (column.key === "job_id" || column.key === "id") return `<td><code>${esc(short(value, 22))}</code></td>`;
       if (column.key === "status" || column.key === "estado") return `<td><span class="status ${statusClass(value)}">${esc(value || "—")}</span></td>`;
       return `<td>${esc(value ?? "—")}</td>`;
-    }).join("") + `<td>${record.job_id ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(record.job_id)}">Ver credenciales</button>` : "—"}</td>`;
+    }).join("") + `<td>${record.job_id ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(record.job_id)}">Ver credenciales</button>` : "—"}${copyButtons(copyContext(record, {}), record.job_id || "")}</td>`;
     const rows = records.length
       ? records.map((record) => `<tr>${cells(record)}</tr>`).join("")
       : `<tr><td colspan="${Math.max(columns.length + 1, 1)}" class="empty">Sin registros para este bot y filtro.</td></tr>`;
     const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
-    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}<th>Credenciales</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}<th>Credenciales / Copiar</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
   function renderCanonicalTable(tableName, rows) {
     const head = $("#executions-head");
@@ -400,7 +430,8 @@ details > .details-body { padding: 0 14px 14px; }
     const keys = (state.tableCatalog.find((item) => item.name === tableName) || {}).columns || [];
     const requestColumn = keys.find((key) => ["request_payload", "request"].includes(key));
     const columns = requestColumn ? requestColumns(rows, requestColumn, keys) : keys.map((key) => ({ key, label: key, kind: "field" }));
-    head.innerHTML = `<tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}</tr>`;
+    const withCopy = rows.some((row) => hasPayload(row.request_payload ?? row.request) || hasPayload(row.response_payload ?? row.response ?? row.response_summary));
+    head.innerHTML = `<tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}${withCopy ? "<th>Copiar</th>" : ""}</tr>`;
     body.innerHTML = rows.length ? rows.map((row) => `<tr>${columns.map((column) => {
       const key = column.key;
       const value = columnValue(row, column);
@@ -408,7 +439,7 @@ details > .details-body { padding: 0 14px 14px; }
       if (key === "credentials") return `<td><span class="muted">—</span></td>`;
       if (["estado", "resultado", "result", "status"].includes(key) && typeof value === "string") return `<td><span class="status ${statusClass(value)}">${esc(value)}</span></td>`;
       return `<td>${cellValue(value)}</td>`;
-    }).join("")}</tr>`).join("") : `<tr><td colspan="${Math.max(keys.length, 1)}" class="empty">La tabla no contiene registros para este filtro.</td></tr>`;
+    }).join("")}${withCopy ? `<td>${copyButtons(copyContext(row, {})) || "—"}</td>` : ""}</tr>`).join("") : `<tr><td colspan="${Math.max(keys.length, 1)}" class="empty">La tabla no contiene registros para este filtro.</td></tr>`;
     $("#bot-sections").innerHTML = `<div class="empty">Vista de tabla canónica: ${esc(tableName)}.</div>`;
   }
   function filterTableOptions(query) {
@@ -592,25 +623,224 @@ details > .details-body { padding: 0 14px 14px; }
       const rows = data.usuarios || [];
       $("#users-table").innerHTML = rows.length ? rows.map((user) => {
         const enabled = user.estado === "habilitado";
-        return `<tr><td><div class="user-id"><code>${esc(user.id)}</code><button type="button" class="button secondary small" data-action="copy-user-id" data-id="${esc(user.id)}" title="Copiar user ID">Copiar</button></div></td><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${accountEditor(user)}</td><td>${userKeyCell(user, enabled)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.max_requests ?? "∞")}</td><td class="actions"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button></td></tr>`;
+        return `<tr><td><div class="user-id"><code>${esc(user.id)}</code><button type="button" class="button secondary small" data-action="copy-user-id" data-id="${esc(user.id)}" title="Copiar user ID">Copiar</button></div></td><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${accountEditor(user)}</td><td>${userKeyCell(user, enabled)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.max_requests ?? "∞")}</td><td class="actions"><div class="actions-inner"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button></div></td></tr>`;
       }).join("") : `<tr><td colspan="9" class="empty">No hay usuarios para ese filtro.</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
+  }
+
+
+  // ---- Filtros por columna (estilo ERP) ----
+  // Clic en el encabezado: menu con casillas (multiseleccion), buscador,
+  // Todos/Ninguno y Aplicar/Limpiar. Los filtros son EN CASCADA: cada columna
+  // solo ofrece (y deja marcar) los valores que existen en las filas que ya
+  // cumplen los filtros de las demas columnas. "Quitar filtros" limpia todo.
+  const CF_SKIP = new Set(["acciones", "copiar", "datos"]);
+  const CF_MAX_OPTIONS = 500;
+  const cfNorm = (text) => String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+  const cfKey = (text) => cfNorm(text).toLowerCase();
+  const cfStates = new WeakMap();
+  let cfOpenMenu = null;
+  function cfState(table) {
+    let st = cfStates.get(table);
+    if (!st) { st = { sel: {}, signature: "", building: false, timer: 0 }; cfStates.set(table, st); }
+    return st;
+  }
+  function cfDataRows(table) {
+    return Array.from(table.tBodies[0] ? table.tBodies[0].rows : []).filter((row) => !row.querySelector("td[colspan]"));
+  }
+  // Valor filtrable de una celda: ``data-filter`` si existe; si la celda es un
+  // <details> (editor), solo su <summary>; si no, el texto sin controles
+  // (botones, campos, listas) para que no entren textos de formularios.
+  function cfCell(row, index) {
+    const cell = row.cells[index];
+    if (!cell) return "";
+    if (cell.dataset.filter != null) return cfNorm(cell.dataset.filter);
+    const holder = cell.querySelector("[data-filter]");
+    if (holder) return cfNorm(holder.dataset.filter);
+    const summary = cell.querySelector("details > summary");
+    if (summary) return cfNorm(summary.textContent.split("·")[0]);
+    const clone = cell.cloneNode(true);
+    clone.querySelectorAll("button, input, select, textarea, details, script, style").forEach((node) => node.remove());
+    return cfNorm(clone.textContent);
+  }
+  function cfPass(row, sel, skipIndex) {
+    return Object.entries(sel).every(([index, set]) => {
+      if (Number(index) === skipIndex || !set || !set.size) return true;
+      return set.has(cfKey(cfCell(row, Number(index))));
+    });
+  }
+  function cfApply(table) {
+    const st = cfState(table);
+    const rows = cfDataRows(table);
+    let shown = 0;
+    rows.forEach((row) => { const ok = cfPass(row, st.sel, -1); row.classList.toggle("hidden", !ok); if (ok) shown += 1; });
+    const active = Object.values(st.sel).some((set) => set && set.size);
+    const headCells = table.tHead ? Array.from(table.tHead.rows[0].cells) : [];
+    headCells.forEach((th, index) => {
+      const set = st.sel[index]; const on = Boolean(set && set.size);
+      th.classList.toggle("cf-active", on);
+      const badge = th.querySelector(".cf-badge");
+      if (badge) { badge.textContent = on ? String(set.size) : ""; badge.classList.toggle("hidden", !on); }
+    });
+    const bar = table.closest(".table-wrap") && table.closest(".table-wrap").nextElementSibling;
+    if (bar && bar.classList.contains("cf-bar")) {
+      bar.querySelector(".cf-count").textContent = active ? `Mostrando ${shown} de ${rows.length}` : `${rows.length} filas`;
+      bar.querySelector(".cf-clear").classList.toggle("hidden", !active);
+      const chips = bar.querySelector(".cf-chips"); chips.innerHTML = "";
+      Object.entries(st.sel).forEach(([index, set]) => {
+        if (!set || !set.size) return;
+        const th = headCells[Number(index)]; if (!th) return;
+        const chip = document.createElement("span"); chip.className = "cf-chip";
+        chip.textContent = `${th.dataset.cfLabel}: ${Array.from(set).slice(0, 2).join(", ")}${set.size > 2 ? ` +${set.size - 2}` : ""}`;
+        chips.appendChild(chip);
+      });
+    }
+  }
+  function cfClearAll(table) {
+    const st = cfState(table); st.sel = {};
+    cfApply(table); cfCloseMenu();
+  }
+  function cfCloseMenu() { if (cfOpenMenu) { cfOpenMenu.remove(); cfOpenMenu = null; } }
+  function cfOpenColumnMenu(table, index, anchor) {
+    cfCloseMenu();
+    const st = cfState(table);
+    const rows = cfDataRows(table);
+    // Cascada: solo filas que cumplen los filtros de las OTRAS columnas.
+    const base = rows.filter((row) => cfPass(row, st.sel, index));
+    const counts = new Map(); const labels = new Map();
+    rows.forEach((row) => { const raw = cfCell(row, index); if (raw) labels.set(cfKey(raw), raw); });
+    base.forEach((row) => { const key = cfKey(cfCell(row, index)); if (key) counts.set(key, (counts.get(key) || 0) + 1); });
+    const current = new Set(st.sel[index] ? Array.from(st.sel[index]) : []);
+    // Siempre se muestran los valores ya marcados (aunque la cascada los deje sin filas).
+    const keys = Array.from(labels.keys()).sort((a, b) => labels.get(a).localeCompare(labels.get(b), "es", { numeric: true }));
+    const menu = document.createElement("div");
+    menu.className = "cf-menu"; menu.setAttribute("role", "dialog"); menu.setAttribute("aria-label", `Filtrar ${anchor.dataset.cfLabel}`);
+    menu.innerHTML = `<input type="search" placeholder="Buscar…" aria-label="Buscar valores"><div class="cf-toggle"><a href="#" data-cf="all">Todos</a> · <a href="#" data-cf="none">Ninguno</a></div><div class="cf-list"></div><div class="cf-actions"><button type="button" class="button primary" data-cf="apply">Aplicar</button><button type="button" class="button secondary" data-cf="clear">Limpiar</button></div>`;
+    const list = menu.querySelector(".cf-list");
+    if (!keys.length) list.innerHTML = `<div class="muted" style="padding:6px">Sin valores</div>`;
+    keys.slice(0, CF_MAX_OPTIONS).forEach((key) => {
+      const available = counts.has(key); const checked = current.has(key);
+      const item = document.createElement("label"); item.className = `cf-item${available || checked ? "" : " cf-off"}`;
+      item.innerHTML = `<input type="checkbox" value="${esc(key)}" ${checked ? "checked" : ""} ${available || checked ? "" : "disabled"}><span>${esc(labels.get(key))}</span><span class="cf-n">${counts.get(key) || 0}</span>`;
+      list.appendChild(item);
+    });
+    document.body.appendChild(menu); cfOpenMenu = menu;
+    const rect = anchor.getBoundingClientRect();
+    menu.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8)}px`;
+    menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+    const search = menu.querySelector("input[type=search]"); search.focus();
+    search.addEventListener("input", () => {
+      const q = cfKey(search.value);
+      list.querySelectorAll(".cf-item").forEach((item) => { item.classList.toggle("hidden", q && !cfKey(item.textContent).includes(q)); });
+    });
+    const visibleChecks = () => Array.from(list.querySelectorAll(".cf-item:not(.hidden):not(.cf-off) input:not(:disabled)"));
+    menu.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-cf]");
+      if (!action) return;
+      event.preventDefault();
+      const kind = action.dataset.cf;
+      if (kind === "all") visibleChecks().forEach((c) => { c.checked = true; });
+      else if (kind === "none") visibleChecks().forEach((c) => { c.checked = false; });
+      else if (kind === "clear") { delete st.sel[index]; cfApply(table); cfCloseMenu(); }
+      else if (kind === "apply") {
+        const chosen = new Set(Array.from(list.querySelectorAll("input:checked")).map((c) => c.value));
+        if (chosen.size) st.sel[index] = chosen; else delete st.sel[index];
+        cfApply(table); cfCloseMenu();
+      }
+    });
+  }
+  function cfBuild(table) {
+    const st = cfState(table);
+    if (st.building || !table.tHead || !table.tHead.rows.length || !table.tBodies[0]) return;
+    const head = table.tHead.rows[0];
+    const cells = Array.from(head.cells);
+    if (!cells.length) return;
+    // Tabla sin filas de datos y de encabezado placeholder (p. ej. "Tabla / Datos"): no se filtra.
+    if (table.closest(".table-wrap").classList.contains("hidden")) return;
+    const signature = cells.map((cell) => cell.dataset.cfLabel || cfKey(cell.textContent)).join("|");
+    const built = cells.every((cell) => cell.classList.contains("cf-th") || cell.dataset.cfSkip === "1");
+    if (built && st.signature === signature) { cfApply(table); return; }
+    st.building = true;
+    if (st.signature !== signature) st.sel = {};
+    st.signature = signature;
+    cells.forEach((cell, index) => {
+      const label = cell.dataset.cfLabel || cfNorm(cell.textContent);
+      cell.dataset.cfLabel = label;
+      if (!label || CF_SKIP.has(label.toLowerCase())) { cell.dataset.cfSkip = "1"; return; }
+      if (cell.classList.contains("cf-th")) return;
+      cell.classList.add("cf-th");
+      cell.innerHTML = `<button type="button" class="cf-btn" aria-haspopup="dialog" aria-label="Filtrar por ${esc(label)}"><span>${esc(label)}</span><span class="cf-badge hidden"></span><span class="cf-caret" aria-hidden="true">▼</span></button>`;
+      cell.querySelector(".cf-btn").addEventListener("click", (event) => { event.stopPropagation(); cfOpenColumnMenu(table, index, cell); });
+    });
+    const wrap = table.closest(".table-wrap");
+    if (wrap && !(wrap.nextElementSibling && wrap.nextElementSibling.classList.contains("cf-bar"))) {
+      const bar = document.createElement("div"); bar.className = "cf-bar";
+      bar.innerHTML = `<span class="cf-count" aria-live="polite"></span><span class="cf-chips"></span><button type="button" class="button secondary small cf-clear hidden">Quitar filtros</button>`;
+      bar.querySelector(".cf-clear").addEventListener("click", () => cfClearAll(table));
+      wrap.after(bar);
+    }
+    st.building = false;
+    cfApply(table);
+  }
+  function setupColumnFilters() {
+    const observer = new MutationObserver((mutations) => {
+      const touched = new Set();
+      mutations.forEach((mutation) => {
+        const node = mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement;
+        const table = node && node.closest ? node.closest("table") : null;
+        if (table && !cfState(table).building) touched.add(table);
+      });
+      touched.forEach((table) => {
+        const st = cfState(table);
+        clearTimeout(st.timer);
+        st.timer = setTimeout(() => cfBuild(table), 50);
+      });
+    });
+    const watched = new WeakSet();
+    const watch = (table) => {
+      if (watched.has(table)) return;
+      watched.add(table);
+      observer.observe(table, { childList: true, subtree: true, characterData: true });
+      cfBuild(table);
+    };
+    document.querySelectorAll(".table-wrap table").forEach(watch);
+    // Tablas creadas despues (secciones por bot en "Tablas / registros"): se
+    // detectan al aparecer y reciben los mismos filtros.
+    const discover = new MutationObserver(() => {
+      document.querySelectorAll(".table-wrap table").forEach(watch);
+    });
+    discover.observe(document.querySelector("main") || document.body, { childList: true, subtree: true });
+    document.addEventListener("click", (event) => { if (cfOpenMenu && !cfOpenMenu.contains(event.target) && !event.target.closest(".cf-btn")) cfCloseMenu(); });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") cfCloseMenu(); });
+    window.addEventListener("resize", cfCloseMenu);
+    window.addEventListener("scroll", cfCloseMenu, true);
+  }
+  function syncNewAccountFields() {
+    const normal = $("#new-account-type").value === "NORMAL";
+    $("#new-max-field").classList.toggle("hidden", !normal);
+    $("#new-max-requests").required = normal;
+    if (!normal) $("#new-max-requests").value = "";
   }
   async function createUser(event) {
     event.preventDefault();
     const payload = {
       email: $("#new-email").value.trim(),
       display_name: $("#new-display").value.trim(),
-      plan: $("#new-plan").value,
+      account_type: $("#new-account-type").value,
       api_key: $("#new-api-key").value.trim(),
       estado: $("#new-state").value,
       enviar_credenciales: $("#new-send-credentials").checked,
       motivo: $("#new-reason").value.trim(),
     };
+    if (payload.account_type === "NORMAL") {
+      const max = Number($("#new-max-requests").value);
+      if (!Number.isInteger(max) || max < 1 || max > 10000000) { flash("Indica el cupo mensual de la cuenta NORMAL (1 a 10000000).", "error"); return; }
+      payload.max_requests = max;
+    }
     try {
       const data = await api("/admin/users", { method: "POST", body: JSON.stringify(payload) });
       const credenciales = data.credenciales || {};
-      $("#create-user-form").reset();
+      $("#create-user-form").reset(); syncNewAccountFields();
       flash(`Usuario creado: ${data.usuario?.email || payload.email}`);
       if (credenciales.solicitado && credenciales.enviadas) {
         flash(`Usuario creado y credenciales enviadas a ${credenciales.destino}.`, "ok");
@@ -643,6 +873,102 @@ details > .details-body { padding: 0 14px 14px; }
     await writeClipboard(value);
     flash("API key copiada al portapapeles.");
   }
+  const COPY_LIMIT_BYTES = 200 * 1024;
+  const copyStore = new Map();
+  let copySeq = 0;
+  const copyKinds = [["request", "Copiar request"], ["response", "Copiar response"], ["both", "Copiar request + response"], ["curl", "Copiar como curl"]];
+  function hasPayload(value) { return value !== null && value !== undefined && !(typeof value === "object" && Object.keys(value).length === 0); }
+  function copyContext(record, job) {
+    const source = record || {};
+    const meta = job || {};
+    const request = source.request_payload ?? source.request ?? null;
+    let response = source.response_payload ?? source.response ?? source.result ?? null;
+    if (!hasPayload(response) && hasPayload(source.response_summary)) response = source.response_summary;
+    return {
+      job_id: meta.id || meta.job_id || source.job_id || source.id || null,
+      bot: meta.bot || source.bot || null,
+      operation: meta.operacion || meta.operation || source.operation || source.operacion || null,
+      status: meta.estado || meta.status || source.estado || source.status || source.resultado || null,
+      created_at: meta.creado_en || meta.created_at || source.created_at || source.creado_en || null,
+      request, response,
+      attempt: meta.intento ?? source.attempt ?? null,
+      worker: meta.worker ?? null,
+      started_at: meta.iniciado_en ?? null,
+      finished_at: meta.finalizado_en ?? null,
+      credentials: source.credentials || meta.credentials || null,
+    };
+  }
+  // Request del estado del job: la consulta que hace el cliente para seguir el job.
+  function statusRequest(context) {
+    return { method: "GET", path: context.job_id ? `/api/v3/jobs/${context.job_id}` : "/api/v3/jobs/<job_id>" };
+  }
+  // Response del estado del job: lo que devuelve esa consulta (estado + resultado).
+  function statusResponse(context) {
+    return {
+      job_id: context.job_id, bot: context.bot, operation: context.operation, status: context.status,
+      created_at: context.created_at, started_at: context.started_at, finished_at: context.finished_at,
+      attempt: context.attempt, result: context.response ?? null,
+    };
+  }
+  function copyButtons(context, lazyJobId) {
+    if (!lazyJobId && !hasPayload(context.request) && !hasPayload(context.response)) return "";
+    const id = `c${++copySeq}`;
+    if (copyStore.size > 500) copyStore.delete(copyStore.keys().next().value);
+    copyStore.set(id, { context, lazyJobId: lazyJobId || "" });
+    return `<div class="copy-buttons" role="group" aria-label="Copiar request y response">${copyKinds.map(([kind, label]) => `<button type="button" class="button secondary small" data-copy-kind="${kind}" data-copy-id="${id}" aria-label="${label}" title="${label}">${label}</button>`).join("")}</div>`;
+  }
+  function curlPath(context) {
+    return context.bot && context.operation ? `/api/v3/bots/${encodeURIComponent(context.bot)}/${encodeURIComponent(context.operation)}` : "/api/v3/bots/<bot>/<operacion>";
+  }
+  function buildCopyText(kind, context) {
+    if (kind === "request") return json({ job_request: context.request ?? {}, status_request: statusRequest(context) });
+    if (kind === "response") return json(statusResponse(context));
+    if (kind === "both") return json({ job_request: context.request ?? {}, status_request: statusRequest(context), status_response: statusResponse(context) });
+    // curl para recrear el job: cuerpo original + campos de credenciales que
+    // el panel nunca almacena en claro, como marcadores a completar.
+    const body = { ...(context.request || {}) };
+    const fields = (context.credentials && context.credentials.fields) || [];
+    fields.forEach((field) => { if (!(field in body) || body[field] === "[REDACTED]" || body[field] === "***") body[field] = `<${String(field).toUpperCase()}>`; });
+    const text = JSON.stringify(body, null, 2).replace(/'/g, "'\\''");
+    return `curl -X POST '${window.location.origin}${curlPath(context)}' -H 'Content-Type: application/json' -H 'Authorization: Basic <API_KEY>' -d '${text}'`;
+  }
+  function copyAnnounce(message) {
+    let node = document.getElementById("copy-live");
+    if (!node) {
+      node = document.createElement("span"); node.id = "copy-live";
+      node.setAttribute("aria-live", "polite"); node.setAttribute("role", "status");
+      node.style.cssText = "position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden";
+      document.body.appendChild(node);
+    }
+    node.textContent = message;
+  }
+  async function copyRecordAction(event) {
+    const button = event.target.closest("button[data-copy-kind]"); if (!button) return;
+    const entry = copyStore.get(button.dataset.copyId); if (!entry) return;
+    const original = button.dataset.label || button.textContent;
+    button.dataset.label = original;
+    try {
+      let context = entry.context;
+      if (entry.lazyJobId && !entry.loaded) {
+        const data = await api(`/admin/jobs/${encodeURIComponent(entry.lazyJobId)}`);
+        const fresh = copyContext({ request: data.request, response: data.response ?? data.result ?? data.resultado, credentials: data.credentials }, data.job || {});
+        // Completa solo lo que falta: nunca pisa datos que el registro ya traia.
+        context = { ...fresh };
+        Object.keys(entry.context).forEach((key) => { if (!hasPayload(context[key])) context[key] = entry.context[key]; });
+        entry.context = context; entry.loaded = true;
+      }
+      const text = buildCopyText(button.dataset.copyKind, context);
+      await writeClipboard(text);
+      const bytes = new Blob([text]).size;
+      const note = bytes > COPY_LIMIT_BYTES ? ` Copiado (${Math.round(bytes / 1024)} KB, contenido muy grande).` : "";
+      button.textContent = "Copiado ✓";
+      copyAnnounce(`Copiado al portapapeles.${note}`);
+      if (note) flash(note.trim());
+      window.clearTimeout(button.copyTimer);
+      button.copyTimer = window.setTimeout(() => { button.textContent = original; }, 1500);
+    } catch (error) { flash(error.message || "No se pudo copiar.", "error"); }
+  }
+  document.addEventListener("click", copyRecordAction);
   function askReason(message, fallback) {
     const raw = window.prompt(`${message} (3-500 caracteres):`, fallback);
     if (raw === null) return null;
@@ -737,7 +1063,7 @@ details > .details-body { padding: 0 14px 14px; }
   }
   async function loadJobs(event) {
     if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const values = [["estado", "#jobs-state"], ["bot", "#jobs-bot"], ["usuario", "#jobs-user"]]; values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
-    try { const [data, metrics] = await Promise.all([api(`/admin/jobs?${params}`), api("/admin/jobs/metrics")]); const stateCards = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join(""); $("#jobs-metrics").innerHTML = stateCards || `<div class="card"><div class="metric"><span>Total</span><strong>${esc(data.total || 0)}</strong></div></div>`; const rows = data.jobs || []; $("#jobs-table").innerHTML = rows.length ? rows.map((job) => `<tr><td><code>${esc(short(job.job_id, 22))}</code></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td>${esc(short(job.usuario, 18))}</td><td>${esc(job.worker || "—")}</td><td>${esc(job.intento)}</td><td class="actions"><button class="button secondary small" data-action="job-detail" data-id="${esc(job.job_id)}">Detalle</button>${["PENDIENTE","ASIGNADO"].includes(job.estado) ? `<button class="button primary small" data-action="job-force" data-id="${esc(job.job_id)}">Forzar</button>` : ""}${["PENDIENTE","ASIGNADO","CORRIENDO"].includes(job.estado) ? `<button class="button danger small" data-action="job-cancel" data-id="${esc(job.job_id)}">Cancelar</button>` : ""}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay jobs para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
+    try { const [data, metrics] = await Promise.all([api(`/admin/jobs?${params}`), api("/admin/jobs/metrics")]); const stateCards = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join(""); $("#jobs-metrics").innerHTML = stateCards || `<div class="card"><div class="metric"><span>Total</span><strong>${esc(data.total || 0)}</strong></div></div>`; const rows = data.jobs || []; $("#jobs-table").innerHTML = rows.length ? rows.map((job) => `<tr><td><code>${esc(short(job.job_id, 22))}</code></td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td>${esc(short(job.usuario, 18))}</td><td>${esc(job.worker || "—")}</td><td>${esc(job.intento)}</td><td class="actions"><div class="actions-inner"><button class="button secondary small" data-action="job-detail" data-id="${esc(job.job_id)}">Detalle</button>${copyButtons({ job_id: job.job_id, bot: job.bot, operation: job.operacion, status: job.estado, created_at: job.creado_en || job.created_at || null, request: null, response: null }, job.job_id)}${["PENDIENTE","ASIGNADO"].includes(job.estado) ? `<button class="button primary small" data-action="job-force" data-id="${esc(job.job_id)}">Forzar</button>` : ""}${["PENDIENTE","ASIGNADO","CORRIENDO"].includes(job.estado) ? `<button class="button danger small" data-action="job-cancel" data-id="${esc(job.job_id)}">Cancelar</button>` : ""}</div></td></tr>`).join("") : `<tr><td colspan="7" class="empty">No hay jobs para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
   async function loadExecutions(event) {
     if (event) event.preventDefault();
@@ -807,8 +1133,8 @@ details > .details-body { padding: 0 14px 14px; }
       const efimerosVisibles = outdatedOnly ? efimeros.filter((worker) => worker.outdated === true) : efimeros;
       $("#fleet-manual-count").textContent = String(data.resumen?.manuales?.total ?? manuales.length);
       $("#fleet-ephemeral-count").textContent = String(data.resumen?.efimeros?.total ?? efimeros.length);
-      $("#fleet-manual-table").innerHTML = manualesVisibles.length ? manualesVisibles.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></td></tr>`).join("") : `<tr><td colspan="10" class="empty">${outdatedOnly ? "No hay workers manuales desactualizados." : "No hay workers manuales inventariados. Agrega uno arriba."}</td></tr>`;
-      $("#fleet-ephemeral-table").innerHTML = efimerosVisibles.length ? efimerosVisibles.map((worker) => `<tr><td><code>${esc(worker.instance_id || "—")}</code></td><td>${esc(worker.instance_type || "—")}</td><td>${esc(worker.ram_gib == null ? "—" : `${worker.ram_gib} GiB`)}</td><td>${esc(worker.concurrency ?? worker.capacidad ?? "—")}</td><td>${esc(formatAge(worker.edad))}</td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.concurrency ?? worker.capacidad ?? 0)}</td><td class="actions"><button class="button danger small" data-action="ephemeral-terminate" data-id="${esc(worker.instance_id || "")}">Terminar</button></td></tr>`).join("") : `<tr><td colspan="9" class="empty">${outdatedOnly ? "No hay workers efímeros desactualizados." : "No hay workers efímeros (EC2)."}</td></tr>`;
+      $("#fleet-manual-table").innerHTML = manualesVisibles.length ? manualesVisibles.map((worker) => `<tr><td><code>${esc(worker.node)}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><div class="actions-inner"><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></div></td></tr>`).join("") : `<tr><td colspan="10" class="empty">${outdatedOnly ? "No hay workers manuales desactualizados." : "No hay workers manuales inventariados. Agrega uno arriba."}</td></tr>`;
+      $("#fleet-ephemeral-table").innerHTML = efimerosVisibles.length ? efimerosVisibles.map((worker) => `<tr><td><code>${esc(worker.instance_id || "—")}</code></td><td>${esc(worker.instance_type || "—")}</td><td>${esc(worker.ram_gib == null ? "—" : `${worker.ram_gib} GiB`)}</td><td>${esc(worker.concurrency ?? worker.capacidad ?? "—")}</td><td>${esc(formatAge(worker.edad))}</td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.concurrency ?? worker.capacidad ?? 0)}</td><td class="actions"><div class="actions-inner"><button class="button danger small" data-action="ephemeral-terminate" data-id="${esc(worker.instance_id || "")}">Terminar</button></div></td></tr>`).join("") : `<tr><td colspan="9" class="empty">${outdatedOnly ? "No hay workers efímeros desactualizados." : "No hay workers efímeros (EC2)."}</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
   }
   async function evaluateFleet() { try { const data = await api("/admin/fleet/evaluate", { method: "POST" }); flash(`Evaluación completada: ${data.activas?.length || 0} alertas activas.`); await loadFleet(); } catch (error) { flash(error.message, "error"); } }
@@ -833,7 +1159,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); state.token = $("#admin-token").value.trim(); if (!state.token) return; try { await api("/admin/users?limit=1"); sessionStorage.setItem(TOKEN_KEY, state.token); loginError(""); showLoggedIn(true); setView(state.view); } catch (_) { state.token = ""; loginError("No se pudo validar el token de administración."); } });
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
-  $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#users-table").addEventListener("click", userAction);
+  $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#new-account-type").addEventListener("change", syncNewAccountFields); syncNewAccountFields(); setupColumnFilters(); $("#users-table").addEventListener("click", userAction);
   $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table-select").addEventListener("change", () => loadExecutions());
   $("#executions-table-search").addEventListener("focus", () => { $("#executions-table-search").select(); openTableOptions(); });
   $("#executions-table-search").addEventListener("input", (event) => { $("#executions-table-select").value = ""; openTableOptions(event.target.value); });
@@ -851,13 +1177,51 @@ details > .details-body { padding: 0 14px 14px; }
 </html>'''
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get(
+    "/",
+    response_class=HTMLResponse,
+    summary="Abrir el panel de administración",
+    description=(
+        "Devuelve la página de entrada de la consola administrativa. Desde ella "
+        "se puede iniciar una sesión de administración y acceder a las vistas "
+        "disponibles según los permisos y la configuración del servicio."
+    ),
+    responses={
+        200: {
+            "description": "Página HTML de entrada al panel administrativo.",
+            "content": {
+                "text/html": {
+                    "example": '<!DOCTYPE html><html lang="es"><head><title>Administración | MrBot V3</title></head><body>...</body></html>'
+                }
+            },
+        }
+    },
+)
 def portada_admin() -> str:
-    """Renderiza la consola administrativa navegable de la V3."""
+    """Devuelve el documento HTML de entrada a la consola administrativa."""
     return ADMIN_PANEL_HTML
 
 
-@router.get("/login", response_class=HTMLResponse)
+@router.get(
+    "/login",
+    response_class=HTMLResponse,
+    summary="Abrir la pantalla de acceso administrativo",
+    description=(
+        "Entrega la misma consola administrativa en la ruta explícita de acceso, "
+        "para clientes que conservan un enlace directo a esta dirección. La "
+        "respuesta es una página HTML; no inicia la sesión por sí sola."
+    ),
+    responses={
+        200: {
+            "description": "Página HTML con la pantalla de acceso administrativo.",
+            "content": {
+                "text/html": {
+                    "example": '<!DOCTYPE html><html lang="es"><head><title>Administración | MrBot V3</title></head><body>...</body></html>'
+                }
+            },
+        }
+    },
+)
 def login_admin() -> str:
-    """Mantiene una URL de login explícita, compatible con la navegación V2."""
+    """Devuelve la página HTML de acceso administrativo."""
     return ADMIN_PANEL_HTML

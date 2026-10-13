@@ -187,3 +187,60 @@ def test_panel_no_reemplaza_la_autorizacion_json(monkeypatch) -> None:
         assert respuesta.status_code == 401
     finally:
         get_settings.cache_clear()
+
+
+def test_panel_admin_botones_copiar_request_response_sin_secretos() -> None:
+    cuerpo = TestClient(create_app()).get("/admin/").text
+    for etiqueta in (
+        "Copiar request",
+        "Copiar response",
+        "Copiar request + response",
+        "Copiar como curl",
+    ):
+        assert f'"{etiqueta}"' in cuerpo
+    assert 'aria-label="${label}"' in cuerpo
+    for fragmento in (
+        "data-copy-kind",
+        "function copyRecordAction",
+        "function buildCopyText",
+        "writeClipboard(text)",
+        "navigator.clipboard.writeText",
+        'document.execCommand("copy")',
+        "Copiado ✓",
+        "1500",
+        "COPY_LIMIT_BYTES = 200 * 1024",
+        "Authorization: Basic <API_KEY>",
+        "/api/v3/bots/",
+        'aria-live", "polite"',
+    ):
+        assert fragmento in cuerpo
+    # Las credenciales nunca se incrustan: solo el placeholder.
+    assert "Basic ${" not in cuerpo
+    assert "state.token" not in cuerpo.split("function buildCopyText")[1].split("function copyAnnounce")[0]
+
+
+def test_las_tablas_del_panel_tienen_filtros_por_columna_en_cascada() -> None:
+    html = TestClient(create_app()).get("/admin/").text
+    # Menu con casillas (multiseleccion), buscador, Todos/Ninguno, Aplicar/Limpiar.
+    for marca in (
+        "setupColumnFilters", "cfOpenColumnMenu", "cfApply", "cf-menu", "cf-item",
+        'data-cf="apply"', 'data-cf="clear"', 'data-cf="all"', 'data-cf="none"',
+    ):
+        assert marca in html, marca
+    # Cascada: cada columna solo ofrece los valores de las filas que cumplen las demas.
+    assert "cfPass(row, st.sel, index)" in html
+    assert "cf-off" in html
+    # Boton para quitar todos los filtros, con contador y chips.
+    assert "Quitar filtros" in html and "Mostrando" in html and "cf-chip" in html
+    # Las columnas de acciones no se filtran y no entran textos de formularios.
+    assert 'CF_SKIP = new Set(["acciones"' in html
+    assert "details > summary" in html
+
+
+def test_la_celda_de_acciones_no_rompe_la_linea_de_la_tabla() -> None:
+    html = TestClient(create_app()).get("/admin/").text
+    # La celda <td> nunca es flex (rompia el borde horizontal de la fila);
+    # el flex vive en un contenedor interno.
+    assert "td.actions { display: table-cell" in html
+    assert 'class="actions-inner"' in html
+    assert '<td class="actions"><div class="actions-inner">' in html
