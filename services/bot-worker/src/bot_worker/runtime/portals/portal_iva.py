@@ -7,6 +7,7 @@ de declaraciones.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import time
@@ -129,6 +130,13 @@ class PortalIvaPortal(PortalArca):
                 "el CUIT no tiene una relación habilitada para Portal IVA",
                 diagnostic_code="portal_iva_no_representados_validos",
             )
+        if await self._representado_activo(formatted):
+            return
+
+        # Como el V1: el SPA aplica el representado al recargar la pagina de inicio.
+        with contextlib.suppress(Exception):
+            await self._abrir_inicio()
+            await self._asegurar_portal_cargado()
         if await self._representado_activo(formatted):
             return
 
@@ -622,6 +630,11 @@ class PortalIvaPortal(PortalArca):
             re.compile(rf"Representando\s+a:\s*{re.escape(formatted)}", re.I)
         )
         if await self._primero_visible((banner,), total_ms=500) is not None:
+            return True
+        perfil = self.page.get_by_text(
+            re.compile(rf"\[\s*CUIT\s+{re.escape(formatted)}\s*\]", re.I), exact=False
+        )
+        if await self._primero_visible((perfil,), total_ms=1_500) is not None:
             return True
         activo = self.page.locator("span.nombre-propio.nombre-activo.pull-right")
         if await activo.count():

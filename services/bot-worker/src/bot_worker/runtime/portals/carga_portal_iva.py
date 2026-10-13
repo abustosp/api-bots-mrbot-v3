@@ -54,6 +54,8 @@ class CargaPortalIvaPortal(PortalArca):
 
     async def preparar_periodo(self, periodo: str, **opciones: bool) -> list[dict[str, str]]:
         """Uses the shared Portal IVA V1 period-preparation flow for loads."""
+        from .portal_iva import PortalIvaPortal
+
         portal = PortalIvaPortal(self.page, captcha=self._captcha, context=self._context)
         return await portal.preparar_periodo(periodo, **opciones)
 
