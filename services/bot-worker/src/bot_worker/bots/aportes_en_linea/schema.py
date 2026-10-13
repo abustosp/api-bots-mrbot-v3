@@ -58,8 +58,11 @@ class AportesDescargarInput(_Base):
         min_length=11,
         max_length=14,
     )
+    # V1/V2 podian pedir el archivo en Base64 dentro del resultado. Ya no se
+    # devuelve: el archivo sale por ``files[]``. Se acepta y se ignora.
     incluir_base64: bool = Field(
         default=False,
+        exclude=True,
         validation_alias=AliasChoices("incluir_base64", "archivo_historico_b64"),
     )
     subir: bool = Field(
@@ -100,12 +103,6 @@ class AportesDescargarInput(_Base):
                     datos[clave] = limpiar_cuit(datos[clave])
         return datos
 
-    @model_validator(mode="after")
-    def _al_menos_una_salida(self) -> AportesDescargarInput:
-        if not self.incluir_base64 and not self.subir:
-            raise ValueError("seleccionar al menos una salida (base64 o subida)")
-        return self
-
 
 OperacionAportes = Literal["descargar"]
 
@@ -118,7 +115,6 @@ def esquema_entrada() -> dict[str, Any]:
         "properties": {
             "operacion": {"type": "string", "enum": ["descargar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
-            "incluir_base64": {"type": "boolean"},
             "subir": {"type": "boolean"},
         },
     }

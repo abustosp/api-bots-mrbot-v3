@@ -26,7 +26,6 @@ desactiva headless/proxy/limpieza.
 from __future__ import annotations
 
 import asyncio
-import base64
 import re
 from datetime import datetime
 from typing import Any, Mapping
@@ -215,16 +214,6 @@ class AportesEnLineaPlugin:
             artefactos.append(referencia)
             datos["sha256"] = referencia["sha256"]
             datos["size_bytes"] = referencia["size_bytes"]
-        if entrada.incluir_base64:
-            contenido = destino.read_bytes()
-            if len(contenido) > TOPE_BASE64_BYTES:
-                datos.setdefault("warnings", []).append(
-                    "historico excede tope base64; viaja solo como artefacto"
-                )
-            else:
-                datos["archivo_historico_b64"] = base64.b64encode(contenido).decode(
-                    "ascii"
-                )
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )

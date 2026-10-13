@@ -32,7 +32,6 @@ Playwright directo. El objeto ``servicio`` expone:
 from __future__ import annotations
 
 import asyncio
-import base64
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -47,8 +46,8 @@ from bot_worker.bots.errors import (
     sin_secretos,
 )
 from bot_worker.bots.vep_archivo.schema import (
-    ARCHIVO_ENTRADA,
     ENTRADAS,
+    MAX_ARCHIVO_BYTES,
     MAX_REGISTROS_POR_LOTE,
     esquema_entrada,
 )
@@ -200,14 +199,7 @@ class VepArchivoPlugin:
         try:
             datos = {k: v for k, v in payload.items() if k != "operacion"}
             validada = modelo.model_validate(datos)
-            try:
-                texto = base64.b64decode(str(validada.archivo_b64)).decode(
-                    "utf-8", errors="strict"
-                )
-                registros = validar_archivo_vep(texto)
-            except ValueError as exc:
-                raise InvalidInputError(f"archivo invalido: {exc}") from exc
-            return (operacion, validada, registros)
+            return (operacion, validada)
         except ValueError as exc:
             if isinstance(exc, InvalidInputError):
                 raise
@@ -217,7 +209,7 @@ class VepArchivoPlugin:
         """Ejecuta la generacion y retorna ``BotResult`` tipado."""
         from bot_worker.runtime.context import BotResult
 
-        operacion, entrada, registros = payload
+        operacion, entrada = payload
         if runtime.credentials is None:
             raise CredentialsRejectedError("el plugin requiere credenciales fiscales")
         secretos = [runtime.credentials.clave]
@@ -228,8 +220,17 @@ class VepArchivoPlugin:
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
         try:
-            archivo = runtime.artifact_store.resolve(ARCHIVO_ENTRADA)
-            archivo.write_bytes(base64.b64decode(str(entrada.archivo_b64)))
+            archivo = runtime.artifact_store.resolve(entrada.archivo_path)
+            if not archivo.is_file() or archivo.suffix.lower() != ".txt":
+                raise ValueError("el archivo de entrada debe ser un TXT cargado previamente")
+            contenido = archivo.read_bytes()
+            if not contenido or len(contenido) > MAX_ARCHIVO_BYTES:
+                raise ValueError("el TXT está vacío o supera el tamaño máximo")
+            texto = contenido.decode("utf-8", errors="strict")
+            registros = validar_archivo_vep(texto)
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise InvalidInputError(f"archivo inválido: {exc}") from exc
+        try:
             async with runtime.browser_factory.arca_session(
                 credentials=runtime.credentials,
                 proxy=runtime.proxy,
@@ -262,7 +263,7 @@ class VepArchivoPlugin:
         await runtime.event_sink.progress(
             phase="GENERANDO", percent=45, message="Generando VEP desde archivo"
         )
-        archivo = runtime.artifact_store.resolve(ARCHIVO_ENTRADA)
+        archivo = runtime.artifact_store.resolve(entrada.archivo_path)
         resumen = await servicio.generar_vep_desde_archivo(
             archivo=archivo, medio_pago=entrada.medio_pago
         )

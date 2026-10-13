@@ -81,14 +81,14 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "importacion_definitiva_bienes": _boolean(), "importacion_servicios": _boolean(),
         "regimen_turiva": _boolean(), "bienes_usados": _boolean(),
         "ninguna_anteriores": _boolean(default=True),
-        "liv_cbte_b64": _string(max_length=5_000_000),
-        "liv_alicuota_b64": _string(max_length=5_000_000),
-        "lic_cbte_b64": _string(max_length=5_000_000),
-        "lic_alicuota_b64": _string(max_length=5_000_000),
-        "csv_cf_b64": _string(max_length=5_000_000),
-        "csv_cf_restitucion_b64": _string(max_length=5_000_000),
-        "csv_df_b64": _string(max_length=5_000_000),
-        "csv_df_restitucion_b64": _string(max_length=5_000_000),
+        "liv_cbte_path": _string(max_length=255),
+        "liv_alicuota_path": _string(max_length=255),
+        "lic_cbte_path": _string(max_length=255),
+        "lic_alicuota_path": _string(max_length=255),
+        "csv_cf_path": _string(max_length=255),
+        "csv_cf_restitucion_path": _string(max_length=255),
+        "csv_df_path": _string(max_length=255),
+        "csv_df_restitucion_path": _string(max_length=255),
     },
     "ccma": {
         "representado_cuit": _string(required=True, pattern=CUIT),
@@ -221,8 +221,10 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "representado_nombre": _string(min_length=1, max_length=128),
         "descarga_ventas": _boolean(), "descarga_compras": _boolean(),
         "incluir_json": _boolean(default=True), "subir_csv": _boolean(default=True),
-        "ventas_txt": _string(min_length=1, max_length=5_000_000),
-        "compras_txt": _string(min_length=1, max_length=5_000_000),
+        "ventas_txt_path": _string(min_length=1, max_length=255),
+        "ventas_alicuotas_txt_path": _string(min_length=1, max_length=255),
+        "compras_txt_path": _string(min_length=1, max_length=255),
+        "compras_alicuotas_txt_path": _string(min_length=1, max_length=255),
     },
     "rcel": {
         "representado_cuit": _string(pattern=CUIT),
@@ -264,7 +266,7 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
     "vep_archivo": {
         "representado_cuit": _string(pattern=CUIT),
         "medio_pago": (Literal["link", "pago_mis_cuentas", "internet_banking", "xn_group"], Field(default="internet_banking")),
-        "archivo_nombre": _string(min_length=1, max_length=128), "archivo_b64": _string(min_length=1),
+        "archivo_path": _string(min_length=1, max_length=255),
         "incluir_json": _boolean(default=True), "subir_pdf": _boolean(default=True),
     },
     "vep_ccma": {
@@ -292,7 +294,13 @@ _OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
         "incluir_json", "subir_csv",
     ),
     ("portal_iva", "importar"): (
-        "periodo", "representado_cuit", "representado_nombre", "ventas_txt", "compras_txt",
+        "periodo", "representado_cuit", "representado_nombre", "ventas_txt_path",
+        "ventas_alicuotas_txt_path", "compras_txt_path", "compras_alicuotas_txt_path",
+    ),
+    ("portal_iva", "gestionar"): (
+        "periodo", "representado_cuit", "representado_nombre", "descarga_ventas",
+        "descarga_compras", "incluir_json", "subir_csv", "ventas_txt_path",
+        "ventas_alicuotas_txt_path", "compras_txt_path", "compras_alicuotas_txt_path",
     ),
 }
 
@@ -355,7 +363,16 @@ def _fields_for_operation(bot: str, operation: str) -> dict[str, tuple[Any, Any]
         required = V2_REQUIRED_FIELDS.get(key, frozenset())
         fields: dict[str, tuple[Any, Any]] = {}
         for name in historical_names:
-            descriptor = _V2_COMPAT_FIELDS.get(name) or _FAMILY_FIELDS.get(bot, {}).get(name)
+            schema_name = (
+                "archivo_path"
+                if bot == "vep_archivo" and operation == "generar" and name == "archivo_b64"
+                else name
+            )
+            descriptor = (
+                _FAMILY_FIELDS.get(bot, {}).get(schema_name)
+                or _V2_COMPAT_FIELDS.get(name)
+                or _FAMILY_FIELDS.get(bot, {}).get(name)
+            )
             if descriptor is None:
                 raise RuntimeError(f"descriptor ausente para {bot}/{operation}.{name}")
             annotation, field_info = descriptor
@@ -374,7 +391,13 @@ def _fields_for_operation(bot: str, operation: str) -> dict[str, tuple[Any, Any]
             if bot == "mis_comprobantes" and name == "carga_minio":
                 field_info.default = operation == "historial"
                 field_info._attributes_set["default"] = operation == "historial"
-            fields[name] = (annotation, field_info)
+            fields[schema_name] = (annotation, field_info)
+        if bot == "carga_portal_iva" and operation == "cargar":
+            fields.update({
+                name: descriptor
+                for name, descriptor in _FAMILY_FIELDS[bot].items()
+                if name.endswith("_path")
+            })
         return fields
 
     fields = dict(_FAMILY_FIELDS.get(bot, {}))
@@ -420,6 +443,19 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
         "Nombre del archivo de entrada TXT que el cliente envió. Solo lo usa el "
         "bot para localizar la entrada temporal, no para nombrar archivos subidos."
     ),
+    "archivo_path": "Nombre local del archivo TXT previamente cargado al bucket uploads y descargado por la operación.",
+    "liv_cbte_path": "Nombre local del archivo TXT de comprobantes de ventas cargado previamente al bucket uploads.",
+    "liv_alicuota_path": "Nombre local del archivo TXT de alícuotas de ventas cargado previamente al bucket uploads.",
+    "lic_cbte_path": "Nombre local del archivo TXT de comprobantes de compras cargado previamente al bucket uploads.",
+    "lic_alicuota_path": "Nombre local del archivo TXT de alícuotas de compras cargado previamente al bucket uploads.",
+    "csv_cf_path": "Nombre local del archivo CSV de crédito fiscal cargado previamente al bucket uploads.",
+    "csv_cf_restitucion_path": "Nombre local del archivo CSV de restitución de crédito fiscal cargado previamente al bucket uploads.",
+    "csv_df_path": "Nombre local del archivo CSV de débito fiscal cargado previamente al bucket uploads.",
+    "csv_df_restitucion_path": "Nombre local del archivo CSV de restitución de débito fiscal cargado previamente al bucket uploads.",
+    "ventas_txt_path": "Nombre local del archivo TXT de ventas cargado previamente al bucket uploads.",
+    "ventas_alicuotas_txt_path": "Nombre local del archivo TXT de alícuotas de ventas cargado previamente al bucket uploads.",
+    "compras_txt_path": "Nombre local del archivo TXT de compras cargado previamente al bucket uploads.",
+    "compras_alicuotas_txt_path": "Nombre local del archivo TXT de alícuotas de compras cargado previamente al bucket uploads.",
 }
 
 
@@ -500,6 +536,9 @@ def _example_value(name: str, bot: str, operation: str, default: Any) -> Any:
         return "SGVsbG8gV29ybGQ="
     if name in {"ventas_txt", "compras_txt"}:
         return "contenido-de-archivo-de-ejemplo"
+    if name.endswith("_path"):
+        extension = ".csv" if name.startswith("csv_") else ".txt"
+        return name.removesuffix("_path") + extension
     if name in {"representado_nombre", "denominacion"}:
         return "Empresa de ejemplo"
     if name == "pv":

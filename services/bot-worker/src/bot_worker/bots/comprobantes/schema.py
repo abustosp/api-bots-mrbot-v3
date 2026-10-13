@@ -8,7 +8,7 @@ el navegador:
 
 - CUIT de 11 digitos (se aceptan guiones, puntos y espacios).
 - Fechas ``dd/mm/aaaa`` con ``desde <= hasta``.
-- Al menos un tipo (emitidos o recibidos) y al menos una salida.
+- Al menos un tipo (emitidos o recibidos). Como en V2, se acepta pedir ninguna salida (solo se consulta).
 - Aliases de compatibilidad V1/V2: ``desde``/``hasta`` y ``cuit``, mas los
   nombres de V1 para los tipos y las salidas (``descarga_emitidos``,
   ``descarga_recibidos``, ``carga_json`` y ``carga_minio``).
@@ -146,7 +146,9 @@ class _TiposComprobante(_Base):
     puntos_venta_emitidos: list[int | str] | None = None
     puntos_venta_recibidos: list[int | str] | None = None
     timeout_mc: int | None = Field(default=None, ge=1, le=86400)
-    carga_b64: bool = False
+    # V1/V2 pedian el archivo en Base64 dentro del resultado. Ya no se devuelve:
+    # el archivo se entrega siempre por ``files[]``. Se acepta y se ignora.
+    carga_b64: bool = Field(default=False, exclude=True, deprecated=True)
     proxy_request: bool | None = None
     eliminar_descargas: bool = True
     verbose: bool = False
@@ -182,12 +184,6 @@ class _SalidasComprobante(_Base):
         default=True,
         validation_alias=AliasChoices("subir_csv", "carga_minio"),
     )
-
-    @model_validator(mode="after")
-    def _al_menos_una_salida(self) -> _SalidasComprobante:
-        if not self.incluir_json and not self.subir_csv and not self.carga_b64:
-            raise ValueError("seleccionar al menos una salida (json, csv o base64)")
-        return self
 
 
 class ComprobantesConsultarInput(_RangoFechas, _Representado, _TiposComprobante, _SalidasComprobante):
@@ -238,7 +234,6 @@ def esquema_entrada() -> dict[str, Any]:
                 "items": {"type": ["integer", "string"]},
             },
             "timeout_mc": {"type": "integer", "minimum": 1, "maximum": 86400},
-            "carga_b64": {"type": "boolean"},
             "incluir_json": {"type": "boolean"},
             "subir_csv": {"type": "boolean"},
         },

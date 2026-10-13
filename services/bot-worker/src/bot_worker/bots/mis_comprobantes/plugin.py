@@ -96,12 +96,6 @@ def filtrar_csv_por_rango(
     )
 
 
-def archivo_en_base64(ruta: Path) -> str:
-    """Base64 del archivo tal como lo descargó el portal (port de V1)."""
-    import base64
-
-    return base64.b64encode(Path(ruta).read_bytes()).decode("utf-8")
-
 
 def timeout_mc_ms(entrada: Any) -> int:
     """Espera del boton ``CSV`` en milisegundos (V1: ``timeout_mc`` segundos)."""
@@ -385,10 +379,6 @@ class MisComprobantesPlugin:
     ) -> dict[str, Any]:
         """Materializa, filtra por rango, sube por slot y resume ``tipo``."""
         resumen: dict[str, Any] = {}
-        if getattr(entrada, "carga_b64", False):
-            # V1 codifica el archivo descargado (el ZIP del portal) antes de
-            # procesarlo; se guarda en el resumen del tipo correspondiente.
-            resumen["archivo_b64"] = archivo_en_base64(crudo)
         materializar_csv_descargado(crudo)
         await runtime.event_sink.progress(
             phase="PROCESANDO", percent=65, message=f"Filtrando {tipo}"

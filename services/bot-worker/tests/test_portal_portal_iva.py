@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -215,6 +216,41 @@ def test_descargar_libro_captura_csv(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert resultado == destino
     assert destino.read_text(encoding="utf-8") == "fecha,importe\n"
     assert pagina.csv.clicked
+
+
+@pytest.mark.parametrize(("descartar", "debe_descartar"), [(False, False), (True, True)])
+def test_descartar_borrador_respeta_la_opcion_v2(
+    tmp_path: Path, descartar: bool, debe_descartar: bool
+) -> None:
+    plugin = PortalIvaPlugin()
+    servicio = SimpleNamespace()
+
+    async def descargar_libro(*, libro: str, destino: Path, **_: Any) -> None:
+        destino.write_text("fecha,importe\n", encoding="utf-8")
+
+    servicio.descargar_libro = descargar_libro
+    servicio.descartar_borrador = AsyncMock()
+    runtime = SimpleNamespace(
+        event_sink=SimpleNamespace(progress=AsyncMock()),
+        cancellation=SimpleNamespace(raise_if_cancelled=AsyncMock()),
+        artifact_store=SimpleNamespace(resolve=lambda nombre: tmp_path / nombre),
+    )
+    entrada = SimpleNamespace(
+        periodo="202608",
+        descarga_ventas=True,
+        descarga_compras=False,
+        incluir_json=True,
+        subir_csv=False,
+        descartar_borrador=descartar,
+        periodos_seleccionables=[],
+    )
+
+    asyncio.run(plugin._descargar(servicio, entrada, runtime, "20123456786"))
+
+    if debe_descartar:
+        servicio.descartar_borrador.assert_awaited_once()
+    else:
+        servicio.descartar_borrador.assert_not_awaited()
 
 
 def test_portal_registrado_con_importacion_sin_presentacion() -> None:
@@ -478,8 +514,14 @@ def _payload(**extra: Any) -> dict[str, Any]:
 
 def test_plugin_importar_envia_comprobantes_y_alicuotas_al_portal(tmp_path: Path) -> None:
     async def _ejecutar() -> tuple[_ServicioFalso, dict[str, Any]]:
+        (tmp_path / "ventas.txt").write_text("LIV", encoding="utf-8")
+        (tmp_path / "ventas_alicuotas.txt").write_text("ALI", encoding="utf-8")
         _, entrada = await PortalIvaPlugin().validate(
-            _payload(operacion="importar", ventas_txt="LIV", ventas_alicuotas_txt="ALI")
+            _payload(
+                operacion="importar",
+                ventas_txt_path="ventas.txt",
+                ventas_alicuotas_txt_path="ventas_alicuotas.txt",
+            )
         )
         servicio = _ServicioFalso()
         datos, _ = await PortalIvaPlugin()._importar(servicio, entrada, _runtime_falso(tmp_path), "20123456789")
@@ -493,7 +535,9 @@ def test_plugin_importar_envia_comprobantes_y_alicuotas_al_portal(tmp_path: Path
 def test_plugin_importar_sin_alicuotas_se_rechaza_como_v1() -> None:
     with pytest.raises(InvalidInputError):
         asyncio.run(
-            PortalIvaPlugin().validate(_payload(operacion="importar", compras_txt="LIC"))
+            PortalIvaPlugin().validate(
+                _payload(operacion="importar", compras_txt_path="compras.txt")
+            )
         )
 
 
@@ -501,9 +545,50 @@ def test_alicuotas_sin_su_comprobante_se_rechazan() -> None:
     with pytest.raises(InvalidInputError):
         asyncio.run(
             PortalIvaPlugin().validate(
-                _payload(operacion="importar", ventas_txt="LIV", compras_alicuotas_txt="ALI")
+                _payload(
+                    operacion="importar",
+                    ventas_txt_path="ventas.txt",
+                    compras_alicuotas_txt_path="compras_alicuotas.txt",
+                )
             )
         )
+
+
+@pytest.mark.parametrize(
+    "archivo_inline",
+    [
+        {"ventas_txt": "LIV", "ventas_alicuotas_txt": "ALI"},
+        {"ventas_txt_b64": "TElW", "ventas_alicuotas_txt_b64": "QUxJ"},
+    ],
+)
+def test_plugin_rechaza_txt_inline_en_importar(archivo_inline: dict[str, str]) -> None:
+    with pytest.raises(InvalidInputError):
+        asyncio.run(
+            PortalIvaPlugin().validate(_payload(operacion="importar", **archivo_inline))
+        )
+
+
+def test_plugin_gestionar_importa_archivos_descargados_en_work_dir(tmp_path: Path) -> None:
+    async def _ejecutar() -> tuple[_ServicioFalso, dict[str, Any]]:
+        (tmp_path / "ventas.txt").write_text("LIV", encoding="utf-8")
+        (tmp_path / "ventas_alicuotas.txt").write_text("ALI", encoding="utf-8")
+        _, entrada = await PortalIvaPlugin().validate(
+            _payload(
+                operacion="gestionar",
+                descarga_ventas=True,
+                ventas_txt_path="ventas.txt",
+                ventas_alicuotas_txt_path="ventas_alicuotas.txt",
+            )
+        )
+        servicio = _ServicioFalso()
+        datos, _ = await PortalIvaPlugin()._importar(
+            servicio, entrada, _runtime_falso(tmp_path), "20123456789"
+        )
+        return servicio, datos
+
+    servicio, datos = asyncio.run(_ejecutar())
+    assert servicio.importados == [("ventas", "LIV", "ALI")]
+    assert datos["importaciones"] == [{"libro": "ventas", "ok": True}]
 
 
 def test_plugin_descargar_refresca_y_limpia_por_defecto_como_v1(tmp_path: Path) -> None:

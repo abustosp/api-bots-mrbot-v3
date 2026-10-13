@@ -7,12 +7,15 @@ de declaraciones.
 """
 from __future__ import annotations
 
+import logging
 import re
 import time
 from pathlib import Path
 from bot_worker.bots.errors import TargetUnavailableError
 
 from .base import PortalArca, solo_digitos
+
+log = logging.getLogger("bot_worker.portals.portal_iva")
 
 PORTAL_IVA_INIT_URL = "https://siapweb.cloud.afip.gob.ar/iva/#/init"
 LIVA_BASE = "https://liva.afip.gob.ar/liva/jsp"
@@ -83,23 +86,37 @@ class PortalIvaPortal(PortalArca):
             ),
             total_ms=4_000,
         )
-        await self._clickear(
+        # El título 'Representar a...' es común a todas las filas del selector:
+        # se restringe por texto al CUIT pedido para no elegir otro representado.
+        representar = self.page.get_by_title("Representar a...")
+        elegido = await self._clickear(
             (
-                self.page.get_by_title("Representar a..."),
-                self.page.get_by_text("Representar a...", exact=False),
+                representar.filter(has_text=formatted),
+                representar.filter(has_text=digits),
             ),
             total_ms=5_000,
         )
+        if not elegido:
+            await self._clickear(
+                (
+                    representar,
+                    self.page.get_by_text("Representar a...", exact=False),
+                ),
+                total_ms=5_000,
+            )
         await self._esperar(700)
 
-        elegido = await self._clickear(
-            (
-                self.page.get_by_role("button", name=re.compile(re.escape(formatted))),
-                self.page.get_by_text(re.compile(re.escape(formatted)), exact=False),
-                self.page.get_by_text(re.compile(re.escape(digits)), exact=False),
-            ),
-            total_ms=8_000,
-        )
+        if not elegido:
+            # Solo cuando el filtro no encontró la fila se usa el clic genérico
+            # seguido del clic por CUIT.
+            elegido = await self._clickear(
+                (
+                    self.page.get_by_role("button", name=re.compile(re.escape(formatted))),
+                    self.page.get_by_text(re.compile(re.escape(formatted)), exact=False),
+                    self.page.get_by_text(re.compile(re.escape(digits)), exact=False),
+                ),
+                total_ms=8_000,
+            )
         if elegido:
             await self._asegurar_portal_cargado()
 
@@ -256,6 +273,17 @@ class PortalIvaPortal(PortalArca):
             except Exception:
                 return
 
+        # La SPA arma las opciones de la declaración después de abrir LIVA: se
+        # espera el anclaje del control para no omitir el marcado en silencio.
+        try:
+            await self.page.locator("#operacionesNoGravadasExentas").first.wait_for(
+                state="attached", timeout=20_000
+            )
+        except Exception:
+            log.warning(
+                "Portal IVA: #operacionesNoGravadasExentas no quedó disponible; "
+                "se omite el marcado de opciones de la declaración"
+            )
         await marcar("#operacionesNoGravadasExentas", operaciones_ng_o_e)
         if operaciones_ng_o_e:
             prorrateo = "3" if prorrateo_ambos else "2" if prorrateo_global else "1" if prorrateo_asignacion_directa else ""
@@ -444,6 +472,106 @@ class PortalIvaPortal(PortalArca):
         await self._esperar(5_000)
         await self._cerrar_modal_procesado()
         await self._esperar(3_000)
+        return True
+
+    async def descartar_borrador(self) -> bool:
+        """Descarta el borrador de la declaración activa (port de V1 ``discard_draft``).
+
+        Vuelve al menú del borrador cuando 'Vista previa' no está a la vista,
+        abre la vista previa, confirma 'Descartar Borrador' y verifica que el
+        borrador ya no exista. Solo se llama después de terminar las descargas
+        pedidas.
+        """
+        return await self.paso("descartar_borrador", self._descartar_borrador())
+
+    async def _descartar_borrador(self) -> bool:
+        vista_previa = self.page.locator("#btnVistaPrevia")
+        if await self._primero_visible((vista_previa,), total_ms=1_000) is None:
+            # Las descargas terminan en el libro o en el inicio: el menú del
+            # borrador es donde vive 'Vista previa' (flujo V2).
+            await self._volver_al_menu()
+            await self._clickear(
+                (
+                    self.page.get_by_role(
+                        "link", name=re.compile(r"Borrador\s+Presentaci[oó]n", re.I)
+                    ),
+                    self.page.get_by_role(
+                        "link", name=re.compile(r"Libro IVA - Borrador", re.I)
+                    ),
+                    self.page.get_by_text("Libro IVA - Borrador", exact=False),
+                ),
+                total_ms=8_000,
+            )
+            await self._esperar(2_000)
+
+        if not await self._clickear(
+            (
+                vista_previa,
+                self.page.get_by_role(
+                    "button", name=re.compile(r"Vista\s+previa", re.I)
+                ),
+                self.page.get_by_text("Vista previa", exact=False),
+            ),
+            total_ms=10_000,
+        ):
+            raise TargetUnavailableError(
+                "no se encontró 'Vista previa' del borrador en Portal IVA",
+                diagnostic_code="portal_iva_preview_missing",
+            )
+
+        eliminar = self.page.locator("#btnEliminarBorrador")
+        try:
+            await eliminar.first.wait_for(state="visible", timeout=20_000)
+        except Exception as exc:
+            raise TargetUnavailableError(
+                "no apareció 'Eliminar Borrador' en Portal IVA",
+                diagnostic_code="portal_iva_draft_delete_missing",
+            ) from exc
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=10_000)
+        except Exception:
+            pass
+
+        # El diálogo real no usa .modal ni .bootstrap-dialog y el primer clic
+        # puede quedar sin efecto si el manejador aún no está enlazado: se
+        # reintenta hasta ver el botón de confirmación.
+        confirmar = self.page.locator("button.btn-danger").filter(
+            has_text=re.compile(r"Descartar\s+Borrador", re.I)
+        )
+        for _ in range(4):
+            if not await self._clickear((eliminar,), total_ms=10_000):
+                raise TargetUnavailableError(
+                    "no se pudo pulsar 'Eliminar Borrador' en Portal IVA",
+                    diagnostic_code="portal_iva_draft_delete_click_failed",
+                )
+            if await self._primero_visible((confirmar,), total_ms=6_000) is not None:
+                break
+            await self._esperar(1_500)
+
+        if not await self._clickear(
+            (
+                confirmar,
+                self.page.locator("[role='dialog'] button.btn-danger").filter(
+                    has_text=re.compile(r"Descartar", re.I)
+                ),
+                self.page.get_by_role(
+                    "button", name=re.compile(r"Descartar\s+Borrador", re.I)
+                ),
+            ),
+            total_ms=10_000,
+        ):
+            raise TargetUnavailableError(
+                "no se pudo confirmar 'Descartar Borrador' en Portal IVA",
+                diagnostic_code="portal_iva_draft_confirm_failed",
+            )
+        await self._esperar(4_000)
+
+        # Un borrador descartado deja de existir: el botón no debe seguir visible.
+        if await self._primero_visible((eliminar,), total_ms=2_000) is not None:
+            raise TargetUnavailableError(
+                "el borrador sigue presente tras confirmar el descarte",
+                diagnostic_code="portal_iva_draft_still_present",
+            )
         return True
 
     async def _abrir_libro(self, book: str) -> None:

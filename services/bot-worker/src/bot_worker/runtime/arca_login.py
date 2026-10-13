@@ -746,7 +746,10 @@ class ArcaSession:
 
         before_url = getattr(self.page, "url", "")
         try:
-            async with self.page.expect_popup(timeout=5_000) as popup:
+            # V2 esperaba 10 s por el popup del servicio: con proxy la
+            # apertura tarda mas y 5 s dejaba la sesion en el portal de Clave
+            # Fiscal sin llegar al servicio.
+            async with self.page.expect_popup(timeout=10_000) as popup:
                 await service_locator.click(timeout=8_000)
             service_page = await popup.value
         except Exception as exc:

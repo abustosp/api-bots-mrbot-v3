@@ -29,7 +29,6 @@ credenciales y el proxy llegan por ``runtime``, nunca por entorno.
 from __future__ import annotations
 
 import asyncio
-import base64
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -107,14 +106,6 @@ def filtrar_csv_por_rango(
             diagnostic_code="portal_csv_unexpected_format",
         ) from exc
 
-
-def archivo_en_base64(ruta: Path) -> str:
-    """Base64 del archivo tal como lo descargó el portal (port de V1).
-
-    V1 codifica el ZIP descargado, no el CSV ya procesado; por eso se llama
-    antes de :func:`materializar_csv_descargado`.
-    """
-    return base64.b64encode(Path(ruta).read_bytes()).decode("utf-8")
 
 
 def timeout_mc_ms(entrada: Any) -> int:
@@ -413,10 +404,6 @@ class ComprobantesPlugin:
             phase="PROCESANDO", percent=65, message=f"Filtrando {tipo}"
         )
         resumen: dict[str, Any] = {}
-        if getattr(entrada, "carga_b64", False):
-            # V1 codifica el archivo descargado (el ZIP del portal) antes de
-            # procesarlo; se guarda en el resumen del tipo correspondiente.
-            resumen["archivo_b64"] = archivo_en_base64(crudo)
         # El botón ``CSV`` del portal entrega un ZIP con el CSV adentro en
         # producción; el archivo directo también se acepta.
         materializar_csv_descargado(crudo)

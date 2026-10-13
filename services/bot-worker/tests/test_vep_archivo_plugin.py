@@ -8,7 +8,6 @@ y de JSON se respetan como en V1.
 from __future__ import annotations
 
 import asyncio
-import base64
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -23,10 +22,6 @@ CUIT = "20123456786"
 PDF = b"%PDF-1.4 vep"
 PNG = b"\x89PNG fake"
 TXT = "01" + CUIT.zfill(11) + "\n02<VEP/>\n02<VEP/>\n"
-
-
-def _archivo_b64() -> str:
-    return base64.b64encode(TXT.encode("utf-8")).decode("ascii")
 
 
 class _Servicio:
@@ -100,7 +95,9 @@ class _Presign:
 
 def _ejecutar(tmp_path: Path, *, qr_disponible: bool = True, **entrada: Any) -> tuple[Any, _Servicio, _Presign]:
     plugin = VepArchivoPlugin()
-    payload = {"operacion": "generar", "archivo_b64": _archivo_b64(), **entrada}
+    archivo_path = entrada.setdefault("archivo_path", "vep.txt")
+    (tmp_path / archivo_path).write_text(TXT, encoding="utf-8")
+    payload = {"operacion": "generar", **entrada}
     validado = asyncio.run(plugin.validate(payload))
     servicio = _Servicio(qr_disponible=qr_disponible)
     presign = _Presign()
@@ -184,6 +181,26 @@ def test_medio_no_habilitado_se_rechaza_antes_del_portal(tmp_path: Path) -> None
     with pytest.raises(InvalidInputError):
         asyncio.run(
             plugin.validate(
-                {"operacion": "generar", "archivo_b64": _archivo_b64(), "medio_pago": "paypal"}
+                {"operacion": "generar", "archivo_path": "vep.txt", "medio_pago": "paypal"}
             )
         )
+
+
+def test_archivo_no_encontrado_en_work_dir_se_rechaza_antes_del_portal(tmp_path: Path) -> None:
+    plugin = VepArchivoPlugin()
+    validado = asyncio.run(
+        plugin.validate({"operacion": "generar", "archivo_path": "ausente.txt"})
+    )
+    servicio = _Servicio(qr_disponible=False)
+    runtime = SimpleNamespace(
+        work_dir=tmp_path,
+        artifact_store=SimpleNamespace(resolve=lambda nombre: tmp_path / nombre),
+        credentials=SimpleNamespace(clave="clave", cuit_representante=CUIT),
+        cancellation=CancellationToken(),
+        event_sink=_Sink(),
+        deadline=SimpleNamespace(remaining_seconds=lambda: 60),
+    )
+
+    with pytest.raises(InvalidInputError):
+        asyncio.run(plugin.execute(validado, runtime))
+    assert servicio.medio_pago is None

@@ -4,7 +4,6 @@
   "periodo": "202501",
   "denominacion": "EJEMPLO SRL",
   "ninguna_anteriores": true,
-  "liv_cbte_b64": "Y29tcHJvYmFudGVzIGRlIGVqZW1wbG8K",
-  "liv_alicuota_b64": "YWxpY3VvdGFzIGRlIGVqZW1wbG8K",
-  "csv_cf_b64": "Q3JlZGl0byBGaXNjYWwgQ29tcHV0YWJsZQoxMDAsMDAK"
+  "liv_cbte_path": "ventas.txt",
+  "liv_alicuota_path": "ventas_alicuotas.txt"
 }

@@ -281,8 +281,8 @@ def test_el_esquema_permite_solo_base64_como_salida() -> None:
     assert entrada[1].carga_b64 is True
 
 
-def test_el_zip_descargado_vuelve_en_base64_cuando_se_pide() -> None:
-    """``carga_b64`` devuelve el archivo tal como lo bajó el portal (ZIP)."""
+def test_carga_b64_se_acepta_pero_el_resultado_nunca_trae_base64() -> None:
+    """``carga_b64`` es un flag historico: se ignora y el archivo sale por ``files[]``."""
     import asyncio
     import zipfile
 
@@ -360,9 +360,7 @@ def test_el_zip_descargado_vuelve_en_base64_cuando_se_pide() -> None:
 
     assert resultado.result == "OK"
     resumen = resultado.data["emitidos"]
-    contenido = base64.b64decode(resumen["archivo_b64"])
-    with zipfile.ZipFile(io.BytesIO(contenido)) as paquete:
-        assert paquete.namelist() == ["consulta.csv"]
+    assert "archivo_b64" not in resumen
     assert resumen["filas"] == 1
     assert resumen["muestra"][0]["MC"] == "MCE"
     assert resumen["muestra"][0]["CUIT Cliente"] == CUIT

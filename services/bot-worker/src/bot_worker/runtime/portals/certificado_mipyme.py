@@ -37,7 +37,23 @@ class CertificadoMipymePortal(PortalArca):
     async def _seleccionar_cuit(self, digits: str) -> None:
         self._verificar_respuesta_servicio(await self._contenido_pagina())
         combo = self.page.get_by_role("combobox", name=_COMBO_LABEL)
-        await combo.wait_for(state="visible", timeout=10_000)
+        try:
+            await combo.wait_for(state="visible", timeout=10_000)
+        except Exception as exc:
+            # Diagnostico sin datos del contribuyente: URL sin query y titulo.
+            import logging
+            from urllib.parse import urlsplit
+
+            try:
+                titulo = (await self.page.title())[:80]
+            except Exception:
+                titulo = "?"
+            url = urlsplit(str(getattr(self.page, "url", "") or ""))
+            logging.getLogger("bot_worker.mipyme").warning(
+                "LUFE sin selector de representado: host=%s ruta=%s titulo=%r error=%s",
+                url.netloc, url.path[:60], titulo, type(exc).__name__,
+            )
+            raise
         await combo.click()
         await self._intentar_expandir_combo()
         await self._esperar(1_500)
@@ -125,6 +141,11 @@ class CertificadoMipymePortal(PortalArca):
                 "el servicio LUFE respondió 504 Gateway Timeout",
                 diagnostic_code="mipyme_service_gateway_timeout",
             )
+        if re.search(r"(?:50[0-3]\s*\|?\s*(?:Internal Server Error|Bad Gateway|Service Unavailable))", contenido, re.I):
+            raise TargetUnavailableError(
+                "el servicio LUFE respondió un error del servidor (5xx)",
+                diagnostic_code="mipyme_service_server_error",
+            )
 
     async def descargar_certificado(self, destino: Path) -> Path:
         """Descarga y comprueba que el artefacto recibido sea un PDF no vacío."""
@@ -132,7 +153,36 @@ class CertificadoMipymePortal(PortalArca):
         enlace = self.page.get_by_role(
             "link", name=re.compile(r"Descargar Certificado MiPyME", re.I)
         )
-        await enlace.wait_for(state="visible", timeout=15_000)
+        try:
+            await enlace.wait_for(state="visible", timeout=15_000)
+        except Exception as exc:
+            # Si el portal respondio 504 tras "Seleccionar" se informa asi, en
+            # lugar de un fallo generico de pagina.
+            self._verificar_respuesta_servicio(await self._contenido_pagina())
+            import logging
+            from urllib.parse import urlsplit
+
+            try:
+                titulo = (await self.page.title())[:80]
+            except Exception:
+                titulo = "?"
+            try:
+                texto = re.sub(r"\d{11}", "<cuit>", (await self.page.inner_text("body"))[:3000])
+                texto = re.sub(r"\s+", " ", texto)[:260]
+            except Exception:
+                texto = ""
+            url = urlsplit(str(getattr(self.page, "url", "") or ""))
+            try:
+                html = (await self.page.content())[:1500]
+                codigo = re.search(r"ERR_[A-Z_]+", html)
+                codigo = codigo.group(0) if codigo else ""
+            except Exception:
+                codigo = ""
+            logging.getLogger("bot_worker.mipyme").warning(
+                "LUFE sin enlace de descarga: host=%s ruta=%s titulo=%r texto=%r neterror=%s error=%s",
+                url.netloc, url.path[:60], titulo, texto, codigo, type(exc).__name__,
+            )
+            raise
         archivo = await self.paso(
             "descargar_certificado",
             self.capturar_descarga(

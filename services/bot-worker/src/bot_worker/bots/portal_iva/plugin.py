@@ -56,6 +56,7 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "Portal IVA"
 ID_ARTEFACTO_VENTAS = "ventas_csv"
 ID_ARTEFACTO_COMPRAS = "compras_csv"
+MAX_TXT_BYTES = 5_000_000
 
 
 def nombre_base_archivo(representado_cuit: str, periodo: str, libro: str) -> str:
@@ -243,6 +244,15 @@ class PortalIvaPlugin:
         if getattr(entrada, "periodos_seleccionables", None):
             datos["periodos_seleccionables"] = entrada.periodos_seleccionables
         artefactos: list[dict[str, Any]] = []
+        descargas_pedidas = {
+            libro
+            for libro, campo in (
+                ("ventas", "descarga_ventas"),
+                ("compras", "descarga_compras"),
+            )
+            if bool(getattr(entrada, campo, False))
+        }
+        descargas_completadas: set[str] = set()
         for libro, artifact_id in (
             ("ventas", ID_ARTEFACTO_VENTAS),
             ("compras", ID_ARTEFACTO_COMPRAS),
@@ -260,6 +270,7 @@ class PortalIvaPlugin:
                 refrescar_desde_arca=bool(getattr(entrada, "refrescar_desde_arca", False)),
                 limpiar_despues=bool(getattr(entrada, "limpiar_despues", False)),
             )
+            descargas_completadas.add(libro)
             await runtime.event_sink.progress(
                 phase="PROCESANDO", percent=65, message=f"Procesando {libro}"
             )
@@ -283,12 +294,28 @@ class PortalIvaPlugin:
             if entrada.incluir_json:
                 resumen["muestra"] = self._muestra(destino)
             datos[libro] = resumen
+        ok_descargas = (
+            not entrada.descarga_ventas or "ventas" in descargas_completadas
+        ) and (
+            not entrada.descarga_compras or "compras" in descargas_completadas
+        )
+        if entrada.descartar_borrador and ok_descargas and descargas_pedidas:
+            descartar = getattr(servicio, "descartar_borrador", None)
+            if callable(descartar):
+                try:
+                    await descartar()
+                except Exception:
+                    # V2 retained successful downloads when draft deletion
+                    # failed, reporting the failure separately.
+                    datos.setdefault("avisos", []).append(
+                        "No se pudo descartar el borrador de Portal IVA."
+                    )
         return datos, artefactos
 
     async def _importar(
         self, servicio: Any, entrada: Any, runtime: BotRuntime, cuit_objetivo: str
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Escribe los TXT en ``work_dir`` e importa libro por libro (V2)."""
+        """Importa los TXT ya descargados en ``work_dir`` desde object_key."""
         await runtime.event_sink.progress(
             phase="CARGA", percent=55, message="Importando libros"
         )
@@ -298,20 +325,27 @@ class PortalIvaPlugin:
             "periodo": entrada.periodo,
             "importaciones": [],
         }
-        for libro, contenido, alicuotas in (
-            ("ventas", entrada.ventas_txt, entrada.ventas_alicuotas_txt),
-            ("compras", entrada.compras_txt, entrada.compras_alicuotas_txt),
+        for libro, archivo, archivo_alicuotas in (
+            ("ventas", entrada.ventas_txt_path, entrada.ventas_alicuotas_txt_path),
+            ("compras", entrada.compras_txt_path, entrada.compras_alicuotas_txt_path),
         ):
-            if not contenido:
+            if not archivo:
                 continue
             await runtime.cancellation.raise_if_cancelled()
-            base = nombre_base_archivo(cuit_objetivo, entrada.periodo, libro)
-            fuente = runtime.artifact_store.resolve(f"{base}.txt")
-            fuente.write_text(str(contenido), encoding="utf-8")
+            fuente = runtime.artifact_store.resolve(archivo)
+            if not fuente.is_file() or fuente.suffix.lower() != ".txt":
+                raise InvalidInputError(f"archivo TXT de {libro} no encontrado en el work_dir")
+            contenido = fuente.read_bytes()
+            if not contenido.strip() or len(contenido) > MAX_TXT_BYTES:
+                raise InvalidInputError(f"archivo TXT de {libro} vacío o demasiado grande")
             fuente_alicuotas = None
-            if alicuotas:
-                fuente_alicuotas = runtime.artifact_store.resolve(f"{base} - alicuotas.txt")
-                fuente_alicuotas.write_text(str(alicuotas), encoding="utf-8")
+            if archivo_alicuotas:
+                fuente_alicuotas = runtime.artifact_store.resolve(archivo_alicuotas)
+                if not fuente_alicuotas.is_file() or fuente_alicuotas.suffix.lower() != ".txt":
+                    raise InvalidInputError(f"archivo TXT de alícuotas de {libro} no encontrado")
+                contenido_alicuotas = fuente_alicuotas.read_bytes()
+                if not contenido_alicuotas.strip() or len(contenido_alicuotas) > MAX_TXT_BYTES:
+                    raise InvalidInputError(f"archivo TXT de alícuotas de {libro} vacío o demasiado grande")
             ok = await servicio.importar_libro(
                 libro=libro, comprobantes=fuente, alicuotas=fuente_alicuotas
             )

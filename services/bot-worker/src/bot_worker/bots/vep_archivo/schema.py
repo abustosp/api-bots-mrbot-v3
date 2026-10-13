@@ -9,8 +9,6 @@ el worker ya borra el ``work_dir`` al terminar, asi que no cambia el resultado.
 
 from __future__ import annotations
 
-import base64
-import binascii
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -20,8 +18,6 @@ CUIT_PATTERN = r"^\d{11}$"
 MEDIOS_PAGO = ("link", "pago_mis_cuentas", "internet_banking", "xn_group", "qr")
 MAX_REGISTROS_POR_LOTE = 600
 MAX_ARCHIVO_BYTES = 7_000_000
-# Nombre del TXT temporal dentro del workdir del job: lo define el bot.
-ARCHIVO_ENTRADA = "vep_entrada.txt"
 #: Campos que V1 recibe por HTTP pero V3 nunca toma del payload.
 CAMPOS_SOBRE_SELLADO = ("contrasena", "clave", "clave_representante", "clave_encriptada", "proxy_request")
 #: Nombres equivalentes de la subida del PDF (V1: ``minio_upload``/``subir_a_minio``).
@@ -65,19 +61,6 @@ def limpiar_cuit(valor: Any) -> str:
     return texto
 
 
-def decodificar_archivo(valor: Any) -> bytes:
-    """Decodifica el .txt en b64 y limita su tamanio (port de V2)."""
-    try:
-        crudo = base64.b64decode(str(valor), validate=True)
-    except (binascii.Error, ValueError):
-        raise ValueError("archivo_b64 debe ser base64 valido") from None
-    if not crudo:
-        raise ValueError("archivo_b64 no puede estar vacio")
-    if len(crudo) > MAX_ARCHIVO_BYTES:
-        raise ValueError("archivo_b64 excede el maximo permitido")
-    return crudo
-
-
 def _unificar_subida(datos: dict[str, Any]) -> None:
     """Reduce ``subir_pdf``/``subir_a_minio``/``minio_upload`` a un solo valor.
 
@@ -99,10 +82,10 @@ def _unificar_subida(datos: dict[str, Any]) -> None:
 class VepArchivoGenerarInput(_Base):
     """Operacion ``generar``: VEP desde archivo .txt.
 
-    Igual que V2, el cliente solo envía el TXT (aquí en Base64), el medio de
-    pago y si se sube el PDF. El nombre del TXT temporal y el del PDF subido
-    los define el bot; el CUIT se toma de la sesión fiscal cuando no se
-    informa. Los archivos temporales siempre se eliminan al terminar.
+    El cliente envía la referencia al TXT previamente cargado, el medio de
+    pago y si se sube el PDF. El worker recibe el nombre local de ese archivo.
+    El CUIT se toma de la sesión fiscal cuando no se informa. Los archivos
+    temporales siempre se eliminan al terminar.
 
     ``cuit_inicio_sesion`` es el nombre que usa V1 para el CUIT que inicia
     sesion: se acepta como alias de ``representado_cuit``.
@@ -115,7 +98,10 @@ class VepArchivoGenerarInput(_Base):
         max_length=14,
     )
     medio_pago: str = Field(default="internet_banking", min_length=1)
-    archivo_b64: str = Field(min_length=1)
+    archivo_path: str = Field(
+        min_length=1,
+        description="Nombre local descargado desde una referencia object_key.",
+    )
     incluir_json: bool = True
     subir_pdf: bool = True
     eliminar_descargas: bool = True
@@ -140,7 +126,6 @@ class VepArchivoGenerarInput(_Base):
     def _archivo_y_medio(self) -> VepArchivoGenerarInput:
         if self.medio_pago not in MEDIOS_PAGO:
             raise ValueError(f"medio_pago debe ser uno de {list(MEDIOS_PAGO)}")
-        decodificar_archivo(self.archivo_b64)
         if not self.incluir_json and not self.subir_pdf:
             raise ValueError("seleccionar al menos una salida (json o pdf)")
         return self
@@ -161,12 +146,16 @@ def esquema_entrada() -> dict[str, Any]:
     """
     return {
         "type": "object",
-        "required": ["operacion"],
+        "required": ["operacion", "archivo_path"],
         "properties": {
             "operacion": {"type": "string", "enum": ["generar"]},
             "representado_cuit": {"type": "string", "pattern": CUIT_PATTERN},
             "medio_pago": {"type": "string", "enum": list(MEDIOS_PAGO)},
-            "archivo_b64": {"type": "string", "minLength": 1},
+            "archivo_path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Nombre local descargado desde una referencia object_key.",
+            },
             "incluir_json": {"type": "boolean"},
             "subir_pdf": {"type": "boolean"},
             "minio_upload": {"type": "boolean"},

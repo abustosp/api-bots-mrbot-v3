@@ -11,8 +11,8 @@ Cambios obligatorios respecto de V2:
   materializan bajo ``runtime.work_dir`` via ``artifact_store.resolve``.
 - Sin ``os.environ`` ni ``get_proxy_config()``: el proxy ya construido
   viaja en ``runtime.proxy`` hacia ``browser_factory``.
-- Sin rutas de cliente: los TXT/CSV llegan como base64 validados en el
-  esquema; aca solo se decodifican (port de ``_validar_archivo``).
+- Sin rutas de cliente: el worker recibe nombres locales generados desde
+  referencias ``object_key`` y lee esos archivos bajo ``work_dir``.
 - Sin credenciales en logs: el error es categoria + diagnostico
   redactado (``sin_secretos``); la clave fiscal nunca se interpola.
 
@@ -23,11 +23,14 @@ estado para reintentos por seccion independiente como en V2.
 from __future__ import annotations
 
 import asyncio
-import base64
 import re
 from typing import Any, Mapping
 
-from bot_worker.bots.carga_portal_iva.schema import CAMPOS_ARCHIVO, esquema_entrada
+from bot_worker.bots.carga_portal_iva.schema import (
+    CAMPOS_ARCHIVO,
+    MAX_ARCHIVO_BYTES,
+    esquema_entrada,
+)
 from bot_worker.bots.carga_portal_iva.schema import CargaPortalIvaInput
 from bot_worker.bots.errors import (
     BrowserCrashedError,
@@ -149,19 +152,24 @@ class CargaPortalIvaPlugin:
             raise InvalidInputError(f"entrada invalida: {exc}") from exc
 
     def _materializar_archivos(self, entrada: CargaPortalIvaInput, runtime: BotRuntime) -> dict[str, str]:
-        """Decodifica los base64 a ``work_dir`` (port de ``_validar_archivo``)."""
+        """Valida las rutas locales ya descargadas desde el bucket uploads."""
         rutas: dict[str, str] = {}
         for campo in CAMPOS_ARCHIVO:
-            b64 = getattr(entrada, campo)
-            if not b64:
+            nombre = getattr(entrada, campo)
+            if not nombre:
                 continue
-            contenido = base64.b64decode(str(b64), validate=True)
+            destino = runtime.artifact_store.resolve(str(nombre))
+            if not destino.is_file():
+                raise InvalidInputError(f"archivo de entrada no encontrado: {campo}")
+            contenido = destino.read_bytes()
             if not contenido.strip():
                 raise InvalidInputError(f"archivo sin contenido legible: {campo}")
-            nombre = f"{campo.replace('_b64', '')}.txt"
-            destino = runtime.artifact_store.resolve(nombre)
-            destino.write_bytes(contenido)
-            rutas[campo] = nombre
+            if len(contenido) > MAX_ARCHIVO_BYTES:
+                raise InvalidInputError(f"archivo supera el máximo permitido: {campo}")
+            extension = ".csv" if campo.startswith("csv_") else ".txt"
+            if destino.suffix.lower() != extension:
+                raise InvalidInputError(f"extensión no admitida para {campo}: use {extension}")
+            rutas[campo] = str(nombre)
         return rutas
 
     async def _importar_txts(
@@ -226,8 +234,8 @@ class CargaPortalIvaPlugin:
             campo: runtime.artifact_store.resolve(nombre) for campo, nombre in rutas.items()
         }
         total_cf = (
-            calcular_total_cf_csv(base64.b64decode(str(entrada.csv_cf_b64)))
-            if entrada.csv_cf_b64
+            calcular_total_cf_csv(rutas_abs["csv_cf_path"].read_bytes())
+            if rutas_abs.get("csv_cf_path")
             else None
         )
         resultados: dict[str, Any] = {
@@ -272,8 +280,8 @@ class CargaPortalIvaPlugin:
                     phase="CONSULTA", percent=45, message="Cargando comprobantes"
                 )
                 for clave, libro, cbte, alic in (
-                    ("ventas_txt", "ventas", "liv_cbte_b64", "liv_alicuota_b64"),
-                    ("compras_txt", "compras", "lic_cbte_b64", "lic_alicuota_b64"),
+                    ("ventas_txt", "ventas", "liv_cbte_path", "liv_alicuota_path"),
+                    ("compras_txt", "compras", "lic_cbte_path", "lic_alicuota_path"),
                 ):
                     if not rutas_abs.get(cbte):
                         continue
@@ -285,10 +293,10 @@ class CargaPortalIvaPlugin:
                     phase="PROCESANDO", percent=65, message="Cargando aperturas"
                 )
                 for seccion, campo in (
-                    ("CF", "csv_cf_b64"),
-                    ("CF Restitucion", "csv_cf_restitucion_b64"),
-                    ("DF", "csv_df_b64"),
-                    ("DF Restitucion", "csv_df_restitucion_b64"),
+                    ("CF", "csv_cf_path"),
+                    ("CF Restitucion", "csv_cf_restitucion_path"),
+                    ("DF", "csv_df_path"),
+                    ("DF Restitucion", "csv_df_restitucion_path"),
                 ):
                     if not rutas_abs.get(campo):
                         continue

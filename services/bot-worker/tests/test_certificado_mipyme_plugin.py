@@ -250,3 +250,29 @@ def test_cuit_ausente_en_lufe_falla_sin_descargar_ni_subir(tmp_path: Path) -> No
 def test_nombre_certificado_sigue_el_patron_v1() -> None:
     nombre = nombre_certificado(CUIT)
     assert nombre.startswith(f"sepyme_{CUIT}_") and nombre.endswith(".pdf")
+
+
+def test_un_504_del_portal_se_informa_como_gateway_timeout():
+    import pytest
+
+    from bot_worker.bots.errors import TargetUnavailableError
+    from bot_worker.runtime.portals.certificado_mipyme import CertificadoMipymePortal
+
+    with pytest.raises(TargetUnavailableError) as err:
+        CertificadoMipymePortal._verificar_respuesta_servicio(
+            "<h1>504 | Gateway Timeout</h1> BunkerWeb"
+        )
+    assert "504" in str(err.value)
+
+
+def test_un_500_del_portal_se_informa_como_error_del_servidor():
+    import pytest
+
+    from bot_worker.bots.errors import TargetUnavailableError
+    from bot_worker.runtime.portals.certificado_mipyme import CertificadoMipymePortal
+
+    with pytest.raises(TargetUnavailableError) as err:
+        CertificadoMipymePortal._verificar_respuesta_servicio(
+            "<h1>500 | Internal Server Error</h1> BunkerWeb"
+        )
+    assert err.value.diagnostic_code == "mipyme_service_server_error"

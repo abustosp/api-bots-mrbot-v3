@@ -9,7 +9,6 @@ no vuelve a borrar, y una seccion fallida deja el job PARCIAL sin tumbarlo.
 from __future__ import annotations
 
 import asyncio
-import base64
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -21,10 +20,6 @@ from bot_worker.bots.errors import TargetUnavailableError
 from bot_worker.runtime.context import ArtifactStore, CancellationToken
 
 CUIT = "20320160856"
-
-
-def _b64(texto: str) -> str:
-    return base64.b64encode(texto.encode("utf-8")).decode("ascii")
 
 
 CF_CSV = "Fecha;Credito Fiscal Computable\n01/01/2026;100,50\n02/01/2026;50,25\n"
@@ -112,7 +107,12 @@ class _Sink:
         return None
 
 
-def _entrada(plugin: CargaPortalIvaPlugin, **extra: Any) -> Any:
+def _entrada(plugin: CargaPortalIvaPlugin, tmp_path: Path, **extra: Any) -> Any:
+    for campo, nombre in extra.items():
+        if not campo.endswith("_path") or not nombre:
+            continue
+        contenido = CF_CSV if campo.startswith("csv_cf") else TXT
+        (tmp_path / nombre).write_text(contenido, encoding="utf-8")
     cuerpo: dict[str, Any] = {
         "operacion": "cargar",
         "representado_cuit": CUIT,
@@ -141,7 +141,10 @@ def _ejecutar(tmp_path: Path, entrada: Any, portal: _PortalCarga) -> Any:
 
 def test_borra_los_registros_previos_antes_de_importar(tmp_path: Path) -> None:
     portal = _PortalCarga()
-    entrada = _entrada(CargaPortalIvaPlugin(), liv_cbte_b64=_b64(TXT), liv_alicuota_b64=_b64(TXT))
+    entrada = _entrada(
+        CargaPortalIvaPlugin(), tmp_path,
+        liv_cbte_path="liv_cbte.txt", liv_alicuota_path="liv_alicuota.txt",
+    )
 
     resultado, sesion = _ejecutar(tmp_path, entrada, portal)
 
@@ -154,7 +157,10 @@ def test_borra_los_registros_previos_antes_de_importar(tmp_path: Path) -> None:
 
 def test_sin_boton_de_borrado_la_seccion_falla_y_no_importa(tmp_path: Path) -> None:
     portal = _PortalCarga(sin_boton_borrar=True)
-    entrada = _entrada(CargaPortalIvaPlugin(), liv_cbte_b64=_b64(TXT), liv_alicuota_b64=_b64(TXT))
+    entrada = _entrada(
+        CargaPortalIvaPlugin(), tmp_path,
+        liv_cbte_path="liv_cbte.txt", liv_alicuota_path="liv_alicuota.txt",
+    )
 
     resultado, _ = _ejecutar(tmp_path, entrada, portal)
 
@@ -166,10 +172,10 @@ def test_sin_boton_de_borrado_la_seccion_falla_y_no_importa(tmp_path: Path) -> N
 def test_las_rutas_llegan_como_absolutas_dentro_de_work_dir(tmp_path: Path) -> None:
     portal = _PortalCarga()
     entrada = _entrada(
-        CargaPortalIvaPlugin(),
-        liv_cbte_b64=_b64(TXT),
-        liv_alicuota_b64=_b64(TXT),
-        csv_cf_b64=_b64(CF_CSV),
+        CargaPortalIvaPlugin(), tmp_path,
+        liv_cbte_path="liv_cbte.txt",
+        liv_alicuota_path="liv_alicuota.txt",
+        csv_cf_path="cf.csv",
     )
 
     _ejecutar(tmp_path, entrada, portal)
@@ -186,7 +192,10 @@ def test_las_rutas_llegan_como_absolutas_dentro_de_work_dir(tmp_path: Path) -> N
 def test_reintento_del_txt_no_vuelve_a_borrar(tmp_path: Path) -> None:
     """Primer intento falla al verificar; el reintento importa sin volver a borrar."""
     portal = _PortalCarga(fallar_intentos=1)
-    entrada = _entrada(CargaPortalIvaPlugin(), liv_cbte_b64=_b64(TXT), liv_alicuota_b64=_b64(TXT))
+    entrada = _entrada(
+        CargaPortalIvaPlugin(), tmp_path,
+        liv_cbte_path="liv_cbte.txt", liv_alicuota_path="liv_alicuota.txt",
+    )
 
     resultado, _ = _ejecutar(tmp_path, entrada, portal)
 
@@ -199,13 +208,13 @@ def test_reintento_del_txt_no_vuelve_a_borrar(tmp_path: Path) -> None:
 def test_una_seccion_fallida_deja_el_job_parcial_y_sigue_con_las_demas(tmp_path: Path) -> None:
     portal = _PortalCarga(fallar_importar={"ventas"}, fallar_csv={"DF"})
     entrada = _entrada(
-        CargaPortalIvaPlugin(),
-        liv_cbte_b64=_b64(TXT),
-        liv_alicuota_b64=_b64(TXT),
-        lic_cbte_b64=_b64(TXT),
-        lic_alicuota_b64=_b64(TXT),
-        csv_cf_b64=_b64(CF_CSV),
-        csv_df_b64=_b64(CF_CSV),
+        CargaPortalIvaPlugin(), tmp_path,
+        liv_cbte_path="liv_cbte.txt",
+        liv_alicuota_path="liv_alicuota.txt",
+        lic_cbte_path="lic_cbte.txt",
+        lic_alicuota_path="lic_alicuota.txt",
+        csv_cf_path="cf.csv",
+        csv_df_path="df.csv",
     )
 
     resultado, _ = _ejecutar(tmp_path, entrada, portal)
@@ -221,7 +230,10 @@ def test_una_seccion_fallida_deja_el_job_parcial_y_sigue_con_las_demas(tmp_path:
 
 def test_si_todas_las_secciones_fallan_el_job_es_error(tmp_path: Path) -> None:
     portal = _PortalCarga(fallar_importar={"ventas"})
-    entrada = _entrada(CargaPortalIvaPlugin(), liv_cbte_b64=_b64(TXT), liv_alicuota_b64=_b64(TXT))
+    entrada = _entrada(
+        CargaPortalIvaPlugin(), tmp_path,
+        liv_cbte_path="liv_cbte.txt", liv_alicuota_path="liv_alicuota.txt",
+    )
 
     resultado, _ = _ejecutar(tmp_path, entrada, portal)
 
@@ -231,7 +243,9 @@ def test_si_todas_las_secciones_fallan_el_job_es_error(tmp_path: Path) -> None:
 
 def test_credito_fiscal_compras_se_completa_despues_del_cf_con_prorrateo(tmp_path: Path) -> None:
     portal = _PortalCarga()
-    entrada = _entrada(CargaPortalIvaPlugin(), csv_cf_b64=_b64(CF_CSV), prorrateo_global=True)
+    entrada = _entrada(
+        CargaPortalIvaPlugin(), tmp_path, csv_cf_path="cf.csv", prorrateo_global=True
+    )
 
     resultado, _ = _ejecutar(tmp_path, entrada, portal)
 
@@ -244,7 +258,9 @@ def test_credito_fiscal_compras_se_completa_despues_del_cf_con_prorrateo(tmp_pat
 
 def test_sin_prorrateo_no_se_toca_el_credito_fiscal(tmp_path: Path) -> None:
     portal = _PortalCarga()
-    entrada = _entrada(CargaPortalIvaPlugin(), csv_cf_b64=_b64(CF_CSV), prorrateo_global=False)
+    entrada = _entrada(
+        CargaPortalIvaPlugin(), tmp_path, csv_cf_path="cf.csv", prorrateo_global=False
+    )
 
     _ejecutar(tmp_path, entrada, portal)
 
@@ -253,7 +269,10 @@ def test_sin_prorrateo_no_se_toca_el_credito_fiscal(tmp_path: Path) -> None:
 
 def test_compras_abre_su_libro_y_no_ventas(tmp_path: Path) -> None:
     portal = _PortalCarga()
-    entrada = _entrada(CargaPortalIvaPlugin(), lic_cbte_b64=_b64(TXT), lic_alicuota_b64=_b64(TXT))
+    entrada = _entrada(
+        CargaPortalIvaPlugin(), tmp_path,
+        lic_cbte_path="lic_cbte.txt", lic_alicuota_path="lic_alicuota.txt",
+    )
 
     _ejecutar(tmp_path, entrada, portal)
 
@@ -264,8 +283,8 @@ def test_compras_abre_su_libro_y_no_ventas(tmp_path: Path) -> None:
 def test_prepara_periodo_con_todos_los_flags_v1(tmp_path: Path) -> None:
     portal = _PortalCarga()
     entrada = _entrada(
-        CargaPortalIvaPlugin(),
-        csv_cf_b64=_b64(CF_CSV),
+        CargaPortalIvaPlugin(), tmp_path,
+        csv_cf_path="cf.csv",
         operaciones_ng_o_e=True,
         prorrateo_ambos=True,
         importacion_definitiva_bienes=True,

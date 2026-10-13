@@ -60,12 +60,11 @@ CAMPOS_FACTURA_VACIOS: tuple[str, ...] = (
 )
 
 
-def extraer_campos_factura(pdf_data: bytes, incluir_b64: bool = False) -> dict[str, str]:
+def extraer_campos_factura(pdf_data: bytes) -> dict[str, str]:
     """Extrae los campos de una factura electronica desde su PDF (port de V1).
 
     Usa pdfplumber sobre la primera pagina. Los campos que no aparecen quedan
-    vacios. ``AUX`` se arma como ``CUIT-COD-PV-Nro``. Con ``incluir_b64`` agrega
-    el PDF completo en base64.
+    vacios. ``AUX`` se arma como ``CUIT-COD-PV-Nro``. Nunca se devuelve el PDF en base64.
 
     Lanza ``ValueError`` si el PDF no se puede leer o no tiene paginas.
     """
@@ -102,8 +101,6 @@ def extraer_campos_factura(pdf_data: bytes, incluir_b64: bool = False) -> dict[s
             f"{info['Punto de Venta']}-{info['Número de Factura']}"
         )
 
-        if incluir_b64:
-            info["B64"] = base64.b64encode(pdf_data).decode("utf-8")
     return info
 
 
@@ -397,7 +394,7 @@ class RcelPortal(PortalArca):
         except Exception:
             pass
 
-    async def extraer_campos(self, ruta: Path, incluir_b64: bool = False) -> dict[str, str]:
+    async def extraer_campos(self, ruta: Path) -> dict[str, str]:
         """Campos de la factura descargada en ``ruta`` (ver ``extraer_campos_factura``)."""
         try:
             pdf_data = Path(ruta).read_bytes()
@@ -407,7 +404,7 @@ class RcelPortal(PortalArca):
                 diagnostic_code="rcel_pdf_unreadable",
             ) from exc
         try:
-            return extraer_campos_factura(pdf_data, incluir_b64=incluir_b64)
+            return extraer_campos_factura(pdf_data)
         except ValueError as exc:
             raise TargetUnavailableError(
                 "no se pudieron extraer los campos del PDF de RCEL",

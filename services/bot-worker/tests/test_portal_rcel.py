@@ -216,15 +216,12 @@ def test_extraer_campos_factura_lee_aux_y_totales() -> None:
     assert "B64" not in campos
 
 
-def test_extraer_campos_factura_incluye_b64_si_se_pide() -> None:
-    import base64
-
+def test_extraer_campos_factura_nunca_devuelve_el_pdf_en_base64() -> None:
     from bot_worker.runtime.portals.rcel import extraer_campos_factura
 
-    pdf = _pdf_con_texto(FACTURA_LINEAS)
-    campos = extraer_campos_factura(pdf, incluir_b64=True)
+    campos = extraer_campos_factura(_pdf_con_texto(FACTURA_LINEAS))
 
-    assert base64.b64decode(campos["B64"]) == pdf
+    assert "B64" not in campos
 
 
 def test_extraer_campos_factura_sin_datos_deja_campos_vacios() -> None:

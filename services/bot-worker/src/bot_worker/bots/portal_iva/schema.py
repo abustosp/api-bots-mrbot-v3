@@ -12,8 +12,8 @@ fallan antes de abrir el navegador:
   ``aaaamm``; se normaliza a ``aaaamm`` (port de
   ``_normalize_period_value`` de V2).
 - ``descargar`` exige al menos un libro (ventas y/o compras);
-  ``importar`` exige al menos un TXT (contenido inline, que el plugin
-  escribe en ``work_dir`` antes de importar); ``gestionar`` combina
+  ``importar`` exige al menos un par TXT recibido por referencia a una carga;
+  ``gestionar`` combina
   ambas fases como el flujo completo de V2.
 - Al menos una salida (JSON de resumen y/o CSV).
 - Aliases de compatibilidad V1/V2: ``cuit``, ``descarga_CSV_ventas`` y
@@ -121,6 +121,8 @@ class PortalIvaDescargarInput(_Periodo, _Representado):
     # V1 always refreshed ARCA and cleared the downloaded book afterwards.
     refrescar_desde_arca: bool = True
     limpiar_despues: bool = True
+    # V2 only discarded the declaration draft when this switch was enabled.
+    descartar_borrador: bool = True
     operaciones_ng_o_e: bool = False
     prorrateo_global: bool = False
     prorrateo_asignacion_directa: bool = False
@@ -142,27 +144,43 @@ class PortalIvaDescargarInput(_Periodo, _Representado):
 
 
 class _ArchivosTxt(_Base):
-    """TXT inline de comprobantes y, opcionalmente, de alicuotas por libro.
+    """Nombres locales de TXT descargados desde referencias ``object_key``."""
 
-    Los campos ``*_alicuotas_txt`` son opcionales: sin ellos solo se sube el
-    TXT de comprobantes, como en el contrato anterior.
-    """
+    ventas_txt_path: str | None = Field(default=None, min_length=1, max_length=255)
+    compras_txt_path: str | None = Field(default=None, min_length=1, max_length=255)
+    ventas_alicuotas_txt_path: str | None = Field(default=None, min_length=1, max_length=255)
+    compras_alicuotas_txt_path: str | None = Field(default=None, min_length=1, max_length=255)
 
-    ventas_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
-    compras_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
-    ventas_alicuotas_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
-    compras_alicuotas_txt: str | None = Field(default=None, min_length=1, max_length=5_000_000)
+    @model_validator(mode="before")
+    @classmethod
+    def _rechazar_contenido_inline(cls, datos: Any) -> Any:
+        if not isinstance(datos, dict):
+            return datos
+        nombres_archivo = {
+            "ventas_txt", "compras_txt",
+            "ventas_alicuotas_txt", "compras_alicuotas_txt",
+        }
+        if any(
+            "b64" in str(campo).lower()
+            or "base64" in str(campo).lower()
+            or campo in nombres_archivo
+            for campo in datos
+        ):
+            raise ValueError(
+                "Los archivos deben subirse antes con POST /api/v3/uploads y enviarse por object_key."
+            )
+        return datos
 
     @model_validator(mode="after")
     def _alicuotas_con_comprobante(self) -> _ArchivosTxt:
-        if self.ventas_txt and not self.ventas_alicuotas_txt:
-            raise ValueError("ventas_txt requiere ventas_alicuotas_txt")
-        if self.compras_txt and not self.compras_alicuotas_txt:
-            raise ValueError("compras_txt requiere compras_alicuotas_txt")
-        if self.ventas_alicuotas_txt and not self.ventas_txt:
-            raise ValueError("ventas_alicuotas_txt requiere ventas_txt")
-        if self.compras_alicuotas_txt and not self.compras_txt:
-            raise ValueError("compras_alicuotas_txt requiere compras_txt")
+        if self.ventas_txt_path and not self.ventas_alicuotas_txt_path:
+            raise ValueError("ventas_txt_key requiere ventas_alicuotas_txt_key")
+        if self.compras_txt_path and not self.compras_alicuotas_txt_path:
+            raise ValueError("compras_txt_key requiere compras_alicuotas_txt_key")
+        if self.ventas_alicuotas_txt_path and not self.ventas_txt_path:
+            raise ValueError("ventas_alicuotas_txt_key requiere ventas_txt_key")
+        if self.compras_alicuotas_txt_path and not self.compras_txt_path:
+            raise ValueError("compras_alicuotas_txt_key requiere compras_txt_key")
         return self
 
 
@@ -182,8 +200,8 @@ class PortalIvaImportarInput(_Periodo, _Representado, _ArchivosTxt):
 
     @model_validator(mode="after")
     def _validar(self) -> PortalIvaImportarInput:
-        if not self.ventas_txt and not self.compras_txt:
-            raise ValueError("proveer al menos ventas_txt o compras_txt")
+        if not self.ventas_txt_path and not self.compras_txt_path:
+            raise ValueError("proveer al menos un par de TXT por referencia object_key")
         return self
 
 
@@ -215,14 +233,15 @@ def esquema_entrada() -> dict[str, Any]:
             "periodo": {"type": "string"},
             "descarga_ventas": {"type": "boolean"},
             "descarga_compras": {"type": "boolean"},
-            "ventas_txt": {"type": "string"},
-            "compras_txt": {"type": "string"},
-            "ventas_alicuotas_txt": {"type": "string"},
-            "compras_alicuotas_txt": {"type": "string"},
+            "ventas_txt_path": {"type": "string", "description": "Nombre local descargado desde object_key."},
+            "compras_txt_path": {"type": "string", "description": "Nombre local descargado desde object_key."},
+            "ventas_alicuotas_txt_path": {"type": "string", "description": "Nombre local descargado desde object_key."},
+            "compras_alicuotas_txt_path": {"type": "string", "description": "Nombre local descargado desde object_key."},
             "incluir_json": {"type": "boolean"},
             "subir_csv": {"type": "boolean"},
             "refrescar_desde_arca": {"type": "boolean"},
             "limpiar_despues": {"type": "boolean"},
+            "descartar_borrador": {"type": "boolean"},
             "operaciones_ng_o_e": {"type": "boolean"},
             "prorrateo_global": {"type": "boolean"},
             "prorrateo_asignacion_directa": {"type": "boolean"},

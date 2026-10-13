@@ -22,7 +22,6 @@ import pytest
 from bot_worker.bots.aportes_en_linea.plugin import (
     AportesEnLineaPlugin,
     BOTON_INGRESAR,
-    TOPE_BASE64_BYTES,
     nombre_archivo_historico,
 )
 from bot_worker.bots.errors import ArtifactUploadError, InvalidInputError
@@ -237,12 +236,13 @@ def test_el_esquema_acepta_los_campos_de_v1() -> None:
     assert entrada.cuit_representante == "20123456789"
 
 
-def test_el_esquema_exige_alguna_salida() -> None:
-    with pytest.raises(InvalidInputError):
-        _validar(incluir_base64=False, subir=False)
+def test_el_esquema_acepta_sin_salida_como_en_v2() -> None:
+    """V2 aceptaba ``archivo_historico_minio=false``: solo devuelve los datos."""
+    entrada = _validar(incluir_base64=False, subir=False)
+    assert entrada is not None
 
 
-def test_execute_descarga_sube_y_devuelve_base64(tmp_path: Path) -> None:
+def test_execute_descarga_y_sube_sin_devolver_base64(tmp_path: Path) -> None:
     async def _ir() -> None:
         pagina = _Pagina()
         sesion = _Sesion(pagina)
@@ -269,9 +269,8 @@ def test_execute_descarga_sube_y_devuelve_base64(tmp_path: Path) -> None:
         nombre = resultado.data["archivo"]
         assert nombre.startswith(f"AEL - {CUIT} - ") and nombre.endswith(".xls")
         assert resultado.data["representado_cuit"] == CUIT
-        assert resultado.data["archivo_historico_b64"] == base64.b64encode(XLS).decode(
-            "ascii"
-        )
+        # El archivo sale solo por ``files[]``: nunca en Base64 dentro de ``data``.
+        assert "archivo_historico_b64" not in resultado.data
         assert subidas.rutas == [("historico.xls", nombre)]
         assert len(resultado.artifacts) == 1
         assert resultado.artifacts[0]["sha256"]
@@ -305,7 +304,7 @@ def test_execute_sin_subir_solo_devuelve_el_archivo(tmp_path: Path) -> None:
         assert subidas.rutas == []
         assert resultado.artifacts == []
         assert "sha256" not in resultado.data
-        assert resultado.data["archivo_historico_b64"]
+        assert "archivo_historico_b64" not in resultado.data
 
     asyncio.run(_ir())
 
@@ -324,20 +323,17 @@ def test_sin_representado_usa_el_cuit_de_la_credencial(tmp_path: Path) -> None:
     asyncio.run(_ir())
 
 
-def test_base64_grande_no_viaja_inline(tmp_path: Path) -> None:
+def test_el_flag_base64_se_acepta_pero_nunca_devuelve_base64(tmp_path: Path) -> None:
     async def _ir() -> None:
-        grande = b"x" * (TOPE_BASE64_BYTES + 1)
         plugin = AportesEnLineaPlugin()
         entrada = await plugin.validate(
             {"operacion": "descargar", "representado_cuit": CUIT, "incluir_base64": True}
         )
-        runtime = _runtime(tmp_path, _Sesion(_Pagina(grande)), _Subidas())
+        runtime = _runtime(tmp_path, _Sesion(_Pagina(b"x" * 1024)), _Subidas())
 
         resultado = await plugin.execute(entrada, runtime)
 
         assert "archivo_historico_b64" not in resultado.data
-        assert "tope base64" in resultado.data["warnings"][0]
-        # El archivo igual se sube como artefacto.
         assert len(resultado.artifacts) == 1
 
     asyncio.run(_ir())

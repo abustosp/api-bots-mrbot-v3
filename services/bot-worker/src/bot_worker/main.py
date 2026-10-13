@@ -196,6 +196,7 @@ class JobEnvelope(BaseModel):
                             "content_types": ["application/pdf"],
                         }
                     ],
+                    "input_files": [],
                     "callback": {
                         "events_url": "https://central-api.mrbot.com.ar/internal/v1/jobs/events"
                     },
@@ -558,6 +559,10 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         import httpx
+        from mrbot_contracts.log_redaction import instalar_redaccion_de_urls
+
+        # uvicorn configura sus handlers al arrancar: se reinstala aqui.
+        instalar_redaccion_de_urls()
 
         stop = asyncio.Event()
         app.state.stop_heartbeat = stop
@@ -614,7 +619,20 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
         await _drenar_al_apagar(app, settings, supervisor, client, stop, task)
         await client.aclose()
 
-    app = FastAPI(title="mrbot bot-worker", version=settings.image_version)
+    app = FastAPI(
+        title="Worker de ejecución MrBot",
+        version=settings.image_version,
+        description=(
+            "Servicio que recibe solicitudes de ejecución, informa su avance y "
+            "resultado, y ofrece el estado operativo y las operaciones disponibles."
+        ),
+        openapi_tags=[
+            {"name": "estado", "description": "Comprobar la disponibilidad y el estado operativo del worker."},
+            {"name": "operaciones", "description": "Consultar las operaciones que puede ejecutar el worker."},
+            {"name": "schemas", "description": "Consultar los campos de entrada y ejemplos de una operación."},
+            {"name": "ejecuciones", "description": "Aceptar, consultar y cancelar ejecuciones asignadas."},
+        ],
+    )
     app.state.settings = settings
     app.state.supervisor = supervisor
     app.state.results = results
@@ -632,19 +650,27 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
         return JSONResponse(status_code=exc.status_code, content=body)
 
     # ------------------------------------------------------------- salud ---
-    @app.get("/internal/v1/health")
+    @app.get(
+        "/internal/v1/health",
+        summary="Comprobar que el worker está activo",
+        description="Confirma que el proceso responde. No consulta una ejecución ni altera su estado.",
+        tags=["estado"],
+        responses={200: {"description": "Worker activo.", "content": {"application/json": {"example": {"status": "ok"}}}}},
+    )
     async def health() -> dict[str, str]:
+        """Devuelve una señal básica de disponibilidad del worker."""
         # Liveness minima: sin auth y sin dependencias externas.
         return {"status": "ok"}
 
     @app.get(
         "/internal/v1/bots/{bot}/{operation}/schema",
         response_model=BotSchemaDocument,
-        summary="Schema documental de una operación de bot",
+        summary="Consultar los datos requeridos por una operación",
         description=(
-            "Devuelve el JSON Schema del body plano V1, los campos de "
-            "credenciales y ejemplos documentales en formato OpenAPI. "
-            "No crea ni asigna jobs."
+            "Devuelve la estructura de entrada, los campos de acceso necesarios "
+            "y un ejemplo para la combinación solicitada de bot y operación. "
+            "Los valores de acceso mostrados son ilustrativos. Esta consulta no "
+            "crea ni asigna ejecuciones."
         ),
         tags=["schemas"],
         responses={
@@ -665,14 +691,46 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
         },
     )
     async def bot_schema(bot: str, operation: str) -> dict[str, Any]:
+        """Devuelve los campos de entrada y un ejemplo documental."""
         return get_schema_document(bot, operation)
 
     # ------------------------------------------------------------ asignar ---
-    @app.post("/internal/v1/jobs", status_code=202)
+    @app.post(
+        "/internal/v1/jobs",
+        status_code=202,
+        summary="Aceptar una ejecución asignada",
+        description=(
+            "Valida la solicitud de ejecución recibida y, si el worker puede "
+            "atenderla, la incorpora a su cola local. La confirmación significa "
+            "que fue aceptada, no que haya finalizado. Si se repite la misma "
+            "asignación se devuelve la confirmación existente."
+        ),
+        tags=["ejecuciones"],
+        responses={
+            202: {"description": "Ejecución aceptada o asignación idéntica ya recibida.", "content": {"application/json": {"example": {
+                "accepted": True, "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10",
+                "attempt": 1, "lease_id": "0190c2d4-7b4a-7b60-9f28-3efc1f7b1b10",
+                "local_state": "EN_COLA", "queue_position": 0,
+                "accepted_at": "2026-10-12T16:35:00Z", "protocol_version": 1,
+            }}}},
+            403: {"description": "La asignación no fue emitida por la central o su vigencia terminó. Solicite a la central una asignación válida y no modifique sus datos.", "content": {"application/json": {"example": {"code": "NO_FIRMADO", "message": "Solo la central puede ordenar ejecuciones."}}}},
+            409: {"description": "El worker está en drenaje, la lease no coincide con una asignación previa o no dispone de capacidad. Reintente más tarde si está saturado; si hay conflicto, confirme que job, intento y lease coincidan con la asignación vigente.", "content": {"application/json": {"examples": {
+                "drenando": {"summary": "No acepta solicitudes nuevas", "value": {"code": "WORKER_DRENANDO", "message": "El worker no acepta trabajo nuevo."}},
+                "lease": {"summary": "Conflicto de asignación", "value": {"code": "LEASE_EN_CONFLICTO", "message": "El intento ya esta asignado a otra lease."}},
+                "saturado": {"summary": "Capacidad temporalmente ocupada", "value": {"code": "WORKER_SATURADO", "message": "El worker no tiene capacidad disponible.", "capacity": 4, "en_ejecucion": 4, "en_cola": 0, "retry_after_seconds": 5}},
+            }}}},
+            422: {"description": "La solicitud no puede abrirse o contiene una versión, identificador, operación, vencimiento o datos requeridos no válidos. Revise el motivo y pida a la central una asignación corregida; para credenciales requeridas, asegúrese de que estén incluidas.", "content": {"application/json": {"examples": {
+                "cuerpo": {"summary": "Campos JSON no válidos", "value": {"detail": [{"loc": ["body", "attempt"], "msg": "Input should be a valid integer", "type": "int_parsing"}]}},
+                "sobre": {"summary": "Asignación no válida", "value": {"code": "SOBRE_INVALIDO", "message": "attempt debe ser >= 1; lease vencida o sin expiracion valida"}},
+                "sellado": {"summary": "Datos de acceso no legibles", "value": {"code": "SOBRE_SELLADO_INVALIDO", "message": "La sección sellada no pudo abrirse."}},
+            }}}},
+        },
+    )
     async def accept_job(
         env: JobEnvelope,
         request: Request,
     ) -> JSONResponse:
+        """Valida y acepta una nueva ejecución asignada por la central."""
         denegado = verify_envelope_signature(request, env, scope="assign")
         if denegado is not None:
             return denegado
@@ -755,13 +813,40 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
         return JSONResponse(status_code=202, content=body)
 
     # ------------------------------------------------------------ listar ---
-    @app.get("/internal/v1/jobs")
+    @app.get(
+        "/internal/v1/jobs",
+        summary="Consultar las ejecuciones recibidas por el worker",
+        description=(
+            "Devuelve una página de ejecuciones locales. Se puede filtrar por los estados "
+            "EN_COLA, PREPARANDO, CORRIENDO, SUBIENDO, REPORTANDO y CANCELANDO, separados "
+            "por comas. El listado solo incluye datos de seguimiento, no los datos de "
+            "entrada, credenciales ni archivos."
+        ),
+        tags=["ejecuciones"],
+        responses={
+            200: {"description": "Página de ejecuciones locales y contadores de actividad.", "content": {"application/json": {"example": {
+                "items": [{
+                    "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "attempt": 1,
+                    "lease_id": "0190c2d4-7b4a-7b60-9f28-3efc1f7b1b10",
+                    "plugin": "ccma", "operation": "consultar", "local_state": "CORRIENDO",
+                    "accepted_at": "2026-10-12T16:30:00Z", "started_at": "2026-10-12T16:30:02Z",
+                    "deadline_at": "2026-10-12T16:35:00Z",
+                }], "next_cursor": None, "en_ejecucion": 1, "en_cola": 0,
+            }}}},
+            422: {"description": "El estado solicitado no está entre los estados admitidos, el cursor no contiene un desplazamiento numérico o el límite está fuera de 1 a 100. Use estados válidos, un cursor devuelto previamente y un límite dentro de ese rango.", "content": {"application/json": {"examples": {
+                "estado": {"summary": "Filtro desconocido", "value": {"detail": {"code": "FILTRO_INVALIDO", "message": "state contiene valores desconocidos."}}},
+                "cursor": {"summary": "Cursor inválido", "value": {"detail": {"code": "CURSOR_INVALIDO", "message": "cursor opaco invalido."}}},
+                "limite": {"summary": "Límite fuera de rango", "value": {"detail": [{"loc": ["query", "limit"], "msg": "Input should be less than or equal to 100", "type": "less_than_equal"}]}},
+            }}}},
+        },
+    )
     async def list_jobs(
         request: Request,
         state: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=100),
         cursor: str | None = Query(default=None),
     ) -> dict[str, Any]:
+        """Lista ejecuciones locales sin exponer sus datos sensibles."""
         states: set[str] | None = None
         if state:
             states = {s.strip().upper() for s in state.split(",") if s.strip()}
@@ -821,12 +906,35 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
         }
 
     # ----------------------------------------------------------- cancelar ---
-    @app.post("/internal/v1/jobs/{job_id}/cancel")
+    @app.post(
+        "/internal/v1/jobs/{job_id}/cancel",
+        summary="Solicitar la cancelación de una ejecución",
+        description=(
+            "Valida la solicitud de cancelación enviada por la central y pide al "
+            "worker detener la ejecución de forma cooperativa. Una solicitud para "
+            "una ejecución ya finalizada se confirma como aceptada sin iniciarla "
+            "de nuevo."
+        ),
+        tags=["ejecuciones"],
+        responses={
+            200: {"description": "La ejecución ya estaba finalizada o cancelada; se confirma la solicitud repetida.", "content": {"application/json": {"example": {
+                "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "local_state": "CANCELADO", "accepted": True
+            }}}},
+            202: {"description": "La solicitud fue aceptada y se pidió detener la ejecución.", "content": {"application/json": {"example": {
+                "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "local_state": "CANCELANDO", "accepted": True
+            }}}},
+            403: {"description": "La solicitud no fue emitida por la central o su vigencia terminó. Solicite una instrucción de cancelación vigente y no altere sus datos.", "content": {"application/json": {"example": {"code": "NO_FIRMADO", "message": "Solo la central puede ordenar ejecuciones."}}}},
+            404: {"description": "El worker no tiene registrado el intento indicado. Verifique el identificador y el número de intento de la solicitud asignada.", "content": {"application/json": {"example": {"code": "DESCONOCIDO", "message": "El worker no conoce ese intento."}}}},
+            409: {"description": "La lease enviada no corresponde al intento registrado. Use la lease vigente para ese job e intento.", "content": {"application/json": {"example": {"code": "LEASE_EN_CONFLICTO", "message": "La lease no coincide con el intento."}}}},
+            422: {"description": "El cuerpo no tiene el formato esperado para la solicitud de cancelación. Corrija los campos señalados y solicite a la central una instrucción válida.", "content": {"application/json": {"example": {"detail": [{"loc": ["body", "attempt"], "msg": "Input should be a valid integer", "type": "int_parsing"}]}}}},
+        },
+    )
     async def cancel_job(
         job_id: str,
         body: CancelIn,
         request: Request,
     ) -> JSONResponse:
+        """Solicita detener cooperativamente el intento indicado."""
         try:
             verify_assignment(
                 getattr(request.app.state, "central_verify_key", None),
@@ -898,10 +1006,28 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
         )
 
     # ------------------------------------------------------------- estado ---
-    @app.get("/internal/v1/status")
+    @app.get(
+        "/internal/v1/status",
+        summary="Consultar el estado operativo del worker",
+        description=(
+            "Informa si el worker está disponible, en drenaje o sin capacidad, "
+            "junto con la actividad reciente, la versión y los recursos observados."
+        ),
+        tags=["estado"],
+        responses={200: {"description": "Estado operativo actual.", "content": {"application/json": {"example": {
+            "worker_id": "10.0.0.11:8080", "state": "SANO", "accepting_jobs": True,
+            "en_ejecucion": 1, "en_cola": 0, "capacity": 4, "available_capacity": 3,
+            "protocol_version": 1, "image_version": "3.2.1", "bots_supported": ["ccma@3.0.0"],
+            "resources": {"memory_available_bytes": 2147483648, "memory_current_bytes": 1073741824,
+                "shm_available_bytes": 67108864, "chromium_processes": 1, "pids_current": 12, "cpu_count": 8},
+            "counters_since_start": {"accepted": 2, "completed": 1},
+            "uptime_seconds": 3600, "observed_at": "2026-10-12T16:35:00Z",
+        }}}}},
+    )
     async def status(
         request: Request
     ) -> dict[str, Any]:
+        """Resume capacidad, actividad y disponibilidad actual."""
         sup: JobSupervisor = request.app.state.supervisor
         st: WorkerConfig = request.app.state.settings
         in_flight = sup.en_ejecucion
@@ -932,10 +1058,25 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
         }
 
     # --------------------------------------------------------------- bots ---
-    @app.get("/internal/v1/bots")
+    @app.get(
+        "/internal/v1/bots",
+        summary="Consultar las operaciones disponibles",
+        description="Devuelve las operaciones que el worker puede atender y la versión informada.",
+        tags=["operaciones"],
+        responses={200: {"description": "Listado de bots y operaciones disponibles.", "content": {"application/json": {"example": {
+            "protocol_version": 1, "image_version": "3.2.1",
+            "bots": [{
+                "nombre": "ccma", "version": "3.0.0", "operaciones": ["consultar"],
+                "timeout_por_defecto_seconds": 900, "requiere_credenciales_fiscales": True,
+                "requiere_proxy": False, "requiere_captcha": False,
+                "costo_creditos_sugerido": 2,
+            }],
+        }}}}},
+    )
     async def bots(
         request: Request
     ) -> dict[str, Any]:
+        """Devuelve el catálogo funcional que ofrece el worker."""
         st: WorkerConfig = request.app.state.settings
         return {
             "protocol_version": PROTOCOL_VERSION,
@@ -1213,23 +1354,28 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 if env.input_files:
                     from bot_worker.runtime.input_files import (
                         descargar_entradas,
-                        descargar_entradas_b64,
+                        descargar_entradas_por_campo,
                     )
 
-                    en_b64 = [f for f in env.input_files if f.get("modo") == "b64"]
-                    en_disco = [f for f in env.input_files if f.get("modo") != "b64"]
+                    en_lista = [
+                        item for item in env.input_files
+                        if item.get("campo") == "archivos"
+                    ]
+                    en_campos = [
+                        item for item in env.input_files
+                        if item.get("campo") != "archivos"
+                    ]
                     nuevo_payload = dict(env.payload)
-                    if en_disco:
+                    if en_lista:
                         nombres_entrada = await descargar_entradas(
-                            en_disco, workdir, client
+                            en_lista, workdir, client
                         )
-                        # Los zip se expanden: el payload pasa a listar los
-                        # archivos reales que quedaron en work_dir.
-                        campo_entrada = str(en_disco[0].get("campo") or "archivos")
-                        nuevo_payload[campo_entrada] = nombres_entrada
-                    if en_b64:
+                        nuevo_payload["archivos"] = nombres_entrada
+                    if en_campos:
                         nuevo_payload.update(
-                            await descargar_entradas_b64(en_b64, client)
+                            await descargar_entradas_por_campo(
+                                en_campos, workdir, client
+                            )
                         )
                     env.payload = nuevo_payload
                 validated = await plugin.validate(validation_payload(env))
@@ -1558,6 +1704,10 @@ def run(argv: list[str] | None = None) -> None:
 
     settings = parse_args(argv)
     logging.basicConfig(level=settings.log_level)
+    # Ninguna URL (prefirmada o no) puede salir en los logs: solo bucket/clave.
+    from mrbot_contracts.log_redaction import instalar_redaccion_de_urls
+
+    instalar_redaccion_de_urls()
     extra: dict[str, Any] = {}
     if settings.tls_enabled:
         from bot_worker.security.tls import TlsPaths, uvicorn_tls_kwargs

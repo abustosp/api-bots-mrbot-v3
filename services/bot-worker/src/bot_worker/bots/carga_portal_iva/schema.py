@@ -7,15 +7,13 @@ Porta la validacion de V2
 - Al menos un par completo de TXT (ventas: comprobantes+alicuotas, o
   compras: comprobantes+alicuotas) o un CSV de apertura (CF, CF
   restitucion, DF, DF restitucion); los pares incompletos se rechazan.
-- Los archivos viajan como base64 en el payload (el worker no lee
-  rutas del cliente): se validan tamano y contenido minimo antes del
-  navegador y se materializan bajo ``work_dir`` en el plugin.
+- Cada archivo se referencia por ``object_key`` subido previamente. El
+  worker recibe el nombre local de cada archivo y valida su contenido antes
+  de abrir el navegador.
 """
 
 from __future__ import annotations
 
-import base64
-import binascii
 import re
 from datetime import datetime
 from typing import Any, Literal
@@ -34,14 +32,14 @@ PERIODO_PATTERN = r"^\d{6}$"
 MAX_ARCHIVO_BYTES = 20_971_520
 
 CAMPOS_ARCHIVO = (
-    "liv_cbte_b64",
-    "liv_alicuota_b64",
-    "lic_cbte_b64",
-    "lic_alicuota_b64",
-    "csv_cf_b64",
-    "csv_cf_restitucion_b64",
-    "csv_df_b64",
-    "csv_df_restitucion_b64",
+    "liv_cbte_path",
+    "liv_alicuota_path",
+    "lic_cbte_path",
+    "lic_alicuota_path",
+    "csv_cf_path",
+    "csv_cf_restitucion_path",
+    "csv_df_path",
+    "csv_df_restitucion_path",
 )
 
 
@@ -113,14 +111,14 @@ class CargaPortalIvaInput(_Base):
     regimen_turiva: bool = False
     bienes_usados: bool = False
     ninguna_anteriores: bool = True
-    liv_cbte_b64: str | None = None
-    liv_alicuota_b64: str | None = None
-    lic_cbte_b64: str | None = None
-    lic_alicuota_b64: str | None = None
-    csv_cf_b64: str | None = None
-    csv_cf_restitucion_b64: str | None = None
-    csv_df_b64: str | None = None
-    csv_df_restitucion_b64: str | None = None
+    liv_cbte_path: str | None = Field(default=None, min_length=1)
+    liv_alicuota_path: str | None = Field(default=None, min_length=1)
+    lic_cbte_path: str | None = Field(default=None, min_length=1)
+    lic_alicuota_path: str | None = Field(default=None, min_length=1)
+    csv_cf_path: str | None = Field(default=None, min_length=1)
+    csv_cf_restitucion_path: str | None = Field(default=None, min_length=1)
+    csv_df_path: str | None = Field(default=None, min_length=1)
+    csv_df_restitucion_path: str | None = Field(default=None, min_length=1)
 
     @field_validator("representado_cuit", mode="before")
     @classmethod
@@ -132,34 +130,30 @@ class CargaPortalIvaInput(_Base):
     def _normalizar_periodo(cls, valor: Any) -> str:
         return validar_periodo(valor)
 
-    @field_validator(*CAMPOS_ARCHIVO, mode="before")
-    @classmethod
-    def _validar_archivo(cls, valor: Any, info: Any) -> Any:
-        if valor is None:
-            return None
-        decodificar_archivo(valor, info.field_name)
-        return valor
-
     @model_validator(mode="before")
     @classmethod
-    def _chequear_carga(cls, datos: Any) -> Any:
+    def _chequear_referencias(cls, datos: Any) -> Any:
         if not isinstance(datos, dict):
             return datos
-        ventas = bool(datos.get("liv_cbte_b64") and datos.get("liv_alicuota_b64"))
-        compras = bool(datos.get("lic_cbte_b64") and datos.get("lic_alicuota_b64"))
+        if any("b64" in str(key).lower() or "base64" in str(key).lower() for key in datos):
+            raise ValueError(
+                "Los archivos deben subirse antes con POST /api/v3/uploads y enviarse por object_key."
+            )
+        ventas = bool(datos.get("liv_cbte_path") and datos.get("liv_alicuota_path"))
+        compras = bool(datos.get("lic_cbte_path") and datos.get("lic_alicuota_path"))
         csvs = any(
             datos.get(c)
             for c in (
-                "csv_cf_b64",
-                "csv_cf_restitucion_b64",
-                "csv_df_b64",
-                "csv_df_restitucion_b64",
+                "csv_cf_path",
+                "csv_cf_restitucion_path",
+                "csv_df_path",
+                "csv_df_restitucion_path",
             )
         )
         pares_rotos = (
-            bool(datos.get("liv_cbte_b64")) != bool(datos.get("liv_alicuota_b64"))
+            bool(datos.get("liv_cbte_path")) != bool(datos.get("liv_alicuota_path"))
         ) or (
-            bool(datos.get("lic_cbte_b64")) != bool(datos.get("lic_alicuota_b64"))
+            bool(datos.get("lic_cbte_path")) != bool(datos.get("lic_alicuota_path"))
         )
         if pares_rotos:
             raise ValueError(
@@ -195,7 +189,10 @@ def esquema_entrada() -> dict[str, Any]:
             "bienes_usados": {"type": "boolean"},
             "ninguna_anteriores": {"type": "boolean"},
             **{
-                campo: {"type": "string", "contentEncoding": "base64"}
+                campo: {
+                    "type": "string",
+                    "description": "Nombre local del archivo recibido por object_key de POST /api/v3/uploads.",
+                }
                 for campo in CAMPOS_ARCHIVO
             },
         },
