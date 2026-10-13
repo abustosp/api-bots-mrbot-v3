@@ -22,7 +22,7 @@ import hmac
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Header, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
@@ -463,34 +463,279 @@ def ensure_meta(job_id: str, user_id: str) -> dict:
 
 
 def project_job(job, meta: dict | None = None) -> dict:
-    """Proyecta un ``Job`` a la forma V2 ``JobStatusResponse`` (plan 02 §3.6)."""
-    from central_api.store import utcnow
+    """Proyecta un job con las claves/semántica V2 y los detalles nuevos V3.
 
+    ``status_detail`` conserva el estado interno. ``status`` mantiene los
+    valores que esperan clientes V2: una asignación sigue siendo pendiente y
+    un fallo se representa como ``COMPLETO`` más ``result=ERROR``.
+    """
     meta = meta if meta is not None else JOB_META.get(job.id, {})
-    created = job.created_at.isoformat().replace("+00:00", "Z") if job.created_at else None
-    result = job.result or {}
-    status = job.status
-    outcome = result.get("result") if isinstance(result, dict) else None
-    if status == "FALLIDO":
+    actual_status = str(getattr(job, "status", "PENDIENTE"))
+    result_data = getattr(job, "result", None)
+    result_data = result_data if isinstance(result_data, dict) else {}
+    outcome = result_data.get("result")
+    if actual_status == "FALLIDO":
         outcome = "ERROR"
-    return {
-        "job_id": job.id,
-        "status": status,
+    if outcome not in ("OK", "PARCIAL", "ERROR"):
+        outcome = None
+
+    bot = str(getattr(job, "bot", ""))
+    raw_operation = str(getattr(job, "operation", ""))
+    operation, operation_legacy = _project_operation(bot, raw_operation)
+    public_status = {
+        "ASIGNADO": "PENDIENTE",
+        "FALLIDO": "COMPLETO",
+    }.get(actual_status, actual_status)
+
+    raw_error = meta.get("error") or result_data.get("error")
+    if outcome == "ERROR" and not raw_error:
+        raw_error = {"error_code": "unexpected"}
+    error, error_detail = _project_job_error(raw_error, outcome, meta)
+
+    started_at = meta.get("started_at") or getattr(job, "started_at", None)
+    finished_at = meta.get("finished_at") or getattr(job, "finished_at", None)
+    if actual_status not in ("COMPLETO", "FALLIDO", "CANCELADO"):
+        finished_at = None
+    projected = {
+        "job_id": str(getattr(job, "id", "")),
+        "status": public_status,
+        "status_detail": actual_status,
         "result": outcome,
-        "bot": job.bot,
-        "operation": job.operation,
-        "created_at": created,
-        "started_at": meta.get("started_at"),
-        "finished_at": meta.get("finished_at") or (
-            utcnow().isoformat().replace("+00:00", "Z")
-            if status in ("COMPLETO", "FALLIDO", "CANCELADO") else None
-        ),
+        "bot": bot,
+        "operation": operation,
+        "created_at": _iso_utc(getattr(job, "created_at", None)),
+        "started_at": _iso_utc(started_at),
+        # No se inventa la fecha de terminación si la metadata no la guardó.
+        "finished_at": _iso_utc(finished_at),
         "cancel_reason": meta.get("cancel_reason"),
-        "cancelled_by": meta.get("cancelled_by"),
-        "error": meta.get("error") or result.get("error") if isinstance(result, dict) else None,
-        "files": meta.get("files", []),
-        "data": meta.get("data") if status == "COMPLETO" else None,
+        "cancelled_by": _legacy_cancelled_by(meta.get("cancelled_by")),
+        "error": error,
+        "error_detail": error_detail,
+        "files": _project_job_files(meta.get("files")),
+        "data": meta.get("data") if actual_status == "COMPLETO" else None,
     }
+    if operation_legacy is not None:
+        projected["operation_legacy"] = operation_legacy
+    return projected
+
+
+def _iso_utc(value: Any) -> str | None:
+    """Serializa datetimes como ISO-8601 UTC terminado en ``Z``."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    elif isinstance(value, datetime):
+        parsed = value
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# Nombre de operacion que publicaba V2 cuando no se deduce de la ruta publica.
+_OPERACION_LEGACY_V2: dict[tuple[str, str], str] = {
+    ("vep_ccma", "generar"): "consulta",
+    ("comprobantes", "consultar"): "consulta",
+    ("comprobantes", "historial"): "historial",
+    ("comprobantes", "solicitar"): "solicitar_consulta",
+    ("mis_comprobantes", "historial"): "historial",
+    ("libros_portal_iva", "descargar_libros"): "consulta",
+}
+
+
+def _project_operation(bot: str, operation: str) -> tuple[str, str | None]:
+    """Normaliza nombres históricos de operación para la respuesta pública."""
+    legado = _OPERACION_LEGACY_V2.get((bot, operation))
+    if legado:
+        return operation, legado
+    if bot == "apoc" and operation in ("consulta", "consultar"):
+        # La ruta pública es GET /apoc/consulta/{cuit} (sin alias en
+        # BOT_ROUTE_ALIASES): se publica igualmente el nombre histórico.
+        return "consultar", "consulta"
+    if bot == "consulta_cuit" and operation in ("consulta", "consultar"):
+        # Este nombre histórico está registrado en OPERATIONS, aunque la ruta
+        # V1 correspondiente usa el sufijo ``individual``.
+        return "consultar", "consulta"
+    try:
+        # Import local evita un ciclo durante la creación de los routers.
+        from central_api.api.bot_compat import BOT_ROUTE_ALIASES
+    except ImportError:  # pragma: no cover - fallback de importación parcial
+        return operation, None
+    for path, alias_bot, canonical in BOT_ROUTE_ALIASES:
+        if alias_bot != bot:
+            continue
+        legacy = path.rsplit("/", 1)[-1]
+        if operation in (canonical, legacy):
+            return canonical, legacy if legacy != canonical else None
+    return operation, None
+
+
+_JOB_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
+    "validation": (
+        "Algunos datos enviados no tienen el formato esperado.",
+        "Revise los campos de entrada y vuelva a enviar la solicitud.",
+    ),
+    "authentication": (
+        "Los datos de acceso no fueron aceptados.",
+        "Revise las credenciales de la cuenta e inténtelo nuevamente.",
+    ),
+    "invalid_credentials": (
+        "Los datos de acceso no fueron aceptados.",
+        "Revise las credenciales de la cuenta e inténtelo nuevamente.",
+    ),
+    "external_timeout": (
+        "El servicio consultado tardó demasiado en responder.",
+        "Inténtelo nuevamente más tarde.",
+    ),
+    "timeout": (
+        "El servicio consultado tardó demasiado en responder.",
+        "Inténtelo nuevamente más tarde.",
+    ),
+    "navigation": (
+        "No se pudo acceder a la información solicitada.",
+        "Verifique los datos de entrada e inténtelo nuevamente.",
+    ),
+    "query": (
+        "No se encontró la información solicitada.",
+        "Verifique los filtros y el período consultado.",
+    ),
+    "download": (
+        "No se pudo obtener el archivo solicitado.",
+        "Confirme que siga disponible y vuelva a intentarlo.",
+    ),
+    "processing": (
+        "No se pudo procesar la solicitud.",
+        "Revise los datos enviados e inténtelo nuevamente.",
+    ),
+    "storage": (
+        "No se pudo guardar o recuperar el resultado.",
+        "Inténtelo nuevamente más tarde.",
+    ),
+    "service_not_enabled": (
+        "El servicio no está disponible temporalmente.",
+        "Inténtelo nuevamente más tarde.",
+    ),
+    "infrastructure_error": (
+        "El servicio no está disponible temporalmente.",
+        "Inténtelo nuevamente más tarde.",
+    ),
+    "credentials_rejected": (
+        "El portal rechazó la clave o el CUIT de acceso.",
+        "Verifique el CUIT y la clave fiscal, y que la relación con el representado esté vigente.",
+    ),
+    "captcha_unsolvable": (
+        "No se pudo superar la verificación de seguridad del portal.",
+        "Inténtelo nuevamente en unos minutos.",
+    ),
+    "target_unavailable": (
+        "El portal no respondió como se esperaba o no se encontró el dato solicitado.",
+        "Verifique que el CUIT del representado y el período existan y estén habilitados, y reintente más tarde.",
+    ),
+    "deadline_exceeded": (
+        "La consulta superó el tiempo máximo de ejecución.",
+        "Reduzca el rango de fechas o la cantidad de datos solicitados e inténtelo nuevamente.",
+    ),
+    "chromium_crashed": (
+        "La ejecución se interrumpió por un problema interno.",
+        "Inténtelo nuevamente; si el problema continúa, contacte al soporte.",
+    ),
+    "worker_oom": (
+        "La ejecución requirió más recursos de los disponibles.",
+        "Reduzca el rango de datos solicitado e inténtelo nuevamente.",
+    ),
+    "artifact_upload_failed": (
+        "No se pudieron guardar los archivos generados.",
+        "Inténtelo nuevamente más tarde.",
+    ),
+    "cancellation_requested": (
+        "La ejecución fue cancelada.",
+        "Cree una nueva solicitud si todavía necesita el resultado.",
+    ),
+    "envelope_invalid": (
+        "Los datos enviados no son válidos para esta operación.",
+        "Revise los campos obligatorios, formatos y valores permitidos de la operación y vuelva a enviarla.",
+    ),
+    "internal": (
+        "Ocurrió un problema interno al completar la solicitud.",
+        "Inténtelo nuevamente; si el problema continúa, contacte al soporte.",
+    ),
+    "unexpected": (
+        "Ocurrió un problema al completar la solicitud.",
+        "Inténtelo nuevamente; si el problema continúa, contacte al soporte.",
+    ),
+}
+
+
+def _project_job_error(
+    value: Any, outcome: str | None, meta: dict
+) -> tuple[list[str] | None, dict[str, str] | None]:
+    """Traduce errores a mensajes españoles seguros y conserva detalle útil."""
+    if outcome == "OK" or value in (None, {}, [], ""):
+        return None, None
+    if not isinstance(value, (dict, str, list)):
+        value = {"error_code": "unexpected"}
+    if isinstance(value, dict):
+        candidate = (
+            value.get("error_code") or value.get("category")
+            or value.get("error_category") or value.get("code")
+        )
+        correlation = value.get("correlation_id") or meta.get("correlation_id")
+    else:
+        candidate = value if isinstance(value, str) else None
+        correlation = meta.get("correlation_id")
+    code = str(candidate or "unexpected").strip().lower()
+    if code not in _JOB_ERROR_MESSAGES:
+        code = "unexpected"
+    cause, message = _JOB_ERROR_MESSAGES[code]
+    detail = {"error_code": code, "cause": cause, "message": message}
+    if isinstance(correlation, str) and 0 < len(correlation) <= 128:
+        detail["correlation_id"] = correlation
+    return [message], detail
+
+
+def _project_job_files(value: Any) -> list[dict[str, Any]]:
+    """Devuelve siempre listas de archivos con campos legacy y metadata V3."""
+    if not isinstance(value, list):
+        return []
+    files: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, str):
+            filename = item.rsplit("/", 1)[-1] or "archivo"
+            direct_url = item if item.startswith(("http://", "https://")) else None
+            item = {"name": filename, "url": direct_url}
+        if not isinstance(item, dict):
+            continue
+        filename = item.get("filename") or item.get("name") or "archivo"
+        size = item.get("size")
+        if size is None:
+            size = item.get("size_bytes")
+        # V2 schema requires a string; use the historical empty-string value
+        # when storage cannot provide a direct presigned URL.
+        url = item.get("url") or ""
+        files.append({
+            "name": item.get("name") or filename,
+            "url": url,
+            "size": size,
+            "artifact_id": item.get("artifact_id"),
+            "filename": filename,
+            "content_type": item.get("content_type"),
+            "size_bytes": item.get("size_bytes") if item.get("size_bytes") is not None else size,
+            "sha256": item.get("sha256"),
+            "download_url": item.get("download_url"),
+            "url_expires_in": item.get("url_expires_in") or (3600 if url else None),
+        })
+    return files
+
+
+def _legacy_cancelled_by(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.lower()
+    return value
 
 
 __all__ = [

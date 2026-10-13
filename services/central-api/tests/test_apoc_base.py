@@ -34,7 +34,7 @@ def setup_cache(tmp_path, monkeypatch):
     path = tmp_path / "apoc.txt"
     settings = SimpleNamespace(apoc_base_url="https://fake.invalid/data", apoc_base_path=str(path), apoc_refresh_interval_days=7,
                                proxy_enabled=False, proxy_host="", proxy_mode="standard", proxy_username="", proxy_password="", proxy_country="ar",
-                               capmonster_arca_key="", capmonster_srt_key="", cuit_service_base_url="", cuit_service_masiva_url="", cuit_service_usuario="", cuit_service_api_key="")
+                               capmonster_api_key="", capmonster_arca_key="", capmonster_srt_key="", cuit_service_base_url="", cuit_service_masiva_url="", cuit_service_usuario="", cuit_service_api_key="")
     monkeypatch.setattr(apoc_base, "get_settings", lambda: settings)
     monkeypatch.setattr(dispatcher, "get_settings", lambda: settings)
     monkeypatch.setattr(apoc_base, "_cached_text", None)
@@ -202,3 +202,94 @@ def test_refresh_loop_espera_la_semana_con_cache_al_dia(setup_cache, monkeypatch
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(apoc_base.refresh_loop())
     assert dormido == [7 * 86400]
+
+
+def test_una_sola_clave_de_captcha_alimenta_arca_y_srt(monkeypatch):
+    from types import SimpleNamespace
+
+    from central_api.scheduler import dispatcher
+
+    monkeypatch.setattr(
+        dispatcher, "get_settings",
+        lambda: SimpleNamespace(
+            capmonster_api_key="clave-unica", capmonster_arca_key="", capmonster_srt_key="",
+            cuit_service_base_url="", cuit_service_masiva_url="",
+            cuit_service_usuario="", cuit_service_api_key="",
+            proxy_enabled=False, proxy_host="",
+        ),
+    )
+    captcha = dispatcher.provisioned_section("ccma")["captcha"]
+    assert captcha["arca_key"] == "clave-unica"
+    assert captcha["srt_key"] == "clave-unica"
+
+
+def test_la_clave_por_portal_tiene_prioridad_si_se_define(monkeypatch):
+    from types import SimpleNamespace
+
+    from central_api.scheduler import dispatcher
+
+    monkeypatch.setattr(
+        dispatcher, "get_settings",
+        lambda: SimpleNamespace(
+            capmonster_api_key="comun", capmonster_arca_key="solo-arca", capmonster_srt_key="",
+            cuit_service_base_url="", cuit_service_masiva_url="",
+            cuit_service_usuario="", cuit_service_api_key="",
+            proxy_enabled=False, proxy_host="",
+        ),
+    )
+    captcha = dispatcher.provisioned_section("ccma")["captcha"]
+    assert captcha["arca_key"] == "solo-arca" and captcha["srt_key"] == "comun"
+
+
+def _ajustes(**extra):
+    from types import SimpleNamespace
+
+    base = dict(
+        capmonster_api_key="", capmonster_arca_key="", capmonster_srt_key="",
+        cuit_service_base_url="", cuit_service_masiva_url="",
+        cuit_service_usuario="", cuit_service_api_key="",
+        proxy_enabled=False, proxy_host="",
+        proxy_bots="certificado_mipyme", proxy_bots_host="http://pr.oxylabs.io:7777",
+        proxy_bots_username="cliente", proxy_bots_password="secreto", proxy_bots_country="ar",
+    )
+    base.update(extra)
+    return SimpleNamespace(**base)
+
+
+def test_proxy_dedicado_solo_aplica_a_los_bots_listados(monkeypatch):
+    from central_api.scheduler import dispatcher
+
+    monkeypatch.setattr(dispatcher, "get_settings", lambda: _ajustes())
+    con = dispatcher.provisioned_section("certificado_mipyme")["proxy"]
+    assert con["host"] == "http://pr.oxylabs.io:7777"
+    assert con["username"] == "customer-cliente-cc-AR"
+    assert dispatcher.provisioned_section("ccma")["proxy"] is None
+
+
+def test_sin_proxy_dedicado_configurado_no_cambia_el_comportamiento(monkeypatch):
+    from central_api.scheduler import dispatcher
+
+    monkeypatch.setattr(dispatcher, "get_settings", lambda: _ajustes(proxy_bots_host=""))
+    assert dispatcher.provisioned_section("certificado_mipyme")["proxy"] is None
+
+
+def test_proxy_datacenter_elige_un_puerto_del_rango_y_usa_prefijo_user(monkeypatch):
+    from central_api.scheduler import dispatcher
+
+    monkeypatch.setattr(
+        dispatcher, "get_settings",
+        lambda: _ajustes(
+            proxy_bots_host="http://dc.oxylabs.io", proxy_bots_username="cliente",
+            proxy_bots_port_min=8001, proxy_bots_port_max=8050,
+        ),
+    )
+    vistos = set()
+    for _ in range(40):
+        p = dispatcher.provisioned_section("certificado_mipyme")["proxy"]
+        assert p["mode"] == "datacenter"
+        assert p["username"] == "user-cliente"
+        puerto = int(p["host"].rsplit(":", 1)[1])
+        assert 8001 <= puerto <= 8050
+        assert p["host"].startswith("http://dc.oxylabs.io:")
+        vistos.add(puerto)
+    assert len(vistos) > 1

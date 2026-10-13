@@ -187,35 +187,50 @@ MAX_WORKER_CAPACITY = 10  # W-2: tope duro de 10 ejecuciones
 
 
 class RegisterBody(BaseModel):
-    advertised_url: str = Field(description="URL base del worker, p.ej. http://10.0.0.11:8080")
-    capacity: int = 5
-    capabilities: list[str] = Field(default_factory=list)
-    build_version: str = ""
-    app_version: str = ""
-    image_version: str = ""
-    image_digest: str = ""
-    image: dict = Field(default_factory=dict)
-    protocol_version: int = PROTOCOL_VERSION
+    advertised_url: str = Field(
+        description="Dirección de red anunciada por el worker, con esquema y puerto.",
+        examples=["http://10.0.0.11:8080"],
+    )
+    capacity: int = Field(
+        default=5, description="Cantidad máxima de ejecuciones simultáneas anunciada.",
+        examples=[4],
+    )
+    capabilities: list[str] = Field(
+        default_factory=list, description="Operaciones o capacidades funcionales disponibles.",
+        examples=[["ccma.consultar", "arca.presentar"]],
+    )
+    build_version: str = Field(default="", description="Versión informada por la instancia.", examples=["3.2.1"])
+    app_version: str = Field(default="", description="Versión de la aplicación del worker.", examples=["3.2.1"])
+    image_version: str = Field(default="", description="Versión de la imagen ejecutada.", examples=["3.2.1"])
+    image_digest: str = Field(default="", description="Identificador de la versión desplegada.", examples=["sha256:0123abcd"])
+    image: dict = Field(default_factory=dict, description="Información complementaria de la versión anunciada.", examples=[{"version": "3.2.1"}])
+    protocol_version: int = Field(
+        default=PROTOCOL_VERSION,
+        description="Versión del formato de comunicación aceptada por el worker.",
+        examples=[1],
+    )
     instance_nonce: str = Field(
         default="",
         description="UUID que cambia en cada arranque; distingue sesiones del worker",
+        examples=["0190c2d4-7b4a-7b61-9f28-3efc1f7b1b10"],
     )
     sealed_pubkey_pem: str = Field(
         default="",
-        description="RSA pública efímera del worker (PEM) para el sobre sellado",
+        description="Clave pública temporal para que solo este worker pueda consultar instrucciones protegidas.",
+        examples=["CLAVE_PUBLICA_DE_EJEMPLO"],
     )
 
 
 class HeartbeatBody(BaseModel):
-    status: str = "SANO"
-    capacity: int = 5
-    en_ejecucion: int = 0
-    en_cola_local: int = 0
-    build_version: str = ""
-    app_version: str = ""
-    image_version: str = ""
-    image_digest: str = ""
-    image: dict = Field(default_factory=dict)
+    status: str = Field(default="SANO", description="Estado operativo actual del worker.", examples=["SANO"])
+    capacity: int = Field(default=5, description="Cantidad máxima de ejecuciones simultáneas.", examples=[4])
+    en_ejecucion: int = Field(default=0, description="Ejecuciones que están procesándose.", examples=[1])
+    en_cola_local: int = Field(default=0, description="Ejecuciones aceptadas que esperan iniciar.", examples=[2])
+    build_version: str = Field(default="", description="Versión informada por la instancia.", examples=["3.2.1"])
+    app_version: str = Field(default="", description="Versión de la aplicación del worker.", examples=["3.2.1"])
+    image_version: str = Field(default="", description="Versión de la imagen ejecutada.", examples=["3.2.1"])
+    image_digest: str = Field(default="", description="Identificador de la versión desplegada.", examples=["sha256:0123abcd"])
+    image: dict = Field(default_factory=dict, description="Información complementaria de la versión anunciada.", examples=[{"version": "3.2.1"}])
 
 
 def _reported_version(body: RegisterBody | HeartbeatBody) -> str:
@@ -236,8 +251,36 @@ def _reported_digest(body: RegisterBody | HeartbeatBody) -> str:
     return str(body.image_digest or image.get("digest") or "").strip()
 
 
-@router.post("/workers/register")
+@router.post(
+    "/workers/register",
+    summary="Registrar una instancia de worker",
+    description=(
+        "Anuncia la dirección, capacidad, versión y capacidades disponibles de "
+        "una instancia. La dirección debe pertenecer al inventario permitido. "
+        "Si la versión de protocolo no coincide, la solicitud responde con HTTP "
+        "200 y `accepted: false`; actualice la versión compatible antes de volver "
+        "a registrar el worker."
+    ),
+    responses={
+        200: {"description": "Registro completado o rechazado por incompatibilidad de protocolo.", "content": {"application/json": {"examples": {
+            "aceptado": {"summary": "Worker registrado", "value": {
+                "accepted": True, "node": "10.0.0.11:8080",
+                "worker_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10",
+                "heartbeat_interval_seconds": 15, "protocol_version": 1,
+                "service_token": "token-de-servicio", "assignment_verify_key_pem": "CLAVE_DE_VERIFICACION_DE_EJEMPLO",
+            }},
+            "incompatible": {"summary": "Protocolo incompatible", "value": {
+                "accepted": False, "node": "10.0.0.11:8080", "worker_id": None,
+                "protocol_version": 1, "motivo": "protocolo incompatible",
+            }},
+        }}}},
+        400: {"description": "La dirección anunciada no es una dirección HTTP o HTTPS válida con host y puerto. Envíe `advertised_url` con formato `http(s)://host:puerto`.", "content": {"application/json": {"example": {"detail": "advertised_url debe incluir ip:port"}}}},
+        403: {"description": "El nodo no figura en el inventario de workers ni en la lista administrativa. Agregue la dirección al inventario permitido y repita el registro.", "content": {"application/json": {"example": {"detail": "worker no inventariado (WORKER_NODES ni panel admin)"}}}},
+        422: {"description": "Falta un campo requerido o alguno de los valores no tiene el tipo JSON esperado. Corrija el campo indicado y vuelva a enviar el registro.", "content": {"application/json": {"example": {"detail": [{"loc": ["body", "advertised_url"], "msg": "Field required", "type": "missing"}]}}}},
+    },
+)
 async def register_worker(body: RegisterBody) -> dict:
+    """Registra o actualiza la presencia y capacidad de un worker."""
     try:
         node = node_from_url(body.advertised_url)
     except ValueError as exc:
@@ -358,8 +401,24 @@ async def _sanar_worker_id(entry: WorkerEntry, node: str, capacity: int) -> None
         pass
 
 
-@router.post("/workers/{worker_id}/heartbeat")
+@router.post(
+    "/workers/{worker_id}/heartbeat",
+    summary="Actualizar el estado de un worker",
+    description=(
+        "Registra el estado operativo, la capacidad y la actividad reciente del "
+        "worker. `worker_id` puede ser el identificador devuelto al registrarlo "
+        "o la dirección `host:puerto` anunciada por la instancia."
+    ),
+    responses={
+        200: {"description": "Estado actualizado.", "content": {"application/json": {"example": {
+            "ok": True, "node": "10.0.0.11:8080", "status": "SANO"
+        }}}},
+        404: {"description": "El identificador no corresponde a un worker conocido ni recuperable. Registre el worker o compruebe el identificador enviado por el registro.", "content": {"application/json": {"example": {"detail": "worker no registrado"}}}},
+        422: {"description": "El cuerpo del latido contiene un valor con formato o tipo incorrecto. Revise el campo señalado y vuelva a informar el estado.", "content": {"application/json": {"example": {"detail": [{"loc": ["body", "capacity"], "msg": "Input should be a valid integer", "type": "int_parsing"}]}}}},
+    },
+)
 async def worker_heartbeat(worker_id: str, body: HeartbeatBody) -> dict:
+    """Actualiza el último estado y la capacidad informados por el worker."""
     # La ruta acepta el UUID pleno o el nodo "ip:port" (compatibilidad).
     node = await _nodo_desde_ruta(worker_id)
     entry = WORKERS.get(node)

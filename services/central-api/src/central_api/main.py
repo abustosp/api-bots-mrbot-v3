@@ -31,6 +31,39 @@ from central_api.internal.router import router as internal_router
 from central_api.settings import get_settings
 
 APP_VERSION = "0.1.0"
+APP_DESCRIPTION = (
+    "Servicio central para crear y consultar ejecuciones de trámites, "
+    "administrar cuentas y archivos asociados, y coordinar el procesamiento "
+    "de las solicitudes. Las operaciones de clientes "
+    "requieren autenticación con las credenciales de la cuenta."
+)
+OPENAPI_TAGS = [
+    {"name": "bots", "description": "Crear ejecuciones de bots y consultar las operaciones disponibles."},
+    {"name": "jobs", "description": "Consultar, cancelar y revisar los resultados de las ejecuciones."},
+    {"name": "cuenta", "description": "Consultar y administrar la cuenta del usuario autenticado."},
+    {"name": "uploads", "description": "Gestionar la recepción de archivos de entrada asociados a solicitudes."},
+    {"name": "utilidades", "description": "Consultar información auxiliar y funciones de apoyo de la API."},
+    {"name": "seguridad", "description": "Consultar información pública necesaria para proteger las solicitudes."},
+    {"name": "apoc", "description": "Consultar información de operaciones vinculadas a APoc."},
+    {"name": "Scrapping PDF", "description": "Consultar y procesar documentos PDF enviados para extracción de información."},
+    {"name": "VEP", "description": "Preparar y consultar información de volantes electrónicos de pago."},
+    {"name": "usuarios", "description": "Gestionar usuarios y sus datos de acceso."},
+    {"name": "schemas", "description": "Consultar los campos y ejemplos disponibles para una operación."},
+    {"name": "internal-workers", "description": "Registrar workers y mantener actualizada su disponibilidad."},
+    {"name": "internal-events", "description": "Recibir avisos de avance y cambios de estado de las ejecuciones."},
+    {"name": "internal-jobs", "description": "Recibir resultados finales y archivos generados por los workers."},
+    {"name": "internal-artifacts", "description": "Autorizar subidas de archivos y recibir acuses de cancelación."},
+    {"name": "admin", "description": "Administrar la configuración general del servicio."},
+    {"name": "admin-workers", "description": "Administrar y monitorear las instancias de worker."},
+    {"name": "admin-users", "description": "Administrar usuarios y permisos de acceso."},
+    {"name": "admin-reporting", "description": "Consultar informes de actividad y resultados."},
+    {"name": "admin-retention", "description": "Consultar y administrar la conservación de datos."},
+    {"name": "admin-jobs", "description": "Inspeccionar y administrar ejecuciones desde el panel."},
+    {"name": "admin-fleet", "description": "Consultar y administrar el conjunto de workers disponibles."},
+    {"name": "admin-billing", "description": "Consultar y administrar saldos, reservas y movimientos."},
+    {"name": "admin-audit", "description": "Consultar el historial de acciones administrativas."},
+    {"name": "admin-autoscale", "description": "Consultar y ajustar la capacidad disponible según la demanda."},
+]
 
 
 def _documentation_app(*, include_private: bool) -> FastAPI:
@@ -41,26 +74,44 @@ def _documentation_app(*, include_private: bool) -> FastAPI:
     mismos routers, sin duplicar handlers ni contratos.
     """
     docs = FastAPI(
-        title="central-api",
+        title="API central de ejecución de trámites",
         version=APP_VERSION,
         description=(
-            "Autenticación (dos métodos, desde Authorize en Swagger): "
-            "1) HTTPBasic con username = usuario y password = API key; "
-            "2) V1: headers email + X-API-Key como en la V1 (en Authorize se "
-            "completan email y API key en la sección V1)."
+            APP_DESCRIPTION
+            + " Para las operaciones de clientes se admite autenticación con "
+            "usuario y clave de API, o con correo electrónico y clave de API. "
+            "Ingrese las credenciales desde el botón Authorize de esta página."
         ),
+        openapi_tags=OPENAPI_TAGS,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
     )
     docs.include_router(public_router, prefix="/api/v3")
     if include_private:
-        @docs.get("/health")
+        @docs.get(
+            "/health",
+            summary="Comprobar que la API está activa",
+            description="Confirma que el proceso de la API responde. No requiere una cuenta.",
+            responses={200: {"description": "Proceso activo.", "content": {"application/json": {"example": {"status": "ok", "version": APP_VERSION}}}}},
+            tags=["admin"],
+        )
         def _health() -> dict:
+            """Devuelve una señal básica de disponibilidad del proceso."""
             return {"status": "ok", "version": APP_VERSION}
 
-        @docs.get("/ready")
+        @docs.get(
+            "/ready",
+            summary="Comprobar la disponibilidad para procesar solicitudes",
+            description="Informa si la API cuenta con la configuración necesaria para atender solicitudes.",
+            responses={200: {"description": "Estado actual de disponibilidad.", "content": {"application/json": {"examples": {
+                "disponible": {"summary": "Servicio listo", "value": {"ready": True, "version": APP_VERSION}},
+                "no_disponible": {"summary": "Falta configuración", "value": {"ready": False, "reason": "DATABASE_URL no configurada"}},
+            }}}}},
+            tags=["admin"],
+        )
         def _ready() -> dict:
+            """Describe si la API tiene los recursos requeridos para operar."""
             return {"ready": True, "version": APP_VERSION}
 
         docs.include_router(internal_router, prefix="/internal/v1")
@@ -170,6 +221,11 @@ async def lifespan(app: FastAPI):
     """
     import asyncio
 
+    # Ninguna URL (prefirmada o no) puede salir en los logs: solo bucket/clave.
+    from mrbot_contracts.log_redaction import instalar_redaccion_de_urls
+
+    instalar_redaccion_de_urls()
+
     app.state.db_configurado = db_configurado()
     if app.state.db_configurado:
         # El catálogo debe existir para que la FK fk_jobs_operation acepte
@@ -225,8 +281,10 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="central-api",
+        title="API central de ejecución de trámites",
         version=APP_VERSION,
+        description=APP_DESCRIPTION,
+        openapi_tags=OPENAPI_TAGS,
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -236,12 +294,29 @@ def create_app() -> FastAPI:
     public_documentation = _documentation_app(include_private=False)
     admin_documentation = _documentation_app(include_private=True)
 
-    @app.get("/health", include_in_schema=False)
+    @app.get(
+        "/health",
+        include_in_schema=False,
+        summary="Comprobar que la API está activa",
+        description="Confirma que el proceso de la API responde sin comprobar sus dependencias.",
+        responses={200: {"description": "Proceso activo.", "content": {"application/json": {"example": {"status": "ok", "version": APP_VERSION}}}}},
+    )
     def health() -> dict:
+        """Devuelve una señal básica de disponibilidad del proceso."""
         return {"status": "ok", "version": APP_VERSION}
 
-    @app.get("/ready", include_in_schema=False)
+    @app.get(
+        "/ready",
+        include_in_schema=False,
+        summary="Comprobar disponibilidad para procesar solicitudes",
+        description="Informa si la configuración y los datos necesarios para operar están disponibles.",
+        responses={200: {"description": "Estado de disponibilidad; una respuesta no lista incluye una causa resumida.", "content": {"application/json": {"examples": {
+            "lista": {"summary": "Servicio listo", "value": {"ready": True, "version": APP_VERSION, "esquema": "20261012_a1b2c3d4"}},
+            "pendiente": {"summary": "Configuración pendiente", "value": {"ready": False, "reason": "DATABASE_URL no configurada"}},
+        }}}}},
+    )
     def ready() -> dict:
+        """Comprueba si los recursos necesarios están disponibles."""
         settings = get_settings()
         if not settings.database_url:
             return {"ready": False, "reason": "DATABASE_URL no configurada"}
@@ -265,16 +340,35 @@ def create_app() -> FastAPI:
         return {"ready": True, "version": APP_VERSION,
                 "esquema": version}
 
-    @app.get("/openapi.json", include_in_schema=False)
+    @app.get(
+        "/openapi.json",
+        include_in_schema=False,
+        summary="Consultar el catálogo de operaciones para clientes",
+        description="Devuelve la descripción de las operaciones disponibles para clientes.",
+        responses={200: {"description": "Catálogo de operaciones para clientes."}},
+    )
     def public_openapi() -> JSONResponse:
         """OpenAPI público: exclusivamente la superficie de clientes."""
         return JSONResponse(public_documentation.openapi())
 
-    @app.get("/docs", include_in_schema=False)
+    @app.get(
+        "/docs",
+        include_in_schema=False,
+        summary="Abrir la documentación interactiva para clientes",
+        description="Presenta el catálogo de operaciones para clientes y permite explorar sus solicitudes.",
+        responses={200: {"description": "Página de documentación interactiva."}},
+    )
     def public_docs() -> HTMLResponse:
+        """Muestra la documentación interactiva pública."""
         return _public_docs_html()
 
-    @app.get("/redoc", include_in_schema=False)
+    @app.get(
+        "/redoc",
+        include_in_schema=False,
+        summary="Abrir la referencia de operaciones para clientes",
+        description="Presenta una referencia de lectura del catálogo público de operaciones.",
+        responses={200: {"description": "Página de referencia de operaciones."}},
+    )
     def public_redoc() -> HTMLResponse:
         """Redoc público con el mismo catálogo exclusivo de clientes."""
         return get_redoc_html(
@@ -282,7 +376,20 @@ def create_app() -> FastAPI:
             title="central-api clientes",
         )
 
-    @app.get("/admin/openapi.json", include_in_schema=False)
+    @app.get(
+        "/admin/openapi.json",
+        include_in_schema=False,
+        summary="Consultar el catálogo administrativo",
+        description="Devuelve las operaciones administrativas e internas tras validar la credencial administrativa.",
+        responses={
+            200: {"description": "Catálogo administrativo autorizado."},
+            401: {"description": "No se envió una credencial administrativa. Incluya una cabecera `Authorization: Bearer` válida.", "content": {"application/json": {"example": {"detail": "Falta Bearer [REDACTED]"}}}},
+            403: {"description": "La credencial no coincide o el acceso administrativo no está configurado. Revise la credencial o solicite que se habilite el acceso.", "content": {"application/json": {"examples": {
+                "invalida": {"summary": "Credencial inválida", "value": {"detail": "ADMIN_TOKEN inválido"}},
+                "no_configurada": {"summary": "Acceso no habilitado", "value": {"detail": "ADMIN_TOKEN no configurado"}},
+            }}}},
+        },
+    )
     def admin_openapi(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
@@ -293,10 +400,21 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "private, no-store"},
         )
 
-    @app.get("/admin/docs", include_in_schema=False)
+    @app.get(
+        "/admin/docs",
+        include_in_schema=False,
+        summary="Abrir la documentación administrativa",
+        description="Muestra la interfaz de referencia; la consulta del catálogo requiere una credencial administrativa válida.",
+        responses={
+            200: {"description": "Página de documentación administrativa."},
+            401: {"description": "Se envió una cabecera administrativa sin credencial. Incluya una credencial válida o abra la página sin cabecera.", "content": {"application/json": {"example": {"detail": "Falta Bearer [REDACTED]"}}}},
+            403: {"description": "La credencial enviada no coincide o el acceso administrativo no está configurado. Revise la credencial o solicite que se habilite el acceso.", "content": {"application/json": {"example": {"detail": "ADMIN_TOKEN inválido"}}}},
+        },
+    )
     def admin_docs(
         authorization: str | None = Header(default=None),
     ) -> HTMLResponse:
+        """Muestra la interfaz de referencia para operaciones administrativas."""
         # El shell HTML no contiene el esquema ni datos operativos. Se puede
         # abrir desde un navegador y el interceptor usa el token de
         # sessionStorage al solicitar /admin/openapi.json.

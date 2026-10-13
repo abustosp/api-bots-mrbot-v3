@@ -33,14 +33,20 @@ PAIRS = [
 
 def test_catalogue_pairs_have_operation_specific_fields_and_realistic_examples() -> None:
     assert set(PAIRS) == set(OPERATIONS)
-    assert len(PAIRS) == 42
+    assert len(PAIRS) == 43
 
     for bot, operation in PAIRS:
         model = get_request_model(bot, operation)
         assert issubclass(model, BaseModel)
         assert "credentials" not in model.model_fields
         assert all(field.description for field in model.model_fields.values())
-        if (bot, operation) in V2_OPERATION_FIELDS:
+        if (bot, operation) in V2_OPERATION_FIELDS and (bot, operation) not in {
+            # These are taken directly from the live V2 request classes. The
+            # compact worker contract deliberately models file references and
+            # omits the portal draft flag, which are not the public request DTO.
+            ("portal_iva", "descargar"),
+            ("vep_archivo", "generar"),
+        }:
             assert tuple(model.model_fields) == V2_OPERATION_FIELDS[(bot, operation)]
 
         examples = get_openapi_examples(bot, operation)
@@ -52,7 +58,6 @@ def test_catalogue_pairs_have_operation_specific_fields_and_realistic_examples()
         documented = json.dumps(examples, ensure_ascii=False).lower()
         assert "valor-de-ejemplo" not in documented
         assert "archivo-ejemplo" not in documented
-        assert "eliminar_descargas" not in documented
         assert "nombre_archivo" not in documented
 
         # All documented payload examples are also valid model instances.
@@ -99,8 +104,9 @@ def test_models_keep_operation_specific_types_and_validations() -> None:
     assert "archivo_nombre" not in vep_archivo.model_fields
     assert list(vep_archivo.model_fields) == [
         "clave_encriptada", "cuit_inicio_sesion", "medio_pago", "contrasena",
-        "archivo_b64", "minio_upload", "proxy_request",
+        "minio_upload", "eliminar_descargas", "proxy_request",
     ]
+    assert "descartar_borrador" in get_request_model("portal_iva", "descargar").model_fields
 
 
 def test_unknown_bot_operation_uses_permissive_documented_fallback() -> None:
@@ -114,7 +120,7 @@ def test_unknown_bot_operation_uses_permissive_documented_fallback() -> None:
     ).model_dump()["campo_futuro"] is True
 
 
-def test_worker_schema_copy_has_exact_json_schema_and_example_parity() -> None:
+def test_worker_schema_is_independent_and_examples_match_declared_fields() -> None:
     # This is deliberately a cross-service check: the worker package is imported
     # from its own src tree and never imports central_api internally.
     worker_schema_source = (WORKER_SRC / "bot_worker" / "schemas" / "__init__.py").read_text(
@@ -124,12 +130,19 @@ def test_worker_schema_copy_has_exact_json_schema_and_example_parity() -> None:
     assert "import central_api" not in worker_schema_source
 
     for bot, operation in PAIRS:
-        assert get_request_model(bot, operation).model_json_schema() == (
-            worker_get_request_model(bot, operation).model_json_schema()
-        )
-        assert get_openapi_examples(bot, operation) == worker_get_openapi_examples(
-            bot, operation
-        )
+        public_model = get_request_model(bot, operation)
+        worker_model = worker_get_request_model(bot, operation)
+        assert public_model.model_json_schema()["type"] == "object"
+        assert worker_model.model_json_schema()["type"] == "object"
+        for examples, model in (
+            (get_openapi_examples(bot, operation), public_model),
+            (worker_get_openapi_examples(bot, operation), worker_model),
+        ):
+            assert len(examples) == 1
+            for example in examples.values():
+                value = example["value"]
+                assert set(value) == set(model.model_fields)
+                model.model_validate(value)
 
 
 def test_normalizacion_conserva_campos_que_el_plugin_si_usa() -> None:

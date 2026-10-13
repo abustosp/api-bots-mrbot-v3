@@ -26,7 +26,7 @@
         },
         "cuit_login": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Login",
           "type": "string"
         },
@@ -47,7 +47,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "archivo_historico_minio": {
@@ -117,7 +117,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -138,7 +138,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente al que se le cargan los libros. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "denominacion": {
@@ -261,7 +261,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -273,7 +273,7 @@
         },
         "cuit_representado": {
           "description": "CUIT/CUIL del contribuyente a consultar",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -353,7 +353,7 @@
           "title": "Clave Encriptada"
         },
         "cuit_representante": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -400,7 +400,7 @@
       "properties": {
         "cuit": {
           "description": "CUIT/CUIL de la persona a consultar en el servicio de Consulta de Constancias de CUIT",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit",
           "type": "string"
         }
@@ -422,8 +422,8 @@
         "cuits": {
           "description": "Lista de CUITs/CUILs a consultar en el servicio de Consulta de Constancias de CUIT",
           "example": [
-            "20123456789",
-            "20374730429",
+            "20123456786",
+            "20123456786",
             "20147130202"
           ],
           "items": {
@@ -465,7 +465,7 @@
         },
         "cuit_representante": {
           "description": "CUIT del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -540,7 +540,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -561,7 +561,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "representado_nombre": {
@@ -647,7 +647,7 @@
         },
         "cuit_login": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Login",
           "type": "string"
         },
@@ -659,7 +659,7 @@
         },
         "cuit_representado": {
           "description": "CUIT del contribuyente representado",
-          "example": "20234567890",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -725,7 +725,7 @@
           "type": "string"
         },
         "cuit_representante": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -814,7 +814,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -835,7 +835,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "denominacion": {
@@ -927,7 +927,7 @@
           "type": "string"
         },
         "cuit_representante": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -1040,7 +1040,7 @@
           "type": "string"
         },
         "cuit_inicio_sesion": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Inicio Sesion",
           "type": "string"
         },
@@ -1208,7 +1208,7 @@
           "type": "string"
         },
         "cuit_inicio_sesion": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Inicio Sesion",
           "type": "string"
         },
@@ -1350,7 +1350,7 @@
           "type": "string"
         },
         "cuit_inicio_sesion": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Inicio Sesion",
           "type": "string"
         },
@@ -1449,7 +1449,7 @@
         },
         "cuit_login": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Login",
           "type": "string"
         },
@@ -1470,7 +1470,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "denominacion": {
@@ -1572,7 +1572,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -1593,7 +1593,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "denominacion": {
@@ -1714,7 +1714,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -1735,7 +1735,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "denominacion": {
@@ -1817,7 +1817,7 @@
         },
         "cuit_representante": {
           "description": "CUIT del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -1829,7 +1829,7 @@
         },
         "cuit_representado": {
           "description": "CUIT del representado a consultar",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -1913,7 +1913,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -1934,7 +1934,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "proxy_request": {
@@ -2007,7 +2007,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -2028,7 +2028,7 @@
           ],
           "default": null,
           "description": "CUIT/CUIL del contribuyente a consultar. Si no se especifica, se usa el CUIT del representante",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado"
         },
         "denominacion": {
@@ -2192,7 +2192,7 @@
           "type": "string"
         },
         "cuit_representante": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -2293,7 +2293,7 @@
         },
         "cuit_representado": {
           "description": "CUIT del contribuyente representado",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -2455,7 +2455,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en Misiones",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -2551,7 +2551,7 @@
         },
         "cuit_login": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Login",
           "type": "string"
         },
@@ -2563,7 +2563,7 @@
         },
         "cuit_representado": {
           "description": "CUIT/CUIL del contribuyente a consultar",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -2685,7 +2685,7 @@
         },
         "cuit_login": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Login",
           "type": "string"
         },
@@ -2697,7 +2697,7 @@
         },
         "cuit_representado": {
           "description": "CUIT/CUIL del contribuyente a consultar",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -2790,7 +2790,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -2802,7 +2802,7 @@
         },
         "cuit_representado": {
           "description": "CUIT/CUIL del contribuyente a consultar",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -2907,7 +2907,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en SIPER",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -2994,7 +2994,7 @@
         },
         "cuit_login": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Login",
           "type": "string"
         },
@@ -3007,8 +3007,8 @@
         "cuits_consulta": {
           "description": "Lista de CUITs/CUILs a consultar en SRT",
           "example": [
-            "30123456789",
-            "20987654321"
+            "20123456786",
+            "20123456786"
           ],
           "items": {
             "type": "string"
@@ -3066,7 +3066,7 @@
           "title": "Clave Encriptada"
         },
         "cuit_inicio_sesion": {
-          "example": "20123456780",
+          "example": "20123456786",
           "title": "Cuit Inicio Sesion",
           "type": "string"
         },
@@ -3145,7 +3145,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -3157,7 +3157,7 @@
         },
         "cuit_representado": {
           "description": "CUIT/CUIL del contribuyente cuyos pagos se consultan",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },
@@ -3299,7 +3299,7 @@
               "type": "string"
             },
             "contribuyente_cuit": {
-              "example": "20123456789",
+              "example": "20123456786",
               "title": "Contribuyente Cuit",
               "type": "string"
             },
@@ -3543,7 +3543,7 @@
         },
         "cuit_representante": {
           "description": "CUIT/CUIL del representante para autenticarse en ARCA",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representante",
           "type": "string"
         },
@@ -3555,7 +3555,7 @@
         },
         "cuit_representado": {
           "description": "CUIT/CUIL del contribuyente a generar VEP",
-          "example": "20123456789",
+          "example": "20123456786",
           "title": "Cuit Representado",
           "type": "string"
         },

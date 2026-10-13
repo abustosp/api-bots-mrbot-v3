@@ -70,15 +70,58 @@ async def _job_para_presign(job_id: str):
 
 
 class PresignBody(BaseModel):
-    artifact_id: str = Field(min_length=1, max_length=128)
-    content_type: str = Field(min_length=1, max_length=128)
-    size_bytes: int = Field(ge=1, le=ARTIFACT_MAX_BYTES)
+    artifact_id: str = Field(
+        min_length=1, max_length=128,
+        description="Identificador funcional del archivo que se va a subir.",
+        examples=["constancia-01"],
+    )
+    content_type: str = Field(
+        min_length=1, max_length=128,
+        description="Tipo MIME que debe usarse al enviar el archivo.",
+        examples=["application/pdf"],
+    )
+    size_bytes: int = Field(
+        ge=1, le=ARTIFACT_MAX_BYTES,
+        description="Tamaño previsto del archivo en bytes. El máximo permitido es 100 MiB.",
+        examples=[184320],
+    )
 
 
-@router.post("/jobs/{job_id}/artifacts/presign", status_code=201)
+@router.post(
+    "/jobs/{job_id}/artifacts/presign",
+    status_code=201,
+    summary="Solicitar autorización temporal para subir un archivo",
+    description=(
+        "Genera una autorización de corta duración para subir un artefacto de un "
+        "job que sigue asignado y activo. La respuesta indica la clave de destino, "
+        "la hora de vencimiento y la cabecera requerida; la autorización debe "
+        "usarse antes de expirar. Si el worker publicó una clave de respuesta, "
+        "el contenido de la autorización se entrega sellado para ese worker."
+    ),
+    responses={
+        201: {"description": "Autorización de subida creada; el enlace temporal debe tratarse como secreto.", "content": {"application/json": {"examples": {
+            "sin_sellado": {"summary": "Autorización visible para el worker", "value": {
+                "upload_id": "0190c2d4-7b4a-7b61-9f28-3efc1f7b1b10",
+                "object_key": "jobs/0190c2d4/1/constancia-01/ab12cd34ef56",
+                "upload_url": "https://storage.example.invalid/upload?token=temporal",
+                "expires_at": "2026-10-12T16:40:00Z",
+                "required_headers": {"Content-Type": "application/pdf"},
+                "sealed": False,
+            }},
+        }}}},
+        401: {"description": "Falta la identidad de un worker registrado activo. Incluya `X-Worker-Node` con el nodo registrado.", "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}}},
+        403: {"description": "El token no autoriza al solicitante o el job no tiene una asignación vigente para este worker. Renueve el registro y solicite la autorización solo mientras el job esté activo.", "content": {"application/json": {"examples": {
+            "token": {"summary": "Token no autorizado", "value": {"detail": {"error_code": "forbidden", "message": "Operación no permitida."}}},
+            "asignacion": {"summary": "Sin asignación activa", "value": {"detail": "sin asignación viva para el job"}},
+        }}}},
+        404: {"description": "No existe el job solicitado. Verifique el identificador recibido al aceptar la asignación.", "content": {"application/json": {"example": {"detail": "job no encontrado"}}}},
+        422: {"description": "El cuerpo no cumple los límites de identificación, tipo de contenido o tamaño. Envíe un tamaño entre 1 byte y 100 MiB y complete los campos obligatorios.", "content": {"application/json": {"example": {"detail": [{"loc": ["body", "size_bytes"], "msg": "Input should be less than or equal to 104857600", "type": "less_than_equal"}]}}}},
+    },
+)
 async def presign_artifact(
     job_id: str, body: PresignBody, worker_node: str = Depends(require_worker)
 ) -> dict:
+    """Crea una autorización temporal de subida para un job activo."""
     job = await _job_para_presign(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job no encontrado")
@@ -137,11 +180,32 @@ async def presign_artifact(
     return respuesta
 
 
-@router.post("/jobs/{job_id}/cancel-ack")
+@router.post(
+    "/jobs/{job_id}/cancel-ack",
+    summary="Confirmar la recepción de una solicitud de cancelación",
+    description=(
+        "Registra el acuse del worker para la solicitud de cancelación de un job. "
+        "El campo `accepted` indica si el worker acepta cooperar con la cancelación; "
+        "si se omite, se considera aceptada. El acuse no cambia por sí mismo el "
+        "estado del job."
+    ),
+    responses={
+        200: {"description": "Acuse recibido.", "content": {"application/json": {"example": {
+            "ok": True, "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "status": "CANCELANDO", "ack": True
+        }}}},
+        401: {"description": "Falta la identidad de un worker registrado activo. Incluya `X-Worker-Node` con el nodo registrado.", "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}}},
+        403: {"description": "El token no es válido o el job está asignado a otro worker. Use el token vigente y confirme únicamente jobs propios.", "content": {"application/json": {"examples": {
+            "token": {"summary": "Token no autorizado", "value": {"detail": {"error_code": "forbidden", "message": "Operación no permitida."}}},
+            "asignacion": {"summary": "Job de otro worker", "value": {"detail": "asignación de otro worker"}},
+        }}}},
+        404: {"description": "No se encontró el job en el registro activo. Compruebe el `job_id` del comando de cancelación.", "content": {"application/json": {"example": {"detail": "job no encontrado"}}}},
+        422: {"description": "El cuerpo no es un objeto JSON válido. Envíe un objeto con `accepted` booleano si desea informar explícitamente la aceptación.", "content": {"application/json": {"example": {"detail": [{"loc": ["body"], "msg": "Input should be a valid dictionary", "type": "dict_type"}]}}}},
+    },
+)
 def cancel_ack(
     job_id: str, body: dict, worker_node: str = Depends(require_worker)
 ) -> dict:
-    """Confirma el comando de cancelación cooperativa del worker."""
+    """Confirma la recepción de una solicitud de cancelación cooperativa."""
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job no encontrado")

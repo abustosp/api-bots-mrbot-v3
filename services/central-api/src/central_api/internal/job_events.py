@@ -57,17 +57,78 @@ VALID_TYPES = (
 
 
 class JobEventBody(BaseModel):
-    event_id: str = Field(min_length=1, max_length=128)
-    event_type: str = Field(min_length=1, max_length=32)
-    assignment_attempt: int = Field(ge=0)
-    assignment_token: str = Field(default="", max_length=512)
-    message: str = Field(default="", max_length=256)
+    event_id: str = Field(
+        min_length=1, max_length=128,
+        description="Identificador estable del evento para evitar procesarlo dos veces.",
+        examples=["evt-0190c2d4-started"],
+    )
+    event_type: str = Field(
+        min_length=1, max_length=32,
+        description="Tipo de evento: started, progress, warning, cancelled, failed_prestart o heartbeat_hint.",
+        examples=["started"],
+    )
+    assignment_attempt: int = Field(
+        ge=0, description="Intento de asignación al que pertenece el evento.", examples=[1]
+    )
+    assignment_token: str = Field(
+        default="", max_length=512,
+        description="Token de la asignación, requerido para validar progreso cuando hay una lease activa.",
+        examples=["token-de-asignacion"],
+    )
+    message: str = Field(
+        default="", max_length=256,
+        description="Mensaje breve de diagnóstico, sin credenciales ni datos sensibles.",
+        examples=["Ejecución iniciada"],
+    )
 
 
-@router.post("/jobs/{job_id}/events")
+@router.post(
+    "/jobs/{job_id}/events",
+    summary="Informar un evento de ejecución",
+    description=(
+        "Registra un cambio o aviso de una ejecución asignada al worker autenticado. "
+        "Los eventos se deduplican por job, intento e identificador, por lo que se "
+        "puede repetir una solicitud idéntica si no se recibió la confirmación. "
+        "Los tipos admitidos son started, progress, warning, cancelled, "
+        "failed_prestart y heartbeat_hint."
+    ),
+    responses={
+        200: {
+            "description": "Evento aceptado o repetición idéntica ya procesada.",
+            "content": {"application/json": {"examples": {
+                "aceptado": {"summary": "Evento registrado", "value": {
+                    "success": True, "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "status": "CORRIENDO"
+                }},
+                "repetido": {"summary": "Evento idempotente", "value": {
+                    "success": True, "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "status": "CORRIENDO", "dedup": True
+                }},
+            }}},
+        },
+        400: {"description": "El tipo de evento no está admitido. Envíe uno de los seis valores enumerados en `event_type`.", "content": {"application/json": {"example": {"detail": "tipo de evento inválido"}}}},
+        401: {"description": "Falta la identidad del worker o no corresponde a un worker registrado activo. Envíe `X-Worker-Node` con el nodo registrado.", "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}}},
+        403: {"description": "El token de servicio no es válido o el job está asignado a otro worker. Use el token vigente del registro y reporte únicamente jobs propios.", "content": {"application/json": {"examples": {
+            "token": {"summary": "Token no autorizado", "value": {"detail": {"error_code": "forbidden", "message": "Operación no permitida."}}},
+            "asignacion": {"summary": "Job de otro worker", "value": {"detail": "asignación de otro worker"}},
+        }}}},
+        404: {"description": "No existe un job con ese identificador. Verifique el `job_id` recibido al aceptar la asignación.", "content": {"application/json": {"example": {"detail": "job no encontrado"}}}},
+        409: {"description": "El identificador ya se usó con otro contenido o el intento/token de asignación quedó obsoleto. Reutilice el mismo contenido al reintentar; si la asignación cambió, use el intento y token actuales.", "content": {"application/json": {"examples": {
+            "duplicado": {"summary": "Mismo ID con contenido distinto", "value": {"detail": "evento duplicado divergente"}},
+            "asignacion": {"summary": "Asignación anterior", "value": {"detail": "stale_assignment"}},
+        }}}},
+        422: {"description": "La solicitud no cumple el formato esperado o el evento no es válido para el estado actual. Revise los campos señalados y envíe un evento compatible con la asignación.", "content": {"application/json": {"examples": {
+            "validacion": {"summary": "Campo de entrada inválido", "value": {"detail": [{"loc": ["body", "event_id"], "msg": "Field required", "type": "missing"}]}},
+            "evento": {"summary": "Evento rechazado", "value": {"detail": "evento inválido"}},
+        }}}},
+        503: {"description": "No se pudo verificar la asignación del job o guardar el evento por una indisponibilidad temporal. Revise que el acceso a datos responda y reintente la misma solicitud después de la espera indicada en `Retry-After`.", "headers": {"Retry-After": {"description": "Segundos sugeridos antes de reintentar.", "schema": {"type": "integer", "example": 3}}}, "content": {"application/json": {"examples": {
+            "persistencia": {"summary": "No se pudo confirmar el evento", "value": {"detail": "no se pudo confirmar el evento; reintente"}},
+            "asignacion": {"summary": "No se pudo verificar la asignación", "value": {"detail": "no se pudo verificar la asignación del job"}},
+        }}}},
+    },
+)
 async def report_event(
     job_id: str, body: JobEventBody, worker_node: str = Depends(require_worker)
 ) -> dict:
+    """Acepta y aplica un evento de una asignación propiedad de este worker."""
     job = await job_para_worker(job_id, worker_node)
     if job is None:
         raise HTTPException(status_code=404, detail="job no encontrado")

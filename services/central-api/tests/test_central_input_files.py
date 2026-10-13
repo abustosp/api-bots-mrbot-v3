@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,13 +34,16 @@ AJUSTES = SimpleNamespace(
 
 
 def test_clave_upload_por_usuario_bot_cuit_y_archivo() -> None:
-    clave = clave_upload(USER_ID, "controladores_fiscales", "20-12345678-9", "../F8010.001.pem")
-    assert clave == f"{USER_ID}/controladores_fiscales/20123456789/F8010.001.pem"
+    clave = clave_upload(USER_ID, "controladores_fiscales", "20-12345678-6", "../F8010.001.pem")
+    assert clave == f"{USER_ID}/controladores_fiscales/20123456786/F8010.001.pem"
     assert ".." not in clave_upload(USER_ID, "x", None, "..").split("/")
 
 
 def test_ticket_en_bucket_uploads_y_job_con_archivos(monkeypatch) -> None:
     monkeypatch.setattr(uploads_api, "get_settings", lambda: AJUSTES)
+    monkeypatch.setattr(uploads_api, "db_configurado", lambda: False)
+    monkeypatch.setattr(uploads_api, "object_exists", lambda **kwargs: True)
+    monkeypatch.setattr(uploads_api, "get_object_bytes", lambda **kwargs: b"pem content")
     app = create_app()
     app.dependency_overrides[api_dependencies.require_api_principal] = lambda: PRINCIPAL
     try:
@@ -47,26 +52,26 @@ def test_ticket_en_bucket_uploads_y_job_con_archivos(monkeypatch) -> None:
             "/api/v3/uploads",
             json={
                 "bot": "controladores_fiscales", "operacion": "presentar",
-                "cuit_representado": "20123456789", "filename": "F8010.001.pem",
+                "cuit_representado": "20123456786", "filename": "F8010.001.pem",
                 "size_bytes": 10,
             },
         )
         assert r.status_code == 201
         cuerpo = r.json()
         assert cuerpo["bucket"] == "uploads"
-        assert cuerpo["object_key"].endswith("/controladores_fiscales/20123456789/F8010.001.pem")
+        assert cuerpo["object_key"].endswith("/controladores_fiscales/20123456786/F8010.001.pem")
         assert "/uploads/" in cuerpo["upload_url"]
 
         # Sin referencias validas el job se rechaza.
         malo = cliente.post(
             "/api/v3/controladores-fiscales/carga",
-            json={"cuit_representante": "20123456789", "clave": "x", "archivos": ["otra/clave.pem"]},
+            json={"cuit_representante": "20123456786", "clave": "x", "archivos": ["otra/clave.pem"]},
         )
         assert malo.status_code == 422
 
         ok = cliente.post(
             "/api/v3/controladores-fiscales/carga",
-            json={"cuit_representante": "20123456789", "clave": "x", "archivos": [cuerpo["object_key"]]},
+            json={"cuit_representante": "20123456786", "clave": "x", "archivos": [cuerpo["object_key"]]},
         )
         assert ok.status_code == 202, ok.text
     finally:
@@ -77,7 +82,7 @@ def test_preparar_entrada_entrega_nombres_y_urls_get(monkeypatch) -> None:
     import central_api.input_files as mod
 
     monkeypatch.setattr(mod, "get_settings", lambda: AJUSTES)
-    clave = f"{USER_ID}/controladores_fiscales/20123456789/F8010.001.pem"
+    clave = f"{USER_ID}/controladores_fiscales/20123456786/F8010.001.pem"
     payload, archivos = preparar_entrada(
         "controladores_fiscales", "presentar", {"archivos": [clave, clave]}
     )
@@ -91,20 +96,59 @@ def test_preparar_entrada_key_reemplaza_b64_por_input_file(monkeypatch) -> None:
     import central_api.input_files as mod
 
     monkeypatch.setattr(mod, "get_settings", lambda: AJUSTES)
-    clave = f"{USER_ID}/vep_archivo/20123456789/vep.txt"
+    clave = f"{USER_ID}/vep_archivo/20123456786/vep.txt"
     payload, archivos = preparar_entrada(
         "vep_archivo", "generar", {"archivo_key": clave, "medio_pago": "link"}
     )
     assert "archivo_key" not in payload and payload["medio_pago"] == "link"
-    assert archivos[0]["campo"] == "archivo_b64" and archivos[0]["modo"] == "b64"
+    assert archivos[0]["campo"] == "archivo_path"
+    assert "modo" not in archivos[0]
     assert "/uploads/" in archivos[0]["url"]
-    # Sin clave: el base64 inline sigue funcionando sin cambios.
-    igual, vacio = preparar_entrada("vep_archivo", "generar", {"archivo_b64": "QQ=="})
-    assert igual == {"archivo_b64": "QQ=="} and vacio == []
+    igual, vacio = preparar_entrada("vep_archivo", "generar", {"medio_pago": "link"})
+    assert igual == {"medio_pago": "link"} and vacio == []
+
+
+def test_ticket_de_portal_iva_importar_no_se_reutiliza_en_gestionar(monkeypatch) -> None:
+    clave = f"{USER_ID}/portal_iva/20123456786/ventas.txt"
+    monkeypatch.setattr(uploads_api, "db_configurado", lambda: False)
+    monkeypatch.setattr(uploads_api, "get_settings", lambda: AJUSTES)
+    uploads_api.TICKETS.clear()
+    uploads_api.TICKETS[clave] = {
+        "owner": USER_ID,
+        "bot": "portal_iva",
+        "operation": "importar",
+        "field": "ventas_txt",
+        "filename": "ventas.txt",
+        "content_type": "text/plain",
+        "size_bytes": 4,
+        "sha256": None,
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+        "confirmado": True,
+    }
+
+    async def comprobar():
+        import pytest
+
+        with pytest.raises(LookupError, match="archivo no encontrado en uploads"):
+            await uploads_api.resolver_archivos(
+                USER_ID,
+                "portal_iva",
+                [clave],
+                operation="gestionar",
+                expected_fields={clave: "ventas_txt"},
+            )
+
+    try:
+        asyncio.run(comprobar())
+    finally:
+        uploads_api.TICKETS.clear()
 
 
 def test_vep_archivo_acepta_key_de_uploads_y_rechaza_ajena(monkeypatch) -> None:
     monkeypatch.setattr(uploads_api, "get_settings", lambda: AJUSTES)
+    monkeypatch.setattr(uploads_api, "db_configurado", lambda: False)
+    monkeypatch.setattr(uploads_api, "object_exists", lambda **kwargs: True)
+    monkeypatch.setattr(uploads_api, "get_object_bytes", lambda **kwargs: b"vep content")
     app = create_app()
     app.dependency_overrides[api_dependencies.require_api_principal] = lambda: PRINCIPAL
     try:
@@ -112,10 +156,11 @@ def test_vep_archivo_acepta_key_de_uploads_y_rechaza_ajena(monkeypatch) -> None:
         r = cliente.post(
             "/api/v3/uploads",
             json={"bot": "vep_archivo", "operacion": "generar",
-                  "cuit_representado": "20123456789", "filename": "vep.txt", "size_bytes": 5},
+                  "campo": "archivo", "cuit_representado": "20123456786",
+                  "filename": "vep.txt", "size_bytes": 11},
         )
         clave = r.json()["object_key"]
-        base = {"cuit_inicio_sesion": "20123456789", "contrasena": "x", "medio_pago": "link"}
+        base = {"cuit_inicio_sesion": "20123456786", "contrasena": "x", "medio_pago": "link"}
         ok = cliente.post("/api/v3/vep/carga", json={**base, "archivo_key": clave})
         assert ok.status_code == 202, ok.text
         ajena = cliente.post("/api/v3/vep/carga", json={**base, "archivo_key": "otro/x.txt"})

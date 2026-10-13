@@ -134,11 +134,13 @@ def test_queue_reads_pending_positions_and_own_rows_from_postgresql(monkeypatch)
         {
             "job_id": str(owner_id),
             "status": "PENDIENTE",
+            "status_detail": "PENDIENTE",
             "bot": "ccma",
             "operation": "consultar",
             "operacion": "consultar",
             "position": 2,
             "queue_position": 2,
+            "operation_legacy": "consulta",
         }
     ]
     assert fake_session.calls == 2
@@ -178,7 +180,7 @@ def test_delete_cancels_postgresql_job_by_id_and_persists_state(monkeypatch) -> 
     assert response.status_code == 200
     assert response.json()["status"] == "CANCELADO"
     assert response.json()["cancel_reason"] == "no hace falta"
-    assert response.json()["cancelled_by"] == "USER"
+    assert response.json()["cancelled_by"] == "user"
     assert row.status == "CANCELADO"
     assert row.finished_at is not None
     assert fake_session.calls == 2

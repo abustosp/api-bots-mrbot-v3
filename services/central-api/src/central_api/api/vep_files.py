@@ -34,29 +34,34 @@ _XLSX_NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
 class VEPHeader(BaseModel):
-    cuit: str = Field(min_length=11, max_length=14)
-    version: str | None = None
-    nro_formulario: str | None = None
-    impuesto: str | None = None
-    concepto: str | None = None
-    tipo_registro: str | None = None
+    cuit: str = Field(
+        min_length=11,
+        max_length=14,
+        description="CUIT del pagador. Se normaliza a dígitos y debe contener exactamente 11.",
+        examples=["00000000000"],
+    )
+    version: str | None = Field(default=None, description="Versión del formato de registro del encabezado.", examples=["0100"])
+    nro_formulario: str | None = Field(default=None, description="Número de formulario; si se omite se usa 20001.", examples=["20001"])
+    impuesto: str | None = Field(default=None, description="Código de impuesto del encabezado; si se omite se usa 003.", examples=["003"])
+    concepto: str | None = Field(default=None, description="Código de concepto del encabezado; si se omite se usa 003.", examples=["003"])
+    tipo_registro: str | None = Field(default=None, description="Tipo de registro del encabezado; si se omite se usa 01.", examples=["01"])
 
 
 class VEPRegistro(BaseModel):
-    nro_form: str
-    cod_tipo_pago: str
-    contribuyente_cuit: str
-    concepto: str
-    sub_concepto: str
-    periodo_fiscal: str
-    obligacion_impuesto: str
-    importe: float
+    nro_form: str = Field(description="Número de formulario del registro.", examples=["20001"])
+    cod_tipo_pago: str = Field(description="Código numérico del tipo de pago.", examples=["19"])
+    contribuyente_cuit: str = Field(description="CUIT del contribuyente; debe normalizarse a 11 dígitos.", examples=["00000000000"])
+    concepto: str = Field(description="Código de concepto del pago.", examples=["19"])
+    sub_concepto: str = Field(description="Código de subconcepto del pago.", examples=["0"])
+    periodo_fiscal: str = Field(description="Período fiscal que se informará en el TXT.", examples=["202609"])
+    obligacion_impuesto: str = Field(description="Código de impuesto de la obligación.", examples=["003"])
+    importe: float = Field(description="Importe del registro.", examples=[1234.56])
 
 
 class VEPTxtRequest(BaseModel):
-    header: VEPHeader
-    registros: list[VEPRegistro]
-    fecha: str | None = None
+    header: VEPHeader = Field(description="Datos que forman el encabezado del archivo TXT.")
+    registros: list[VEPRegistro] = Field(description="Registros VEP que se incluirán en el archivo; debe enviar al menos uno.")
+    fecha: str | None = Field(default=None, description="Fecha del nombre del archivo en formato YYYYMMDD. Si se omite se usa la fecha actual.", examples=["20261012"])
 
 
 def _digits(value: object, field: str = "CUIT") -> str:
@@ -187,8 +192,40 @@ def _model_xlsx() -> bytes:
     return buffer.getvalue()
 
 
-@router.post("/txt", summary="Genera un TXT individual")
+@router.post(
+    "/txt",
+    summary="Genera un archivo TXT de VEP",
+    description=(
+        "Recibe un objeto JSON con encabezado, fecha opcional y uno o más registros, y devuelve "
+        "un archivo de texto descargable en formato VEP. Los CUIT se aceptan con separadores "
+        "siempre que, al quitarlos, queden exactamente 11 dígitos. La fecha, si se informa, "
+        "debe tener ocho dígitos (YYYYMMDD). No se aplica un límite de registros en esta operación."
+    ),
+    responses={
+        200: {
+            "description": "Archivo TXT generado y adjunto. El nombre incluye formulario, CUIT y fecha.",
+            "content": {"text/plain": {"schema": {"type": "string"}, "example": "010000000000020001001000030030002\n02<VEP nroFormulario=\"20001\" codTipoPago=\"19\" contribuyenteCUIT=\"00000000000\" concepto=\"19\" subConcepto=\"0\" periodoFiscal=\"202609\" importe=\"1234.56\"> <Obligacion impuesto=\"003\" importe=\"1234.56\"/></VEP>"}},
+            "headers": {"Content-Disposition": {"description": "Nombre del archivo descargable.", "schema": {"type": "string"}}},
+        },
+        400: {
+            "description": "No se enviaron registros, la fecha no tiene formato YYYYMMDD o un CUIT no contiene exactamente 11 dígitos. Corrija los datos y vuelva a enviar la solicitud.",
+            "content": {"application/json": {"example": {"detail": "Debe enviar al menos un registro."}}},
+        },
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        422: {
+            "description": "El JSON no cumple el esquema de encabezado y registros: revise los campos obligatorios, tipos y longitud declarada del CUIT.",
+        },
+        503: {
+            "description": "No se pudo verificar la autenticación por indisponibilidad del servicio de datos. Reintente más tarde.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}}},
+        },
+    },
+)
 def txt(payload: VEPTxtRequest, principal: ApiPrincipal = Depends(require_api_principal)) -> Response:
+    """Genera un TXT descargable a partir de un encabezado y sus registros VEP."""
     _ = principal
     if not payload.registros:
         raise HTTPException(status_code=400, detail="Debe enviar al menos un registro.")
@@ -206,12 +243,72 @@ def txt(payload: VEPTxtRequest, principal: ApiPrincipal = Depends(require_api_pr
     return Response(_header(cuit, len(records) + 1, **options) + "\n" + "\n".join(records), media_type="text/plain", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-@router.post("/zip", summary="Genera un ZIP con TXT de VEP")
+@router.post(
+    "/zip",
+    summary="Genera un ZIP de TXT de VEP desde una planilla",
+    description=(
+        "Genera un ZIP con archivos TXT agrupados por lote a partir de una planilla XLSX previamente "
+        "cargada al bucket uploads. La primera hoja debe incluir las columnas "
+        "ID_Lote_mrbot, Fecha VEP_mrbot, CUIT Pagador_mrbot, Fecha_Expiracion_mrbot, "
+        "CUIT_Contibuyente_mrbot, Impuesto_mrbot, Concepto_mrbot, Subconcepto_mrbot, "
+        "Anticipo_mrbot, Periodo_mrbot, Importe_mrbot, Formulario_mrbot y Cod Pago_mrbot. "
+        "Cada TXT contiene como máximo 600 registros; los lotes mayores se dividen en varios archivos. "
+        "El XLSX debe tener hasta 52.428.800 bytes (50 MiB).\n\n"
+        "Flujo de dos pasos: (1) solicite un ticket en POST /api/v3/uploads con `bot=vep_archivo`, "
+        "`operacion=generar`, `campo=archivo_excel`, nombre, tipo y tamaño de la planilla. La respuesta "
+        "incluye `upload_url` y `object_key`; cargue los bytes usando esa URL y el encabezado "
+        '`Content-Type` indicado. (2) envíe `{"object_key":"<object_key>"}` a este endpoint.'
+    ),
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["object_key"],
+                        "properties": {
+                            "object_key": {
+                                "type": "string",
+                                "description": "Clave recibida al cargar previamente el XLSX en el bucket uploads.",
+                                "example": "550e8400-e29b-41d4-a716-446655440000/vep_archivo/sin_cuit/lotes.xlsx",
+                            }
+                        },
+                    },
+                    "example": {"object_key": "550e8400-e29b-41d4-a716-446655440000/vep_archivo/sin_cuit/lotes.xlsx"},
+                },
+            },
+        },
+    },
+    responses={
+        200: {
+            "description": "Archivo ZIP descargable con los TXT generados, organizados por CUIT pagador y lote.",
+            "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
+            "headers": {"Content-Disposition": {"description": "Nombre del archivo ZIP descargable.", "schema": {"type": "string"}, "example": "attachment; filename=\"veps_20261012.zip\""}},
+        },
+        400: {
+            "description": "La carga está vacía o no es un XLSX legible, faltan columnas requeridas, ningún registro contiene lote, o un CUIT/código numérico no tiene formato válido. Use una planilla XLSX con todos los encabezados requeridos y corrija los valores indicados.",
+            "content": {"application/json": {"example": {"detail": "Faltan columnas requeridas: Importe_mrbot"}}},
+        },
+        413: {"description": "El archivo supera 52.428.800 bytes (50 MiB). Redúzcalo y vuelva a enviarlo."},
+        415: {"description": "El archivo no tiene formato XLSX. Envíe un archivo con extensión .xlsx."},
+        422: {"description": "La referencia no pertenece a la cuenta autenticada, el archivo no está en el bucket uploads o fue eliminado. Envíe un object_key obtenido previamente con POST /api/v3/uploads."},
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        503: {
+            "description": "No fue posible guardar o leer la copia del archivo, o no pudo verificarse la autenticación. Revise el servicio y vuelva a intentar.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}}},
+        },
+    },
+)
 async def zip_vep(request: Request, principal: ApiPrincipal = Depends(require_api_principal)) -> Response:
-    _ = principal
-    upload = await uploaded_file_from_request(request, field_name="archivo_excel")
-    if not upload.content:
-        raise HTTPException(status_code=400, detail="El archivo esta vacio.")
+    """Convierte una planilla XLSX en un ZIP de archivos TXT de VEP."""
+    upload = await uploaded_file_from_request(
+        request, field_name="archivo_excel", principal=principal,
+        bot="vep_archivo", operation="generar",
+    )
     try:
         body = _zip_from_rows(_xlsx_rows(upload.content), datetime.now().strftime("%Y%m%d"))
     except ValueError as exc:
@@ -220,7 +317,31 @@ async def zip_vep(request: Request, principal: ApiPrincipal = Depends(require_ap
     return Response(body, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-@router.get("/modelo", summary="Descarga el modelo de Excel de VEP")
+@router.get(
+    "/modelo",
+    summary="Descarga el modelo de Excel para VEP",
+    description=(
+        "Devuelve una planilla XLSX vacía con los encabezados requeridos para generar archivos "
+        "TXT de VEP mediante la operación de conversión por lote. Descargue el archivo, agregue "
+        "una fila por registro y conserve los nombres de las columnas."
+    ),
+    responses={
+        200: {
+            "description": "Plantilla XLSX descargable con una fila de encabezados y sin registros.",
+            "content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {"schema": {"type": "string", "format": "binary"}}},
+            "headers": {"Content-Disposition": {"description": "Nombre de la plantilla descargable.", "schema": {"type": "string"}, "example": "attachment; filename=\"vep_consolidado_modelo.xlsx\""}},
+        },
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        503: {
+            "description": "No se pudo verificar la autenticación por indisponibilidad del servicio de datos. Reintente más tarde.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}}},
+        },
+    },
+)
 def modelo(principal: ApiPrincipal = Depends(require_api_principal)) -> Response:
+    """Entrega la plantilla XLSX con los encabezados requeridos para VEP."""
     _ = principal
     return Response(_model_xlsx(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="vep_consolidado_modelo.xlsx"'})

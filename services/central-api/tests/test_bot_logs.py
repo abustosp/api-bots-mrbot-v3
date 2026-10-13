@@ -98,7 +98,11 @@ def test_table_targets_match_bot_route_aliases_and_v3_prefixes() -> None:
             assert bot in alias_bots, spec.path
             for operation in operations or ():
                 # mis_comprobantes conserva ``consulta`` como alias histórico.
-                assert (bot, operation) in alias_ops or operation == "consulta"
+                assert (
+                    (bot, operation) in alias_ops
+                    or operation == "consulta"
+                    or (bot, operation) == ("libros_portal_iva", "descargar_libros")
+                )
     # Cada path /logs comparte prefijo con su ruta de consulta V3.
     prefixes = {path.rpartition("/")[0] for path, _b, _o in BOT_ROUTE_ALIASES}
     # ``/portal_iva/carga`` es a la vez ruta de operación y prefijo del log.

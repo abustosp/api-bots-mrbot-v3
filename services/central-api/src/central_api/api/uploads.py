@@ -8,13 +8,14 @@ temporales emitidos al mismo principal, confirmados y sin vencer.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from central_api.api.bots import OPERATIONS
 from central_api.db import db_configurado, nueva_sesion
@@ -22,7 +23,14 @@ from central_api.security.principals import ApiPrincipal
 from central_api.security.secret_redaction import public_error
 from central_api.api.dependencies import require_api_principal
 from central_api.settings import get_settings
-from central_api.storage import firmar_subida, presign_get_url
+from mrbot_contracts.log_redaction import OBJETO_ELIMINADO
+from central_api.storage import (
+    firmar_subida,
+    get_object_bytes,
+    object_exists,
+    presign_get_url,
+)
+from central_api.input_files import UPLOAD_FIELDS, UPLOAD_FIELD_MAX_BYTES
 
 router = APIRouter()
 
@@ -59,17 +67,61 @@ def clave_upload(user_id: str, bot: str, cuit: str | None, filename: str) -> str
 
 
 class TicketBody(BaseModel):
-    bot: str
-    operacion: str
-    campo: str = Field(default="archivos", min_length=1, max_length=120)
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{
+                "bot": "portal_iva",
+                "operacion": "importar",
+                "campo": "ventas_txt",
+                "cuit_representado": "20123456786",
+                "filename": "ventas.txt",
+                "content_type": "text/plain",
+                "size_bytes": 120,
+            }]
+        }
+    )
+
+    bot: str = Field(
+        description="Identificador del bot cuya operación recibirá el archivo.",
+        examples=["portal_iva"],
+    )
+    operacion: str = Field(
+        description="Operación declarada por el bot para la que se emite el ticket.",
+        examples=["importar"],
+    )
+    campo: str = Field(
+        default="archivos",
+        min_length=1,
+        max_length=120,
+        description="Nombre del campo de archivo que se usará en la operación (de 1 a 120 caracteres).",
+        examples=["archivos"],
+    )
     cuit_representado: str | None = Field(
         default=None,
         description="CUIT del representado (o del representante si el bot no tiene representado).",
+        examples=["00000000000"],
     )
-    filename: str = Field(min_length=1, max_length=255)
-    content_type: str = Field(default="application/octet-stream")
-    size_bytes: int = Field(ge=1)
-    sha256: str | None = None
+    filename: str = Field(
+        min_length=1,
+        max_length=255,
+        description="Nombre original del archivo, de 1 a 255 caracteres. La ruta enviada se descarta.",
+        examples=["comprobantes.pdf"],
+    )
+    content_type: str = Field(
+        default="application/octet-stream",
+        description="Tipo MIME que debe usarse también en la carga del archivo.",
+        examples=["application/pdf"],
+    )
+    size_bytes: int = Field(
+        ge=1,
+        description="Tamaño del archivo en bytes. Debe ser mayor que cero y no superar 52.428.800 bytes (50 MiB).",
+        examples=[1048576],
+    )
+    sha256: str | None = Field(
+        default=None,
+        description="Hash SHA-256 hexadecimal opcional del contenido del archivo.",
+        examples=["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+    )
 
 
 def _utcnow() -> datetime:
@@ -105,16 +157,94 @@ async def _persist_ticket(ticket: dict) -> None:
         raise HTTPException(status_code=503, detail="Servicio no disponible") from exc
 
 
-@router.post("/uploads", status_code=201)
+@router.post(
+    "/uploads",
+    status_code=201,
+    summary="Solicita una carga directa de archivo",
+    description=(
+        "Paso 1 de un flujo de dos pasos: emite un ticket temporal para cargar un archivo "
+        "asociado a una operación existente. Envíe un JSON con bot, operación, campo, nombre, "
+        "tipo y tamaño. La respuesta 201 incluye `object_key`, la dirección temporal de carga "
+        "y los encabezados requeridos. Cargue el archivo allí y, en el paso 2, envíe el "
+        "`object_key` en el campo de archivo de la operación correspondiente. "
+        "No ejecuta la operación ni crea un trabajo. Se acepta cualquier tipo MIME declarado, "
+        "con tamaño informado entre 1 y 52.428.800 bytes (50 MiB); el cliente debe respetar "
+        "el encabezado Content-Type devuelto y cargar el archivo usando la dirección temporal. El ticket permanece "
+        "vigente hasta la fecha de retención indicada y solo puede utilizarlo la cuenta que lo solicitó."
+    ),
+    responses={
+        201: {
+            "description": "Ticket emitido. La respuesta incluye la clave del objeto, una URL de carga y el encabezado requerido.",
+            "content": {"application/json": {"example": {
+                "upload_id": "7de83a76-9ac8-4c26-9a5f-e5e9709bce42",
+                "object_key": "550e8400-e29b-41d4-a716-446655440000/portal_iva/00000000000/comprobantes.pdf",
+                "bucket": "uploads",
+                "upload_url": "https://almacenamiento.example/carga-temporal",
+                "upload_url_expires_in": 900,
+                "expires_at": "2026-10-12T17:00:00Z",
+                "required_headers": {"Content-Type": "application/pdf"},
+            }}},
+        },
+        400: {
+            "description": "El tamaño declarado supera 52.428.800 bytes. Reduzca el archivo antes de solicitar el ticket.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "validation", "message": "Datos de entrada inválidos."}}}},
+        },
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        404: {
+            "description": "La combinación de bot y operación no existe. Revise ambos identificadores en el catálogo de operaciones disponibles.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "not_found", "message": "Recurso no encontrado."}}}},
+        },
+        422: {
+            "description": "El cuerpo no cumple el esquema: faltan campos obligatorios o hay valores fuera de sus restricciones. Corrija los campos indicados y vuelva a enviar JSON válido.",
+        },
+        503: {
+            "description": "No se pudo guardar el ticket o verificar la autenticación por indisponibilidad del servicio de datos. Reintente más tarde; no reutilice una carga sin un ticket confirmado.",
+            "content": {"application/json": {"examples": {
+                "ticket_no_guardado": {"summary": "No se pudo emitir el ticket", "value": {"detail": "Servicio no disponible"}},
+                "autenticacion_no_disponible": {"summary": "No se pudo verificar la autenticación", "value": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}},
+            }}},
+        },
+    },
+)
 async def request_upload(
     body: TicketBody,
     principal: ApiPrincipal = Depends(require_api_principal),
 ) -> JSONResponse:
+    """Emite una URL temporal para cargar un archivo de hasta 50 MiB."""
     definition = OPERATIONS.get((body.bot, body.operacion))
     if definition is None:
         return JSONResponse(status_code=404, content=public_error("not_found"))
+    campos_permitidos = UPLOAD_FIELDS.get((body.bot, body.operacion), frozenset())
+    if body.campo not in campos_permitidos:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": {
+                "error_code": "validation",
+                "message": (
+                    f"El campo {body.campo!r} no admite archivos en esta operación. "
+                    f"Campos admitidos: {', '.join(sorted(campos_permitidos)) or 'ninguno'}."
+                ),
+            }},
+        )
     if body.size_bytes > UPLOAD_MAX_BYTES:
         return JSONResponse(status_code=400, content=public_error("validation"))
+    max_campo = UPLOAD_FIELD_MAX_BYTES.get(
+        (body.bot, body.operacion, body.campo), UPLOAD_MAX_BYTES
+    )
+    if body.size_bytes > max_campo:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": {
+                "error_code": "validation",
+                "message": (
+                    f"El archivo supera el máximo permitido para {body.campo}: "
+                    f"{max_campo:,} bytes."
+                ),
+            }},
+        )
     upload_id = str(uuid.uuid4())
     object_key = clave_upload(
         str(principal.user_id), body.bot, body.cuit_representado, body.filename
@@ -173,17 +303,48 @@ async def request_upload(
     )
 
 
-@router.get("/jobs/{job_id}/artifacts/{artifact_id}/download")
+@router.get(
+    "/jobs/{job_id}/artifacts/{artifact_id}/download",
+    status_code=307,
+    summary="Descarga un artefacto de un trabajo",
+    description=(
+        "Comprueba que el trabajo y su artefacto pertenecen a la cuenta autenticada y que el "
+        "artefacto no venció. Si la comprobación es correcta, responde con una redirección "
+        "temporal al archivo; el destino de descarga es válido durante 300 segundos. "
+        "La respuesta no contiene el archivo directamente."
+    ),
+    responses={
+        307: {
+            "description": "Redirección temporal al archivo. Use la URL indicada en el encabezado Location dentro de los siguientes 300 segundos.",
+            "headers": {"Location": {"description": "URL temporal de descarga del archivo.", "schema": {"type": "string", "format": "uri"}}},
+        },
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        404: {
+            "description": "El identificador no es válido, el trabajo o artefacto no existe, el trabajo pertenece a otra cuenta o el artefacto venció. Compruebe los identificadores y la vigencia; no se distingue entre inexistencia y falta de acceso.",
+            "content": {"application/json": {"example": {"detail": "artefacto no encontrado"}}},
+        },
+        410: {
+            "description": "El archivo ya no está en el almacenamiento (fue eliminado por la política de retención o manualmente). Vuelva a ejecutar la consulta para generarlo de nuevo.",
+            "content": {"application/json": {"example": {"detail": "objeto eliminado del bucket"}}},
+        },
+        503: {
+            "description": "El almacenamiento de archivos no está disponible o no está configurado. Revise su disponibilidad y vuelva a intentar la descarga.",
+            "content": {"application/json": {"example": {"detail": "almacenamiento no disponible"}}},
+        },
+    },
+)
 async def download_artifact(
     job_id: str,
     artifact_id: str,
     principal: ApiPrincipal = Depends(require_api_principal),
 ) -> RedirectResponse:
-    """Redirige al objeto tras comprobar ownership y su vínculo persistido.
+    """Redirige al archivo tras comprobar su pertenencia y vigencia.
 
-    El URL del bucket dura cinco minutos y solo se emite para un artifact
-    asociado al job visible del usuario. Un mismo 404 oculta inexistencia y
-    falta de autorización.
+    La URL de descarga dura cinco minutos. Un mismo 404 oculta la inexistencia
+    del trabajo o artefacto y la falta de autorización.
     """
     try:
         job_uuid = uuid.UUID(job_id)
@@ -209,10 +370,20 @@ async def download_artifact(
             if artifact.expires_at is not None and artifact.expires_at <= _utcnow():
                 raise LookupError("artifact expirado")
             object_key = str(artifact.object_key)
+            nombre_original = str(getattr(artifact, "filename", "") or "")
     except Exception as exc:  # noqa: BLE001 - oculta job ajeno/no disponible
         raise HTTPException(status_code=404, detail="artefacto no encontrado") from exc
 
     settings = get_settings()
+    if object_exists(
+        endpoint=settings.object_storage_endpoint,
+        region=settings.object_storage_region,
+        bucket=settings.object_storage_bucket,
+        access_key=settings.object_storage_access_key,
+        secret_key=settings.object_storage_secret_key,
+        object_key=object_key,
+    ) is False:
+        raise HTTPException(status_code=410, detail=OBJETO_ELIMINADO)
     try:
         url = presign_get_url(
             endpoint=(
@@ -225,6 +396,7 @@ async def download_artifact(
             secret_key=settings.object_storage_secret_key,
             object_key=object_key,
             expires_seconds=ARTIFACT_DOWNLOAD_TTL_SECONDS,
+            filename=nombre_original,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -284,7 +456,15 @@ async def verify_upload_key_async(object_key: str, user_id: str) -> bool:
         return False
 
 
-async def resolver_archivos(user_id: str, bot: str, claves: list[str]) -> list[dict]:
+async def resolver_archivos(
+    user_id: str,
+    bot: str,
+    claves: list[str],
+    *,
+    operation: str | None = None,
+    expected_fields: dict[str, str] | None = None,
+    include_content: bool = False,
+) -> list[dict]:
     """Devuelve los tickets vigentes de ``claves`` si son del usuario y del bot.
 
     Lanza ``LookupError`` si alguna clave no existe, es ajena, venció o
@@ -292,7 +472,12 @@ async def resolver_archivos(user_id: str, bot: str, claves: list[str]) -> list[d
     varios jobs mientras dure la retención.
     """
     resultado: list[dict] = []
+    prefijo_usuario = f"{user_id}/"
     for clave in claves:
+        clave = str(clave)
+        # No se consulta ni revela información de claves ajenas al principal.
+        if not clave.startswith(prefijo_usuario) or ".." in clave.split("/"):
+            raise LookupError("archivo no encontrado en uploads")
         ticket: dict | None = None
         if db_configurado():
             try:
@@ -304,7 +489,7 @@ async def resolver_archivos(user_id: str, bot: str, claves: list[str]) -> list[d
                     fila = (
                         await session.execute(
                             text(
-                                "SELECT object_key, bot, filename, content_type, size_bytes, sha256 "
+                                "SELECT object_key, bot, operation, field, filename, content_type, size_bytes, sha256 "
                                 "FROM upload_tickets WHERE object_key = :k AND user_id = :u "
                                 "AND confirmed = true AND expires_at > CURRENT_TIMESTAMP"
                             ),
@@ -319,15 +504,74 @@ async def resolver_archivos(user_id: str, bot: str, claves: list[str]) -> list[d
             t = TICKETS.get(clave)
             if t and t["owner"] == str(user_id) and t["expires_at"] > _utcnow() and t["confirmado"]:
                 ticket = t
-        if ticket is None or ticket["bot"] != bot:
-            raise LookupError(f"archivo no disponible: {clave}")
-        resultado.append({
+        if ticket is None or ticket.get("bot") != bot:
+            raise LookupError("archivo no encontrado en uploads")
+        operacion_ticket = str(ticket.get("operation") or ticket.get("operacion") or "")
+        campo_ticket = str(ticket.get("field") or ticket.get("campo") or "")
+        if operation is not None and operacion_ticket != operation:
+            raise LookupError("archivo no encontrado en uploads")
+        if expected_fields is not None and expected_fields.get(clave) != campo_ticket:
+            raise LookupError("archivo no encontrado en uploads")
+        campos_permitidos = UPLOAD_FIELDS.get((bot, operacion_ticket), frozenset())
+        if campo_ticket not in campos_permitidos:
+            raise LookupError("archivo no encontrado en uploads")
+
+        limite = UPLOAD_FIELD_MAX_BYTES.get(
+            (bot, operacion_ticket, campo_ticket), UPLOAD_MAX_BYTES
+        )
+        if int(ticket.get("size_bytes") or 0) > limite:
+            raise LookupError(f"El archivo supera el máximo permitido para {campo_ticket}: {limite:,} bytes.")
+
+        settings = get_settings()
+        storage_args = {
+            "endpoint": settings.object_storage_endpoint,
+            "region": settings.object_storage_region,
+            "bucket": settings.object_storage_uploads_bucket,
+            "access_key": settings.object_storage_access_key,
+            "secret_key": settings.object_storage_secret_key,
+            "object_key": clave,
+        }
+        existe = await asyncio.to_thread(object_exists, **storage_args)
+        if existe is False:
+            raise LookupError(OBJETO_ELIMINADO)
+        if existe is None:
+            raise LookupError("No se pudo comprobar el archivo en el bucket uploads.")
+        try:
+            contenido = await asyncio.to_thread(
+                get_object_bytes,
+                **storage_args,
+                max_bytes=limite,
+            )
+        except RuntimeError as exc:
+            if "excede el tamaño" in str(exc):
+                raise LookupError(f"El archivo supera el máximo permitido para {campo_ticket}: {limite:,} bytes.") from exc
+            if await asyncio.to_thread(object_exists, **storage_args) is False:
+                raise LookupError(OBJETO_ELIMINADO) from exc
+            raise LookupError("No se pudo leer el archivo del bucket uploads.") from exc
+
+        from central_api.api.file_inputs import _validar_archivo
+
+        try:
+            _validar_archivo(
+                bot, operacion_ticket, campo_ticket,
+                str(ticket.get("filename") or ""), contenido,
+            )
+        except Exception as exc:
+            detalle = getattr(exc, "detail", None) or "El archivo no cumple el formato permitido."
+            raise LookupError(str(detalle)) from exc
+
+        item = {
             "object_key": clave,
             "filename": ticket["filename"],
             "content_type": ticket["content_type"],
             "size_bytes": int(ticket["size_bytes"]),
             "sha256": ticket.get("sha256"),
-        })
+            "field": campo_ticket,
+            "operation": operacion_ticket,
+        }
+        if include_content:
+            item["content"] = contenido
+        resultado.append(item)
     return resultado
 
 

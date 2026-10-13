@@ -53,6 +53,31 @@ from central_api.store import JOBS, Job, new_job_id
 router = APIRouter()
 
 
+def _openapi_error(
+    description: str,
+    error_code: str,
+    message: str,
+    *,
+    headers: dict[str, Any] | None = None,
+    with_correlation_id: bool = False,
+) -> dict[str, Any]:
+    """Construye un ejemplo del sobre de error público de esta API."""
+    error_detail = {"error_code": error_code, "message": message}
+    if with_correlation_id:
+        error_detail["correlation_id"] = "corr-0190f0c0"
+    response = {
+        "description": description,
+        "content": {
+            "application/json": {
+                "example": {"detail": error_detail}
+            }
+        },
+    }
+    if headers:
+        response["headers"] = headers
+    return response
+
+
 class JobPersistenceUnavailable(RuntimeError):
     """La base está configurada, pero no se pudo confirmar el job canónico."""
 
@@ -168,19 +193,25 @@ async def _persistir_job_db(
 class CreateJobBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    payload: dict = Field(default_factory=dict)
+    payload: dict = Field(
+        default_factory=dict,
+        description="Datos de entrada requeridos por la operación seleccionada.",
+        examples=[{"representado_cuit": "20123456789"}],
+    )
     credentials: dict = Field(
         default_factory=dict,
-        description="Compatibilidad V3: credenciales de borde, nunca en request_payload",
+        description="Datos de acceso que la operación necesita para consultar o gestionar la cuenta.",
+        examples=[{}],
     )
 
 
 class CreateJobResponse(BaseModel):
-    """Respuesta común de alta de jobs V3 y aliases históricos."""
+    """Respuesta con el identificador y estado inicial del job aceptado."""
 
     success: bool = Field(
         default=True,
         description="Indica que el job fue aceptado para ejecución asíncrona.",
+        examples=[True],
     )
     job_id: str = Field(
         ...,
@@ -205,55 +236,71 @@ class CreateJobResponse(BaseModel):
 
 
 class BotOperationDocumentation(BaseModel):
-    """Contrato explorable de una operación de bot."""
+    """Datos de entrada, costo publicado y ejemplo de una operación."""
 
-    id: str = Field(..., description="Nombre de la operación canónica.")
-    modo: str = Field(default="job", description="Todas las operaciones son asíncronas.")
+    id: str = Field(..., description="Nombre de la operación disponible.", examples=["consultar"])
+    modo: str = Field(default="job", description="La operación se ejecuta como un job consultable.", examples=["job"])
     costo_creditos: int = Field(
-        ..., description="Peso informativo de la operación. No se cobra: cada request consume 1 del cupo de la cuenta.", ge=0
+        ..., description=(
+            "Peso informativo de la operación. No es un cargo adicional, "
+            "cada solicitud consume una unidad del cupo de la cuenta."
+        ), ge=0,
+        examples=[2],
     )
     input_schema: dict[str, Any] = Field(
         ...,
         description=(
-            "Schema del payload específico. Las credenciales se envían en el "
-            "campo credentials del envelope V3 y nunca dentro del payload."
+            "Esquema del payload específico. Los datos de acceso se envían "
+            "separados, en el campo credentials."
         ),
+        examples=[{"type": "object", "properties": {"representado_cuit": {"type": "string"}}}],
     )
     credentials_schema: dict[str, Any] = Field(
         ...,
-        description="Schema informativo de las credenciales efímeras aceptadas.",
+        description="Descripción de los datos de acceso aceptados por la operación.",
+        examples=[{"type": "object", "additionalProperties": True}],
     )
     example: dict[str, Any] = Field(
         ...,
-        description="Ejemplo completo del envelope V3 para esta operación.",
+        description="Ejemplo de solicitud con payload y datos de acceso separados.",
+        examples=[{"payload": {"representado_cuit": "20123456789"}, "credentials": {}}],
     )
 
 
 class BotCatalogItem(BaseModel):
-    id: str = Field(..., description="Identificador estable del bot.")
-    nombre: str = Field(..., description="Nombre legible del bot.")
-    estado: str = Field(..., examples=["HABILITADO"])
-    costo_creditos: int = Field(..., ge=0)
-    operaciones: list[BotOperationDocumentation]
+    id: str = Field(..., description="Identificador del bot para usar en las solicitudes.", examples=["ccma"])
+    nombre: str = Field(..., description="Nombre legible del bot.", examples=["Ccma"])
+    estado: str = Field(..., description="Disponibilidad del bot.", examples=["HABILITADO"])
+    costo_creditos: int = Field(..., description="Costo informativo publicado para el bot.", ge=0, examples=[2])
+    operaciones: list[BotOperationDocumentation] = Field(
+        ..., description="Operaciones con sus schemas y ejemplos de entrada.",
+        examples=[[{"id": "consultar", "modo": "job", "costo_creditos": 2, "input_schema": {"type": "object", "properties": {"representado_cuit": {"type": "string"}}}, "credentials_schema": {"type": "object", "additionalProperties": True}, "example": {"payload": {"representado_cuit": "20123456789"}, "credentials": {}}}]],
+    )
 
 
 class BotCatalogResponse(BaseModel):
-    success: bool = True
+    success: bool = Field(default=True, description="Indica que el catálogo fue devuelto.", examples=[True])
     bots: list[dict[str, Any]] = Field(
-        ..., description="Catálogo compacto compatible con clientes existentes."
+        ..., description="Catálogo compacto de bots disponibles.",
+        examples=[[{"bot": "ccma", "operaciones": ["consultar"]}]],
     )
     items: list[BotCatalogItem] = Field(
-        ..., description="Catálogo enriquecido con schemas y ejemplos por operación."
+        ..., description="Catálogo enriquecido con schemas y ejemplos por operación.",
+        examples=[[{"id": "ccma", "nombre": "Ccma", "estado": "HABILITADO", "costo_creditos": 2, "operaciones": [{"id": "consultar", "modo": "job", "costo_creditos": 2, "input_schema": {"type": "object", "properties": {"representado_cuit": {"type": "string"}}}, "credentials_schema": {"type": "object", "additionalProperties": True}, "example": {"payload": {"representado_cuit": "20123456789"}, "credentials": {}}}]}]],
     )
 
 
 class BotDetailResponse(BaseModel):
-    id: str = Field(..., description="Identificador estable del bot.")
-    nombre: str
-    estado: str = Field(..., examples=["HABILITADO"])
-    operaciones: list[BotOperationDocumentation]
+    id: str = Field(..., description="Identificador del bot.", examples=["ccma"])
+    nombre: str = Field(..., description="Nombre legible del bot.", examples=["ccma"])
+    estado: str = Field(..., description="Disponibilidad del bot.", examples=["HABILITADO"])
+    operaciones: list[BotOperationDocumentation] = Field(
+        ..., description="Operaciones disponibles con sus schemas y ejemplos de entrada.",
+        examples=[[{"id": "consultar", "modo": "job", "costo_creditos": 2, "input_schema": {"type": "object", "properties": {"representado_cuit": {"type": "string"}}}, "credentials_schema": {"type": "object", "additionalProperties": True}, "example": {"payload": {"representado_cuit": "20123456789"}, "credentials": {}}}]],
+    )
     planes: list[str] = Field(
-        ..., description="Tipos de cuenta que pueden consultar esta metadata de catálogo."
+        ..., description="Tipos de cuenta que pueden usar el bot.",
+        examples=[["PRUEBA", "TESTING", "NORMAL"]],
     )
 
 
@@ -294,6 +341,7 @@ OPERATIONS: dict[tuple[str, str], dict] = {
     ("declaracion_en_linea", "consultar"): _op("declaracion_en_linea", "consultar", 2),
     ("facturometro", "consultar"): _op("facturometro", "consultar", 1),
     ("hacienda", "consultar"): _op("hacienda", "consultar", 2),
+    ("libros_portal_iva", "descargar"): _op("libros_portal_iva", "descargar", 2),
     ("libros_portal_iva", "descargar_libros"): _op("libros_portal_iva", "descargar_libros", 2),
     ("libros_portal_iva", "descargar_ddjj"): _op("libros_portal_iva", "descargar_ddjj", 2),
     ("liquidacion_granos", "consultar"): _op("liquidacion_granos", "consultar", 2),
@@ -328,7 +376,12 @@ CATALOGUE = [
     {"bot": "ccma", "operaciones": ["consultar"]},
     {"bot": "certificado_mipyme", "operaciones": ["descargar"]},
     {"bot": "compensaciones", "operaciones": ["consultar"]},
-    {"bot": "comprobantes", "operaciones": ["consultar", "solicitar", "historial"]},
+    {
+        "bot": "comprobantes",
+        "operaciones": ["consultar", "solicitar", "historial"],
+        "deprecated": True,
+        "alias_de": "mis_comprobantes",
+    },
     {"bot": "consulta_cuit",
      "operaciones": ["consulta", "consultar", "consultar_masivo"]},
     {"bot": "consulta_pagos_vep", "operaciones": ["consultar"]},
@@ -337,7 +390,7 @@ CATALOGUE = [
     {"bot": "facturometro", "operaciones": ["consultar"]},
     {"bot": "hacienda", "operaciones": ["consultar"]},
     {"bot": "libros_portal_iva",
-     "operaciones": ["descargar_libros", "descargar_ddjj"]},
+     "operaciones": ["descargar", "descargar_libros", "descargar_ddjj"]},
     {"bot": "liquidacion_granos", "operaciones": ["consultar"]},
     {"bot": "mis_comprobantes",
      "operaciones": ["consulta", "consultar", "solicitar", "historial"]},
@@ -406,7 +459,7 @@ def _canonical_body_openapi() -> dict:
 
     La ruta canónica recibe ``payload`` anidado. Los aliases V2 documentan el
     payload directamente, mientras que este esquema conserva el envelope y
-    ofrece las 42 combinaciones bot/operación dentro de ``oneOf``.
+    ofrece todas las combinaciones registradas de bot y operación en ``oneOf``.
     """
     payload_example = dict(
         public_bot_body_schema("ccma", "consultar")["examples"][0]
@@ -427,16 +480,16 @@ def _canonical_body_openapi() -> dict:
                                     for bot, operation in OPERATIONS
                                 ],
                                 "description": (
-                                    "Payload específico del bot. Seleccione el "
-                                    "esquema correspondiente a bot/operacion."
+                                    "Datos específicos del bot. Use los campos "
+                                    "indicados para la operación solicitada."
                                 ),
                             },
                             "credentials": {
                                 "type": "object",
                                 "additionalProperties": True,
                                 "description": (
-                                    "Credenciales fiscales efímeras. Nunca se "
-                                    "persisten."
+                                    "Datos de acceso requeridos por la operación. "
+                                    "Envíelos separados del payload."
                                 ),
                             },
                         },
@@ -534,7 +587,9 @@ async def submit_job(
         from central_api.api.uploads import resolver_archivos  # evita ciclo
 
         try:
-            await resolver_archivos(str(principal.user_id), bot, claves_ref)
+            await resolver_archivos(
+                str(principal.user_id), bot, claves_ref, operation=operacion
+            )
         except LookupError as exc:
             return JSONResponse(
                 status_code=422,
@@ -685,12 +740,45 @@ async def submit_job(
     "/bots/{bot}/{operacion}",
     status_code=202,
     response_model=CreateJobResponse,
-    summary="Crear un job de bot",
+    summary="Crear una ejecución de bot",
     description=(
-        "Acepta el envelope V3 y devuelve un job asíncrono. Use GET /jobs/{job_id} "
-        "para consultar estados, resultados y artefactos. Los aliases históricos "
-        "mantienen los cuerpos planos de V1/V2."
+        "Recibe la información requerida por la operación y, cuando corresponda, "
+        "los datos de acceso en campos separados. Registra una ejecución para su "
+        "procesamiento asíncrono. La respuesta incluye job_id y estado inicial; consulte "
+        "GET /api/v3/jobs/{job_id} para ver su evolución y resultado. Puede enviar "
+        "Idempotency-Key para reconocer reintentos de la misma solicitud."
     ),
+    responses={
+        202: {
+            "description": "Solicitud aceptada o repetición reconocida. job_id identifica el job consultable.",
+            "headers": {
+                "Location": {"description": "Ruta para consultar el job creado.", "schema": {"type": "string", "example": "/api/v3/jobs/0190f0c0-7f5b-7b2e-9f7e-123456789abc"}},
+                "X-Correlation-ID": {"description": "Identificador para dar seguimiento a esta solicitud.", "schema": {"type": "string", "example": "corr-0190f0c0"}},
+            },
+        },
+        401: _openapi_error("La clave de acceso falta, no es válida, venció o pertenece a una cuenta deshabilitada. Envíe una clave activa con el método de autenticación admitido.", "authentication", "Credenciales inválidas."),
+        404: _openapi_error("El bot o la operación solicitados no están disponibles. Consulte GET /api/v3/bots y use una combinación publicada.", "not_found", "Recurso no encontrado."),
+        409: _openapi_error("Si reutiliza la Idempotency-Key con datos distintos, recibirá 409 idempotency_conflict. Para recuperar la ejecución existente, repita exactamente la solicitud original; para crear una ejecución diferente, use una clave nueva.", "idempotency_conflict", "La clave de idempotencia ya se usó con otro contenido."),
+        422: {
+            "description": "El cuerpo no cumple el formato esperado, los datos enviados no corresponden a la operación, faltan datos de acceso o un archivo no está disponible. Consulte el detalle, corrija los campos y complete los datos requeridos. Para archivos, use POST /api/v3/uploads y envíe la referencia recibida.",
+            "content": {"application/json": {"examples": {
+                "cuerpo_invalido": {
+                    "summary": "Cuerpo de solicitud inválido",
+                    "value": {"detail": [{"type": "dict_type", "loc": ["body", "payload"], "msg": "Input should be a valid dictionary", "input": "no es un objeto"}]},
+                },
+                "payload_o_archivo_invalido": {
+                    "summary": "Payload o archivo no disponible",
+                    "value": {"detail": {"error_code": "validation", "message": "Los archivos deben referenciarse con object_key emitidas por POST /api/v3/uploads."}},
+                },
+                "datos_de_acceso_invalidos": {
+                    "summary": "Datos de acceso no válidos",
+                    "value": {"detail": {"error_code": "invalid_credentials", "message": "Los datos de acceso enviados no son válidos."}},
+                },
+            }}}
+        },
+        429: _openapi_error("La cuenta agotó la cuota disponible para crear jobs. Espere a que se renueve la cuota o consulte el plan de la cuenta. Retry-After indica cuándo reintentar.", "quota_exhausted", "Cuota agotada.", headers={"Retry-After": {"description": "Segundos sugeridos antes de reintentar.", "schema": {"type": "string", "example": "60"}}}),
+        503: _openapi_error("No fue posible verificar el acceso o guardar y confirmar el job por una indisponibilidad temporal. Reintente más tarde y conserve la misma Idempotency-Key para evitar duplicados.", "service_not_enabled", "Servicio temporalmente no disponible."),
+    },
     openapi_extra=_canonical_body_openapi(),
 )
 async def create_job(
@@ -701,7 +789,7 @@ async def create_job(
     principal: ApiPrincipal = Depends(require_api_principal),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
-    """Crea un job usando la superficie genérica normativa de V3."""
+    """Registra un job con payload y credenciales separados."""
     payload = dict(body.payload)
     credentials = dict(body.credentials)
     for name, value in (body.model_extra or {}).items():
@@ -736,8 +824,8 @@ def _operation_documentation(bot: str, operation: str) -> dict[str, Any]:
             "type": "object",
             "additionalProperties": True,
             "description": (
-                "Credenciales fiscales efímeras. Se envían en el envelope y "
-                "nunca forman parte de request_payload."
+                "Datos de acceso requeridos por la operación. Se envían "
+                "separados del payload."
             ),
             "example": credentials_example,
         },
@@ -753,14 +841,40 @@ def _operation_documentation(bot: str, operation: str) -> dict[str, Any]:
     response_model=BotCatalogResponse,
     summary="Listar bots y sus operaciones",
     description=(
-        "Devuelve el catálogo compacto y, en items, el schema de entrada y un "
-        "ejemplo seguro para cada operación disponible."
+        "Devuelve la lista de bots disponibles. El campo bots ofrece un resumen "
+        "compacto, mientras que items añade las operaciones disponibles, sus "
+        "esquemas de entrada y un ejemplo de solicitud para cada operación."
     ),
+    responses={
+        200: {
+            "description": "Catálogo compacto y detallado de bots disponibles.",
+            "content": {"application/json": {"example": {
+                "success": True,
+                "bots": [{"bot": "ccma", "operaciones": ["consultar"]}],
+                "items": [{
+                    "id": "ccma",
+                    "nombre": "Ccma",
+                    "estado": "HABILITADO",
+                    "costo_creditos": 2,
+                    "operaciones": [{
+                        "id": "consultar",
+                        "modo": "job",
+                        "costo_creditos": 2,
+                        "input_schema": {"type": "object", "properties": {"representado_cuit": {"type": "string"}}},
+                        "credentials_schema": {"type": "object", "additionalProperties": True},
+                        "example": {"payload": {"representado_cuit": "20123456789"}, "credentials": {}},
+                    }],
+                }],
+            }}},
+        },
+        401: _openapi_error("La clave de acceso falta, no es válida, venció o pertenece a una cuenta deshabilitada. Envíe una clave activa con el método admitido.", "authentication", "Credenciales inválidas."),
+        503: _openapi_error("No se pudo completar la autenticación por indisponibilidad temporal del servicio. Reintente más tarde.", "service_not_enabled", "Servicio temporalmente no disponible."),
+    },
 )
 def list_bots(
     principal: ApiPrincipal = Depends(require_api_principal),
 ) -> dict[str, Any]:
-    """Catálogo visible con costo y disponibilidad (plan 02 §3.10)."""
+    """Devuelve el catálogo con operaciones, costos y ejemplos."""
     _ = principal
     items = [
         {
@@ -780,16 +894,39 @@ def list_bots(
 @router.get(
     "/bots/{bot}",
     response_model=BotDetailResponse,
-    summary="Consultar schema y ejemplos de un bot",
+    summary="Consultar esquema y ejemplos de un bot",
     description=(
-        "Expone las operaciones, costos, schemas de payload y ejemplos de uso "
-        "sin importar ni ejecutar plugins del worker."
+        "Devuelve las operaciones disponibles para el bot indicado, con costos "
+        "publicados, esquemas de entrada y ejemplos. Use el identificador de "
+        "bot mostrado por GET /api/v3/bots."
     ),
+    responses={
+        200: {
+            "description": "Detalle del bot, sus operaciones y tipos de cuenta disponibles.",
+            "content": {"application/json": {"example": {
+                "id": "ccma",
+                "nombre": "ccma",
+                "estado": "HABILITADO",
+                "operaciones": [{
+                    "id": "consultar",
+                    "modo": "job",
+                    "costo_creditos": 2,
+                    "input_schema": {"type": "object", "properties": {"representado_cuit": {"type": "string"}}},
+                    "credentials_schema": {"type": "object", "additionalProperties": True},
+                    "example": {"payload": {"representado_cuit": "20123456789"}, "credentials": {}},
+                }],
+                "planes": ["PRUEBA", "TESTING", "NORMAL"],
+            }}},
+        },
+        401: _openapi_error("La clave de acceso falta, no es válida, venció o pertenece a una cuenta deshabilitada. Envíe una clave activa con el método admitido.", "authentication", "Credenciales inválidas."),
+        404: _openapi_error("No hay operaciones publicadas para el identificador indicado. Verifique el nombre consultando GET /api/v3/bots.", "not_found", "Recurso no encontrado."),
+        503: _openapi_error("No se pudo completar la autenticación por indisponibilidad temporal del servicio. Reintente más tarde.", "service_not_enabled", "Servicio temporalmente no disponible."),
+    },
 )
 def bot_detail(
     bot: str, principal: ApiPrincipal = Depends(require_api_principal)
 ) -> JSONResponse:
-    """Detalle y operaciones de un bot con schema de entrada y costo."""
+    """Devuelve operaciones, schemas y ejemplos del bot indicado."""
     _ = principal
     ops = [
         _operation_documentation(bot, op)

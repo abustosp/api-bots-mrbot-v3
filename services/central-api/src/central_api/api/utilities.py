@@ -1,15 +1,9 @@
-"""Synchronous, deterministic V1 utility endpoints.
-
-They process only request bytes and do not invoke browser bots.  File uploads use
-the same multipart wire format as V1 while avoiding a global multipart runtime
-dependency in central-api.
-"""
+"""Synchronous utilities that process files previously loaded to uploads."""
 
 from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
-import base64
 import os
 import re
 import subprocess
@@ -24,7 +18,6 @@ from central_api.api.file_inputs import uploaded_file_from_request
 from central_api.security.principals import ApiPrincipal
 
 router = APIRouter()
-MAX_UTILITY_BYTES = 7_000_000
 
 
 def _validate_cuit(value: str) -> str:
@@ -107,7 +100,7 @@ def _pdf_text(content: bytes) -> str:
         raise HTTPException(status_code=400, detail=f"Error procesando el PDF: {exc}") from exc
 
 
-def _rcel_fields(text: str, content: bytes, include_b64: bool) -> dict[str, Any]:
+def _rcel_fields(text: str, content: bytes | None = None) -> dict[str, Any]:
     fields = {
         "CUIT del Emisor": "", "COD": "", "Punto de Venta": "", "Número de Factura": "",
         "Domicilio Vendedor": "", "Condición Vendedor": "", "Fecha": "", "Desde": "", "Hasta": "",
@@ -133,8 +126,6 @@ def _rcel_fields(text: str, content: bytes, include_b64: bool) -> dict[str, Any]
         if match:
             fields[key] = match.group(1).strip()
     fields["AUX"] = "-".join(fields[key] for key in ("CUIT del Emisor", "COD", "Punto de Venta", "Número de Factura"))
-    if include_b64:
-        fields["B64"] = base64.b64encode(content).decode("ascii")
     return fields
 
 
@@ -150,38 +141,194 @@ def _apoc_base_paths() -> list[Path]:
     return candidates
 
 
-@router.get("/utilidades/cuit/{cuit}")
+def _utility_file_request_body(extension: str, *, upload_field: str) -> dict:
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["object_key"],
+                        "properties": {
+                            "object_key": {
+                                "type": "string",
+                                "description": "Clave recibida al cargar previamente el archivo en el bucket uploads.",
+                                "example": "550e8400-e29b-41d4-a716-446655440000/rcel/sin_cuit/documento." + extension,
+                            },
+                        },
+                    },
+                    "example": {"object_key": f"550e8400-e29b-41d4-a716-446655440000/rcel/sin_cuit/documento.{extension}"},
+                },
+            },
+        }
+    }
+
+
+@router.get(
+    "/utilidades/cuit/{cuit}",
+    summary="Valida un CUIT",
+    description=(
+        "Valida que el valor contenga un CUIT de 11 dígitos y que su dígito verificador "
+        "sea correcto. Se permiten separadores, que se eliminan antes de validar. Devuelve "
+        "el CUIT normalizado y el resultado de la validación."
+    ),
+    responses={
+        200: {
+            "description": "CUIT válido, normalizado a 11 dígitos.",
+            "content": {"application/json": {"example": {"cuit": "00000000000", "valido": True, "fuente": "validacion_modulo_11"}}},
+        },
+        400: {
+            "description": "El CUIT no contiene 11 dígitos tras quitar separadores o el dígito verificador no coincide. Corrija el número y vuelva a intentar.",
+            "content": {"application/json": {"example": {"detail": "CUIT con dígito verificador inválido."}}},
+        },
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        503: {
+            "description": "No se pudo verificar la autenticación por indisponibilidad del servicio de datos. Reintente más tarde.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}}},
+        },
+    },
+)
 def cuit_individual(cuit: str, principal: ApiPrincipal = Depends(require_api_principal)) -> JSONResponse:
+    """Valida el formato y el dígito verificador de un CUIT."""
     _ = principal
     digits = _validate_cuit(cuit)
     return JSONResponse({"cuit": digits, "valido": True, "fuente": "validacion_modulo_11"})
 
 
-@router.post("/utilidades/pem/convertir")
+@router.post(
+    "/utilidades/pem/convertir",
+    summary="Convierte un archivo PEM a datos estructurados",
+    description=(
+        "Convierte un archivo `.pem` cargado previamente al bucket uploads y devuelve su contenido "
+        "validado como datos estructurados. El archivo puede tener hasta 52.428.800 bytes (50 MiB); "
+        "la conversión tiene un límite de 20 segundos.\n\n"
+        "Flujo de dos pasos: (1) solicite un ticket en POST /api/v3/uploads con `bot=rcel`, "
+        "`operacion=descargar`, `campo=pem_convertir`, el nombre, tipo y tamaño del archivo; "
+        "la respuesta devuelve `upload_url` y `object_key`. Cargue los bytes usando `upload_url` "
+        'y el encabezado `Content-Type` indicado. (2) envíe `{"object_key":"<object_key>"}` '
+        "a este endpoint."
+    ),
+    openapi_extra=_utility_file_request_body("pem", upload_field="pem_convertir"),
+    responses={
+        200: {
+            "description": "Archivo convertido. `datos` representa la estructura del contenido y conserva atributos y texto.",
+            "content": {"application/json": {"example": {"nombre_archivo": "archivo.pem", "datos": {"Documento": {"@attributes": {}, "Texto": "contenido de ejemplo"}}}}},
+        },
+        400: {
+            "description": "El archivo PEM no puede convertirse o interpretarse. Envíe un archivo PEM válido.",
+            "content": {"application/json": {"example": {"detail": "No fue posible convertir el contenido PEM."}}},
+        },
+        413: {"description": "El archivo supera 52.428.800 bytes (50 MiB). Reduzca el archivo y vuelva a enviarlo."},
+        415: {"description": "El formato no es PEM. Envíe un archivo con extensión .pem."},
+        422: {"description": "La clave no corresponde a un archivo vigente de esta cuenta, el archivo fue eliminado del bucket uploads o la solicitud no contiene una referencia válida."},
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        503: {
+            "description": "No fue posible guardar o leer la copia del archivo, o la conversión no está disponible. Revise el almacenamiento y reintente; el archivo no se procesó.",
+        },
+        504: {
+            "description": "La conversión excedió el tiempo permitido. Compruebe que el archivo sea válido y vuelva a intentarlo más tarde.",
+            "content": {"application/json": {"example": {"detail": "La conversión PEM excedió el tiempo permitido."}}},
+        },
+    },
+)
 async def pem_convertir(request: Request, principal: ApiPrincipal = Depends(require_api_principal)) -> JSONResponse:
-    _ = principal
-    upload = await uploaded_file_from_request(request, field_name="file")
-    if not upload.filename.lower().endswith(".pem"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser un .pem")
-    if len(upload.content) > MAX_UTILITY_BYTES:
-        raise HTTPException(status_code=400, detail="El archivo excede el tamaño permitido.")
+    """Convierte un archivo PEM de hasta 50 MiB a una respuesta JSON."""
+    upload = await uploaded_file_from_request(
+        request, field_name="pem_convertir", principal=principal,
+        bot="rcel", operation="descargar",
+    )
     return JSONResponse({"nombre_archivo": upload.filename, "datos": _convert_pem(upload.content, upload.filename)})
 
 
-@router.post("/utilidades/rcel/extraer-texto")
+@router.post(
+    "/utilidades/rcel/extraer-texto",
+    summary="Extrae datos de una factura PDF",
+    description=(
+        "Extrae texto de la primera página de una factura PDF cargada previamente al bucket uploads. "
+        "El contenido no puede superar 52.428.800 bytes (50 MiB). La respuesta devuelve solo los "
+        "campos extraídos; el archivo original no se incluye.\n\n"
+        "Flujo de dos pasos: (1) solicite un ticket en POST /api/v3/uploads con `bot=rcel`, "
+        "`operacion=descargar`, `campo=rcel_extraer_texto`, el nombre, tipo y tamaño del PDF; "
+        "la respuesta devuelve `upload_url` y `object_key`. Cargue los bytes usando `upload_url` "
+        'y el encabezado `Content-Type` indicado. (2) envíe `{"object_key":"<object_key>"}` '
+        "a este endpoint."
+    ),
+    openapi_extra=_utility_file_request_body("pdf", upload_field="rcel_extraer_texto"),
+    responses={
+        200: {
+            "description": "PDF procesado. `extracted_data` contiene un objeto con los campos encontrados; los campos no detectados se devuelven como cadenas vacías.",
+            "content": {"application/json": {"example": {"success": True, "message": "PDF procesado con éxito.", "extracted_data": [{
+                "CUIT del Emisor": "", "COD": "", "Punto de Venta": "", "Número de Factura": "",
+                "Domicilio Vendedor": "", "Condición Vendedor": "", "Fecha": "", "Desde": "", "Hasta": "",
+                "CUIT del Receptor": "", "Nombre del Receptor": "", "Condición Comprador": "", "Domicilio Cliente": "",
+                "Importe Neto Gravado": "", "IVA 0%": "", "IVA 2,5%": "", "IVA 5%": "", "IVA 10,5%": "",
+                "IVA 21%": "", "IVA 27%": "", "Otros Tributos": "", "Importe Total": "", "CAE": "",
+                "Vencimiento CAE": "", "AUX": "-"
+            }]}}},
+        },
+        400: {
+            "description": "El PDF no se puede procesar. Envíe una factura PDF legible.",
+            "content": {"application/json": {"example": {"detail": "No fue posible procesar el PDF."}}},
+        },
+        413: {"description": "El archivo supera 52.428.800 bytes (50 MiB). Reduzca el archivo y vuelva a enviarlo."},
+        415: {"description": "El formato no es PDF. Envíe un archivo con extensión .pdf."},
+        422: {"description": "La clave no corresponde a un archivo vigente de esta cuenta, el archivo fue eliminado del bucket uploads o la solicitud no contiene una referencia válida."},
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        503: {
+            "description": "No fue posible guardar o leer la copia del archivo, la extracción no está disponible o no pudo verificarse la autenticación. Revise el almacenamiento y reintente.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}}},
+        },
+    },
+)
 async def rcel_extraer_texto(request: Request, principal: ApiPrincipal = Depends(require_api_principal)) -> JSONResponse:
-    _ = principal
-    upload = await uploaded_file_from_request(request, field_name="file")
-    if not upload.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
-    if len(upload.content) > MAX_UTILITY_BYTES:
-        raise HTTPException(status_code=400, detail="El archivo excede el tamaño permitido.")
-    include_b64 = upload.fields.get("incluir_b64", "false").lower() in {"1", "true", "si", "sí"}
-    return JSONResponse({"success": True, "message": "PDF procesado con éxito.", "extracted_data": [_rcel_fields(_pdf_text(upload.content), upload.content, include_b64)]})
+    """Extrae campos de una factura PDF de hasta 50 MiB desde la copia guardada."""
+    upload = await uploaded_file_from_request(
+        request, field_name="rcel_extraer_texto", principal=principal,
+        bot="rcel", operation="descargar",
+    )
+    return JSONResponse({"success": True, "message": "PDF procesado con éxito.", "extracted_data": [_rcel_fields(_pdf_text(upload.content))]})
 
 
-@router.get("/utilidades/apoc/{cuit}")
+@router.get(
+    "/utilidades/apoc/{cuit}",
+    summary="Consulta si un CUIT figura como apócrifo",
+    description=(
+        "Valida el CUIT y consulta la base local de contribuyentes apócrifos. Devuelve `apoc=true` "
+        "con las fechas de condición y publicación si existe una coincidencia; si no figura, "
+        "devuelve `apoc=false` y ambas fechas como null."
+    ),
+    responses={
+        200: {
+            "description": "Consulta completada, tanto si se encontró el CUIT como si no figura en la base.",
+            "content": {"application/json": {"examples": {
+                "no_encontrado": {"summary": "CUIT no encontrado", "value": {"cuit": "00000000000", "fecha_condicion": None, "fecha_publicacion": None, "apoc": False}},
+            }}},
+        },
+        400: {
+            "description": "El CUIT no contiene 11 dígitos tras quitar separadores o su dígito verificador es incorrecto. Corrija el número y vuelva a intentar.",
+            "content": {"application/json": {"example": {"detail": "CUIT con dígito verificador inválido."}}},
+        },
+        401: {
+            "description": "Las credenciales están ausentes o no son válidas. Envíe una clave de API válida con el método de autenticación admitido.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        503: {
+            "description": "La base de consulta no está configurada o no se pudo verificar la autenticación. Solicite que habiliten la consulta y vuelva a intentar.",
+        },
+    },
+)
 def apoc(cuit: str, principal: ApiPrincipal = Depends(require_api_principal)) -> JSONResponse:
+    """Consulta la base de apócrifos para un CUIT válido."""
     _ = principal
     digits = _validate_cuit(cuit)
     for path in _apoc_base_paths():

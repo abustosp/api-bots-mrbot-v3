@@ -136,12 +136,26 @@ def normalize_v2_payload(
         )
 
     if bot == "siper":
-        for legacy, current in (
-            ("detalle_minio", "incluir_detalle"),
-            ("categorias_minio", "incluir_categorias"),
-        ):
+        # V2: ``detalle_minio``/``categorias_minio`` solo decidian que
+        # capturas se suben (ambas en false = consulta igual, solo datos). Se
+        # conserva ese comportamiento: el detalle y las categorias se
+        # consultan siempre y las banderas controlan la subida.
+        subir = False
+        for legacy in ("detalle_minio", "categorias_minio"):
             if legacy in normalized:
-                normalized.setdefault(current, normalized.pop(legacy))
+                valor = bool(normalized.pop(legacy))
+                subir = subir or valor
+        if subir:
+            normalized.setdefault("subir", True)
+        elif "subir" not in normalized:
+            normalized["subir"] = False
+        normalized.setdefault("incluir_detalle", True)
+        normalized.setdefault("incluir_categorias", True)
+        # V2: sin ``cuit_representado`` se consulta el propio CUIT.
+        if not normalized.get("representado_cuit"):
+            propio = normalized.get("cuit_representante") or normalized.get("cuit_inicio_sesion")
+            if propio:
+                normalized["representado_cuit"] = propio
 
     if bot == "sct":
         # V1 pedía salidas por sección y formato con nueve banderas; el worker
@@ -169,6 +183,12 @@ def normalize_v2_payload(
         if secciones:
             normalized.setdefault("secciones", sorted(set(secciones)))
             normalized.setdefault("formatos", sorted(set(formatos)))
+        else:
+            # V2 con las nueve banderas en false consultaba igual y devolvia
+            # solo los datos: todas las secciones, sin archivos.
+            normalized.setdefault("secciones", ["vencimientos", "deudas", "ddjj_pendientes"])
+            normalized.setdefault("formatos", ["xlsx"])
+            normalized.setdefault("subir", False)
 
     if "pdf" in normalized:
         pdf = normalized.pop("pdf")

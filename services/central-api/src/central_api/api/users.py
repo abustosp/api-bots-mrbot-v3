@@ -35,8 +35,17 @@ class CrearUsuarioBody(BaseModel):
         description="Email o alias de depuración único, normalizado sin distinguir mayúsculas.",
         examples=["persona@example.com"],
     )
-    nombre: str | None = Field(default=None, max_length=120)
-    enviar_email: bool = False
+    nombre: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Nombre visible asociado a la cuenta; es opcional.",
+        examples=["Persona"],
+    )
+    enviar_email: bool = Field(
+        default=False,
+        description="Indica si también se intenta enviar la clave al correo de la identidad.",
+        examples=[False],
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -48,13 +57,86 @@ class CrearUsuarioBody(BaseModel):
 
 
 class UsuarioBody(BaseModel):
-    usuario: str = Field(min_length=2, max_length=254, examples=["persona@example.com"])
+    usuario: str = Field(
+        min_length=2,
+        max_length=254,
+        description="Correo o alias de la cuenta cuya clave se quiere restablecer.",
+        examples=["persona@example.com"],
+    )
 
 
 class EstablecerApiKeyBody(BaseModel):
-    usuario: str = Field(min_length=2, max_length=254, examples=["persona@example.com"])
-    api_key_actual: str = Field(min_length=1, examples=["mbk_0123456789abcdef_abcdef0123456789"])
-    api_key_nueva: str = Field(min_length=3, examples=["mi-clave-nueva"])
+    usuario: str = Field(
+        min_length=2,
+        max_length=254,
+        description="Correo o alias asociado a la clave actual.",
+        examples=["persona@example.com"],
+    )
+    api_key_actual: str = Field(
+        min_length=1,
+        description="Clave vigente que se debe comprobar antes de emitir otra.",
+        examples=["mbk_0123456789abcdef_abcdef0123456789"],
+    )
+    api_key_nueva: str = Field(
+        min_length=3,
+        description="Nueva clave elegida por el usuario; debe tener al menos 3 caracteres y no contener espacios.",
+        examples=["mi-clave-nueva"],
+    )
+
+
+class UsuarioCreadoRespuesta(BaseModel):
+    usuario: str = Field(description="Identidad normalizada de la cuenta.", examples=["persona@example.com"])
+    nombre: str = Field(description="Nombre visible de la cuenta; puede estar vacío.", examples=["Persona"])
+    estado: str = Field(description="Estado inicial de la cuenta.", examples=["deshabilitado"])
+    api_key: str = Field(
+        description="Clave de acceso revelada en esta respuesta. Guárdala de forma segura, ya que no se vuelve a mostrar aquí.",
+        examples=["mbk_0123456789abcdef_abcdef0123456789"],
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "usuario": "persona@example.com",
+                    "nombre": "Persona",
+                    "estado": "deshabilitado",
+                    "api_key": "mbk_0123456789abcdef_abcdef0123456789",
+                }
+            ]
+        }
+    }
+
+
+class RestablecimientoSolicitadoRespuesta(BaseModel):
+    detail: str = Field(
+        description="Confirmación genérica que no revela si la cuenta existe ni si se pudo enviar el mensaje.",
+        examples=["Si la cuenta existe, recibirás instrucciones por email."],
+    )
+
+
+class ApiKeyActualizadaRespuesta(BaseModel):
+    success: bool = Field(description="Indica que la clave se actualizó correctamente.", examples=[True])
+    usuario: str = Field(description="Identidad normalizada de la cuenta actualizada.", examples=["persona@example.com"])
+    mensaje: str = Field(description="Confirmación de la actualización.", examples=["API key actualizada"])
+
+
+class ConsultasUsuarioRespuesta(BaseModel):
+    asignadas: int | None = Field(description="Consultas incluidas en el cupo vigente; nulo si es ilimitado.", examples=[100])
+    consumidas: int = Field(description="Consultas ya consumidas.", examples=[12])
+    reservadas: int = Field(description="Consultas actualmente reservadas.", examples=[1])
+    disponibles: int | None = Field(description="Consultas restantes; nulo si el cupo es ilimitado.", examples=[87])
+
+
+class MiUsuarioRespuesta(BaseModel):
+    usuario: str = Field(description="Identidad de la cuenta autenticada.", examples=["persona@example.com"])
+    estado: str = Field(description="Estado actual de la cuenta.", examples=["habilitado"])
+    tipo_cuenta: str = Field(description="Categoría de cuenta asignada.", examples=["PRUEBA"])
+    plan: str = Field(description="Nombre normalizado del tipo de cuenta.", examples=["prueba"])
+    max_requests: int | None = Field(description="Máximo de consultas configurado; nulo cuando no hay tope.", examples=[100])
+    ilimitado: bool = Field(description="Indica si el cupo no tiene límite.", examples=[False])
+    renovable: bool = Field(description="Indica si el cupo se renueva por período.", examples=[False])
+    periodo: dict[str, Any] | None = Field(description="Período vigente, si corresponde.", examples=[None])
+    consultas: ConsultasUsuarioRespuesta = Field(description="Detalle de asignación y uso del cupo.")
 
 
 def _normalizar_usuario(raw: str) -> str:
@@ -252,13 +334,44 @@ async def _rotar_clave_memoria(usuario_id: str, api_key: str) -> None:
     emitir_clave(usuario_id, [], "", api_key)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, summary="Crear usuario")
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="Crear una cuenta de usuario",
+    description=(
+        "Registra una cuenta inicialmente deshabilitada y devuelve una clave de acceso "
+        "que solo se revela en esta respuesta. Si se solicita, también intenta enviarla "
+        "al correo de la identidad; un fallo de envío no impide completar el alta. "
+        "La respuesta no debe almacenarse en caché."
+    ),
+    responses={
+        201: {
+            "model": UsuarioCreadoRespuesta,
+            "description": "Cuenta creada. Conserva la clave devuelta, porque no se vuelve a mostrar en esta operación.",
+        },
+        400: {
+            "description": "La identidad está vacía o no cumple el formato admitido. Envía un correo válido o un alias de 2 a 64 caracteres permitido.",
+            "content": {"application/json": {"example": {"detail": "email inválido"}}},
+        },
+        409: {
+            "description": "Ya existe una cuenta con esa identidad. Usa otra identidad o solicita el restablecimiento de la clave de la cuenta existente.",
+            "content": {"application/json": {"example": {"detail": "identidad ya registrada"}}},
+        },
+        422: {
+            "description": "El cuerpo no cumple las restricciones de entrada, por ejemplo, falta usuario o excede la longitud permitida. Corrige los campos indicados y vuelve a enviar la solicitud."
+        },
+        503: {
+            "description": "No se pudo completar el alta o no está disponible la protección necesaria para guardar la clave. No se revela la clave; vuelve a intentar más tarde.",
+            "content": {"application/json": {"example": {"detail": "No se pudo completar el alta de usuario"}}},
+        },
+    },
+)
 async def crear_usuario(
     body: CrearUsuarioBody,
     response: Response,
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict[str, Any]:
-    """Crea una cuenta deshabilitada y revela su clave una sola vez."""
+    """Crea una cuenta deshabilitada y devuelve su clave de acceso una sola vez."""
     identidad = _normalizar_usuario(body.usuario)
     if _buscar_usuario_memoria(identidad) is not None:
         raise HTTPException(status_code=409, detail="identidad ya registrada")
@@ -315,13 +428,36 @@ async def crear_usuario(
     }
 
 
-@router.post("/restablecer-api-key", status_code=status.HTTP_202_ACCEPTED, summary="Restablecer API key")
+@router.post(
+    "/restablecer-api-key",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Solicitar el restablecimiento de una clave",
+    description=(
+        "Solicita de forma privada una nueva clave para la cuenta indicada. "
+        "La respuesta es siempre genérica para no confirmar si la identidad existe; "
+        "si la cuenta puede recibir correo y el envío se completa, las instrucciones "
+        "llegan a esa dirección."
+    ),
+    responses={
+        202: {
+            "model": RestablecimientoSolicitadoRespuesta,
+            "description": "Solicitud aceptada. La confirmación no informa si la cuenta existe ni garantiza que se haya enviado un correo.",
+        },
+        400: {
+            "description": "La identidad está vacía o tiene un formato no admitido. Corrige el correo o alias e inténtalo de nuevo.",
+            "content": {"application/json": {"example": {"detail": "email inválido"}}},
+        },
+        422: {
+            "description": "El cuerpo no cumple las restricciones del campo usuario. Envía una identidad de entre 2 y 254 caracteres."
+        },
+    },
+)
 async def restablecer_api_key(
     body: UsuarioBody,
     response: Response,
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict[str, str]:
-    """Solicita una rotación enviada exclusivamente por email, sin oráculo."""
+    """Solicita el envío privado de instrucciones para cambiar la clave."""
     identidad = _normalizar_usuario(body.usuario)
     settings = get_settings()
     usuario_pg = None
@@ -375,13 +511,47 @@ async def restablecer_api_key(
     return {"detail": "Si la cuenta existe, recibirás instrucciones por email."}
 
 
-@router.post("/establecer-api-key", summary="Establecer API key")
+@router.post(
+    "/establecer-api-key",
+    summary="Cambiar la clave de acceso",
+    description=(
+        "Comprueba la identidad y la clave vigente antes de sustituirla por la nueva. "
+        "Al completarse, las claves anteriores dejan de ser válidas. La respuesta "
+        "confirma el cambio, pero no devuelve la nueva clave: consérvala en el cliente "
+        "que la envió."
+    ),
+    responses={
+        200: {
+            "model": ApiKeyActualizadaRespuesta,
+            "description": "La clave se actualizó y las claves anteriores quedaron revocadas.",
+        },
+        400: {
+            "description": "La identidad no es válida, la nueva clave tiene menos de 3 caracteres, contiene espacios o coincide con la actual. Corrige la identidad o elige una clave distinta sin espacios.",
+            "content": {"application/json": {"example": {"detail": "La nueva API key debe ser distinta"}}},
+        },
+        401: {
+            "description": "La clave actual no es válida para esa identidad, está revocada o la cuenta no está habilitada. Verifica ambos datos o solicita el restablecimiento de la clave.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        409: {
+            "description": "No se pudo emitir la nueva clave. Reintenta más tarde; la operación no confirma el cambio.",
+            "content": {"application/json": {"example": {"detail": "No se pudo emitir la nueva API key"}}},
+        },
+        422: {
+            "description": "El cuerpo no cumple las restricciones de entrada, como los límites de longitud o la ausencia de un campo obligatorio. Corrige los campos indicados y vuelve a enviar la solicitud."
+        },
+        503: {
+            "description": "El servicio de verificación o actualización no está disponible temporalmente. Espera y vuelve a intentarlo.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}}},
+        },
+    },
+)
 async def establecer_api_key(
     body: EstablecerApiKeyBody,
     response: Response,
     request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> dict[str, Any]:
-    """Verifica la clave actual y revoca las claves anteriores al emitir otra."""
+    """Verifica la clave actual y sustituye las claves anteriores por la nueva."""
     identidad = _normalizar_usuario(body.usuario)
     api_key_actual = body.api_key_actual.strip()
     api_key_nueva = _validar_api_key(body.api_key_nueva)
@@ -421,11 +591,40 @@ async def establecer_api_key(
     return {"success": True, "usuario": identidad, "mensaje": "API key actualizada"}
 
 
-@router.get("/me", summary="Consultar mi usuario")
+@router.get(
+    "/me",
+    summary="Consultar mi cuenta de usuario",
+    description=(
+        "Devuelve la identidad autenticada, el estado de la cuenta y el detalle "
+        "del cupo asignado y utilizado. Requiere una credencial válida cuando la "
+        "autenticación de clientes está habilitada."
+    ),
+    responses={
+        200: {
+            "model": MiUsuarioRespuesta,
+            "description": "Identidad, estado y resumen de consultas de la cuenta autenticada.",
+        },
+        401: {
+            "description": "Falta una credencial válida o la cuenta no puede autenticarse. Envía una clave activa asociada a una cuenta habilitada.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
+        },
+        503: {
+            "description": "No se puede verificar la cuenta temporalmente. Reintenta cuando el servicio vuelva a estar disponible.",
+            "content": {"application/json": {"example": {"detail": {"error_code": "service_not_enabled", "message": "Servicio temporalmente no disponible."}}}},
+        },
+        422: {
+            "description": "La solicitud contiene datos o encabezados que no se pudieron interpretar. Revisa el formato de la petición y vuelve a enviarla.",
+        },
+        500: {
+            "description": "No fue posible cargar la información actual de la cuenta. Reintenta la consulta y, si el problema persiste, contacta al soporte de la cuenta.",
+            "content": {"text/plain": {"example": "Internal Server Error"}},
+        },
+    },
+)
 async def mi_usuario(
     principal: ApiPrincipal = Depends(require_api_principal),
 ) -> dict[str, Any]:
-    """Devuelve identidad, estado, tipo de cuenta y cupo de consultas."""
+    """Devuelve la identidad, el estado y el cupo de consultas de la cuenta autenticada."""
     if principal.key_id == "dev":
         raise _no_autorizado()
     from central_api.admin.users import USERS

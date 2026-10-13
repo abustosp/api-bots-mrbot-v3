@@ -28,22 +28,71 @@ class ArtifactBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    artifact_id: str | None = Field(default=None, max_length=128)
-    object_key: str = Field(min_length=1, max_length=1024)
-    name: str = Field(min_length=1, max_length=255)
-    size_bytes: int = Field(ge=0)
-    content_type: str = Field(min_length=1, max_length=128)
-    sha256: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
+    artifact_id: str | None = Field(
+        default=None, max_length=128,
+        description="Identificador del artefacto en la salida de la ejecución.",
+        examples=["constancia-01"],
+    )
+    object_key: str = Field(
+        min_length=1, max_length=1024,
+        description="Clave del archivo guardado que fue devuelta al solicitar la subida.",
+        examples=["jobs/0190c2d4/1/constancia-01/ab12cd34ef56"],
+    )
+    name: str = Field(
+        min_length=1, max_length=255,
+        description="Nombre del archivo entregado al usuario.", examples=["constancia.pdf"]
+    )
+    size_bytes: int = Field(
+        ge=0, description="Tamaño del archivo en bytes.", examples=[184320]
+    )
+    content_type: str = Field(
+        min_length=1, max_length=128,
+        description="Tipo de contenido del archivo.", examples=["application/pdf"]
+    )
+    sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-fA-F]{64}$",
+        description="Hash SHA-256 hexadecimal del archivo, si está disponible.",
+        examples=["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+    )
 
 
 class ResultBody(BaseModel):
-    result: str = Field(default="OK", pattern=r"^(OK|PARCIAL|ERROR|CANCELADO)$")
-    data: dict = Field(default_factory=dict)
-    error: dict | None = None
-    artifacts: list[ArtifactBody] = Field(default_factory=list, max_length=100)
-    assignment_attempt: int = Field(default=1, ge=1)
-    event_id: str = Field(default="", max_length=128)
-    error_category: str | None = Field(default=None, max_length=80)
+    result: str = Field(
+        default="OK", pattern=r"^(OK|PARCIAL|ERROR|CANCELADO)$",
+        description="Resultado terminal de la ejecución.", examples=["OK"],
+    )
+    data: dict = Field(
+        default_factory=dict,
+        description="Datos devueltos por la operación cuando el resultado es correcto o parcial.",
+        examples=[{"estado": "presentada", "periodo": "2026-09"}],
+    )
+    error: dict | None = Field(
+        default=None, description="Información resumida del error, si la ejecución falló.",
+        examples=[{"error_code": "consulta_no_disponible"}],
+    )
+    artifacts: list[ArtifactBody] = Field(
+        default_factory=list, max_length=500,
+        description="Archivos generados y guardados para esta ejecución.",
+        examples=[[{
+            "artifact_id": "constancia-01",
+            "object_key": "jobs/0190c2d4/1/constancia-01/ab12cd34ef56",
+            "name": "constancia.pdf", "size_bytes": 184320,
+            "content_type": "application/pdf",
+        }]],
+    )
+    assignment_attempt: int = Field(
+        default=1, ge=1, description="Número del intento que produjo el resultado.", examples=[1]
+    )
+    event_id: str = Field(
+        default="", max_length=128,
+        description="Identificador de correlación del reporte de resultado.",
+        examples=["evt-0190c2d4-result"],
+    )
+    error_category: str | None = Field(
+        default=None, max_length=80,
+        description="Categoría pública del error; use INFRASTRUCTURE_ERROR solo para fallos de infraestructura.",
+        examples=["INFRASTRUCTURE_ERROR"],
+    )
 
 
 async def _espejar_resultado_db(job_id: str, body: ResultBody) -> tuple[str, bool]:
@@ -92,10 +141,52 @@ async def _espejar_resultado_db(job_id: str, body: ResultBody) -> tuple[str, boo
         return str(job.status), not created
 
 
-@router.post("/jobs/{job_id}/result")
+@router.post(
+    "/jobs/{job_id}/result",
+    summary="Informar el resultado final de un job",
+    description=(
+        "Entrega el resultado terminal, los datos de salida y la metadata de los "
+        "archivos generados por el intento asignado al worker autenticado. Un "
+        "reenvío idéntico es idempotente; un resultado diferente para el mismo "
+        "job e intento se rechaza para evitar reemplazar la salida ya confirmada."
+    ),
+    responses={
+        200: {
+            "description": "Resultado persistido o repetición idéntica del reporte.",
+            "content": {"application/json": {"examples": {
+                "registrado": {"summary": "Resultado guardado", "value": {
+                    "success": True, "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "status": "COMPLETO"
+                }},
+                "repetido": {"summary": "Reenvío idempotente", "value": {
+                    "success": True, "job_id": "0190c2d4-7b4a-7b5f-9f28-3efc1f7b1b10", "status": "COMPLETO", "dedup": True
+                }},
+            }}},
+        },
+        401: {"description": "Falta la identidad de un worker registrado activo. Incluya `X-Worker-Node` con el nodo del worker registrado.", "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}}},
+        403: {"description": "El token de servicio no es válido o el job pertenece a otra asignación. Renueve el registro/token si corresponde y reporte solo trabajos asignados a este worker.", "content": {"application/json": {"examples": {
+            "token": {"summary": "Token no autorizado", "value": {"detail": {"error_code": "forbidden", "message": "Operación no permitida."}}},
+            "asignacion": {"summary": "Job de otro worker", "value": {"detail": "asignación de otro worker"}},
+        }}}},
+        404: {"description": "El job ya no existe o el identificador no es válido para una ejecución registrada. Compruebe el identificador entregado por la central.", "content": {"application/json": {"example": {"detail": "job no encontrado"}}}},
+        409: {"description": "Ya existe un resultado distinto para el mismo intento o el intento informado quedó obsoleto. No cambie el contenido al reintentar; use la asignación vigente si el intento fue reemplazado.", "content": {"application/json": {"examples": {
+            "duplicado": {"summary": "Resultado distinto ya registrado", "value": {"detail": "resultado duplicado divergente"}},
+            "asignacion": {"summary": "Intento obsoleto", "value": {"detail": "stale_assignment"}},
+        }}}},
+        422: {"description": "El cuerpo, el resultado o la metadata de un archivo no cumple el contrato. Revise tipos, límites, clave del archivo y formato del hash SHA-256 antes de reenviar.", "content": {"application/json": {"examples": {
+            "validacion": {"summary": "Campo de entrada inválido", "value": {"detail": [{"loc": ["body", "assignment_attempt"], "msg": "Input should be greater than or equal to 1", "type": "greater_than_equal"}]}},
+            "artefacto": {"summary": "Metadata de archivo inválida", "value": {"detail": "metadata de artefacto inválida"}},
+            "resultado": {"summary": "Resultado no aceptado", "value": {"detail": "resultado inválido"}},
+        }}}},
+        503: {"description": "No se pudo verificar la asignación del job o guardar el resultado por una indisponibilidad temporal. Revise que el acceso a datos responda y reintente el mismo reporte después de la espera indicada en `Retry-After`.", "headers": {"Retry-After": {"description": "Segundos sugeridos antes de reintentar.", "schema": {"type": "integer", "example": 3}}}, "content": {"application/json": {"examples": {
+            "persistencia": {"summary": "No se pudo confirmar el resultado", "value": {"detail": "no se pudo confirmar el resultado; reintente"}},
+            "asignacion": {"summary": "No se pudo verificar la asignación", "value": {"detail": "no se pudo verificar la asignación del job"}},
+        }}}},
+    },
+)
 async def report_result(
     job_id: str, body: ResultBody, worker_node: str = Depends(require_worker)
 ) -> dict:
+    """Guarda el resultado terminal de un job asignado a este worker."""
     job = await job_para_worker(job_id, worker_node)
     if job is None:
         raise HTTPException(status_code=404, detail="job no encontrado")

@@ -45,10 +45,11 @@ def test_upload_route_emite_put_sigv4_con_content_type(monkeypatch):
         response = TestClient(app).post(
             "/api/v3/uploads",
             json={
-                "bot": "apoc",
-                "operacion": "consultar",
-                "campo": "entrada",
-                "filename": "entrada.txt",
+                "bot": "portal_iva",
+                "operacion": "importar",
+                "campo": "ventas_txt",
+                "cuit_representado": "20123456786",
+                "filename": "ventas.txt",
                 "content_type": "text/plain",
                 "size_bytes": 7,
             },
@@ -58,7 +59,7 @@ def test_upload_route_emite_put_sigv4_con_content_type(monkeypatch):
 
     assert response.status_code == 201
     body = response.json()
-    assert body["object_key"].endswith("/apoc/sin_cuit/entrada.txt")
+    assert body["object_key"].endswith("/portal_iva/20123456786/ventas.txt")
     assert body["required_headers"] == {"Content-Type": "text/plain"}
     assert "X-Amz-Signature=" in body["upload_url"]
     assert "X-Amz-SignedHeaders=content-type%3Bhost" in body["upload_url"]
@@ -185,7 +186,7 @@ def test_get_job_recupera_job_persistido_fuera_de_memoria(monkeypatch):
 def test_download_artifact_solo_firma_tras_scoping_del_job(monkeypatch):
     job_id, artifact_id = uuid.uuid4(), uuid.uuid4()
     object_key = f"jobs/{job_id}/1/output.pdf"
-    artifact = SimpleNamespace(object_key=object_key, expires_at=None)
+    artifact = SimpleNamespace(object_key=object_key, expires_at=None, filename="reporte final.csv")
 
     class FakeResult:
         def scalar_one_or_none(self):
@@ -227,6 +228,7 @@ def test_download_artifact_solo_firma_tras_scoping_del_job(monkeypatch):
         ),
     )
 
+    monkeypatch.setattr(uploads_api, "object_exists", lambda **_: True)
     response = asyncio.run(
         uploads_api.download_artifact(str(job_id), str(artifact_id), PRINCIPAL)
     )
@@ -235,3 +237,51 @@ def test_download_artifact_solo_firma_tras_scoping_del_job(monkeypatch):
     assert response.headers["location"].startswith("http://127.0.0.1:9000/")
     assert object_key in response.headers["location"]
     assert "X-Amz-Signature=" in response.headers["location"]
+
+
+def test_download_artifact_devuelve_objeto_eliminado_si_no_esta_en_el_bucket(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+
+    job_id, artifact_id = uuid.uuid4(), uuid.uuid4()
+    artifact = SimpleNamespace(
+        object_key=f"jobs/{job_id}/1/output.pdf", expires_at=None, filename="r.csv"
+    )
+
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return artifact
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, statement):
+            return FakeResult()
+
+    class FakeRepository:
+        def __init__(self, session):
+            pass
+
+        async def get_scoped(self, *_):
+            return object()
+
+    monkeypatch.setattr("central_api.db.nueva_sesion", lambda: FakeSession())
+    monkeypatch.setattr("central_api.repositories.jobs.JobRepository", FakeRepository)
+    monkeypatch.setattr(
+        uploads_api, "get_settings",
+        lambda: SimpleNamespace(
+            object_storage_endpoint="http://127.0.0.1:9000",
+            object_storage_public_endpoint="http://127.0.0.1:9000",
+            object_storage_region="us-east-1", object_storage_bucket="mrbot",
+            object_storage_access_key="a", object_storage_secret_key="b",
+        ),
+    )
+    monkeypatch.setattr(uploads_api, "object_exists", lambda **_: False)
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(uploads_api.download_artifact(str(job_id), str(artifact_id), PRINCIPAL))
+    assert err.value.status_code == 410
+    assert err.value.detail == "objeto eliminado del bucket"

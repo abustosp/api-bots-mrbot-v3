@@ -53,8 +53,9 @@ def provisioned_section(bot: str | None = None) -> dict:
         "proxy": None,
         "captcha": {
             "enabled": True,
-            "arca_key": _limpio(settings.capmonster_arca_key),
-            "srt_key": _limpio(settings.capmonster_srt_key),
+            "arca_key": _limpio(settings.capmonster_arca_key) or _limpio(settings.capmonster_api_key),
+            "srt_key": _limpio(settings.capmonster_srt_key) or _limpio(settings.capmonster_api_key),
+            "api_key": _limpio(settings.capmonster_api_key),
         },
         "service": {
             "cuit_base_url": _limpio(settings.cuit_service_base_url),
@@ -68,7 +69,38 @@ def provisioned_section(bot: str | None = None) -> dict:
         if apoc_base is not None:
             # El plugin la lee de la sección ``service`` (configure()).
             section["service"]["apoc_base_text"] = apoc_base
-    if settings.proxy_enabled and settings.proxy_host:
+    bots_con_proxy = {
+        b.strip() for b in (getattr(settings, "proxy_bots", "") or "").split(",") if b.strip()
+    }
+    if bot and bot in bots_con_proxy and getattr(settings, "proxy_bots_host", ""):
+        host = settings.proxy_bots_host
+        usuario = (settings.proxy_bots_username or "").strip()
+        minimo = int(getattr(settings, "proxy_bots_port_min", 0) or 0)
+        maximo = int(getattr(settings, "proxy_bots_port_max", 0) or 0)
+        if minimo and maximo >= minimo:
+            # Datacenter: un puerto por IP; se elige uno al azar en cada job.
+            import secrets
+
+            puerto = minimo + secrets.randbelow(maximo - minimo + 1)
+            host = f"{host.rsplit(':', 1)[0] if host.count(':') > 1 else host}:{puerto}"
+            if not usuario.startswith("user-"):
+                usuario = f"user-{usuario[len('customer-'):] if usuario.startswith('customer-') else usuario}"
+            modo, pais = "datacenter", (getattr(settings, "proxy_bots_country", "") or "ar").lower()
+        else:
+            pais = (getattr(settings, "proxy_bots_country", "") or "ar").strip().upper()
+            if usuario and "-cc-" not in usuario.lower() and not usuario.lower().startswith("customer-"):
+                usuario = f"customer-{usuario}"
+            if usuario and "-cc-" not in usuario.lower():
+                usuario = f"{usuario}-cc-{pais}"
+            modo, pais = "dedicated", pais.lower()
+        section["proxy"] = {
+            "mode": modo,
+            "host": host,
+            "username": usuario or None,
+            "password": settings.proxy_bots_password or None,
+            "country": pais,
+        }
+    elif settings.proxy_enabled and settings.proxy_host:
         section["proxy"] = {
             "mode": settings.proxy_mode,
             "host": settings.proxy_host,

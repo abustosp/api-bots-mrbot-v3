@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     object_storage_region: str = Field(default="us-east-1", alias="OBJECT_STORAGE_REGION")
     object_storage_bucket: str = Field(default="", alias="OBJECT_STORAGE_BUCKET")
     # Bucket temporal de archivos de entrada (PEM, TXT, CSV...) que el cliente
-    # sube antes de crear el job. Layout: ``{bot}/{cuit_representado}/{archivo}``.
+    # carga antes de crear el job. Clave: ``{usuario}/{bot}/{cuit}/{archivo}``.
     object_storage_uploads_bucket: str = Field(
         default="uploads", alias="OBJECT_STORAGE_UPLOADS_BUCKET"
     )
@@ -153,6 +153,21 @@ class Settings(BaseSettings):
     proxy_username: str = Field(default="", alias="PROXY_USERNAME")
     proxy_password: str = Field(default="", alias="PROXY_PASSWORD")
     proxy_country: str = Field(default="ar", alias="PROXY_COUNTRY")
+    # Proxy dedicado para los bots cuyo portal bloquea las IPs de los servidores
+    # (p. ej. certificado_mipyme/LUFE). Aplica solo a ``PROXY_BOTS`` (lista por
+    # comas); el resto de los bots sigue con el perfil general o sin proxy.
+    proxy_bots: str = Field(default="", alias="PROXY_BOTS")
+    proxy_bots_host: str = Field(default="", alias="PROXY_BOTS_HOST")
+    proxy_bots_username: str = Field(default="", alias="PROXY_BOTS_USERNAME")
+    proxy_bots_password: str = Field(default="", alias="PROXY_BOTS_PASSWORD")
+    proxy_bots_country: str = Field(default="ar", alias="PROXY_BOTS_COUNTRY")
+    # Datacenter: un puerto por IP. La central elige uno al azar en el rango por job.
+    proxy_bots_port_min: int = Field(default=0, alias="PROXY_BOTS_PORT_MIN")
+    proxy_bots_port_max: int = Field(default=0, alias="PROXY_BOTS_PORT_MAX")
+    # Una sola clave del proveedor de CAPTCHA para todos los portales. Las
+    # variables por portal (``CAPMONSTER_ARCA_KEY``/``CAPMONSTER_SRT_KEY``) se
+    # conservan solo como excepción opcional y, si faltan, usan la clave común.
+    capmonster_api_key: str = Field(default="", alias="CAPMONSTER_API_KEY")
     capmonster_arca_key: str = Field(default="", alias="CAPMONSTER_ARCA_KEY")
     capmonster_srt_key: str = Field(default="", alias="CAPMONSTER_SRT_KEY")
     cuit_service_base_url: str = Field(default="", alias="CUIT_SERVICE_BASE_URL")

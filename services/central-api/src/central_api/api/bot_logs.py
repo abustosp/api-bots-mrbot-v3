@@ -92,7 +92,7 @@ LOG_SPECS: tuple[LogSpec, ...] = (
     LogSpec("/hacienda/logs", (("hacienda", ("consultar",)),), _REP_REPDO,
             _CUITS),
     LogSpec("/libros_iva/logs",
-            (("libros_portal_iva", ("descargar_libros", "descargar_ddjj")),),
+            (("libros_portal_iva", ("descargar", "descargar_libros", "descargar_ddjj")),),
             _REP_REPDO,
             (*_CUITS, "denominacion", "periodo_desde", "periodo_hasta",
              "periodos_descargados", "periodos_error")),
@@ -155,18 +155,48 @@ _FIELD_TYPES: dict[str, Any] = {
     "periodos_error": Optional[list[str]],
 }
 
+_RECORD_FIELD_DESCRIPTIONS = {
+    "id": "Texto obligatorio: identificador del registro; coincide con job_id.",
+    "timestamp": "Fecha y hora obligatoria en formato ISO 8601; indica cuándo se creó el registro.",
+    "status": "Texto obligatorio: estado resumido compatible con el historial anterior: success, error o pending.",
+    "error_message": "Texto opcional: mensaje público y resumido del error; es null si no hubo error.",
+    "job_id": "Texto opcional: identificador de la ejecución asociada; coincide con id.",
+    "estado_v3": "Texto opcional: estado detallado: PENDIENTE, ASIGNADO, CORRIENDO, COMPLETO, FALLIDO o CANCELADO.",
+    "bot": "Texto opcional: nombre identificador del bot que realizó la operación.",
+    "operation": "Texto opcional: nombre identificador de la operación realizada por el bot.",
+    "resultado": "Texto opcional: resultado informado, cuando está disponible: OK, PARCIAL o ERROR.",
+    "error_code": "Texto opcional: código público de error, de 1 a 80 caracteres (letras, números, punto, guion bajo, dos puntos o guion). No incluye el detalle interno.",
+    "cuit_representante": "Texto opcional: CUIT del representante asociado al registro; normalmente tiene 11 dígitos.",
+    "cuit_representado": "Texto opcional: CUIT del contribuyente representado; normalmente tiene 11 dígitos.",
+    "cuit": "Texto opcional: CUIT consultado para este registro, usado por el historial de ARBA.",
+    "usuario": "Texto opcional: valor histórico del usuario asociado a la consulta; puede ser un CUIT o identificador de acceso.",
+    "denominacion": "Texto opcional: denominación o razón social del contribuyente, cuando fue informada.",
+    "representado_nombre": "Texto opcional: nombre o denominación del contribuyente representado.",
+    "periodo": "Texto opcional: período consultado; el formato depende del bot y se conserva como texto (por ejemplo, AAAAMM).",
+    "periodo_desde": "Texto opcional: inicio del período consultado, tal como lo informa el bot; el formato puede variar.",
+    "periodo_hasta": "Texto opcional: fin del período consultado, tal como lo informa el bot; el formato puede variar.",
+    "medio_pago": "Texto opcional: medio de pago asociado al registro, por ejemplo internet_banking.",
+    "opciones_encontradas": "Lista opcional de textos: opciones encontradas durante la consulta.",
+    "despachos": "Lista opcional de textos: identificadores de los despachos informados.",
+    "periodos_descargados": "Lista opcional de textos: períodos descargados correctamente.",
+    "periodos_error": "Lista opcional de textos: períodos que presentaron un error.",
+    "cuits_consultados": "Texto opcional: CUIT consultados, separados por comas; puede contener varios valores.",
+    "cantidad_archivos": "Entero opcional: cantidad de archivos asociados al registro.",
+    "archivo_nombre": "Texto opcional: nombre del archivo asociado, sin que implique incluir su contenido.",
+}
+
 
 # --------------------------------------------------------------------------
 # Modelos de request/response generados por path
 # --------------------------------------------------------------------------
 
 _FILTER_DESCRIPTIONS = {
-    "Fecha_desde": "Fecha de inicio en formato YYYYMMDD.",
-    "Fecha_hasta": "Fecha de fin en formato YYYYMMDD (inclusiva).",
-    "Cuit_representante": "CUIT del representante (11 dígitos sin guiones).",
-    "Cuit_representado": "CUIT del representado (11 dígitos sin guiones).",
-    "Cuit": "CUIT consultado (11 dígitos sin guiones).",
-    "Medio_pago": "Medio de pago (por ejemplo internet_banking).",
+    "Fecha_desde": "Texto opcional con la fecha inicial de creación del registro, en formato YYYYMMDD; incluye ese día.",
+    "Fecha_hasta": "Texto opcional con la fecha final de creación del registro, en formato YYYYMMDD; incluye ese día.",
+    "Cuit_representante": "Texto opcional con el CUIT del representante (11 dígitos); se ignoran los caracteres que no sean dígitos al comparar.",
+    "Cuit_representado": "Texto opcional con el CUIT representado (11 dígitos); se ignoran los caracteres que no sean dígitos al comparar.",
+    "Cuit": "Texto opcional con el CUIT consultado (11 dígitos); se ignoran los caracteres que no sean dígitos al comparar.",
+    "Medio_pago": "Texto opcional con el medio de pago; la comparación es exacta (por ejemplo, internet_banking).",
 }
 
 
@@ -181,7 +211,7 @@ def _request_model(spec: LogSpec) -> type[BaseModel]:
     for name in ("Fecha_desde", "Fecha_hasta", *spec.filters):
         fields[name] = (
             Optional[str],
-            Field(default=None, description=_FILTER_DESCRIPTIONS[name]),
+            Field(default=None, description=_filter_description(spec, name)),
         )
     return create_model(
         f"Logs_request_{_slug(spec.path)}",
@@ -191,22 +221,232 @@ def _request_model(spec: LogSpec) -> type[BaseModel]:
 
 
 def _record_model(spec: LogSpec) -> type[BaseModel]:
+    from pydantic import Field
+
     fields: dict[str, Any] = {
-        "id": (str, ...),
-        "timestamp": (datetime, ...),
-        "status": (str, ...),
-        "error_message": (Optional[str], None),
+        "id": (str, Field(..., description=_RECORD_FIELD_DESCRIPTIONS["id"])),
+        "timestamp": (
+            datetime,
+            Field(..., description=_RECORD_FIELD_DESCRIPTIONS["timestamp"]),
+        ),
+        "status": (str, Field(..., description=_RECORD_FIELD_DESCRIPTIONS["status"])),
+        "error_message": (
+            Optional[str],
+            Field(default=None, description=_RECORD_FIELD_DESCRIPTIONS["error_message"]),
+        ),
     }
     for name in (*spec.fields, *_COMMON_FIELDS):
         if name not in fields:
-            fields[name] = (_FIELD_TYPES.get(name, Optional[str]), None)
+            fields[name] = (
+                _FIELD_TYPES.get(name, Optional[str]),
+                Field(default=None, description=_RECORD_FIELD_DESCRIPTIONS[name]),
+            )
     return create_model(f"Log_registry_{_slug(spec.path)}", **fields)
 
 
 def _response_model(spec: LogSpec, record: type[BaseModel]) -> type[BaseModel]:
+    from pydantic import Field
+
     return create_model(
-        f"Logs_response_{_slug(spec.path)}", registros=(list[record], ...)
+        f"Logs_response_{_slug(spec.path)}",
+        registros=(
+            list[record],
+            Field(..., description="Lista de registros de este historial, ordenada del más reciente al más antiguo."),
+        ),
     )
+
+
+_EXAMPLE_VALUES = {
+    "cuit_representante": "20123456786",
+    "cuit_representado": "27234567891",
+    "cuit": "30712345678",
+    "usuario": "20123456786",
+    "denominacion": "Empresa de ejemplo S.A.",
+    "representado_nombre": "Empresa de ejemplo S.A.",
+    "periodo": "202601",
+    "periodo_desde": "202601",
+    "periodo_hasta": "202612",
+    "medio_pago": "internet_banking",
+    "opciones_encontradas": ["Opción de ejemplo"],
+    "despachos": ["12345"],
+    "periodos_descargados": ["202601"],
+    "periodos_error": [],
+    "cuits_consultados": "27234567891,30712345678",
+    "cantidad_archivos": 1,
+    "archivo_nombre": "ejemplo.pdf",
+}
+
+
+def _endpoint_label(spec: LogSpec) -> str:
+    return spec.path.rsplit("/", 1)[0].strip("/").replace("_", " ").replace("-", " ")
+
+
+def _request_example(spec: LogSpec) -> dict[str, str]:
+    values = {
+        "Fecha_desde": "20260101",
+        "Fecha_hasta": "20260131",
+        "Cuit_representante": _EXAMPLE_VALUES["cuit_representante"],
+        "Cuit_representado": _EXAMPLE_VALUES["cuit_representado"],
+        "Cuit": _EXAMPLE_VALUES["cuit"],
+        "Medio_pago": _EXAMPLE_VALUES["medio_pago"],
+    }
+    return {
+        name: values[name]
+        for name in ("Fecha_desde", "Fecha_hasta", *spec.filters)
+    }
+
+
+def _response_example(spec: LogSpec) -> dict[str, list[dict[str, Any]]]:
+    job_id = "00000000-0000-4000-8000-000000000001"
+    record: dict[str, Any] = {
+        "id": job_id,
+        "timestamp": "2026-01-15T12:00:00Z",
+        "status": "success",
+        "error_message": None,
+    }
+    for name in spec.fields:
+        record[name] = _EXAMPLE_VALUES[name]
+    record.update({
+        "job_id": job_id,
+        "estado_v3": "COMPLETO",
+        "bot": spec.targets[0][0],
+        "operation": (spec.targets[0][1] or ("consultar",))[0],
+        "resultado": "OK",
+        "error_code": None,
+    })
+    return {"registros": [record]}
+
+
+def _endpoint_description(spec: LogSpec) -> str:
+    filtros = [
+        f"`{name}`: {_filter_description(spec, name)}"
+        for name in ("Fecha_desde", "Fecha_hasta", *spec.filters)
+    ]
+    return (
+        f"Consulta síncrona del historial de {_endpoint_label(spec)}. "
+        "Devuelve los registros asociados a la cuenta autenticada, ordenados "
+        "del más reciente al más antiguo. Es una consulta de lectura, no un "
+        "job: no crea ni encola una nueva ejecución.\n\n"
+        "Filtros opcionales del cuerpo JSON:\n"
+        + "\n".join(f"- {item}" for item in filtros)
+        + "\n\nEl parámetro de consulta `limit` acepta de 1 a 5000 registros y "
+        "por defecto es 5000. La respuesta contiene como máximo ese número. "
+        "No hay desplazamiento ni cursor de paginación: se devuelven los "
+        "registros más recientes que cumplan los filtros. Los textos se limitan "
+        "a 256 caracteres y cada lista a 200 elementos. "
+        "Los nombres y tipos de cada campo de `registros` se describen en el "
+        "esquema de respuesta; los campos particulares conservan los nombres "
+        "históricos de sus columnas."
+    )
+
+
+def _filter_description(spec: LogSpec, name: str) -> str:
+    if name in ("Fecha_desde", "Fecha_hasta"):
+        return (
+            f"Texto opcional con fecha YYYYMMDD; se interpreta en UTC y "
+            f"{'incluye' if name == 'Fecha_hasta' else 'comienza en'} ese día."
+        )
+    if name == "Cuit_representado" and "cuits_consultados" in spec.fields:
+        return (
+            "Texto opcional con un CUIT (11 dígitos); se busca como subcadena "
+            "en la lista de CUIT consultados, separada por comas."
+        )
+    return _FILTER_DESCRIPTIONS[name]
+
+
+_ERROR_RESPONSES = {
+    400: {
+        "description": (
+            "Fecha_desde o Fecha_hasta no respeta YYYYMMDD. Envíe una fecha "
+            "válida con ocho dígitos; ejemplo de respuesta:"
+        ),
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "error_code": "validation",
+                        "message": "Fecha_desde debe tener formato YYYYMMDD",
+                        "success": False,
+                    }
+                }
+            }
+        },
+    },
+    401: {
+        "description": (
+            "No se proporcionó una credencial válida o no pudo verificarse. "
+            "Envíe una credencial de acceso vigente y vuelva a intentarlo."
+        ),
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "error_code": "authentication",
+                        "message": "Credenciales inválidas.",
+                    }
+                }
+            }
+        },
+    },
+    403: {
+        "description": (
+            "La cuenta autenticada no tiene permiso para consultar historiales. "
+            "Solicite que se habilite el acceso de lectura y vuelva a intentarlo."
+        ),
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "error_code": "forbidden",
+                        "message": "Operación no permitida.",
+                    }
+                }
+            }
+        },
+    },
+    422: {
+        "description": (
+            "El cuerpo JSON o `limit` no tiene el tipo o el valor esperado. "
+            "Use un objeto JSON, fechas como texto YYYYMMDD y un `limit` entero "
+            "entre 1 y 5000."
+        ),
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": [{
+                        "type": "less_than_equal",
+                        "loc": ["query", "limit"],
+                        "msg": "El valor debe ser menor o igual que 5000",
+                        "input": 5001,
+                        "ctx": {"le": 5000},
+                    }]
+                }
+            }
+        },
+    },
+    503: {
+        "description": (
+            "El historial no pudo consultarse temporalmente. Espere al menos "
+            "3 segundos y reintente; si persiste, contacte al soporte."
+        ),
+        "headers": {
+            "Retry-After": {
+                "description": "Segundos mínimos antes de reintentar; actualmente 3.",
+                "schema": {"type": "integer", "example": 3},
+            }
+        },
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "error_code": "service_not_enabled",
+                        "message": "Servicio temporalmente no disponible.",
+                    }
+                }
+            }
+        },
+    },
+}
 
 
 # --------------------------------------------------------------------------
@@ -595,10 +835,22 @@ def _register(spec: LogSpec) -> None:
 
     async def handler(
         principal: ApiPrincipal = Depends(require_api_principal),
-        body: request_model = Body(default_factory=request_model),  # type: ignore[valid-type]
+        body: request_model = Body(  # type: ignore[valid-type]
+            default_factory=request_model,
+            openapi_examples={
+                "ejemplo": {
+                    "summary": f"Filtros para {_endpoint_label(spec)}",
+                    "description": "Ejemplo de consulta del historial; todos los filtros son opcionales.",
+                    "value": _request_example(spec),
+                }
+            },
+        ),
         limit: int = Query(
             default=_MAX_ROWS, ge=1, le=_MAX_ROWS,
-            description="Máximo de registros devueltos (más recientes primero).",
+            description=(
+                "Cantidad máxima de registros que se devolverán, del más reciente "
+                "al más antiguo. Entero entre 1 y 5000; por defecto 5000."
+            ),
         ),
     ):
         if not (principal_has(principal, "jobs:read_own")
@@ -630,10 +882,25 @@ def _register(spec: LogSpec) -> None:
         methods=["POST"],
         response_model=response_model,
         tags=[primary_bot],
-        summary=f"Historial de ejecuciones de {spec.path.rsplit('/', 1)[0]}",
-        response_description=(
-            "Registros del historial del usuario, más recientes primero."
-        ),
+        summary=f"Consultar historial de {_endpoint_label(spec)}",
+        description=_endpoint_description(spec),
+        response_description="Registros del historial, del más reciente al más antiguo.",
+        responses={
+            **_ERROR_RESPONSES,
+            200: {
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "ejemplo": {
+                                "summary": f"Respuesta de {_endpoint_label(spec)}",
+                                "description": "Ejemplo representativo con los campos de este historial.",
+                                "value": _response_example(spec),
+                            }
+                        }
+                    }
+                }
+            },
+        },
     )
 
 
