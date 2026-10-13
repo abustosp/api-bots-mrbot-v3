@@ -16,6 +16,7 @@ el ejemplo de payload. El código vive en:
 - La regla https de COMARB (`_asegurar_route_https_comarb`) se instala después de ubicar la tarjeta y antes del clic. Si se instalaba antes, el catálogo de Clave Fiscal quedaba con 0 enlaces en vivo.
 - La regla es idempotente por sesión y solo intercepta `**://app1.comarb.gob.ar/**` para pasar `http://` a `https://`.
 - Ambos cambios se probaron en vivo contra ARCA el 09/10/2026. Cobertura: `tests/test_arca_login_servicio_sifere.py`.
+- Autorrepresentación sin otros representados: COMARB entra directo a `mainMenu.do` con "X (CUIT) representando a X (CUIT)" y no muestra `#selectedCuit`. Si el CUIT del encabezado coincide con el pedido, `seleccionar_representado` lo da por elegido. Probado en vivo el 13/10/2026 (V1, V2 y V3 tienen el mismo fix).
 
 ## Operación `consultar`
 
