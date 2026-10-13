@@ -32,3 +32,4 @@ build/
 *.bak
 .DS_Store
 
+tools/compat_runner/*

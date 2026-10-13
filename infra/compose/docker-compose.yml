@@ -5,8 +5,10 @@
 # (plano de control, unico cliente de la base) mas bot-worker
 # (plano de ejecucion, sin puertos al host). central y worker comparten la
 # red externa proxy-edge para que nginx-v2 termine TLS por labels.
-# MinIO local solo existe bajo el perfil local-storage; en
-# produccion el broker es externo (ver docker-compose.prod.yml).
+# Object storage: por defecto MEGA S4 (compatible S3, ver OBJECT_STORAGE_*
+# en .env). MinIO local solo existe bajo el perfil opcional local-storage
+# (desarrollo sin red); en produccion el broker es externo (ver
+# docker-compose.prod.yml).
 #
 # Uso:
 #   cp .env.example .env
@@ -104,18 +106,28 @@ services:
       # worker): claves solo por archivo; en dev valen los defaults vacíos
       # (clave efímera, sin proxy, captcha deshabilitado, endpoints públicos).
       ASSIGNMENT_SIGNING_KEY_FILE: /run/secrets/assignment_signing_key
+      # Clave unica del proveedor de CAPTCHA (se define en .env, solo central).
+      CAPMONSTER_API_KEY: ${CAPMONSTER_API_KEY:-}
+      # Proxy dedicado solo para los bots listados en PROXY_BOTS (p. ej. certificado_mipyme).
+      PROXY_BOTS: ${PROXY_BOTS:-}
+      PROXY_BOTS_HOST: ${PROXY_BOTS_HOST:-}
+      PROXY_BOTS_USERNAME: ${PROXY_BOTS_USERNAME:-}
+      PROXY_BOTS_PASSWORD: ${PROXY_BOTS_PASSWORD:-}
+      PROXY_BOTS_COUNTRY: ${PROXY_BOTS_COUNTRY:-ar}
+      PROXY_BOTS_PORT_MIN: ${PROXY_BOTS_PORT_MIN:-0}
+      PROXY_BOTS_PORT_MAX: ${PROXY_BOTS_PORT_MAX:-0}
       CAPMONSTER_ARCA_KEY_FILE: /run/secrets/capmonster_arca_key
       CAPMONSTER_SRT_KEY_FILE: /run/secrets/capmonster_srt_key
-      # Storage local para artefactos V3. El servicio MinIO sigue opt-in
-      # mediante `local-storage`; estas credenciales solo se montan en central.
-      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}
-      OBJECT_STORAGE_PUBLIC_ENDPOINT: ${OBJECT_STORAGE_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
-      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
-      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-mrbot}
+      # Storage de artefactos V3: MEGA S4 (compatible S3) por defecto. Las
+      # credenciales se definen en .env (OBJECT_STORAGE_ACCESS_KEY/SECRET_KEY)
+      # y solo se montan en central; el worker nunca las recibe.
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-https://s3.ca-central-1.s4.mega.io}
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: ${OBJECT_STORAGE_PUBLIC_ENDPOINT:-https://s3.ca-central-1.s4.mega.io}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-ca-central-1}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-miscomprobantes}
+      OBJECT_STORAGE_USE_SSL: ${OBJECT_STORAGE_USE_SSL:-true}
       OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-}
       OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-}
-      OBJECT_STORAGE_ACCESS_KEY_FILE: /run/secrets/minio_root_user
-      OBJECT_STORAGE_SECRET_KEY_FILE: /run/secrets/minio_root_password
       SMTP_SERVER: ${SMTP_SERVER:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -139,8 +151,6 @@ services:
       - assignment_signing_key
       - smtp_password
       - minio_central_credentials
-      - minio_root_user
-      - minio_root_password
       - oidc_client_secret
       - capmonster_arca_key
       - capmonster_srt_key
@@ -212,7 +222,7 @@ services:
       # central ni de otros servicios (W-1/SEC-3).
       - ../certs:/certs:ro
     # Storage solo transporta URLs prefirmadas de un solo uso. El worker no
-    # recibe credenciales S3, pero sí necesita alcanzar MinIO para subir los
+    # recibe credenciales S3, pero sí necesita alcanzar el storage (MEGA S4) para subir los
     # artefactos de sus jobs.
     networks: [edge, control, storage]
     depends_on:
@@ -368,8 +378,9 @@ networks:
   control:
     internal: true
   storage:
-    # No internal: MinIO local publica 9000/9001 solo en 127.0.0.1 y el host
-    # necesita seguir las URLs GET prefirmadas para descargar artefactos.
+    # No internal: el worker sube a MEGA S4 por internet y el cliente sigue
+    # las URLs GET prefirmadas. (MinIO local, opcional, publica 9000/9001 en
+    # 127.0.0.1.)
 
 volumes:
   apoc_base:
