@@ -104,6 +104,11 @@ class SiferePortal(PortalArca):
             )
             await self.paso("resolver_entry_point", self._resolver_entry_point())
             selector, ambito = await self._buscar_selector_cuit()
+        if selector is None and await self._representado_vigente() == digits:
+            # Sin otros representados, COMARB entra directo a mainMenu.do con
+            # "X (CUIT) representando a X (CUIT)" y no muestra el selector.
+            self._representado_listo = True
+            return
         if selector is None:
             raise TargetUnavailableError(
                 "el portal SIFERE no mostró el selector de representado",
@@ -190,6 +195,21 @@ class SiferePortal(PortalArca):
         except Exception:
             pass
         await self._esperar(1_500)
+
+    async def _representado_vigente(self) -> str | None:
+        """CUIT que el encabezado muestra después de "representando a"."""
+        ambitos = [self.page, *list(getattr(self.page, "frames", []) or [])]
+        for ambito in ambitos:
+            try:
+                texto = await ambito.locator("body").inner_text(timeout=3_000)
+            except Exception:
+                continue
+            coincidencia = re.search(
+                r"representando\s+a\s+[^()]*\((\d{2}-?\d{8}-?\d)\)", str(texto), re.I
+            )
+            if coincidencia:
+                return solo_digitos(coincidencia.group(1))
+        return None
 
     async def _buscar_selector_cuit(self) -> tuple[Any | None, Any]:
         """Selector ``#selectedCuit`` en la página o dentro de un iframe."""

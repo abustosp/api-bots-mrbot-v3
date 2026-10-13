@@ -201,6 +201,58 @@ def test_seleccionar_representado_envia_formulario_sin_esperar_navegacion() -> N
     assert listo
 
 
+class _PortalSinSelector(_SiferePortalTest):
+    """COMARB sin otros representados: mainMenu.do sin ``#selectedCuit``."""
+
+    def __init__(self, encabezado: str) -> None:
+        super().__init__(_SelectorRepresentado())
+        self.encabezado = encabezado
+
+    async def _buscar_selector_cuit(self) -> tuple[Any, Any]:
+        return None, self.page
+
+    async def abrir_url(self, url: str, **kwargs: Any) -> None:
+        pass
+
+    async def _representado_vigente(self) -> str | None:
+        portal = SiferePortal(_PaginaConTexto(self.encabezado))
+        return await portal._representado_vigente()
+
+
+class _PaginaConTexto:
+    def __init__(self, texto: str) -> None:
+        self.texto = texto
+        self.frames: list[Any] = []
+
+    def locator(self, *_: Any) -> Any:
+        texto = self.texto
+
+        class _Body:
+            async def inner_text(self, **__: Any) -> str:
+                return texto
+
+        return _Body()
+
+
+ENCABEZADO_PROPIO = (
+    "LANZA ANABELLA CLAUDIA (27-24907029-2) representando a\n"
+    "LANZA ANABELLA CLAUDIA (27-24907029-2)\nSistema SifereWeb"
+)
+
+
+def test_seleccionar_representado_sin_selector_acepta_el_cuit_vigente() -> None:
+    portal = _PortalSinSelector(ENCABEZADO_PROPIO)
+    asyncio.run(portal.seleccionar_representado("27249070292"))
+    assert portal._representado_listo
+
+
+def test_seleccionar_representado_sin_selector_rechaza_otro_cuit() -> None:
+    portal = _PortalSinSelector(ENCABEZADO_PROPIO)
+    with pytest.raises(TargetUnavailableError, match="selector de representado"):
+        asyncio.run(portal.seleccionar_representado("20123456789"))
+    assert not portal._representado_listo
+
+
 # --- SIRCAR (port del bucle de V1: retencionIn/percepcionIn + Excel/PDF) ---
 
 
