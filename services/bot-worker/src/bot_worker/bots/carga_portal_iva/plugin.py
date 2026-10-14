@@ -23,7 +23,10 @@ estado para reintentos por seccion independiente como en V2.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 import re
+import traceback
 from typing import Any, Mapping
 
 from bot_worker.bots.carga_portal_iva.schema import (
@@ -99,6 +102,29 @@ def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     if "browser" in type(exc).__name__.lower() or "playwright" in type(exc).__name__.lower():
         return BrowserCrashedError(f"navegador caido: {texto}")
     return TargetUnavailableError(f"falla del organismo: {texto}")
+
+
+_log = logging.getLogger("bot_worker.carga_portal_iva")
+
+
+async def _diagnostico_seccion(clave: str, exc: BaseException, pagina: Any) -> None:
+    """Registra traza, URL y titulo de la pagina al fallar una seccion (solo logs del worker)."""
+    url = titulo = ""
+    try:
+        page = getattr(pagina, "page", None)
+        if page is not None:
+            url = str(page.url)
+            titulo = await page.title()
+            cuerpo = (await page.locator("body").inner_text(timeout=3_000)).replace("\n", " | ")[:700]
+            ids = await page.evaluate("() => [...document.querySelectorAll('[id]')].map(e => e.id).slice(0, 60).join(',')")
+            url = f"{url} BODY={cuerpo} IDS={ids}"
+    except Exception:  # noqa: BLE001
+        pass
+    _log.warning(
+        "DIAG seccion=%s exc=%s msg=%s url=%s titulo=%s\n%s",
+        clave, type(exc).__name__, str(exc)[:300], url, titulo,
+        "".join(traceback.format_exception(exc))[-1800:],
+    )
 
 
 class CargaPortalIvaPlugin:
@@ -198,6 +224,7 @@ class CargaPortalIvaPlugin:
                 return f"{libro}: importado (intento {intento})"
             except Exception as exc:  # noqa: BLE001 - se reintenta por seccion
                 ultimo_error = type(exc).__name__
+                await _diagnostico_seccion(f"{libro}_intento{intento}", exc, pagina)
                 await pagina.volver_al_inicio()
                 if intento < MAX_REINTENTOS_SECCION:
                     await pagina.abrir_libro(libro)
@@ -288,10 +315,21 @@ class CargaPortalIvaPlugin:
                     await self._seccion(
                         resultados["secciones"], clave,
                         self._importar_txts(pagina, libro, rutas_abs[cbte], rutas_abs[alic], runtime),
+                        pagina,
                     )
                 await runtime.event_sink.progress(
                     phase="PROCESANDO", percent=65, message="Cargando aperturas"
                 )
+                if entrada.prorrateo_global and total_cf is not None and rutas_abs.get("csv_cf_path"):
+                    # Precondicion del portal (igual que el V1): el CF Computable Global
+                    # debe estar cargado antes de abrir Informacion Adicional.
+                    await self._seccion(
+                        resultados["secciones"], "credito_fiscal_compras",
+                        self._credito_fiscal_compras(pagina, total_cf, runtime),
+                        pagina,
+                    )
+                    with contextlib.suppress(Exception):
+                        await pagina.volver_al_inicio()
                 for seccion, campo in (
                     ("CF", "csv_cf_path"),
                     ("CF Restitucion", "csv_cf_restitucion_path"),
@@ -303,12 +341,8 @@ class CargaPortalIvaPlugin:
                     await self._seccion(
                         resultados["secciones"], seccion,
                         self._cargar_apertura_csv(pagina, seccion, rutas_abs[campo], runtime),
+                        pagina,
                     )
-                    if seccion == "CF" and entrada.prorrateo_global and total_cf is not None:
-                        await self._seccion(
-                            resultados["secciones"], "credito_fiscal_compras",
-                            self._credito_fiscal_compras(pagina, total_cf, runtime),
-                        )
         except ErrorDeBot:
             raise
         except Exception as exc:
@@ -325,6 +359,7 @@ class CargaPortalIvaPlugin:
         secciones: dict[str, Any],
         clave: str,
         operacion: Any,
+        pagina: Any = None,
     ) -> None:
         """Corre una seccion aislada: si falla, queda registrada y el job sigue (V1).
 
@@ -341,8 +376,10 @@ class CargaPortalIvaPlugin:
             raise
         except ErrorDeBot as exc:
             secciones[clave] = f"error: {exc.__class__.__name__}"
+            await _diagnostico_seccion(clave, exc, pagina)
         except Exception as exc:  # noqa: BLE001 - una seccion no tumba el job
             secciones[clave] = f"error: {type(exc).__name__}"
+            await _diagnostico_seccion(clave, exc, pagina)
 
     async def _credito_fiscal_compras(self, pagina: Any, total_cf: str, runtime: BotRuntime) -> str:
         """Crédito fiscal computable global de compras (V1 ``_ir_a_editar_credito_fiscal_en_compras``)."""

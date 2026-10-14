@@ -140,6 +140,11 @@ class PortalIvaPortal(PortalArca):
         if await self._representado_activo(formatted):
             return
 
+        try:
+            texto = (await self.page.locator("body").inner_text(timeout=3_000))[:500]
+            log.warning("DIAG representado=%s url=%s titulo=%s body=%r", formatted, self.page.url, await self.page.title(), texto)
+        except Exception:  # noqa: BLE001
+            pass
         raise TargetUnavailableError(
             "no se pudo seleccionar el CUIT representado en Portal IVA",
             diagnostic_code="represented_cuit_not_selectable",

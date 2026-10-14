@@ -13,12 +13,17 @@ rutas relativas.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 import re
 from pathlib import Path
 
 from bot_worker.bots.errors import TargetUnavailableError
 
 from .base import PortalArca
+
+log = logging.getLogger("bot_worker.portals.carga_portal_iva")
 
 LIVA_BASE = "https://liva.afip.gob.ar/liva/jsp"
 URL_MENU_PRESENTACION = f"{LIVA_BASE}/menuPresentacion.do"
@@ -61,6 +66,30 @@ class CargaPortalIvaPortal(PortalArca):
 
     # ------------------------------------------------------------------
     # Esperas y utilidades
+
+    async def esperar_pantalla_carga(self, timeout_ms: int = 60_000) -> None:
+        """Espera a que desaparezcan los indicadores de carga de LIVA (como el V1)."""
+        selectores = ("#divCargando", "#cargando", ".cargando", ".loading", ".spinner", ".overlay", ".modal-backdrop")
+        limite = asyncio.get_running_loop().time() + timeout_ms / 1000
+        while asyncio.get_running_loop().time() < limite:
+            ocupado = False
+            for sel in selectores:
+                try:
+                    loc = self.page.locator(sel)
+                    if await loc.count() > 0 and await loc.first.is_visible():
+                        ocupado = True
+                        break
+                except Exception:
+                    continue
+            if not ocupado:
+                try:
+                    ocupado = await self.page.get_by_text(re.compile(r"^\s*(Procesando|Cargando)\s*\.{0,3}\s*$", re.I)).first.is_visible(timeout=300)
+                except Exception:
+                    ocupado = False
+            if not ocupado:
+                break
+            await self._esperar(1_000)
+        await self.esperar_procesando()
 
     async def esperar_procesando(self) -> None:
         """Espera a que desaparezca "Procesando" (hasta 60 s), como V1 ``_esperar_procesando``."""
@@ -122,6 +151,32 @@ class CargaPortalIvaPortal(PortalArca):
                 if "menuPresentacion" in await self._url():
                     return
 
+    async def _click_robusto(self, localizadores, *, total_ms: int = 20_000) -> bool:
+        """Como ``click_first`` del V1: prueba click normal, luego forzado y por JS aunque no sea visible."""
+        limite = asyncio.get_running_loop().time() + total_ms / 1000
+        while True:
+            for loc in localizadores:
+                try:
+                    if await loc.count() == 0:
+                        continue
+                    objetivo = loc.first
+                    for modo in ("normal", "force", "js"):
+                        try:
+                            if modo == "normal":
+                                await objetivo.click(timeout=3_000)
+                            elif modo == "force":
+                                await objetivo.click(timeout=3_000, force=True)
+                            else:
+                                await objetivo.evaluate("el => el.click()")
+                            return True
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+            if asyncio.get_running_loop().time() >= limite:
+                return False
+            await self._esperar(1_000)
+
     async def abrir_libro(self, libro: str) -> None:
         """Abre el libro de ventas o compras (V1 ``_abrir_libro``)."""
         if libro not in HREF_LIBRO:
@@ -130,17 +185,26 @@ class CargaPortalIvaPortal(PortalArca):
                 diagnostic_code="portal_iva_book_unknown",
             )
         await self._verificar_sesion()
-        await self.esperar_procesando()
+        await self.esperar_pantalla_carga()
         nombre = "Libro Ventas" if libro == "ventas" else "Libro Compras"
-        abierto = await self._clickear(
+        abierto = await self._click_robusto(
             (
                 self.page.locator(f"a[href*='{HREF_LIBRO[libro]}']"),
                 self.page.get_by_role("link", name=re.compile(rf"{nombre}\s+Registr", re.I)),
                 self.page.get_by_role("link", name=re.compile(nombre, re.I)),
                 self.page.locator("#btnLibroVentas" if libro == "ventas" else "#btnLibroCompras"),
             ),
-            total_ms=15_000,
+            total_ms=40_000,
         )
+        if not abierto:
+            # Respaldo: URL directa del libro (el click puede perderse con el SPA cargando).
+            with contextlib.suppress(Exception):
+                await self.page.goto(f"{LIVA_BASE}/{HREF_LIBRO[libro]}", wait_until="domcontentloaded", timeout=30_000)
+                await self.esperar_pantalla_carga()
+                abierto = any(
+                    marca in await self._url()
+                    for marca in (HREF_LIBRO[libro], f"ver{libro.capitalize()}")
+                )
         if not abierto:
             await self.volver_al_inicio()
             await self.esperar_procesando()
@@ -266,16 +330,37 @@ class CargaPortalIvaPortal(PortalArca):
                 await self.page.goto(URL_MENU_INFO_ADICIONAL, wait_until="domcontentloaded", timeout=15_000)
             await self._esperar(2_000)
         patron, href = SECCION_CSV[seccion]
-        if not await self._clickear(
-            (
-                self.page.locator(f".form-group a.btn-primary[href*='{href}']"),
-                self.page.locator("a.btn-primary").filter(has_text=patron),
-                self.page.get_by_role("link", name=patron),
-            ),
-            total_ms=15_000,
-        ):
-            raise TargetUnavailableError(f"no se encontro el enlace de {seccion}", diagnostic_code="carga_csv_link_missing")
-        await self._esperar(2_000)
+        url_seccion = f"{LIVA_BASE}/verInfoAdicionalProgreso.do?{href}"
+        for intento in (1, 2, 3):
+            try:
+                await self.page.goto(url_seccion, wait_until="domcontentloaded", timeout=30_000)
+            except Exception:
+                pass
+            await self.esperar_pantalla_carga()
+            if await self._seccion_cargada():
+                return
+            if intento == 2 and await self._click_robusto(
+                (
+                    self.page.locator(f".form-group a.btn-primary[href*='{href}']"),
+                    self.page.locator("a.btn-primary").filter(has_text=patron),
+                    self.page.get_by_role("link", name=patron),
+                ),
+                total_ms=15_000,
+            ):
+                await self.esperar_pantalla_carga()
+                if await self._seccion_cargada():
+                    return
+            await self._esperar(3_000)
+        raise TargetUnavailableError(f"no se pudo abrir la seccion {seccion}", diagnostic_code="carga_csv_link_missing")
+
+    async def _seccion_cargada(self) -> bool:
+        for sel in ("#tablaTotalesContainer", "input[id^='montoGravado']", "#archivo", "#btnImportarArchivo"):
+            try:
+                if await self.page.locator(sel).count() > 0:
+                    return True
+            except Exception:
+                continue
+        return False
 
     async def cargar_csv(self, seccion: str, csv_path: Path) -> None:
         """Importa el CSV de la seccion y guarda (V1 ``cargar_apertura_csv``)."""
@@ -283,7 +368,7 @@ class CargaPortalIvaPortal(PortalArca):
         if not csv_path.is_file():
             raise TargetUnavailableError("CSV de apertura ausente en work_dir", diagnostic_code="carga_input_missing")
         await self.abrir_seccion_csv(seccion)
-        if not await self._clickear((self.page.locator("#btnImportarArchivo"),), total_ms=5_000):
+        if not await self._clickear((self.page.locator("#btnImportarArchivo"),), total_ms=20_000):
             await self._clickear(
                 (
                     self.page.locator("button.btn-link").filter(has_text=re.compile(r"Importar", re.I)),
@@ -292,7 +377,7 @@ class CargaPortalIvaPortal(PortalArca):
                 total_ms=5_000,
             )
         await self._esperar(2_000)
-        await self.page.locator("input[type='file']").first.set_input_files(str(csv_path))
+        await self.page.locator("input[type='file']").first.set_input_files(str(csv_path), timeout=60_000)
         await self._esperar(1_500)
         await self._clickear((self.page.locator("#btnImportarArchivoImportar"),), total_ms=5_000)
         await self.esperar_procesando()
@@ -337,8 +422,7 @@ class CargaPortalIvaPortal(PortalArca):
         if await campo.count() == 0:
             return False
         if valor is not None:
-            await campo.first.fill(valor)
-            await self._esperar(1_500)
+            await self._escribir_credito(campo.first, valor)
             return True
         try:
             texto = await self.page.locator("body").inner_text()
@@ -349,9 +433,21 @@ class CargaPortalIvaPortal(PortalArca):
             numeros = re.findall(r"(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)", texto)
         if not numeros:
             return False
-        await campo.first.fill(numeros[-1].replace(".", "").replace(",", "."))
-        await self._esperar(1_500)
+        await self._escribir_credito(campo.first, numeros[-1].replace(".", "").replace(",", "."))
         return True
+
+    async def _escribir_credito(self, campo, valor: str) -> None:
+        """Escribe el credito computable y dispara el recalculo del global (como el V1)."""
+        await campo.fill(valor)
+        with contextlib.suppress(Exception):
+            await campo.dispatch_event("change")
+        with contextlib.suppress(Exception):
+            await self.page.evaluate(
+                "() => { if (typeof actualizarCredFiscalGlobal === 'function') actualizarCredFiscalGlobal(); }"
+            )
+        await self._esperar(1_500)
+        with contextlib.suppress(Exception):
+            log.warning("DIAG credito_fiscal valor=%s global=%s", valor, await self.page.locator("#credFiscGlobal").input_value())
 
     async def cargar_credito_fiscal_compras(self, total: str) -> bool:
         """Completa el credito fiscal computable global de compras con ``total`` (V1 ``_ir_a_editar_credito_fiscal_en_compras``).
@@ -362,6 +458,12 @@ class CargaPortalIvaPortal(PortalArca):
         await self.volver_al_inicio()
         await self.page.goto(URL_CREDITO_FISCAL_COMPRAS, wait_until="domcontentloaded", timeout=15_000)
         await self.esperar_procesando()
+        with contextlib.suppress(Exception):
+            cuerpo = (await self.page.locator("body").inner_text(timeout=3_000)).replace("\n", " | ")[:1500]
+            campos = await self.page.evaluate(
+                "() => [...document.querySelectorAll('input')].map(e => e.id + '=' + e.value).join(', ')"
+            )
+            log.warning("DIAG cf_global_pagina csv_total=%s BODY=%s INPUTS=%s", total, cuerpo, campos)
         if await self.page.locator("#credFiscProrrateo").count() > 0:
             if await self.completar_credito_fiscal(total):
                 await self._guardar()
