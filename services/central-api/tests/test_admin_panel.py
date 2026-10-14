@@ -309,3 +309,12 @@ def test_panel_tiene_vista_de_reportes_de_consumo() -> None:
     assert 'value="desglose_cuit"' in cuerpo
     assert "/admin/reporting?" in cuerpo and "/admin/reporting/download?" in cuerpo
     assert "CUIT representado" in cuerpo
+
+
+def test_panel_tiene_botones_para_ir_a_reportes() -> None:
+    cuerpo = TestClient(create_app()).get("/admin/").text
+    assert 'id="goto-reports"' in cuerpo
+    assert cuerpo.count('data-goto="reports"') >= 2
+    assert 'document.addEventListener("click"' in cuerpo and "[data-goto]" in cuerpo
+    # el destino existe y la pestaña del menu sigue disponible
+    assert 'data-panel="reports"' in cuerpo and 'data-view="reports"' in cuerpo
