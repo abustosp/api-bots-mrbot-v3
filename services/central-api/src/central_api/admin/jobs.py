@@ -51,6 +51,9 @@ BOT_TABLE_COLUMNS = (
     "response_received_at", "credential_metadata", "created_at",
     "assigned_at", "started_at", "finished_at", "updated_at",
     "artifact_names", "artifact_metadata",
+    # Columnas de ciclo de vida que el job canónico ya tiene. Solo se
+    # seleccionan si la tabla física las posee (se filtra por information_schema).
+    "idempotency_key", "lease_expires_at", "error_message",
 )
 
 
@@ -193,6 +196,9 @@ TABLE_COLUMNS = {
         "id", "user_id", "usuario_email", "bot", "operacion", "estado",
         "resultado", "intento", "worker_id", "creado_en", "asignado_en",
         "iniciado_en", "finalizado_en", "request", "credentials",
+        "prioridad", "max_intentos", "app_version", "protocol_version",
+        "idempotency_key", "lease_expira_en", "cancel_reason", "cancelled_by",
+        "error_code", "error_message",
     ),
     "job_results": (
         "job_id", "attempt", "result", "payload", "summary", "received_at",
@@ -290,6 +296,13 @@ async def _jobs_db() -> list | None:
             created_at=fila.created_at, result=None,
             credential_metadata=dict(fila.credential_metadata or {}),
             credentials_available=bool(fila.credential_ciphertext),
+            user_id=str(fila.user_id), worker_id=(
+                str(fila.worker_id) if fila.worker_id else None
+            ),
+            result_status=fila.result,
+            assigned_at=fila.assigned_at, started_at=fila.started_at,
+            finished_at=fila.finished_at,
+            extra=_campos_extra_job(fila),
         ))
     return adaptados
 
@@ -335,6 +348,26 @@ async def _conteo_estados_db() -> dict | None:
 
 def _iso(value: object) -> str | None:
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else None
+
+
+def _campos_extra_job(fila) -> dict:
+    """Resto de columnas del job que la grilla antes omitía.
+
+    Nunca incluye ``credential_ciphertext``. Los textos libres pasan por el
+    saneador de valores de tabla para no filtrar secretos en mensajes de error.
+    """
+    return {
+        "prioridad": getattr(fila, "priority", None),
+        "max_intentos": getattr(fila, "max_attempts", None),
+        "app_version": getattr(fila, "app_version", None),
+        "protocol_version": getattr(fila, "protocol_version", None),
+        "idempotency_key": getattr(fila, "idempotency_key", None),
+        "lease_expira_en": _iso(getattr(fila, "lease_expires_at", None)),
+        "cancel_reason": _sanear_valor_tabla(getattr(fila, "cancel_reason", None)),
+        "cancelled_by": getattr(fila, "cancelled_by", None),
+        "error_code": getattr(fila, "error_code", None),
+        "error_message": _sanear_valor_tabla(getattr(fila, "error_message", None)),
+    }
 
 
 def _registro_memoria(job) -> dict:
@@ -471,6 +504,7 @@ async def _ejecuciones_db(
                 "asignado_en": _iso(fila.assigned_at),
                 "iniciado_en": _iso(fila.started_at),
                 "finalizado_en": _iso(fila.finished_at),
+                **_campos_extra_job(fila),
             },
             "credentials": {
                 "available": bool(fila.credential_ciphertext),
@@ -883,6 +917,13 @@ def _resumen_job(job) -> dict:
         "worker": job.worker_node,
         "intento": job.assignment_attempt,
         "creado_en": job.created_at.isoformat() if job.created_at else None,
+        "user_id": getattr(job, "user_id", None) or (job.payload or {}).get("user_id"),
+        "worker_id": getattr(job, "worker_id", None) or job.worker_node,
+        "resultado": getattr(job, "result_status", None),
+        "asignado_en": _iso(getattr(job, "assigned_at", None)),
+        "iniciado_en": _iso(getattr(job, "started_at", None)),
+        "finalizado_en": _iso(getattr(job, "finished_at", None)),
+        **(getattr(job, "extra", None) or {}),
         "claves_payload": sorted((job.payload or {}).keys()),
         "credenciales": {
             "available": bool(

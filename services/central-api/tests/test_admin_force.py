@@ -180,3 +180,25 @@ def test_panel_expone_boton_forzar() -> None:
     assert 'data-action="job-force"' in cuerpo
     assert ">Forzar</button>" in cuerpo
     assert "/jobs/${encodeURIComponent(jobId)}/force" in cuerpo
+
+
+def test_listado_admin_de_jobs_devuelve_id_completo_y_campos_del_job(admin) -> None:
+    """GET /admin/jobs entrega el UUID entero y los campos de ciclo de vida."""
+    from central_api.store import JOBS, Job
+
+    trabajo = Job(
+        id=str(uuid.uuid4()),
+        bot="rcel", operation="consultar", payload={"user_id": "u-1"},
+        status="PENDIENTE",
+    )
+    JOBS[trabajo.id] = trabajo
+
+    cuerpo = TestClient(create_app()).get("/admin/jobs", headers=_headers()).json()
+    fila = next(j for j in cuerpo["jobs"] if j["job_id"] == trabajo.id)
+    assert len(fila["job_id"]) == 36
+    for clave in (
+        "estado", "bot", "operacion", "usuario", "user_id", "worker_id", "intento",
+        "creado_en", "asignado_en", "iniciado_en", "finalizado_en", "resultado",
+    ):
+        assert clave in fila
+    assert fila["user_id"] == "u-1"

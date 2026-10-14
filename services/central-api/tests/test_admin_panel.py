@@ -244,3 +244,58 @@ def test_la_celda_de_acciones_no_rompe_la_linea_de_la_tabla() -> None:
     assert "td.actions { display: table-cell" in html
     assert 'class="actions-inner"' in html
     assert '<td class="actions"><div class="actions-inner">' in html
+
+
+def test_panel_muestra_job_id_completo_y_todas_las_columnas_del_job() -> None:
+    """Los job_id no se recortan y la grilla de jobs expone todo el job."""
+    cuerpo = TestClient(create_app()).get("/admin/").text
+
+    # Un UUID tiene 36 caracteres: ninguna tabla de jobs puede truncarlo.
+    assert 'short(job.id, 22)' not in cuerpo
+    assert 'short(job.job_id, 22)' not in cuerpo
+    assert 'short(value, 22)' not in cuerpo
+    assert cuerpo.count("idCode(") >= 5
+    for columna in (
+        "Resultado", "User ID", "Prioridad", "App version", "Asignado", "Iniciado",
+        "Finalizado", "Lease expira", "Idempotency key", "Cancelación", "Error",
+    ):
+        assert f"<th>{columna}</th>" in cuerpo
+
+
+def test_resumen_y_catalogo_de_jobs_exponen_todas_las_columnas_sin_secretos() -> None:
+    from types import SimpleNamespace
+
+    from central_api.admin import jobs as admin_jobs
+
+    fila = SimpleNamespace(
+        priority=3, max_attempts=5, app_version="20261014_031956",
+        protocol_version=1, idempotency_key="idem-1", lease_expires_at=None,
+        cancel_reason=None, cancelled_by=None, error_code="E1",
+        error_message="falló", credential_ciphertext="SECRETO",
+    )
+    extra = admin_jobs._campos_extra_job(fila)
+    assert extra["prioridad"] == 3 and extra["max_intentos"] == 5
+    assert extra["idempotency_key"] == "idem-1" and extra["error_code"] == "E1"
+    assert "SECRETO" not in str(extra) and "credential_ciphertext" not in extra
+
+    job = SimpleNamespace(
+        id="0192f3a4-7b1c-7d2e-8f90-123456789abc", status="COMPLETO", bot="rcel",
+        operation="consulta", payload={"user_id": "u"}, user_email="a@b.c",
+        worker_node="w", assignment_attempt=1, created_at=None, extra=extra,
+        user_id="u", worker_id="w", result_status="OK",
+    )
+    resumen = admin_jobs._resumen_job(job)
+    assert resumen["job_id"] == job.id and len(resumen["job_id"]) == 36
+    for clave in ("user_id", "worker_id", "resultado", "app_version", "error_code"):
+        assert clave in resumen
+    for columna in extra:
+        if columna in ("lease_expira_en",):
+            continue
+        assert columna in admin_jobs.TABLE_COLUMNS["jobs"] or columna in (
+            "prioridad", "max_intentos", "app_version", "protocol_version",
+            "idempotency_key", "cancel_reason", "cancelled_by", "error_code",
+            "error_message",
+        )
+    assert {"error_message", "lease_expira_en", "idempotency_key"} <= set(
+        admin_jobs.TABLE_COLUMNS["jobs"]
+    )
