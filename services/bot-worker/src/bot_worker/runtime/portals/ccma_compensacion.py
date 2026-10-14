@@ -290,6 +290,7 @@ async def _collect_compensacion_saldos(
     states_seen: Set[Tuple[str, str, str, str]] = set()
 
     page_number = 1
+    ultima_pagina_escaneada = 0
     while page_number <= max_pages:
         current_state = await _get_ccma_movimientos_state(page)
         if not current_state.get("tablePresent"):
@@ -305,6 +306,7 @@ async def _collect_compensacion_saldos(
             break
         states_seen.add(state_key)
 
+        ultima_pagina_escaneada = page_number
         page_data = await _extract_compensacion_page(page)
         for movimiento in page_data.get("movimientos", []):
             movimiento_key = (
@@ -369,6 +371,11 @@ async def _collect_compensacion_saldos(
                 break
 
         page_number += 1
+
+    # Diagnóstico temporal/no sensible: el colector termina mostrando la última
+    # página escaneada, mientras que cada rowId se obtuvo en su página de origen.
+    for pago in pagos:
+        pago["ultima_pagina_escaneada"] = str(ultima_pagina_escaneada)
 
     return movimientos, saldos, pagos
 
@@ -650,14 +657,17 @@ _ABRIR_REAFECTACION_JS = """
 """
 
 
-async def _abrir_reafectacion(page: Any, row_id: str) -> bool:
+async def _abrir_reafectacion(page: Any, row_id: str) -> Tuple[bool, str]:
     try:
         async with page.expect_navigation(timeout=45_000, wait_until="domcontentloaded"):
             await page.evaluate(_ABRIR_REAFECTACION_JS, row_id)
-        await page.wait_for_selector("#impuestoAjax", timeout=20_000)
-        return True
     except Exception:
-        return False
+        return False, "navegacion_no_confirmada"
+    try:
+        await page.wait_for_selector("#impuestoAjax", timeout=20_000)
+    except Exception:
+        return False, "formulario_no_disponible"
+    return True, ""
 
 
 async def _confirmar_reafectacion(page: Any) -> bool:
@@ -773,21 +783,18 @@ async def _compensar_saldos_a_favor(
     finalizados: Set[Tuple[str, ...]] = set()
     destinos_cancelados: Set[Tuple[str, ...]] = set()
 
-    # La sabana queda recién calculada por bot_ccma (un solo cálculo de deuda
-    # en el inicio). Sólo se recalcula aquí si bot_ccma la dejó paginada
-    # (movimientos=True); el resto de los recálculos ocurren únicamente tras
-    # una confirmación, que invalida los rowId.
+    # Cada formulario de pago se confirma o cancela; luego se vuelve a la
+    # sábana y se recalcula para que el siguiente rowId se abra desde frm.
     sabana_fresca = sabana_fresca_inicial
     escaneado = False
     movimientos: List[Dict[str, str]] = []
     pagos: List[Dict[str, str]] = []
     saldos_por_grupo: Dict[Tuple[str, str], float] = {}
+    montos_simulados: Dict[Tuple[str, str], float] = {}
 
     for _ in range(max_reafectaciones):
-        # La sabana se recalcula y re-escanea sólo cuando fue alterada por una
-        # confirmación (los rowId cambian). Tras un intento cancelado los
-        # rowId siguen vigentes y se reutiliza el relevamiento anterior con el
-        # seguimiento local de saldos ya reafectados.
+        # Cada formulario de pago se confirma o cancela; luego se vuelve a la
+        # sábana y se recalcula para que el siguiente rowId se abra desde frm.
         if not sabana_fresca:
             if not await _volver_a_sabana_compensacion(page):
                 error_logs.append(
@@ -806,6 +813,12 @@ async def _compensar_saldos_a_favor(
             movimientos, saldos, pagos = await _collect_compensacion_saldos(page)
             resultado["saldos"] = saldos
             saldos_por_grupo = _construir_saldos_por_grupo(saldos)
+            if not confirmar:
+                for grupo, importe in montos_simulados.items():
+                    if grupo in saldos_por_grupo:
+                        saldos_por_grupo[grupo] = max(
+                            0.0, saldos_por_grupo[grupo] - importe
+                        )
             escaneado = True
             if not pagos:
                 break
@@ -900,15 +913,20 @@ async def _compensar_saldos_a_favor(
                         "No se pudo confirmar la reafectación del pago "
                         f"{pago['periodo']} {pago['impuesto']}/{pago['concepto']}/{pago['subconcepto']}"
                     )
+            if not confirmado:
+                await _cancelar_reafectacion(page)
             resultado["reafectaciones"].append(
                 {"pago": pago, "aplicadas": aplicadas, "confirmado": confirmado}
             )
             finalizados.add(clave_pago)
-            if confirmado:
-                sabana_fresca = False
-                escaneado = False
+            sabana_fresca = False
+            escaneado = False
             for aplicada in aplicadas:
                 grupo = (aplicada["periodo"], aplicada["impuesto"])
+                if not confirmar:
+                    montos_simulados[grupo] = (
+                        montos_simulados.get(grupo, 0.0) + aplicada["importe"]
+                    )
                 if grupo in saldos_por_grupo:
                     saldos_por_grupo[grupo] -= aplicada["importe"]
                     if saldos_por_grupo[grupo] <= 0.004:
@@ -916,8 +934,9 @@ async def _compensar_saldos_a_favor(
         else:
             resultado["pagos_sin_destino"].append(pago)
             sin_destino.add(clave_pago)
-            if await page.locator(_CONFIRMAR_BOTON_SELECTOR).count() > 0:
-                await _cancelar_reafectacion(page)
+            await _cancelar_reafectacion(page)
+            sabana_fresca = False
+            escaneado = False
 
     return resultado
 

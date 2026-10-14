@@ -14,6 +14,7 @@ from bot_worker.bots.errors import InvalidInputError
 from bot_worker.bots.registry import get_plugin
 from bot_worker.runtime.context import ArtifactStore, CancellationToken
 from bot_worker.runtime.portals import portal_para
+from bot_worker.runtime.portals import ccma_compensacion as portal_compensacion
 from bot_worker.runtime.portals.ccma_compensacion import (
     CcmaCompensacionPortal,
     _construir_destinos,
@@ -189,3 +190,86 @@ def test_helpers_de_compensacion() -> None:
     destinos = _construir_destinos(movimientos, origen)
     # Mismo impuesto primero, luego otros por orden cronologico; sin saldo deudor no entra.
     assert [(d["periodo"], d["impuesto"]) for d in destinos] == [("02/2024", "20"), ("01/2024", "21")]
+
+
+def test_confirmar_false_cancela_formulario_y_respeta_saldo_virtual(monkeypatch: Any) -> None:
+    pagos = [
+        {
+            "periodo": "08/2026", "impuesto": "020", "concepto": "019",
+            "subconcepto": "019", "haber": "80.00", "rowId": "r1",
+        },
+        {
+            "periodo": "09/2026", "impuesto": "020", "concepto": "019",
+            "subconcepto": "019", "haber": "80.00", "rowId": "r2",
+        },
+    ]
+    destino = {"periodo": "10/2026", "impuesto": "020", "concepto": "019", "subconcepto": "019"}
+    calls: dict[str, Any] = {
+        "scans": 0,
+        "refreshes": 0,
+        "opened": [],
+        "cancelled": 0,
+        "amounts": [],
+    }
+
+    async def collect(_page: Any, **_: Any) -> tuple[list[Any], list[Any], list[Any]]:
+        calls["scans"] += 1
+        return [], [{"periodo": "10/2026", "impuesto": "020", "saldo": "(100.00)"}], pagos
+
+    async def open_payment(_page: Any, row_id: str) -> bool:
+        calls["opened"].append(row_id)
+        return True
+
+    async def read_form(_page: Any) -> dict[str, str]:
+        return {"importe_sobrante": "80.00"}
+
+    async def apply_destination(
+        _page: Any, _destino: dict[str, str], remanente: float, *, saldo_grupo: float
+    ) -> dict[str, Any]:
+        importe = min(remanente, saldo_grupo)
+        calls["amounts"].append(importe)
+        return {"estado": "aceptado", "importe": importe, "detalle": ""}
+
+    async def cancel(_page: Any) -> None:
+        calls["cancelled"] += 1
+
+    async def refresh(_page: Any) -> bool:
+        calls["refreshes"] += 1
+        return True
+
+    async def wait_for_selector(*_: Any, **__: Any) -> None:
+        return None
+
+    async def unexpected_confirm(_page: Any) -> bool:
+        raise AssertionError("confirmar=False nunca debe confirmar en ARCA")
+
+    monkeypatch.setattr(portal_compensacion, "_collect_compensacion_saldos", collect)
+    monkeypatch.setattr(portal_compensacion, "_abrir_reafectacion", open_payment)
+    monkeypatch.setattr(portal_compensacion, "_leer_form_reafectacion", read_form)
+    monkeypatch.setattr(
+        portal_compensacion,
+        "_construir_destinos",
+        lambda *_args, **_kwargs: [destino],
+    )
+    monkeypatch.setattr(portal_compensacion, "_imputar_destino", apply_destination)
+    monkeypatch.setattr(portal_compensacion, "_cancelar_reafectacion", cancel)
+    monkeypatch.setattr(portal_compensacion, "_volver_a_sabana_compensacion", refresh)
+    monkeypatch.setattr(portal_compensacion, "_confirmar_reafectacion", unexpected_confirm)
+
+    page = SimpleNamespace(wait_for_selector=wait_for_selector)
+    resultado = asyncio.run(
+        portal_compensacion._compensar_saldos_a_favor(
+            page,
+            error_logs=[],
+            confirmar=False,
+            sabana_fresca_inicial=True,
+            max_reafectaciones=5,
+        )
+    )
+
+    assert calls["opened"] == ["r1", "r2"]
+    assert calls["cancelled"] == 2
+    assert calls["refreshes"] == 2
+    assert calls["scans"] == 3
+    assert calls["amounts"] == [80.0, 20.0]
+    assert [r["confirmado"] for r in resultado["reafectaciones"]] == [False, False]
