@@ -59,6 +59,7 @@ BOT_ROUTE_ALIASES: tuple[tuple[str, str, str], ...] = (
     ("/mis_comprobantes/solicitar_consulta", "mis_comprobantes", "solicitar"),
     ("/mis_comprobantes/historial", "mis_comprobantes", "historial"),
     ("/ccma/consulta", "ccma", "consultar"),
+    ("/ccma/compensacion", "ccma_compensacion", "compensar"),
     ("/siper/consulta", "siper", "consultar"),
     ("/sct/consulta", "sct", "consultar"),
     ("/sct/compensaciones/consulta", "compensaciones", "consultar"),

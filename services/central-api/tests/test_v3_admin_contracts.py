@@ -341,7 +341,7 @@ def test_admin_records_separa_tablas_y_no_expone_urls_de_minio(monkeypatch) -> N
         assert all("url" not in key.lower() for key in job_record)
         sections = body["bot_sections"]
         assert len(sections) == len(CATALOGUE)
-        assert sum(len(section["operaciones"]) for section in sections) == 43
+        assert sum(len(section["operaciones"]) for section in sections) == 44
         ccma = next(section for section in sections if section["bot"] == "ccma")
         assert ccma["tablas"] == ["jobs", "job_results", "job_artifacts", "job_events"]
         assert "consulta_ccma_logs" in ccma["tablas_legacy"]

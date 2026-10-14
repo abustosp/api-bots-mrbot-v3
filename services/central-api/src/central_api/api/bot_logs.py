@@ -76,6 +76,8 @@ LOG_SPECS: tuple[LogSpec, ...] = (
     LogSpec("/aportes-en-linea/logs", (("aportes_en_linea", ("descargar",)),),
             _REP_REPDO, _CUITS),
     LogSpec("/ccma/logs", (("ccma", ("consultar",)),), _REP_REPDO, _CUITS),
+    LogSpec("/ccma/compensacion/logs",
+            (("ccma_compensacion", ("compensar",)),), _REP_REPDO, _CUITS),
     LogSpec("/certificado-mipyme/logs",
             (("certificado_mipyme", ("descargar",)),), _REP_REPDO,
             (*_CUITS, "opciones_encontradas")),

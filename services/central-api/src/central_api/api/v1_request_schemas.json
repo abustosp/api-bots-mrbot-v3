@@ -329,6 +329,132 @@
       "type": "object"
     }
   },
+  "ccma_compensacion.CompensacionCCMARequest": {
+    "fields": [
+      "clave_encriptada",
+      "cuit_representante",
+      "clave_representante",
+      "cuit_representado",
+      "proxy_request",
+      "movimientos",
+      "pdf",
+      "compensar",
+      "confirmar"
+    ],
+    "schema": {
+      "description": "Modelo de entrada para la compensación de saldos a favor de CCMA.\n\n- ``cuit_representante``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``clave_representante``: clave fiscal del representante (o ``clave_encriptada``).\n- ``cuit_representado``: CUIT/CUIL del contribuyente cuya cuenta corriente se compensa.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.\n- ``movimientos``: incluir los movimientos de la cuenta corriente en la respuesta.\n- ``pdf``: generar el PDF de la cuenta corriente y devolver la URL de MinIO.\n- ``compensar``: reafectar los pagos con saldo a favor contra las obligaciones deudoras.\n- ``confirmar``: confirmar (ejecutar) las reafectaciones. Con ``False`` sólo se\n  agregan al detalle y quedan pendientes de confirmación en ARCA.",
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "cuit_representante": {
+          "description": "CUIT/CUIL del representante para autenticarse en ARCA",
+          "example": "20123456789",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave_representante": {
+          "description": "Clave fiscal del representante para autenticarse en ARCA",
+          "example": "clave_fiscal",
+          "title": "Clave Representante",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "description": "CUIT/CUIL del contribuyente cuya cuenta corriente se compensa",
+          "example": "20123456789",
+          "title": "Cuit Representado",
+          "type": "string"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        },
+        "movimientos": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se deben incluir los movimientos en la respuesta",
+          "example": false,
+          "title": "Movimientos"
+        },
+        "pdf": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe generar el PDF y devolver la URL de MinIO",
+          "example": false,
+          "title": "Pdf"
+        },
+        "compensar": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Reafecta los pagos con saldo a favor contra las obligaciones con saldo deudor",
+          "example": true,
+          "title": "Compensar"
+        },
+        "confirmar": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Confirma (ejecuta) las reafectaciones. Con False quedan pendientes de confirmación",
+          "example": false,
+          "title": "Confirmar"
+        }
+      },
+      "required": [
+        "cuit_representante",
+        "clave_representante",
+        "cuit_representado"
+      ],
+      "title": "CompensacionCCMARequest",
+      "type": "object"
+    }
+  },
   "certificado_mipyme.CertificadoMipymeRequest": {
     "fields": [
       "clave_encriptada",

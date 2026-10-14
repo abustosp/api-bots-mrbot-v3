@@ -100,6 +100,9 @@ from bot_worker.bots.carga_portal_iva.plugin import (  # noqa: E402
     CargaPortalIvaPlugin,
 )
 from bot_worker.bots.ccma.plugin import CcmaPlugin  # noqa: E402
+from bot_worker.bots.ccma_compensacion.plugin import (  # noqa: E402
+    CcmaCompensacionPlugin,
+)
 from bot_worker.bots.certificado_mipyme.plugin import (  # noqa: E402
     CertificadoMipymePlugin,
 )
@@ -168,6 +171,7 @@ _PLUGINS: tuple[BotPlugin, ...] = (
     ArbaPlugin(),  # type: ignore[arg-type]
     CargaPortalIvaPlugin(),  # type: ignore[arg-type]
     CcmaPlugin(),  # type: ignore[arg-type]
+    CcmaCompensacionPlugin(),  # type: ignore[arg-type]
     CertificadoMipymePlugin(),  # type: ignore[arg-type]
     CompensacionesPlugin(),  # type: ignore[arg-type]
     ComprobantesPlugin(),  # type: ignore[arg-type]

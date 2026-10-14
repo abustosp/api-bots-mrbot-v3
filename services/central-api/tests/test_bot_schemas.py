@@ -33,7 +33,7 @@ PAIRS = [
 
 def test_catalogue_pairs_have_operation_specific_fields_and_realistic_examples() -> None:
     assert set(PAIRS) == set(OPERATIONS)
-    assert len(PAIRS) == 43
+    assert len(PAIRS) == 44
 
     for bot, operation in PAIRS:
         model = get_request_model(bot, operation)

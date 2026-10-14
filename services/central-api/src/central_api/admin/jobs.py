@@ -70,6 +70,7 @@ def _bot_physical_table(bot: str) -> str | None:
 LEGACY_VIEW_V2_COLUMNS: dict[str, tuple[str, ...]] = {
     "consulta_aportes_en_linea_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "archivos", "response_data", "job_id", "status", "error_message"),
     "consulta_ccma_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "response_ccma", "archivos", "response_data", "job_id", "status", "error_message"),
+    "consulta_ccma_compensacion_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "compensar", "confirmar", "archivos", "response_data", "job_id", "status", "error_message"),
     "consulta_certificado_mipyme_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "opciones_encontradas", "archivos", "response_data", "job_id", "status", "error_message"),
     "consulta_controladores_fiscales_logs": ("id", "user_id", "timestamp", "cuit_representante", "cantidad_archivos", "response_data", "resultados", "archivos", "job_id", "status", "error_message"),
     "consulta_declaracion_en_linea_logs": ("id", "user_id", "timestamp", "cuit_representante", "cuit_representado", "representado_nombre", "periodo_desde", "periodo_hasta", "archivos", "response_data", "job_id", "status", "error_message"),
@@ -213,6 +214,7 @@ LEGACY_BOT_TABLES = {
     "aportes_en_linea": ("consulta_aportes_en_linea_logs",),
     "arba": ("consulta_retenciones_percepciones_iibb_arba_logs",),
     "ccma": ("consulta_ccma_logs",),
+    "ccma_compensacion": ("consulta_ccma_compensacion_logs",),
     "certificado_mipyme": ("consulta_certificado_mipyme_logs",),
     "controladores_fiscales": ("consulta_controladores_fiscales_logs",),
     "declaracion_en_linea": ("consulta_declaracion_en_linea_logs",),

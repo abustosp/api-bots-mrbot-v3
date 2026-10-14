@@ -26,6 +26,7 @@ from central_api.settings import get_settings  # noqa: E402
 TABLAS_V2 = (
     "consulta_aportes_en_linea_logs",
     "consulta_ccma_logs",
+    "consulta_ccma_compensacion_logs",
     "consulta_certificado_mipyme_logs",
     "consulta_controladores_fiscales_logs",
     "consulta_declaracion_en_linea_logs",
@@ -96,11 +97,30 @@ def admin(monkeypatch):
     get_settings.cache_clear()
 
 
+def _migracion_0023():
+    ruta = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0023_ccma_compensacion.py"
+    )
+    spec = importlib.util.spec_from_file_location("mig_0023", ruta)
+    assert spec is not None and spec.loader is not None
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+def _vistas_legacy() -> tuple:
+    """Vistas legacy de 0016 más las agregadas en revisiones posteriores."""
+    return (*_migracion_0016().LEGACY_VIEWS, *_migracion_0023().LEGACY_VIEWS)
+
+
 def test_revision_0016_cubre_las_28_tablas_v2() -> None:
     mig = _migracion_0016()
     assert mig.revision == "0016"
     assert mig.down_revision == "0015"
-    vistas = {vista: (bot, columnas) for vista, bot, columnas in mig.LEGACY_VIEWS}
+    vistas = {vista: (bot, columnas) for vista, bot, columnas in _vistas_legacy()}
     assert set(vistas) == set(TABLAS_V2)
     from central_api.api.bots import CATALOGUE
 
@@ -130,8 +150,7 @@ def test_catalogo_expone_vistas_legacy() -> None:
     assert "consulta_retenciones_percepciones_iibb_arba_logs" in {
         e["name"] for e in legacy
     }
-    mig = _migracion_0016()
-    mapa = {vista: (bot, columnas) for vista, bot, columnas in mig.LEGACY_VIEWS}
+    mapa = {vista: (bot, columnas) for vista, bot, columnas in _vistas_legacy()}
     for entrada in legacy:
         bot, columnas = mapa[entrada["name"]]
         assert entrada["bot"] == bot
@@ -240,6 +259,6 @@ def test_panel_lista_tablas_v2(admin) -> None:
     assert catalogo.status_code == 200
     tablas = catalogo.json()["tables"]
     legacy = [t for t in tablas if t["kind"] == "legacy"]
-    assert len(legacy) == 28
+    assert len(legacy) == 29
     assert "consulta_mc_logs (V1/V2)" in {t["label"] for t in legacy}
     assert "consulta_srt_logs (V1/V2)" in {t["label"] for t in legacy}

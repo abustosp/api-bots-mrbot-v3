@@ -27,7 +27,7 @@ OTHER = "logs-other"
 SECRET = "super-secreto-clave-fiscal"
 
 EXPECTED_PATHS = {
-    "/aportes-en-linea/logs", "/ccma/logs", "/certificado-mipyme/logs",
+    "/aportes-en-linea/logs", "/ccma/logs", "/ccma/compensacion/logs", "/certificado-mipyme/logs",
     "/controladores-fiscales/logs", "/declaracion-en-linea/logs",
     "/facturometro/logs", "/hacienda/logs", "/libros_iva/logs",
     "/liquidacion_granos/logs", "/mis_comprobantes/logs",
@@ -81,9 +81,9 @@ def _job(
     return job
 
 
-def test_declarative_table_covers_the_27_v1_log_paths() -> None:
+def test_declarative_table_covers_the_28_v1_log_paths() -> None:
     assert {spec.path for spec in bot_logs.LOG_SPECS} == EXPECTED_PATHS
-    assert len(bot_logs.LOG_SPECS) == 27
+    assert len(bot_logs.LOG_SPECS) == 28
     paths = create_app().openapi()["paths"]
     for path in EXPECTED_PATHS:
         assert f"/api/v3{path}" in paths

@@ -1,0 +1,7 @@
+{
+  "operacion": "compensar",
+  "representado_cuit": "20123456786",
+  "compensar": true,
+  "confirmar": false,
+  "incluir_movimientos": false
+}
