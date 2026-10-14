@@ -43,6 +43,14 @@ class CcmaCompensarInput(_Base):
         default=False,
         validation_alias=AliasChoices("incluir_movimientos", "movimientos"),
     )
+    incluir_pdf: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("incluir_pdf", "pdf"),
+    )
+    subir: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("subir", "carga_minio", "minio_upload"),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -52,13 +60,17 @@ class CcmaCompensarInput(_Base):
             unificar_cuit(datos)
             for clave in CAMPOS_SOBRE_SELLADO:
                 datos.pop(clave, None)
-            # V1 acepta ``pdf``/``subir``; V3 no genera PDF de la compensacion.
-            for retirado in ("pdf", "incluir_pdf", "subir", "carga_minio", "minio_upload"):
-                datos.pop(retirado, None)
             for flag in ("compensar", "confirmar"):
                 if datos.get(flag) is None:
                     datos.pop(flag, None)
         return datos
+
+    @model_validator(mode="after")
+    def _pdf_requiere_movimientos(self) -> CcmaCompensarInput:
+        # Igual que ``ccma``: el PDF consolidado lleva los movimientos.
+        if self.incluir_pdf and not self.incluir_movimientos:
+            object.__setattr__(self, "incluir_movimientos", True)
+        return self
 
 
 def esquema_entrada() -> dict[str, Any]:
@@ -81,5 +93,9 @@ def esquema_entrada() -> dict[str, Any]:
             },
             "incluir_movimientos": {"type": "boolean"},
             "movimientos": {"type": "boolean"},
+            "incluir_pdf": {"type": "boolean"},
+            "pdf": {"type": "boolean"},
+            "subir": {"type": "boolean"},
+            "carga_minio": {"type": "boolean"},
         },
     }

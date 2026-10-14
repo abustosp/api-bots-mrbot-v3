@@ -99,7 +99,8 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
     "ccma_compensacion": {
         "representado_cuit": _string(required=True, pattern=CUIT),
         "compensar": _boolean(default=True), "confirmar": _boolean(),
-        "incluir_movimientos": _boolean(),
+        "incluir_movimientos": _boolean(), "incluir_pdf": _boolean(),
+        "subir": _boolean(default=True),
     },
     "certificado_mipyme": {
         "representado_cuit": _string(required=True, pattern=CUIT),

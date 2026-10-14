@@ -273,3 +273,22 @@ def test_confirmar_false_cancela_formulario_y_respeta_saldo_virtual(monkeypatch:
     assert calls["scans"] == 3
     assert calls["amounts"] == [80.0, 20.0]
     assert [r["confirmado"] for r in resultado["reafectaciones"]] == [False, False]
+
+
+def test_pdf_sin_subir_genera_archivo_con_html_de_ccma(tmp_path: Path) -> None:
+    class _PortalPdf(_Portal):
+        html: str | None = None
+
+        async def imprimir_pdf(self, html: str, destino: Path) -> Path:
+            self.html = html
+            Path(destino).write_bytes(b"%PDF-1.4 fake")
+            return Path(destino)
+
+    portal = _PortalPdf({"saldos": [], "reafectaciones": [], "pagos_sin_destino": [], "errores": []})
+    resultado, _ = _ejecutar(tmp_path, portal, pdf=True, subir=False)
+
+    assert resultado.result == "OK"
+    assert portal.html is not None and "CCMA consolidado" in portal.html
+    assert resultado.data["archivo"].startswith(f"ccma_compensacion_{CUIT}_")
+    assert (tmp_path / resultado.data["archivo"]).exists()
+    assert resultado.artifacts == []

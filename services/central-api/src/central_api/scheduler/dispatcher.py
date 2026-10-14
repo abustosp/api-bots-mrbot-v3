@@ -152,6 +152,15 @@ def artifact_upload_slots(job: Job) -> list[dict]:
                 "content_types": ["application/pdf"],
             }
         )
+    if job.bot == "ccma_compensacion" and payload.get("incluir_pdf") and payload.get("subir", True):
+        slots.append(
+            {
+                "artifact_id": "ccma_compensacion.pdf",
+                "name_hint": "ccma_compensacion.pdf",
+                "max_bytes": 10_485_760,
+                "content_types": ["application/pdf"],
+            }
+        )
     if job.bot == "mis_comprobantes" and payload.get("subir_csv", True):
         for tipo, artifact_id in (
             ("emitidos", "emitidos_csv"),

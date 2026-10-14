@@ -17,10 +17,17 @@ y movimientos) y agrega la reafectacion de pagos con saldo a favor del portal
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any, Mapping
 
 from bot_worker.bots.ccma.movimientos import recorrer_movimientos_con_fallback
-from bot_worker.bots.ccma.plugin import MAX_MOVIMIENTOS, MAX_PAGINAS, URL_CTACTE
+from bot_worker.bots.ccma.pdf import build_ccma_pdf_html
+from bot_worker.bots.ccma.plugin import (
+    MAX_MOVIMIENTOS,
+    MAX_PAGINAS,
+    URL_CTACTE,
+    nombre_pdf_ccma,
+)
 from bot_worker.bots.ccma.schema import PERIODO_DESDE_DEFAULT
 from bot_worker.bots.ccma_compensacion.schema import (
     CcmaCompensarInput,
@@ -31,12 +38,13 @@ from bot_worker.bots.errors import (
     CaptchaUnsolvableError,
     CredentialsRejectedError,
     DeadlineExceededError,
+    ArtifactUploadError,
     ErrorDeBot,
     InvalidInputError,
     TargetUnavailableError,
     sin_secretos,
 )
-from bot_worker.bots.registry import BotManifest
+from bot_worker.bots.registry import ArtifactSpec, BotManifest
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -45,6 +53,7 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotRuntime = Any  # type: ignore[assignment,misc]
 
 SERVICIO_ARCA = "CCMA"
+ID_ARTEFACTO_PDF = "ccma_compensacion.pdf"
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -76,7 +85,14 @@ class CcmaCompensacionPlugin:
         version="3.0.0",
         operaciones=("compensar",),
         esquema_entrada=esquema_entrada(),
-        artefactos_produce=(),
+        artefactos_produce=(
+            ArtifactSpec(
+                nombre=ID_ARTEFACTO_PDF,
+                content_types=("application/pdf",),
+                max_bytes=10_485_760,
+                obligatorio=False,
+            ),
+        ),
         timeout_por_defecto_seconds=1800,
         requiere_credenciales_fiscales=True,
         requiere_proxy=False,
@@ -132,6 +148,7 @@ class CcmaCompensacionPlugin:
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
         avisos: list[str] = []
+        artefactos: list[dict[str, Any]] = []
         try:
             async with runtime.browser_factory.arca_session(
                 credentials=runtime.credentials,
@@ -170,6 +187,32 @@ class CcmaCompensacionPlugin:
                     )
                     datos["movimientos"] = recorrido.movimientos
                     datos["movimientos_corte"] = recorrido.corte
+                if entrada.incluir_pdf:
+                    nombre = nombre_pdf_ccma(entrada.representado_cuit).replace(
+                        "ccma_", "ccma_compensacion_", 1
+                    )
+                    destino = runtime.artifact_store.resolve(nombre)
+                    html = build_ccma_pdf_html(
+                        resumen,
+                        datos.get("movimientos") or [],
+                        generado=datetime.now(),
+                    )
+                    await pagina.imprimir_pdf(html, destino)
+                    if entrada.subir:
+                        await runtime.event_sink.progress(
+                            phase="SUBIENDO", percent=45, message="Subiendo PDF"
+                        )
+                        try:
+                            referencia = await runtime.artifact_store.upload(
+                                ID_ARTEFACTO_PDF, destino.name
+                            )
+                        except ValueError as exc:
+                            raise ArtifactUploadError(str(exc)) from exc
+                        artefactos.append(referencia)
+                        datos["sha256"] = referencia["sha256"]
+                        datos["size_bytes"] = referencia["size_bytes"]
+                    else:
+                        datos["archivo"] = destino.name
                 if entrada.compensar:
                     await runtime.cancellation.raise_if_cancelled()
                     await runtime.event_sink.progress(
@@ -199,6 +242,6 @@ class CcmaCompensacionPlugin:
         return BotResult(
             result="PARCIAL" if con_errores else "OK",
             data=datos,
-            artifacts=[],
+            artifacts=artefactos,
             warnings=warnings,
         )
