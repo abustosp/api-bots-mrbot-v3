@@ -299,3 +299,13 @@ def test_resumen_y_catalogo_de_jobs_exponen_todas_las_columnas_sin_secretos() ->
     assert {"error_message", "lease_expira_en", "idempotency_key"} <= set(
         admin_jobs.TABLE_COLUMNS["jobs"]
     )
+
+
+def test_panel_tiene_vista_de_reportes_de_consumo() -> None:
+    cuerpo = TestClient(create_app()).get("/admin/").text
+    assert 'data-view="reports"' in cuerpo and 'data-panel="reports"' in cuerpo
+    for elemento in ("reports-desde", "reports-hasta", "reports-tipo", "reports-download"):
+        assert f'id="{elemento}"' in cuerpo
+    assert 'value="desglose_cuit"' in cuerpo
+    assert "/admin/reporting?" in cuerpo and "/admin/reporting/download?" in cuerpo
+    assert "CUIT representado" in cuerpo

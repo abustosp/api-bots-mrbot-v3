@@ -10,6 +10,7 @@ import csv
 import io
 from datetime import datetime, time, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -80,9 +81,14 @@ _VALIDATION_RESPONSE = {
 }
 
 
+# Los logs V1/V2 guardaban hora local: un dia de reporte es el dia argentino,
+# no el dia UTC (si no, 3 horas de cada dia caerian en el dia equivocado).
+REPORT_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
 def _parse_date(value: str, field: str) -> datetime:
     try:
-        return datetime.combine(datetime.strptime(value.strip(), "%Y-%m-%d").date(), time.min, timezone.utc)
+        return datetime.combine(datetime.strptime(value.strip(), "%Y-%m-%d").date(), time.min, REPORT_TZ)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Formato inválido para {field}. Usa YYYY-MM-DD.") from exc
 
@@ -106,10 +112,14 @@ async def _report_rows_db(kind: str, start: datetime, end: datetime) -> list[dic
     """Agrupa sólo datos operativos permitidos desde la fuente canónica."""
     from sqlalchemy import text
 
+    # El CUIT representado se guarda en ``credential_metadata.context`` (clave
+    # ``representado_cuit``; ``cuit_representado`` por compatibilidad). Los
+    # bots sin representado (consulta_cuit, apoc, srt...) quedan con CUIT vacio.
     cuit_column = (
-        ", COALESCE(j.credential_metadata ->> 'cuit_representado', "
-        "j.credential_metadata ->> 'cuit', "
-        "j.credential_metadata ->> 'cuit_representante') AS cuit_representado"
+        ", COALESCE(j.credential_metadata #>> '{context,representado_cuit}', "
+        "j.credential_metadata #>> '{context,cuit_representado}', "
+        "j.credential_metadata ->> 'representado_cuit', "
+        "j.credential_metadata ->> 'cuit_representado') AS cuit_representado"
         if kind == "desglose_cuit" else ""
     )
     cuit_group = ", cuit_representado" if kind == "desglose_cuit" else ""
@@ -149,9 +159,13 @@ def _report_rows_memory(kind: str, start: datetime, end: datetime) -> list[dict[
         user_id = str(meta.get("owner", ""))
         cuit = None
         if kind == "desglose_cuit":
-            data = meta.get("data") or {}
-            if isinstance(data, dict):
-                cuit = data.get("cuit_representado") or data.get("cuit")
+            cred = getattr(job, "credential_metadata", None) or {}
+            context = cred.get("context") if isinstance(cred, dict) else None
+            for source in (context, cred, meta.get("data")):
+                if isinstance(source, dict):
+                    cuit = source.get("representado_cuit") or source.get("cuit_representado")
+                    if cuit:
+                        break
         key = (user_id, f"{job.bot}:{job.operation}", str(cuit) if cuit else None)
         row = groups.setdefault(
             key,

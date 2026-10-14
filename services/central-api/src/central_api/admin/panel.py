@@ -205,6 +205,7 @@ details > .details-body { padding: 0 14px 14px; }
       <button type="button" data-view="users">Usuarios</button>
       <button type="button" data-view="jobs">Jobs</button>
       <button type="button" data-view="executions">Tablas / registros</button>
+      <button type="button" data-view="reports">Reportes</button>
       <button type="button" data-view="fleet">Flota</button>
       <button type="button" data-view="audit">Auditoría</button>
     </nav>
@@ -253,6 +254,14 @@ details > .details-body { padding: 0 14px 14px; }
         <datalist id="module-options"></datalist><p class="muted" id="execution-table-status" aria-live="polite">Selecciona una tabla.</p>
         <div class="bot-sections" id="bot-sections"><div class="empty">Selecciona una tabla para consultar.</div></div>
         <div class="table-wrap"><table><thead id="executions-head"><tr><th>Tabla</th><th>Datos</th></tr></thead><tbody id="executions-table"><tr><td colspan="2" class="empty">Selecciona una tabla.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="view hidden" data-panel="reports">
+        <div class="kicker">Consumos</div><h2>Reporte de consumos</h2><p class="subtle">Requests exitosas y fallidas por usuario y servicio, con desglose opcional por CUIT representado. Exitosa: job COMPLETO con resultado OK o PARCIAL. Fallida: FALLIDO, CANCELADO o resultado ERROR. Las fechas se toman en hora de Argentina.</p>
+        <form id="reports-form" class="toolbar"><div class="field"><label for="reports-desde">Desde</label><input id="reports-desde" type="date" required></div><div class="field"><label for="reports-hasta">Hasta</label><input id="reports-hasta" type="date" required></div><div class="field"><label for="reports-tipo">Detalle</label><select id="reports-tipo"><option value="resumen">Por usuario y servicio</option><option value="desglose_cuit">Por usuario, servicio y CUIT representado</option></select></div><div class="field"><label>&nbsp;</label><button class="button primary" type="submit">Generar</button></div><div class="field"><label>&nbsp;</label><button class="button secondary" type="button" id="reports-download" disabled>Descargar CSV</button></div></form>
+        <div class="grid" id="reports-totals"></div>
+        <p class="muted" id="reports-note" aria-live="polite"></p>
+        <div class="table-wrap"><table><thead id="reports-head"><tr><th>Usuario</th><th>Servicio</th><th>Exitosas</th><th>Fallidas</th></tr></thead><tbody id="reports-table"><tr><td colspan="4" class="empty">Elegí un rango de fechas y generá el reporte.</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="fleet">
@@ -304,7 +313,39 @@ details > .details-body { padding: 0 14px 14px; }
     if (!response.ok) throw new Error(data.detail || data.message || `HTTP ${response.status}`);
     return data;
   }
-  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, fleet: loadFleet, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
+  const reportState = { last: null };
+  function reportParams() { return new URLSearchParams({ desde: $("#reports-desde").value, hasta: $("#reports-hasta").value, tipo: $("#reports-tipo").value }); }
+  function initReports() {
+    if ($("#reports-desde").value) return;
+    const today = new Date(); const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    $("#reports-hasta").value = iso(today); $("#reports-desde").value = iso(new Date(today.getFullYear(), today.getMonth(), 1));
+  }
+  async function loadReport(event) {
+    if (event) event.preventDefault();
+    const tipo = $("#reports-tipo").value;
+    try {
+      const data = await api(`/admin/reporting?${reportParams()}`);
+      reportState.last = reportParams().toString();
+      const withCuit = tipo === "desglose_cuit";
+      $("#reports-head").innerHTML = `<tr><th>Usuario</th><th>Servicio</th>${withCuit ? "<th>CUIT representado</th>" : ""}<th>Exitosas</th><th>Fallidas</th><th>Total</th></tr>`;
+      const rows = data.rows || [];
+      $("#reports-table").innerHTML = rows.length ? rows.map((row) => `<tr><td>${esc(row.user_email || "—")}<br>${idCode(row.user_id)}</td><td>${esc(row.servicio)}</td>${withCuit ? `<td>${row.cuit_representado ? `<code>${esc(row.cuit_representado)}</code>` : '<span class="muted">sin representado</span>'}</td>` : ""}<td><span class="status status-good">${esc(row.requests_exitosas)}</span></td><td><span class="status ${Number(row.requests_no_exitosas) ? "status-bad" : "status-neutral"}">${esc(row.requests_no_exitosas)}</span></td><td>${esc(Number(row.requests_exitosas) + Number(row.requests_no_exitosas))}</td></tr>`).join("") : `<tr><td colspan="${withCuit ? 6 : 5}" class="empty">No hay requests en ese rango.</td></tr>`;
+      const totals = data.totals || {}; const ok = Number(totals.requests_exitosas || 0), bad = Number(totals.requests_no_exitosas || 0);
+      $("#reports-totals").innerHTML = [["Filas", data.total_rows || 0], ["Exitosas", ok], ["Fallidas", bad], ["Total requests", ok + bad]].map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join("");
+      $("#reports-note").textContent = data.preview_truncated ? `Vista previa de las primeras ${rows.length} de ${data.total_rows} filas. El CSV trae todas.` : "";
+      $("#reports-download").disabled = !(data.total_rows > 0);
+    } catch (error) { flash(error.message, "error"); }
+  }
+  async function downloadReport() {
+    try {
+      const response = await fetch(`/admin/reporting/download?${reportParams()}`, { cache: "no-store", headers: { Authorization: `Bearer ${state.token}` } });
+      if (response.status === 401 || response.status === 403) { logout("Sesión inválida o vencida. Ingresa nuevamente."); return; }
+      if (!response.ok) { let detail = `HTTP ${response.status}`; try { detail = (await response.json()).detail || detail; } catch (_) {} throw new Error(detail); }
+      const url = URL.createObjectURL(await response.blob()); const link = document.createElement("a");
+      link.href = url; link.download = `reporte_${$("#reports-tipo").value}_${$("#reports-desde").value}_${$("#reports-hasta").value}.csv`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    } catch (error) { flash(error.message, "error"); }
+  }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, reports: initReports, fleet: loadFleet, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
   function cellValue(value) {
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "object") return payloadView(value, "Ver datos");
@@ -1162,7 +1203,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#logout-button").addEventListener("click", () => logout());
   $("#main-nav").addEventListener("click", (event) => { const button = event.target.closest("button[data-view]"); if (button) setView(button.dataset.view); });
   $("#users-filter").addEventListener("submit", loadUsers); $("#create-user-form").addEventListener("submit", createUser); $("#new-account-type").addEventListener("change", syncNewAccountFields); syncNewAccountFields(); setupColumnFilters(); $("#users-table").addEventListener("click", userAction);
-  $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table-select").addEventListener("change", () => loadExecutions());
+  $("#reports-form").addEventListener("submit", loadReport); $("#reports-download").addEventListener("click", downloadReport); $("#jobs-filter").addEventListener("submit", loadJobs); $("#jobs-table").addEventListener("click", jobAction); $("#executions-filter").addEventListener("submit", loadExecutions); $("#executions-table-select").addEventListener("change", () => loadExecutions());
   $("#executions-table-search").addEventListener("focus", () => { $("#executions-table-search").select(); openTableOptions(); });
   $("#executions-table-search").addEventListener("input", (event) => { $("#executions-table-select").value = ""; openTableOptions(event.target.value); });
   $("#executions-table-search").addEventListener("keydown", handleTableComboboxKeydown);

@@ -115,3 +115,54 @@ def test_clear_and_retention_purge_require_confirmation_and_keep_active_jobs(cli
     cleared = client.post("/admin/tables/clear-consulta-logs", headers=_headers(), data={"confirmation_text": "ELIMINAR"})
     assert cleared.status_code == 200
     assert active.id in JOBS
+
+
+def _job_reporte(idx: int, user_id: str, bot: str, status: str, result: str | None, cuit: str | None):
+    job = Job(
+        id=f"01900000-0000-7000-8000-0000000001{idx:02d}", bot=bot, operation="consultar",
+        payload={}, status=status, result={"result": result} if result else None,
+    )
+    if cuit:
+        job.credential_metadata = {"context": {"representado_cuit": cuit}}
+    JOBS[job.id] = job
+    JOB_META[job.id] = {"owner": user_id}
+    return job
+
+
+def test_reporte_de_consumos_por_usuario_servicio_y_cuit(client: TestClient) -> None:
+    """Exitosas/fallidas por usuario, servicio y CUIT representado (como V1/V2)."""
+    user = _user()
+    _job_reporte(1, user.id, "rcel", "COMPLETO", "OK", "20111111112")
+    _job_reporte(2, user.id, "rcel", "COMPLETO", "PARCIAL", "20111111112")
+    _job_reporte(3, user.id, "rcel", "FALLIDO", "ERROR", "20111111112")
+    _job_reporte(4, user.id, "rcel", "CANCELADO", None, "20222222223")
+    _job_reporte(5, user.id, "consulta_cuit", "COMPLETO", "OK", None)
+    hoy = utcnow().date()
+    params = {"desde": (hoy - timedelta(days=1)).isoformat(), "hasta": (hoy + timedelta(days=1)).isoformat()}
+
+    resumen = client.get("/admin/reporting", headers=_headers(), params={**params, "tipo": "resumen"}).json()
+    por_servicio = {row["servicio"]: row for row in resumen["rows"]}
+    assert por_servicio["rcel:consultar"]["requests_exitosas"] == 2
+    assert por_servicio["rcel:consultar"]["requests_no_exitosas"] == 2
+    assert por_servicio["consulta_cuit:consultar"]["requests_exitosas"] == 1
+    assert resumen["totals"] == {"requests_exitosas": 3, "requests_no_exitosas": 2}
+
+    desglose = client.get("/admin/reporting", headers=_headers(), params={**params, "tipo": "desglose_cuit"}).json()
+    assert "cuit_representado" in desglose["columns"]
+    por_cuit = {(row["servicio"], row["cuit_representado"]): row for row in desglose["rows"]}
+    assert por_cuit[("rcel:consultar", "20111111112")]["requests_exitosas"] == 2
+    assert por_cuit[("rcel:consultar", "20111111112")]["requests_no_exitosas"] == 1
+    assert por_cuit[("rcel:consultar", "20222222223")]["requests_no_exitosas"] == 1
+    assert por_cuit[("consulta_cuit:consultar", None)]["requests_exitosas"] == 1
+
+    csv = client.get("/admin/reporting/download", headers=_headers(), params={**params, "tipo": "desglose_cuit"})
+    assert csv.text.splitlines()[0] == "user_id,user_email,servicio,cuit_representado,requests_exitosas,requests_no_exitosas"
+    assert "20111111112" in csv.text and user.email in csv.text
+
+
+def test_reporte_toma_el_dia_en_hora_argentina() -> None:
+    from central_api.admin import reporting
+
+    inicio, fin = reporting._range("2026-10-14", "2026-10-14")
+    assert inicio.isoformat() == "2026-10-14T00:00:00-03:00"
+    assert fin.isoformat().startswith("2026-10-14T23:59:59.999999-03:00")
