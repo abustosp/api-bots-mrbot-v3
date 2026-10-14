@@ -187,7 +187,7 @@ class CargaPortalIvaPortal(PortalArca):
         await self._verificar_sesion()
         await self.esperar_pantalla_carga()
         nombre = "Libro Ventas" if libro == "ventas" else "Libro Compras"
-        abierto = await self._click_robusto(
+        await self._click_robusto(
             (
                 self.page.locator(f"a[href*='{HREF_LIBRO[libro]}']"),
                 self.page.get_by_role("link", name=re.compile(rf"{nombre}\s+Registr", re.I)),
@@ -196,15 +196,25 @@ class CargaPortalIvaPortal(PortalArca):
             ),
             total_ms=40_000,
         )
+
+        # Un click sobre el menu puede completarse sin que el SPA navegue. No
+        # basta con saber que Playwright hizo click: confirmar la URL evita que
+        # el flujo siguiente intente importar desde la pantalla de inicio.
+        marca_url = HREF_LIBRO[libro]
+        await self._esperar(1_000)
+        abierto = marca_url in await self._url()
         if not abierto:
-            # Respaldo: URL directa del libro (el click puede perderse con el SPA cargando).
+            # Respaldo: URL directa del libro. Los parametros t=31/t=21 son
+            # los que usa el portal al abrir estos accesos desde el menu.
+            tipo_libro = "31" if libro == "ventas" else "21"
             with contextlib.suppress(Exception):
-                await self.page.goto(f"{LIVA_BASE}/{HREF_LIBRO[libro]}", wait_until="domcontentloaded", timeout=30_000)
-                await self.esperar_pantalla_carga()
-                abierto = any(
-                    marca in await self._url()
-                    for marca in (HREF_LIBRO[libro], f"ver{libro.capitalize()}")
+                await self.page.goto(
+                    f"{LIVA_BASE}/{HREF_LIBRO[libro]}?t={tipo_libro}",
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
                 )
+                await self.esperar_pantalla_carga()
+                abierto = marca_url in await self._url()
         if not abierto:
             await self.volver_al_inicio()
             await self.esperar_procesando()
