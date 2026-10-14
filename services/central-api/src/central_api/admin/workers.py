@@ -27,7 +27,7 @@ from central_api.db import db_configurado, nueva_sesion
 from central_api.scheduler import dispatcher
 from central_api.settings import get_settings
 from central_api.store import ADMIN_NODES, WORKERS, WorkerEntry, utcnow
-from central_api.worker_nodes import merge_nodes, node_from_url
+from central_api.worker_nodes import merge_nodes, node_from_url, resolve_node_ip
 
 router = APIRouter()
 
@@ -205,6 +205,8 @@ def worker_overview(node: str) -> dict:
     ) else "panel" if node in ADMIN_NODES else "env"
     return {
         "node": node,
+        "alias": settings.worker_alias_map.get(node, ""),
+        "ip": resolve_node_ip(node),
         "worker_id": entry.worker_id if entry else "",
         "origen": origen,
         "registrado": entry is not None,

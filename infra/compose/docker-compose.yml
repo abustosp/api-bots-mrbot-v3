@@ -92,6 +92,7 @@ services:
       # el soporte *_FILE del plan de infra seccion 6.3.
       DATABASE_URL: ${DATABASE_URL:-}
       WORKER_NODES: ${WORKER_NODES:-}
+      WORKER_ALIASES: ${WORKER_ALIASES:-}
       DATABASE_URL_FILE: /run/secrets/database_url
       API_KEY_HMAC_SECRET_FILE: /run/secrets/api_key_hmac_secret
       SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key

@@ -37,6 +37,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-}
       WORKER_NODES: ${WORKER_NODES:-}
+      WORKER_ALIASES: ${WORKER_ALIASES:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       # Clave unica del proveedor de CAPTCHA para todos los portales.
       CAPMONSTER_API_KEY: ${CAPMONSTER_API_KEY:-}

@@ -5,6 +5,57 @@ Este módulo no depende de FastAPI/Pydantic para poder probarse aislado.
 """
 
 
+import ipaddress
+import socket
+import time
+
+_IP_CACHE: dict[str, tuple[float, str]] = {}
+_IP_TTL_SECONDS = 300.0
+
+
+def parse_worker_aliases(raw: str) -> dict[str, str]:
+    """Normaliza ``WORKER_ALIASES="host:port=alias,host:port=alias"`` a dict."""
+    aliases: dict[str, str] = {}
+    for item in (raw or "").split(","):
+        nodo, sep, alias = item.partition("=")
+        nodo, alias = nodo.strip(), alias.strip()
+        if sep and nodo and alias:
+            aliases[nodo] = alias
+    return aliases
+
+
+def node_host(node: str) -> str:
+    """Host de ``host:port`` (soporta ``[ipv6]:port``)."""
+    node = node.strip()
+    if node.startswith("["):
+        return node[1:].split("]", 1)[0]
+    return node.rsplit(":", 1)[0] if ":" in node else node
+
+
+def resolve_node_ip(node: str) -> str:
+    """IP del nodo: el propio host si ya es IP, o resolución DNS con caché (vacío si falla)."""
+    host = node_host(node)
+    if not host:
+        return ""
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+    ahora = time.monotonic()
+    cached = _IP_CACHE.get(host)
+    if cached and ahora - cached[0] < _IP_TTL_SECONDS:
+        return cached[1]
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        ips = [i[4][0] for i in infos]
+        ip = next((i for i in ips if ":" not in i), ips[0] if ips else "")
+    except OSError:
+        ip = ""
+    _IP_CACHE[host] = (ahora, ip)
+    return ip
+
+
 def parse_worker_nodes(raw: str) -> list[str]:
     """Normaliza ``WORKER_NODES="ip:port,ip:port"`` a lista sin duplicados."""
     nodes: list[str] = []

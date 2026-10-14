@@ -241,3 +241,11 @@ def test_worker_registration_and_heartbeat_store_version_metadata(admin_fleet) -
     assert latido.status_code == 200
     assert WORKERS["env-node:8080"].app_version == "3.4.2"
     assert WORKERS["env-node:8080"].image_digest == "sha256:new"
+
+
+def test_alias_e_ip_de_nodos():
+    from central_api.worker_nodes import parse_worker_aliases, resolve_node_ip
+
+    assert parse_worker_aliases("a:1=api2, b:2 = mrbot1,x") == {"a:1": "api2", "b:2": "mrbot1"}
+    assert resolve_node_ip("10.1.2.3:8080") == "10.1.2.3"
+    assert resolve_node_ip("[::1]:443") == "::1"

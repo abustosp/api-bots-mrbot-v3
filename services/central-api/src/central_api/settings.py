@@ -19,7 +19,7 @@ from pathlib import Path
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from central_api.worker_nodes import parse_worker_nodes
+from central_api.worker_nodes import parse_worker_aliases, parse_worker_nodes
 
 
 def _secret_file_content(alias: str) -> str:
@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     # Inventario de workers: SOLO direcciones "ip:port", contactadas por HTTP.
     # El panel de administración puede sumar nodos en caliente (ADMIN_NODES).
     worker_nodes: str = Field(default="", alias="WORKER_NODES")
+    # Alias legibles por nodo: "host:port=alias,host:port=alias" (solo para mostrar en el panel).
+    worker_aliases: str = Field(default="", alias="WORKER_ALIASES")
     # Versión objetivo opcional de la flota. Sin valor, se deriva el máximo
     # observado entre los workers registrados.
     worker_latest_version: str = Field(default="", alias="WORKER_LATEST_VERSION")
@@ -225,6 +227,10 @@ class Settings(BaseSettings):
             and self.object_storage_access_key
             and self.object_storage_secret_key
         )
+
+    @property
+    def worker_alias_map(self) -> dict[str, str]:
+        return parse_worker_aliases(self.worker_aliases)
 
     @property
     def worker_node_list(self) -> list[str]:
