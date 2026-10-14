@@ -9,7 +9,8 @@ y movimientos) y agrega la reafectacion de pagos con saldo a favor del portal
 - Sin base de datos, entorno ni MinIO directo; el proxy llega en
   ``runtime.proxy`` y las credenciales en el sobre sellado.
 - ``idempotency_class="EFECTO"``: con ``confirmar=True`` modifica la cuenta
-  corriente en ARCA, por eso no se reintenta a ciegas.
+  corriente en ARCA, por eso no se reintenta a ciegas. Con ``False`` devuelve
+  la propuesta, cancela el formulario y no modifica la cuenta.
 - Errores por categoria con diagnostico redactado (``sin_secretos``).
 """
 

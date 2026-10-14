@@ -4,8 +4,8 @@ Porta ``app/schemas/ccma_compensacion.py::CompensacionCCMARequest`` (V1/V2):
 
 - CUIT representado de 11 digitos (alias ``cuit``/``cuit_representado``).
 - ``compensar`` (default ``True``): reafecta los pagos con saldo a favor.
-- ``confirmar`` (default ``False``): confirma las reafectaciones; con
-  ``False`` quedan agregadas al detalle sin confirmar en ARCA.
+- ``confirmar`` (default ``False``): aplica las reafectaciones; con
+  ``False`` sólo devuelve la propuesta y cancela el formulario sin modificar ARCA.
 - ``incluir_movimientos`` (alias V1 ``movimientos``).
 - Credenciales, ``cuit_representante`` y ``proxy_request`` viajan en el sobre
   sellado: se descartan si llegan en el payload.
@@ -72,7 +72,13 @@ def esquema_entrada() -> dict[str, Any]:
             "cuit": {"type": "string", "pattern": CUIT_PATTERN},
             "cuit_representado": {"type": "string", "pattern": CUIT_PATTERN},
             "compensar": {"type": "boolean"},
-            "confirmar": {"type": "boolean"},
+            "confirmar": {
+                "type": "boolean",
+                "description": (
+                    "Aplica las reafectaciones en ARCA. False sólo devuelve una "
+                    "propuesta y cancela el formulario sin modificar la cuenta."
+                ),
+            },
             "incluir_movimientos": {"type": "boolean"},
             "movimientos": {"type": "boolean"},
         },
