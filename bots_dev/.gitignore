@@ -9,5 +9,6 @@ temp
 *.xlsx
 *.xls
 *.txt
+!requirements.txt
 *.json
 *.csv

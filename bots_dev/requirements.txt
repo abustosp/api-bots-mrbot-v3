@@ -1,0 +1,19 @@
+# Dependencias para ejecutar y testear manualmente los bots de bots_dev/.
+# Instalacion en el venv del proyecto:
+#
+#   uv pip install --python bots_dev/venv/bin/python -r bots_dev/requirements.txt
+#   bots_dev/venv/bin/python -m playwright install chromium
+#
+# playwright==1.62.0: misma serie que la imagen base de produccion
+# (bb:py3.14.7-pw1.62) para probar con el mismo Chromium que el bot-worker.
+# pdfplumber==0.11.4: misma version fijada en services/bot-worker/pyproject.toml.
+playwright==1.62.0
+playwright-stealth==2.0.3
+python-dotenv==1.2.4
+requests==2.34.2
+beautifulsoup4==4.15.0
+pandas==2.3.3
+numpy==2.5.4
+openpyxl==3.1.5
+pdfplumber==0.11.4
+minio==7.2.20
