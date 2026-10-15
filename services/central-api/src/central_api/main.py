@@ -244,6 +244,17 @@ async def lifespan(app: FastAPI):
             logging.getLogger(__name__).warning(
                 "no se pudo sembrar el catálogo al arrancar: %s", type(exc).__name__
             )
+    if app.state.db_configurado:
+        try:
+            from central_api.admin.workers import cargar_alias_persistidos
+
+            await cargar_alias_persistidos()
+        except Exception as exc:  # noqa: BLE001 - sin tabla aún, se usa el entorno
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "no se pudieron cargar los alias de workers: %s", type(exc).__name__
+            )
     tarea_scheduler: asyncio.Task | None = None
     tarea_autoscaler: asyncio.Task | None = None
     from central_api.services.apoc_base import refresh_loop as apoc_refresh_loop

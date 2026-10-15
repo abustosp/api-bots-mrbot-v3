@@ -26,7 +26,13 @@ from pydantic import BaseModel, Field, create_model
 from central_api.db import db_configurado, nueva_sesion
 from central_api.scheduler import dispatcher
 from central_api.settings import get_settings
-from central_api.store import ADMIN_NODES, WORKERS, WorkerEntry, utcnow
+from central_api.store import (
+    ADMIN_NODES,
+    WORKER_ALIAS_OVERRIDES,
+    WORKERS,
+    WorkerEntry,
+    utcnow,
+)
 from central_api.worker_nodes import merge_nodes, node_from_url, resolve_node_ip
 
 router = APIRouter()
@@ -77,6 +83,15 @@ async def vista_worker(node: str) -> dict:
     else:
         vista = {**vista, "fuente": "memoria"}
     return vista
+
+
+class AliasBody(BaseModel):
+    alias: str = Field(
+        default="",
+        max_length=64,
+        description="Alias legible del worker. Vacío quita el alias editado y vuelve al de WORKER_ALIASES.",
+        examples=["api2"],
+    )
 
 
 class AddWorkerBody(BaseModel):
@@ -195,6 +210,45 @@ def derive_state(entry: WorkerEntry | None) -> str:
     return "SANO"
 
 
+def alias_de(node: str) -> str:
+    """Alias vigente: el editado en el panel gana sobre ``WORKER_ALIASES``."""
+    return WORKER_ALIAS_OVERRIDES.get(node) or get_settings().worker_alias_map.get(node, "")
+
+
+async def cargar_alias_persistidos() -> int:
+    """Carga ``worker_aliases`` en memoria (arranque). Sin base no hace nada."""
+    if not db_configurado():
+        return 0
+    from sqlalchemy import text
+
+    async with nueva_sesion() as sesion:
+        filas = (await sesion.execute(text("SELECT node, alias FROM worker_aliases"))).all()
+    WORKER_ALIAS_OVERRIDES.clear()
+    WORKER_ALIAS_OVERRIDES.update({str(n): str(a) for n, a in filas})
+    return len(filas)
+
+
+async def _guardar_alias(node: str, alias: str) -> None:
+    """Persiste (o borra, si ``alias`` es vacío) el alias de un nodo."""
+    if not db_configurado():
+        return
+    from sqlalchemy import text
+
+    async with nueva_sesion() as sesion:
+        if alias:
+            await sesion.execute(
+                text(
+                    "INSERT INTO worker_aliases (node, alias) VALUES (:n, :a) "
+                    "ON CONFLICT (node) DO UPDATE SET alias = :a, updated_at = CURRENT_TIMESTAMP"
+                ),
+                {"n": node, "a": alias},
+            )
+        else:
+            await sesion.execute(
+                text("DELETE FROM worker_aliases WHERE node = :n"), {"n": node}
+            )
+
+
 def worker_overview(node: str) -> dict:
     settings = get_settings()
     entry = WORKERS.get(node)
@@ -205,7 +259,7 @@ def worker_overview(node: str) -> dict:
     ) else "panel" if node in ADMIN_NODES else "env"
     return {
         "node": node,
-        "alias": settings.worker_alias_map.get(node, ""),
+        "alias": alias_de(node),
         "ip": resolve_node_ip(node),
         "worker_id": entry.worker_id if entry else "",
         "origen": origen,
@@ -339,3 +393,46 @@ def remove_worker(node: str, authorization: str | None = Header(default=None)) -
     if entry is not None:
         entry.status = "DRENANDO"
     return {"success": True, "node": norm}
+
+
+@router.put(
+    "/workers/{node}/alias",
+    summary="Editar el alias de un worker",
+    description=(
+        "Define el alias legible que el panel muestra para el nodo. Se guarda en "
+        "la base y tiene prioridad sobre WORKER_ALIASES. Un alias vacío lo quita. "
+        "Requiere autorización administrativa."
+    ),
+)
+async def set_worker_alias(
+    node: str,
+    body: AliasBody,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Guarda el alias del nodo y lo aplica de inmediato."""
+    require_admin(authorization)
+    try:
+        norm = _coerce_node(node)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    alias = " ".join((body.alias or "").split())
+    if any(ord(c) < 32 for c in alias):
+        raise HTTPException(status_code=400, detail="alias con caracteres inválidos")
+    conocidos = merge_nodes(get_settings().worker_node_list, ADMIN_NODES)
+    if norm not in conocidos and norm not in WORKERS:
+        raise HTTPException(status_code=404, detail="worker no está en el inventario")
+    await _guardar_alias(norm, alias)
+    if alias:
+        WORKER_ALIAS_OVERRIDES[norm] = alias
+    else:
+        WORKER_ALIAS_OVERRIDES.pop(norm, None)
+    try:
+        from central_api.admin.audit import log_event
+
+        log_event(
+            "fleet.worker.alias_set", target_type="worker", target_id=norm,
+            metadata={"alias": alias},
+        )
+    except Exception:  # noqa: BLE001 - la auditoría no debe romper la edición
+        pass
+    return {"success": True, "node": norm, "alias": alias_de(norm)}

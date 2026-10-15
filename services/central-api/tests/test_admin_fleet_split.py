@@ -249,3 +249,30 @@ def test_alias_e_ip_de_nodos():
     assert parse_worker_aliases("a:1=api2, b:2 = mrbot1,x") == {"a:1": "api2", "b:2": "mrbot1"}
     assert resolve_node_ip("10.1.2.3:8080") == "10.1.2.3"
     assert resolve_node_ip("[::1]:443") == "::1"
+
+
+def test_alias_de_worker_editable_desde_el_panel(admin_fleet, monkeypatch) -> None:
+    from central_api.store import WORKER_ALIAS_OVERRIDES
+
+    monkeypatch.setenv("WORKER_ALIASES", "env-node:8080=desde-env")
+    get_settings.cache_clear()
+    WORKER_ALIAS_OVERRIDES.clear()
+    cabeceras = {"Authorization": "Bearer admin-fleet-token"}
+    try:
+        with TestClient(create_app()) as client:
+            def alias_en_flota() -> str:
+                datos = client.get("/admin/fleet", headers=cabeceras).json()
+                fila = next(w for w in datos["manuales"] if w["node"] == "env-node:8080")
+                return fila["alias"]
+
+            assert alias_en_flota() == "desde-env"
+            r = client.put("/admin/workers/env-node:8080/alias", headers=cabeceras, json={"alias": "  api   2 "})
+            assert r.status_code == 200 and r.json()["alias"] == "api 2"
+            assert alias_en_flota() == "api 2"
+            r = client.put("/admin/workers/env-node:8080/alias", headers=cabeceras, json={"alias": ""})
+            assert r.json()["alias"] == "desde-env"
+            assert client.put("/admin/workers/otro:1/alias", headers=cabeceras, json={"alias": "x"}).status_code == 404
+            assert client.put("/admin/workers/env-node:8080/alias", json={"alias": "x"}).status_code in (401, 403)
+            assert client.put("/admin/workers/env-node:8080/alias", headers=cabeceras, json={"alias": "x" * 65}).status_code == 422
+    finally:
+        WORKER_ALIAS_OVERRIDES.clear()
