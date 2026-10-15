@@ -313,8 +313,9 @@ def test_panel_tiene_vista_de_reportes_de_consumo() -> None:
 
 def test_panel_tiene_botones_para_ir_a_reportes() -> None:
     cuerpo = TestClient(create_app()).get("/admin/").text
-    assert 'id="goto-reports"' in cuerpo
-    assert cuerpo.count('data-goto="reports"') >= 2
+    # el boton de Resumen se quito a pedido: queda el de Jobs
+    assert 'id="goto-reports"' not in cuerpo
+    assert cuerpo.count('data-goto="reports"') >= 1
     assert 'document.addEventListener("click"' in cuerpo and "[data-goto]" in cuerpo
     # el destino existe y la pestaña del menu sigue disponible
     assert 'data-panel="reports"' in cuerpo and 'data-view="reports"' in cuerpo

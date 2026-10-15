@@ -230,7 +230,6 @@ details > .details-body { padding: 0 14px 14px; }
       <div class="flash" id="flash" role="status"></div>
       <section class="view" data-panel="dashboard">
         <div class="kicker">Centro operativo</div><h2>Resumen</h2><p class="subtle">Estado de la cola, flota y actividad administrativa.</p>
-        <div class="form-actions"><button type="button" class="button primary" data-goto="reports" id="goto-reports">📊 Ir al panel de reportes</button></div>
         <div class="grid" id="dashboard-metrics"><div class="empty">Cargando métricas...</div></div>
         <div class="grid" style="margin-top:14px"><div class="card"><h3>Flota</h3><div id="dashboard-fleet" class="muted">Cargando...</div></div><div class="card"><h3>Últimas acciones</h3><div id="dashboard-audit" class="muted">Cargando...</div></div></div>
       </section>
