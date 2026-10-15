@@ -332,8 +332,11 @@ class MisFacilidadesPlugin:
                 phase="SUBIENDO", percent=80, message=f"Subiendo {vista['vista']}"
             )
             try:
+                # ``upload`` resuelve contra work_dir: el PDF vive en la
+                # subcarpeta ``<base>.vistas``, no en la raiz.
                 referencia = await runtime.artifact_store.upload(
-                    ID_ARTEFACTO_PDF, destino.name
+                    ID_ARTEFACTO_PDF,
+                    destino.resolve().relative_to(runtime.work_dir.resolve()).as_posix(),
                 )
             except ValueError as exc:
                 raise ArtifactUploadError(str(exc)) from exc

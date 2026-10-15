@@ -365,6 +365,7 @@ def _runtime_mf(tmp_path: Path):
         cancellation=SimpleNamespace(raise_if_cancelled=_no_op),
         event_sink=SimpleNamespace(progress=_no_op),
         artifact_store=ArtifactStore(tmp_path, {}),
+        work_dir=tmp_path,
     )
 
 
@@ -420,6 +421,35 @@ def test_consultar_genera_un_pdf_por_vista_con_nombre_v1(tmp_path: Path) -> None
     assert [v["vista"] for v in plan["pdf_vistas"]] == ["pagos", "cuotas"]
     assert plan["pdf_vistas"][0]["archivo"] == "9 - 20123456789 - P-001 - EMPRESA SA - pagos.pdf"
     assert plan["xlsx"]["archivo"] == "9 - 20123456789 - P-001 - EMPRESA SA - tablas.xlsx"
+
+
+def test_consultar_sube_pdfs_de_subcarpeta_y_xlsx(tmp_path: Path) -> None:
+    """Regresion: los PDF viven en ``<base>.vistas`` y deben subirse igual."""
+    from bot_worker.bots.mis_facilidades.plugin import MisFacilidadesPlugin
+    from bot_worker.runtime.context import ArtifactStore
+
+    plugin = MisFacilidadesPlugin()
+    _, entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "denominacion": "EMPRESA SA",
+    }))
+    runtime = _runtime_mf(tmp_path)
+    runtime.artifact_store = ArtifactStore(
+        tmp_path,
+        {},
+        declarados={"plan_pdf": (("application/pdf",), 1_000_000),
+                    "planes_xlsx": ((), 1_000_000)},
+    )
+    servicio = _ServicioMF([{"numero": "P-001", "situacion": "Vigente", "denominacion": "X"}])
+
+    datos, artefactos, errores = asyncio.run(
+        plugin._consultar(servicio, entrada, runtime, "20123456789")
+    )
+
+    assert errores == []
+    assert len(artefactos) == 3
+    assert len(datos["planes"][0]["pdf_vistas"]) == 2
 
 
 def test_denominacion_del_listado_se_usa_si_el_request_no_la_trae(tmp_path: Path) -> None:
