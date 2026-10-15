@@ -58,6 +58,11 @@ ADMIN_NODES: set[str] = set()
 # Tienen prioridad sobre ``WORKER_ALIASES`` del entorno.
 WORKER_ALIAS_OVERRIDES: dict[str, str] = {}
 
+# Nodos pausados desde el panel (``worker_paused`` en PostgreSQL): no reciben
+# jobs nuevos, los en curso terminan. Es una marca aparte del ``status`` del
+# worker para que latidos y circuit breaker no la pisen.
+PAUSED_NODES: set[str] = set()
+
 # Instancias que pertenecen al autoscaler. Nunca se mezclan con workers
 # manuales: su clave estable es el ID EC2 y su nodo puede no existir mientras
 # la instancia todavía está arrancando.

@@ -276,3 +276,42 @@ def test_alias_de_worker_editable_desde_el_panel(admin_fleet, monkeypatch) -> No
             assert client.put("/admin/workers/env-node:8080/alias", headers=cabeceras, json={"alias": "x" * 65}).status_code == 422
     finally:
         WORKER_ALIAS_OVERRIDES.clear()
+
+
+def test_pausar_worker_lo_excluye_del_reparto_y_reanudar_lo_devuelve(admin_fleet) -> None:
+    from central_api.scheduler.selector import select_worker
+    from central_api.store import PAUSED_NODES, WORKERS, Job, WorkerEntry, utcnow
+
+    PAUSED_NODES.clear()
+    cabeceras = {"Authorization": "Bearer admin-fleet-token"}
+    WORKERS["env-node:8080"] = WorkerEntry(
+        node="env-node:8080", capacity=5, status="SANO", last_heartbeat_at=utcnow()
+    )
+    WORKERS["otro:8080"] = WorkerEntry(
+        node="otro:8080", capacity=5, status="SANO", last_heartbeat_at=utcnow()
+    )
+    try:
+        with TestClient(create_app()) as client:
+            r = client.post("/admin/workers/env-node:8080/pause", headers=cabeceras)
+            assert r.status_code == 200 and r.json()["pausado"] is True
+            assert r.json()["estado"] == "PAUSADO"
+            for n in range(30):
+                elegido = select_worker(Job(id=f"j{n}", bot="b", operation="o", payload={}), list(WORKERS.values()))
+                assert elegido is not None and elegido.node == "otro:8080"
+            manuales = client.get("/admin/fleet", headers=cabeceras).json()["manuales"]
+            assert next(w for w in manuales if w["node"] == "env-node:8080")["estado"] == "PAUSADO"
+            # sin otro worker disponible, el job espera en cola
+            assert select_worker(
+                Job(id="x", bot="b", operation="o", payload={}), [WORKERS["env-node:8080"]]
+            ) is None
+            r = client.post("/admin/workers/env-node:8080/resume", headers=cabeceras)
+            assert r.json()["pausado"] is False
+            nodos = {
+                select_worker(Job(id=f"k{n}", bot="b", operation="o", payload={}), list(WORKERS.values())).node
+                for n in range(30)
+            }
+            assert nodos == {"env-node:8080", "otro:8080"}
+            assert client.post("/admin/workers/nada:1/pause", headers=cabeceras).status_code == 404
+            assert client.post("/admin/workers/env-node:8080/pause").status_code in (401, 403)
+    finally:
+        PAUSED_NODES.clear()

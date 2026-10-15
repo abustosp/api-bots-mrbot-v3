@@ -28,6 +28,7 @@ from central_api.scheduler import dispatcher
 from central_api.settings import get_settings
 from central_api.store import (
     ADMIN_NODES,
+    PAUSED_NODES,
     WORKER_ALIAS_OVERRIDES,
     WORKERS,
     WorkerEntry,
@@ -198,6 +199,8 @@ def derive_state(entry: WorkerEntry | None) -> str:
         return "DESCONOCIDO"
     if entry.status == "DRENANDO":
         return "DRENANDO"
+    if entry.node in PAUSED_NODES:
+        return "PAUSADO"
     if entry.last_heartbeat_at is None:
         return "REGISTRANDO"
     age = now - entry.last_heartbeat_at
@@ -226,6 +229,34 @@ async def cargar_alias_persistidos() -> int:
     WORKER_ALIAS_OVERRIDES.clear()
     WORKER_ALIAS_OVERRIDES.update({str(n): str(a) for n, a in filas})
     return len(filas)
+
+
+async def cargar_pausados_persistidos() -> int:
+    """Carga ``worker_paused`` en memoria (arranque). Sin base no hace nada."""
+    if not db_configurado():
+        return 0
+    from sqlalchemy import text
+
+    async with nueva_sesion() as sesion:
+        filas = (await sesion.execute(text("SELECT node FROM worker_paused"))).all()
+    PAUSED_NODES.clear()
+    PAUSED_NODES.update(str(f[0]) for f in filas)
+    return len(filas)
+
+
+async def _guardar_pausa(node: str, pausado: bool) -> None:
+    if not db_configurado():
+        return
+    from sqlalchemy import text
+
+    async with nueva_sesion() as sesion:
+        if pausado:
+            await sesion.execute(
+                text("INSERT INTO worker_paused (node) VALUES (:n) ON CONFLICT (node) DO NOTHING"),
+                {"n": node},
+            )
+        else:
+            await sesion.execute(text("DELETE FROM worker_paused WHERE node = :n"), {"n": node})
 
 
 async def _guardar_alias(node: str, alias: str) -> None:
@@ -436,3 +467,60 @@ async def set_worker_alias(
     except Exception:  # noqa: BLE001 - la auditoría no debe romper la edición
         pass
     return {"success": True, "node": norm, "alias": alias_de(norm)}
+
+
+async def _cambiar_pausa(node: str, authorization: str | None, pausado: bool) -> dict:
+    require_admin(authorization)
+    try:
+        norm = _coerce_node(node)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    conocidos = merge_nodes(get_settings().worker_node_list, ADMIN_NODES)
+    if norm not in conocidos and norm not in WORKERS:
+        raise HTTPException(status_code=404, detail="worker no está en el inventario")
+    await _guardar_pausa(norm, pausado)
+    if pausado:
+        PAUSED_NODES.add(norm)
+    else:
+        PAUSED_NODES.discard(norm)
+    try:
+        from central_api.admin.audit import log_event
+
+        log_event(
+            "fleet.worker.paused" if pausado else "fleet.worker.resumed",
+            target_type="worker", target_id=norm,
+        )
+    except Exception:  # noqa: BLE001 - la auditoría no debe romper la operación
+        pass
+    entry = WORKERS.get(norm)
+    return {
+        "success": True,
+        "node": norm,
+        "pausado": pausado,
+        "en_ejecucion": entry.running_jobs if entry else 0,
+        "estado": derive_state(entry),
+    }
+
+
+@router.post(
+    "/workers/{node}/pause",
+    summary="Pausar un worker",
+    description=(
+        "El worker deja de recibir jobs nuevos y se reparten entre los no pausados. "
+        "Los jobs en curso terminan con normalidad. La pausa se conserva tras reinicios "
+        "de la central. Requiere autorización administrativa."
+    ),
+)
+async def pause_worker(node: str, authorization: str | None = Header(default=None)) -> dict:
+    """Marca el worker como pausado."""
+    return await _cambiar_pausa(node, authorization, True)
+
+
+@router.post(
+    "/workers/{node}/resume",
+    summary="Reanudar un worker pausado",
+    description="Vuelve a asignarle jobs al worker. Requiere autorización administrativa.",
+)
+async def resume_worker(node: str, authorization: str | None = Header(default=None)) -> dict:
+    """Quita la pausa del worker."""
+    return await _cambiar_pausa(node, authorization, False)

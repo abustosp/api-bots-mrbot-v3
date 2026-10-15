@@ -16,7 +16,14 @@ from typing import Any
 from central_api.autoscaler.policy import Decision, decide
 from central_api.db import db_configurado, nueva_sesion
 from central_api.settings import get_settings
-from central_api.store import ADMIN_NODES, EPHEMERAL_WORKERS, JOBS, WORKERS, utcnow
+from central_api.store import (
+    ADMIN_NODES,
+    EPHEMERAL_WORKERS,
+    JOBS,
+    PAUSED_NODES,
+    WORKERS,
+    utcnow,
+)
 from central_api.worker_nodes import merge_nodes
 
 log = logging.getLogger(__name__)
@@ -436,6 +443,7 @@ async def build_snapshot(now: datetime | None = None) -> dict:
         entry = WORKERS.get(node)
         if (
             entry is not None
+            and entry.node not in PAUSED_NODES
             and entry.status == "SANO"
             and entry.last_heartbeat_at is not None
             and entry.last_heartbeat_at.timestamp() >= fresh_cutoff

@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 
-from central_api.store import Job, WorkerEntry, utcnow
+from central_api.store import PAUSED_NODES, Job, WorkerEntry, utcnow
 
 
 def stable_hash(job_id: str, node: str) -> int:
@@ -48,6 +48,7 @@ def select_worker(
         w
         for w in workers
         if (allowed_nodes is None or w.node in allowed_nodes)
+        and w.node not in PAUSED_NODES
         and w.status == "SANO"
         and (force or w.running_jobs + w.reserved_slots < w.capacity)
         and w.last_heartbeat_at is not None
