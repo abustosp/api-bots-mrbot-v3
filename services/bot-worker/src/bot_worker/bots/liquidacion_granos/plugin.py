@@ -49,6 +49,7 @@ from bot_worker.bots.liquidacion_granos.schema import (
     normalizar_fecha,
 )
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from bot_worker.runtime.context import ruta_para_upload
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -264,7 +265,8 @@ class LiquidacionGranosPlugin:
                 )
                 try:
                     referencia = await runtime.artifact_store.upload(
-                        ID_ARTEFACTO_PLANILLA, destino.name
+                        ID_ARTEFACTO_PLANILLA,
+                        ruta_para_upload(getattr(runtime, "work_dir", None), destino),
                     )
                 except ValueError as exc:
                     raise ArtifactUploadError(str(exc)) from exc
@@ -299,7 +301,8 @@ class LiquidacionGranosPlugin:
         for ruta in rutas:
             try:
                 referencia = await runtime.artifact_store.upload(
-                    ID_ARTEFACTO_COMPROBANTE, Path(ruta).name
+                    ID_ARTEFACTO_COMPROBANTE,
+                    ruta_para_upload(getattr(runtime, "work_dir", None), ruta),
                 )
             except ValueError as exc:
                 raise ArtifactUploadError(str(exc)) from exc

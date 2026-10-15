@@ -39,6 +39,7 @@ from bot_worker.bots.errors import (
     sin_secretos,
 )
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from bot_worker.runtime.context import ruta_para_upload
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -310,7 +311,8 @@ class DeclaracionEnLineaPlugin:
                         continue
                     try:
                         referencia = await runtime.artifact_store.upload(
-                            id_artefacto, destino.name
+                            id_artefacto,
+                            ruta_para_upload(getattr(runtime, "work_dir", None), destino),
                         )
                     except ValueError as exc:
                         raise ArtifactUploadError(str(exc)) from exc

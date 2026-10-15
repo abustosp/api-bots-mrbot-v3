@@ -46,6 +46,7 @@ from bot_worker.bots.errors import (
 )
 from bot_worker.bots.mis_facilidades.schema import ENTRADAS, esquema_entrada
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from bot_worker.runtime.context import ruta_para_upload
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -336,7 +337,7 @@ class MisFacilidadesPlugin:
                 # subcarpeta ``<base>.vistas``, no en la raiz.
                 referencia = await runtime.artifact_store.upload(
                     ID_ARTEFACTO_PDF,
-                    destino.resolve().relative_to(runtime.work_dir.resolve()).as_posix(),
+                    ruta_para_upload(getattr(runtime, "work_dir", None), destino),
                 )
             except ValueError as exc:
                 raise ArtifactUploadError(str(exc)) from exc

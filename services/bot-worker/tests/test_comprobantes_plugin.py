@@ -138,7 +138,9 @@ class _Sink:
         pass
 
 
-def test_execute_desempaqueta_el_zip_del_portal_antes_de_filtrar(tmp_path: Path) -> None:
+def test_execute_desempaqueta_el_zip_del_portal_antes_de_filtrar(
+    tmp_path: Path, nombre: str = "Empresa de Prueba"
+) -> None:
     from bot_worker.runtime.context import ArtifactStore, BotRuntime, CancellationToken
 
     eventos: list[str] = []
@@ -154,7 +156,7 @@ def test_execute_desempaqueta_el_zip_del_portal_antes_de_filtrar(tmp_path: Path)
             {
                 "operacion": "consultar",
                 "representado_cuit": CUIT,
-                "representado_nombre": "Empresa de Prueba",
+                "representado_nombre": nombre,
                 "fecha_desde": "01/01/2026",
                 "fecha_hasta": "31/01/2026",
                 "emitidos": True,
@@ -205,3 +207,13 @@ def test_execute_desempaqueta_el_zip_del_portal_antes_de_filtrar(tmp_path: Path)
     assert len(archivos) == 1
     assert archivos[0].read_text(encoding="utf-8") == filtrado
     assert not servicio.destinos[0].exists() or not zipfile.is_zipfile(servicio.destinos[0])
+
+
+def test_execute_sube_el_csv_aunque_el_nombre_del_representado_tenga_barra(tmp_path: Path) -> None:
+    """Regresion: "PEREZ / HNOS" partia el archivo en subcarpetas y la subida fallaba."""
+    test_execute_desempaqueta_el_zip_del_portal_antes_de_filtrar(
+        tmp_path, nombre="PEREZ S.R.L. / HNOS: 2"
+    )
+    csvs = list(tmp_path.glob("*.csv"))
+    assert csvs and all("/" not in c.name for c in csvs)
+    assert not [d for d in tmp_path.iterdir() if d.is_dir()]

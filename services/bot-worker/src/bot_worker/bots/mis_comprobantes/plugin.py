@@ -25,6 +25,7 @@ directo ni desactiva headless/proxy/limpieza.
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -52,6 +53,7 @@ from bot_worker.bots.mis_comprobantes.schema import (
     normalizar_fecha,
 )
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from bot_worker.runtime.context import ruta_para_upload
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -74,7 +76,9 @@ def nombre_base_archivo(
     desde_limpio = normalizar_fecha(desde).replace("/", "")
     hasta_limpio = normalizar_fecha(hasta).replace("/", "")
     sigla = "MCE" if tipo == "emitidos" else "MCR"
-    return f"{cuit[-1]} - {sigla} - {desde_limpio} - {hasta_limpio} - {cuit} - {representado_nombre}"
+    # El nombre lo escribe el usuario: un "/" o ":" lo partiria en subcarpetas.
+    nombre = re.sub(r'[\\/:*?"<>|]+', "_", str(representado_nombre or "")).strip()
+    return f"{cuit[-1]} - {sigla} - {desde_limpio} - {hasta_limpio} - {cuit} - {nombre}"
 
 
 def filtrar_csv_por_rango(
@@ -395,7 +399,8 @@ class MisComprobantesPlugin:
             )
             try:
                 referencia = await runtime.artifact_store.upload(
-                    id_artefacto, final.name
+                    id_artefacto,
+                    ruta_para_upload(getattr(runtime, "work_dir", None), final),
                 )
             except ValueError as exc:
                 raise ArtifactUploadError(str(exc)) from exc

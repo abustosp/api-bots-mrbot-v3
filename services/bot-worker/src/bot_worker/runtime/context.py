@@ -138,6 +138,21 @@ def _declarado_por_el_manifiesto(
     return None
 
 
+def ruta_para_upload(work_dir: Any, archivo: Path | str) -> str:
+    """Ruta de ``archivo`` relativa a ``work_dir``, como exige ``upload``.
+
+    ``ArtifactStore.upload`` resuelve contra la raíz de ``work_dir``: subir solo
+    ``archivo.name`` falla si el archivo vive en una subcarpeta. Si no se puede
+    calcular la ruta relativa (sin ``work_dir`` o archivo fuera de él) se
+    devuelve el nombre suelto, que es el comportamiento previo.
+    """
+    ruta = Path(archivo)
+    try:
+        return ruta.resolve().relative_to(Path(work_dir).resolve()).as_posix()
+    except (TypeError, ValueError, OSError):
+        return ruta.name
+
+
 class ArtifactStore:
     """Solo sube a slots prefirmados del sobre; sin credenciales de bucket."""
 
