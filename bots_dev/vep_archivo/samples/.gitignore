@@ -1,0 +1,4 @@
+# Ignore real VEP files (contain CUIT data); commit only this README + .gitignore.
+*
+!.gitignore
+!README.md

@@ -1,0 +1,4 @@
+# Ignore real Excel files (contain sensitive data); commit only this README + .gitignore.
+*
+!.gitignore
+!README.md

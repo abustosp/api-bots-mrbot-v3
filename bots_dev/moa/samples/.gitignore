@@ -1,0 +1,4 @@
+# Ignore real despacho files (contain CUITs); commit only this README + .gitignore.
+*
+!.gitignore
+!README.md

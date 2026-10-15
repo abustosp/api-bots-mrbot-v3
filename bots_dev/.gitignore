@@ -1,0 +1,13 @@
+.env
+.venv
+venv
+temp
+*cache*
+*temp*
+*.pem
+*.zip
+*.xlsx
+*.xls
+*.txt
+*.json
+*.csv
