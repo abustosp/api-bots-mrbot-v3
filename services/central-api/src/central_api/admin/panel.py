@@ -279,6 +279,8 @@ details > .details-body { padding: 0 14px 14px; }
       <section class="view hidden" data-panel="ephemeral">
         <div class="kicker">Capacidad bajo demanda</div><h2>Workers efímeros</h2><p class="subtle">Política de escalado automático, alta manual de instancias EC2 y baja suave o forzada. Las instancias manuales no las retira el autoscaler: solo se eliminan desde acá.</p>
         <div class="form-actions"><button class="button primary" type="button" id="eph-refresh">Actualizar</button><span class="pill" id="eph-enabled">—</span><button class="button secondary" type="button" id="eph-toggle">Habilitar / deshabilitar autoscaler</button><span class="muted" id="eph-aws-error"></span></div>
+        <div class="toolbar"><div class="field wide"><label for="eph-zone">Zona activa (región AWS)</label><select id="eph-zone" aria-describedby="eph-zone-info"><option value="">Cargando zonas...</option></select></div><span class="muted" id="eph-zone-info" aria-live="polite">Zona activa: sin configurar</span></div>
+        <p class="muted" id="eph-zone-help">Al cambiar la zona se pide un motivo y el autoscaler pasa a levantar instancias en la zona elegida; las instancias ya creadas siguen en la suya. El catálogo de tipos y el sizing por RAM se recargan para la zona seleccionada.</p>
         <div class="grid" id="eph-summary"></div>
         <h3>Política de escalado</h3>
         <form id="eph-policy-form"><div class="form-grid">
@@ -294,12 +296,13 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="card" id="eph-estimate"><div class="muted">Cargando estimación...</div></div>
         <form id="eph-sim-form" class="toolbar"><div class="field"><label for="eph-sim-pending">Simular cola de N pendientes</label><input id="eph-sim-pending" type="number" min="0" step="1" placeholder="cola actual"></div><button class="button secondary" type="submit">Estimar</button></form>
         <h3 style="margin-top:24px">Levantar instancias manualmente</h3>
-        <form id="eph-launch-form" class="toolbar"><div class="field"><label for="eph-launch-count">Cantidad</label><input id="eph-launch-count" type="number" min="1" max="100" step="1" value="1" required></div><div class="field wide"><label for="eph-launch-type">Tipo de instancia (vCPU / RAM)</label><select id="eph-launch-type"><option value="c5.xlarge">c5.xlarge</option></select></div><div class="field"><label for="eph-launch-concurrency">Workers por instancia (semaphore, 1 a 10)</label><input id="eph-launch-concurrency" type="number" min="1" max="10" step="1" value="5" required></div><div class="field wide"><label for="eph-launch-reason">Motivo</label><input id="eph-launch-reason" type="text" value="alta manual desde panel V3" minlength="10" maxlength="500" required></div><button class="button primary" type="submit">Levantar</button></form>
+        <form id="eph-launch-form" class="toolbar"><div class="field"><label for="eph-launch-count">Cantidad</label><input id="eph-launch-count" type="number" min="1" max="100" step="1" value="1" required></div><div class="field wide"><label for="eph-launch-type">Tipo de instancia (vCPU / RAM)</label><select id="eph-launch-type"><option value="c5.xlarge">c5.xlarge</option></select></div><div class="field"><label for="eph-launch-concurrency">Workers por instancia (semaphore)</label><input id="eph-launch-concurrency" type="number" min="1" max="10" step="1" value="5" aria-describedby="eph-launch-help" required></div><div class="field wide"><label for="eph-launch-reason">Motivo</label><input id="eph-launch-reason" type="text" value="alta manual desde panel V3" minlength="10" maxlength="500" required></div><button class="button primary" type="submit">Levantar</button></form>
+        <p class="muted" id="eph-launch-help">Regla de sizing: cada worker consume entre 1,5 y 2 GB de RAM. El semaphore sugerido sale de la RAM del tipo elegido, con un mínimo recomendado y un máximo permitido por instancia: el input toma ese máximo como tope y rechaza valores mayores.</p>
         <p class="muted" id="eph-type-info" aria-live="polite">Cargando tipos disponibles...</p>
         <h3 style="margin-top:24px">Instancias <span class="pill" id="eph-count">0</span></h3>
         <div class="form-actions"><button class="button danger" type="button" id="eph-terminate-all">Eliminar todas (suave)</button><button class="button danger" type="button" id="eph-terminate-all-hard">Forzar eliminación de todas (hard)</button></div>
         <p class="muted">Suave: deja de asignar jobs y elimina la instancia cuando llega a 0 trabajos. Hard: libera de inmediato sus jobs (se reencolan si tienen intentos disponibles, si no quedan fallidos) y termina la instancia ya. Al eliminar se liberan disco, red y resto de recursos de la instancia.</p>
-        <div class="table-wrap"><table><thead><tr><th>Instancia</th><th>Origen</th><th>Tipo</th><th>Slots</th><th>Edad</th><th>Estado</th><th>Jobs</th><th>Acciones</th></tr></thead><tbody id="eph-table"><tr><td colspan="8" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Instancia</th><th>Origen</th><th>Tipo</th><th>Zona</th><th>Slots</th><th>Edad</th><th>Estado</th><th>Jobs</th><th>Acciones</th></tr></thead><tbody id="eph-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
         <h3 style="margin-top:24px">Eventos recientes</h3>
         <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Detalle</th></tr></thead><tbody id="eph-events"><tr><td colspan="3" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
@@ -1242,21 +1245,76 @@ details > .details-body { padding: 0 14px 14px; }
     if (!est) { $("#eph-estimate").innerHTML = `<div class="muted">Sin estimación.</div>`; return; }
     $("#eph-estimate").innerHTML = `<h3>Estimación (${esc(est.mode)})</h3><div>Cola simulada/actual: <strong>${esc(est.pending)}</strong> · se escala por encima de <strong>${esc(est.trigger_when_pending_over)}</strong> · <strong>${esc(est.requests_per_instance)}</strong> solicitudes por instancia (${esc(est.slots_per_instance)} slots, ~${esc(est.avg_job_seconds)} s por job)</div><div style="margin-top:6px">Instancias adicionales estimadas: <strong>${esc(est.estimated_instances)}</strong> · tiempo aprox. para vaciar la cola: <strong>${esc(est.estimated_minutes_to_drain)} min</strong></div><div class="muted" style="margin-top:6px">${esc(est.note)}</div>`;
   }
-  async function loadEphemeral() {
+  const zoneCatalog = { rows: [], active: "" };
+  const gb = (value) => Number(value ?? 0).toLocaleString("es-AR", { maximumFractionDigits: 2 });
+  function zoneLabel(zone) { return zone ? `${zone.label || zone.key || ""}${zone.region ? ` (${zone.region})` : ""}` : ""; }
+  function currentZoneKey() { return $("#eph-zone").value || zoneCatalog.active || ""; }
+  function currentZone() { return zoneCatalog.rows.find((zone) => zone.key === currentZoneKey()) || null; }
+  function renderZoneInfo() {
+    const zone = currentZone();
+    const extra = zone && Number.isFinite(Number(zone.instances)) ? ` · ${zone.instances} instancia(s) en la zona` : "";
+    $("#eph-zone-info").textContent = zone ? `Zona activa: ${zoneLabel(zone)}${extra}` : `Zona activa: ${currentZoneKey() || "sin configurar"}`;
+  }
+  async function loadZones(activeFallback = "", fallbackRow = null) {
+    try {
+      const data = await api("/admin/autoscale/zones");
+      zoneCatalog.rows = data.zones || [];
+      zoneCatalog.active = data.active || activeFallback || (zoneCatalog.rows[0] || {}).key || "";
+      const select = $("#eph-zone");
+      select.innerHTML = zoneCatalog.rows.length ? zoneCatalog.rows.map((zone) => `<option value="${esc(zone.key)}">${esc(`${zoneLabel(zone)}${zone.key === zoneCatalog.active ? " — activa" : ""}`)}</option>`).join("") : `<option value="">Sin zonas configuradas</option>`;
+      if (zoneCatalog.rows.some((zone) => zone.key === zoneCatalog.active)) select.value = zoneCatalog.active;
+      renderZoneInfo();
+      return true;
+    } catch (error) {
+      zoneCatalog.active = activeFallback || zoneCatalog.active;
+      if (fallbackRow && fallbackRow.key && !zoneCatalog.rows.length) {
+        zoneCatalog.rows = [fallbackRow];
+        zoneCatalog.active = fallbackRow.key;
+        const select = $("#eph-zone");
+        select.innerHTML = `<option value="${esc(fallbackRow.key)}">${esc(`${zoneLabel(fallbackRow)} — activa`)}</option>`;
+        select.value = fallbackRow.key;
+      }
+      renderZoneInfo();
+      $("#eph-zone-info").textContent = `No se pudo cargar la lista de zonas (${error.message}). ` + $("#eph-zone-info").textContent;
+      return false;
+    }
+  }
+  async function changeZone() {
+    const select = $("#eph-zone");
+    const target = select.value;
+    if (!target || target === zoneCatalog.active) { select.value = zoneCatalog.active; return; }
+    const zone = zoneCatalog.rows.find((row) => row.key === target) || { key: target };
+    const motivo = window.prompt(`Motivo del cambio a la zona ${zoneLabel(zone) || target} (mínimo 10 caracteres):`, "cambio de zona desde panel V3");
+    if (motivo === null) { select.value = zoneCatalog.active; return; }
+    const limpio = motivo.trim();
+    if (limpio.length < 10) { flash("El motivo del cambio de zona debe tener al menos 10 caracteres.", "error"); select.value = zoneCatalog.active; return; }
+    try {
+      await api("/admin/autoscale/zone", { method: "PUT", body: JSON.stringify({ zone: target, motivo: limpio }) });
+      zoneCatalog.active = target; typeCatalog.zone = null; typeCatalog.rows = [];
+      await loadEphemeral(true);
+      flash(`Zona activa: ${zoneLabel(zone) || target}. Se recargó el catálogo de tipos de esa zona.`);
+    } catch (error) { flash(error.message, "error"); select.value = zoneCatalog.active; }
+  }
+  async function loadEphemeral(force = false) {
+    const recargar = force === true;
     try {
       const [data, policy] = await Promise.all([api("/admin/autoscale"), api("/admin/autoscale/policy")]);
-      loadInstanceTypes();
+      const zoneFromStatus = (typeof data.zone === "string" ? data.zone : data.zone?.key) || data.zona || data.active_zone || "";
+      const zoneRowFromStatus = data.zone && typeof data.zone === "object" ? data.zone : null;
+      await loadZones(zoneFromStatus, zoneRowFromStatus);
+      await loadInstanceTypes(currentZoneKey() || zoneFromStatus, recargar);
       const cfg = data.config || {}; const snap = data.snapshot || {};
       $("#eph-enabled").textContent = cfg.enabled ? "Autoscaler habilitado" : "Autoscaler deshabilitado";
       $("#eph-enabled").dataset.enabled = cfg.enabled ? "1" : "0";
       $("#eph-aws-error").textContent = data.aws_error ? `AWS no disponible: ${data.aws_error}` : (cfg.dry_run ? "Modo simulación (dry run)" : "");
       const efimeros = data.efimeros || [];
       const activos = new Map((snap.efimeros || []).map((item) => [item.instance_id, item]));
-      $("#eph-summary").innerHTML = [["Cola sin asignar", snap.pendientes ?? 0], ["En ejecución", snap.en_ejecucion ?? 0], ["Efímeras", efimeros.length], ["Workers fijos sanos", snap.workers_fijos ?? 0], ["Costo estimado", data.costo_estimado == null ? "—" : `${data.costo_estimado} ${data.costo_moneda || "USD"}`]].map(([label, value]) => `<div class="card"><div class="muted">${esc(label)}</div><strong>${esc(value)}</strong></div>`).join("");
+      const zonaActiva = zoneLabel(currentZone()) || currentZoneKey() || "—";
+      $("#eph-summary").innerHTML = [["Zona activa", zonaActiva], ["Cola sin asignar", snap.pendientes ?? 0], ["En ejecución", snap.en_ejecucion ?? 0], ["Efímeras", efimeros.length], ["Workers fijos sanos", snap.workers_fijos ?? 0], ["Costo estimado", data.costo_estimado == null ? "—" : `${data.costo_estimado} ${data.costo_moneda || "USD"}`]].map(([label, value]) => `<div class="card"><div class="muted">${esc(label)}</div><strong>${esc(value)}</strong></div>`).join("");
       for (const key of POLICY_KEYS) { const input = document.querySelector(`[data-policy="${key}"]`); const meta = policy.values?.[key]; if (input && meta && document.activeElement !== input) { input.value = meta.value; input.title = `Entorno: ${meta.env}${meta.overridden ? " (modificado desde el panel)" : ""}`; } }
       renderEphEstimate(policy.estimate);
       $("#eph-count").textContent = String(efimeros.length);
-      $("#eph-table").innerHTML = efimeros.length ? efimeros.map((item) => { const live = activos.get(item.instance_id) || {}; const edad = item.launched_at ? (Date.now() - new Date(item.launched_at).getTime()) / 1000 : null; const estado = item.hard_terminate ? "ELIMINANDO (forzado)" : item.drain_requested ? "DRENANDO" : (item.state || "—"); const id = esc(item.instance_id || ""); return `<tr><td><code>${id}</code><br><span class="muted">${esc(item.node || "sin IP aún")}</span></td><td>${item.manual ? "Manual" : "Automática"}</td><td>${esc(item.instance_type || "—")}</td><td>${esc(item.concurrency ?? "—")}</td><td>${esc(formatAge(edad))}</td><td><span class="status ${statusClass(item.drain_requested ? "PAUSADO" : live.sano ? "SANO" : "")}">${esc(estado)}</span></td><td>${esc(live.jobs_activos ?? 0)}/${esc(item.concurrency ?? 0)}</td><td class="actions"><div class="actions-inner"><button class="button danger small" data-action="eph-soft" data-id="${id}">Eliminar</button><button class="button danger small" data-action="eph-hard" data-id="${id}">Forzar</button></div></td></tr>`; }).join("") : `<tr><td colspan="8" class="empty">No hay workers efímeros.</td></tr>`;
+      $("#eph-table").innerHTML = efimeros.length ? efimeros.map((item) => { const live = activos.get(item.instance_id) || {}; const edad = item.launched_at ? (Date.now() - new Date(item.launched_at).getTime()) / 1000 : null; const estado = item.hard_terminate ? "ELIMINANDO (forzado)" : item.drain_requested ? "DRENANDO" : (item.state || "—"); const id = esc(item.instance_id || ""); return `<tr><td><code>${id}</code><br><span class="muted">${esc(item.node || "sin IP aún")}</span></td><td>${item.manual ? "Manual" : "Automática"}</td><td>${esc(item.instance_type || "—")}</td><td>${esc(item.zone || currentZoneKey() || "—")}</td><td>${esc(item.concurrency ?? "—")}</td><td>${esc(formatAge(edad))}</td><td><span class="status ${statusClass(item.drain_requested ? "PAUSADO" : live.sano ? "SANO" : "")}">${esc(estado)}</span></td><td>${esc(live.jobs_activos ?? 0)}/${esc(item.concurrency ?? 0)}</td><td class="actions"><div class="actions-inner"><button class="button danger small" data-action="eph-soft" data-id="${id}">Eliminar</button><button class="button danger small" data-action="eph-hard" data-id="${id}">Forzar</button></div></td></tr>`; }).join("") : `<tr><td colspan="9" class="empty">No hay workers efímeros.</td></tr>`;
       const eventos = data.eventos || [];
       $("#eph-events").innerHTML = eventos.length ? eventos.slice(0, 30).map((ev) => `<tr><td>${esc(date(ev.at))}</td><td><strong>${esc(ev.action)}</strong></td><td>${esc(ev.reason || "")}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">Sin eventos.</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
@@ -1275,35 +1333,72 @@ details > .details-body { padding: 0 14px 14px; }
     event.preventDefault(); const pending = $("#eph-sim-pending").value;
     try { const policy = await api(`/admin/autoscale/policy${pending === "" ? "" : `?pending=${encodeURIComponent(pending)}`}`); renderEphEstimate(policy.estimate); } catch (error) { flash(error.message, "error"); }
   }
-  const typeCatalog = { rows: [], loaded: false };
-  function describeType(row) { return `${row.instance_type}: ${row.vcpu} vCPU, ${row.ram_gib} GiB RAM (semaphore sugerido: ${row.suggested_concurrency})`; }
-  function syncTypeInfo(applySuggested) {
-    const row = typeCatalog.rows.find((item) => item.instance_type === $("#eph-launch-type").value);
-    $("#eph-type-info").textContent = row ? describeType(row) : "Sin información del tipo seleccionado.";
-    if (row && applySuggested) $("#eph-launch-concurrency").value = row.suggested_concurrency;
+  const typeCatalog = { rows: [], zone: null, maxPermitido: 10 };
+  function topeDeTipo(row) {
+    const maximo = Number(row.max_concurrency);
+    const global = Number(typeCatalog.maxPermitido) || 10;
+    return Math.max(1, Math.min(Number.isFinite(maximo) && maximo > 0 ? maximo : global, global));
   }
-  async function loadInstanceTypes() {
-    if (typeCatalog.loaded) return;
+  function typeRow() { return typeCatalog.rows.find((item) => item.instance_type === $("#eph-launch-type").value) || null; }
+  function describeType(row) {
+    const minGb = gb(row.gb_per_worker_min ?? 1.5), maxGb = gb(row.gb_per_worker_max ?? 2);
+    return `${row.instance_type}: ${row.vcpu} vCPU, ${gb(row.ram_gib)} GiB RAM · cada worker consume entre ${minGb} y ${maxGb} GB de RAM · semaphore sugerido: ${row.suggested_concurrency} · mínimo recomendado: ${row.recommended_min} · máximo permitido: ${topeDeTipo(row)}`;
+  }
+  function syncTypeInfo(applySuggested) {
+    const row = typeRow(); const input = $("#eph-launch-concurrency");
+    if (!row) { $("#eph-type-info").textContent = "Sin información del tipo seleccionado. Regla general: cada worker consume entre 1,5 y 2 GB de RAM; el máximo permitido se ajusta al tipo elegido."; return; }
+    const tope = topeDeTipo(row);
+    input.max = String(tope);
+    input.title = `Máximo permitido para ${row.instance_type}: ${tope} workers (cada worker consume entre ${gb(row.gb_per_worker_min ?? 1.5)} y ${gb(row.gb_per_worker_max ?? 2)} GB de RAM).`;
+    $("#eph-type-info").textContent = describeType(row);
+    if (applySuggested) input.value = String(Math.max(1, Math.min(Number(row.suggested_concurrency) || 1, tope)));
+  }
+  function applyTypeCatalog(clave, data) {
+    typeCatalog.zone = clave;
+    typeCatalog.maxPermitido = Number(data.max_concurrency) || typeCatalog.maxPermitido || 10;
+    typeCatalog.rows = data.types || [];
+    if (!typeCatalog.rows.length) {
+      $("#eph-launch-type").innerHTML = `<option value="">Sin tipos disponibles</option>`;
+      $("#eph-type-info").textContent = data.error ? `No se pudo consultar los tipos en ${clave} (${data.error}).` : `No hay tipos disponibles en ${clave}.`;
+      return;
+    }
+    const hasDefault = typeCatalog.rows.some((row) => row.instance_type === data.default);
+    const family = String(data.default || "").split(".")[0];
+    const sameFamily = typeCatalog.rows.find((row) => row.instance_type.startsWith(`${family}.`));
+    const preferred = hasDefault ? data.default : (sameFamily || typeCatalog.rows[0]).instance_type;
+    $("#eph-launch-type").innerHTML = typeCatalog.rows.map((row) => `<option value="${esc(row.instance_type)}"${row.instance_type === preferred ? " selected" : ""}>${esc(`${row.instance_type} — ${row.vcpu} vCPU, ${row.ram_gib} GiB RAM (máx. ${row.max_concurrency} workers)`)}</option>`).join("");
+    syncTypeInfo(true);
+    if (!hasDefault && data.default) $("#eph-type-info").textContent = `${data.default} no está disponible en la zona ${clave}; se preseleccionó ${preferred}. ` + $("#eph-type-info").textContent;
+  }
+  async function loadInstanceTypes(zone, force = false) {
+    const clave = String(zone || currentZoneKey() || "");
+    if (!clave) { $("#eph-type-info").textContent = "No hay zona activa: no se puede consultar el catálogo de tipos."; return; }
+    if (!force && typeCatalog.zone === clave && typeCatalog.rows.length) { syncTypeInfo(false); return; }
+    $("#eph-type-info").textContent = `Cargando tipos de la zona ${clave}...`;
     try {
-      const data = await api("/admin/autoscale/instance-types");
-      typeCatalog.rows = data.types || [];
-      if (!typeCatalog.rows.length) { $("#eph-type-info").textContent = data.error ? `No se pudo consultar los tipos (${data.error}).` : "No hay tipos disponibles."; return; }
-      typeCatalog.loaded = true;
-      const hasDefault = typeCatalog.rows.some((row) => row.instance_type === data.default);
-      const family = String(data.default || "").split(".")[0];
-      const sameFamily = typeCatalog.rows.find((row) => row.instance_type.startsWith(`${family}.`));
-      const preferred = hasDefault ? data.default : (sameFamily || typeCatalog.rows[0]).instance_type;
-      $("#eph-launch-type").innerHTML = typeCatalog.rows.map((row) => `<option value="${esc(row.instance_type)}"${row.instance_type === preferred ? " selected" : ""}>${esc(`${row.instance_type} — ${row.vcpu} vCPU, ${row.ram_gib} GiB RAM`)}</option>`).join("");
-      syncTypeInfo(true);
-      if (!hasDefault) $("#eph-type-info").textContent = `${data.default} no está disponible en la zona configurada; se preseleccionó ${preferred}. ` + $("#eph-type-info").textContent;
-    } catch (error) { $("#eph-type-info").textContent = `No se pudo cargar los tipos: ${error.message}`; }
+      const data = await api(`/admin/autoscale/instance-types?zone=${encodeURIComponent(clave)}`);
+      if (currentZoneKey() && currentZoneKey() !== clave) return;
+      applyTypeCatalog(clave, data);
+    } catch (error) {
+      const zone = zoneCatalog.rows.find((item) => item.key === clave);
+      if (zone && (zone.types || []).length) {
+        applyTypeCatalog(clave, { types: zone.types });
+        $("#eph-type-info").textContent = `Catálogo de respaldo de la zona ${clave} (la consulta de tipos falló: ${error.message}). ` + $("#eph-type-info").textContent;
+        return;
+      }
+      $("#eph-type-info").textContent = `No se pudo cargar los tipos de la zona ${clave}: ${error.message}`;
+    }
   }
   async function launchEphemeral(event) {
     event.preventDefault(); const count = Number($("#eph-launch-count").value); const motivo = $("#eph-launch-reason").value.trim();
     const instance_type = $("#eph-launch-type").value; const concurrency = Number($("#eph-launch-concurrency").value);
-    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 10) { flash("El semaphore debe ser un entero entre 1 y 10.", "error"); return; }
-    if (!window.confirm(`¿Levantar ${count} instancia(s) ${instance_type} con ${concurrency} workers cada una? Generan costo hasta que las elimines.`)) return;
-    try { const data = await api("/admin/autoscale/scale-up", { method: "POST", body: JSON.stringify({ count, motivo, manual: true, instance_type, concurrency }) }); flash(`Solicitadas ${data.requested}, lanzadas ${(data.launched || []).length}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
+    const row = typeRow(); const zoneKey = currentZoneKey(); const zone = currentZone();
+    if (!row) { flash("Elegí un tipo de instancia disponible antes de levantar instancias.", "error"); return; }
+    const tope = topeDeTipo(row);
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > tope) { flash(`El semaphore para ${instance_type} debe ser un entero entre 1 y ${tope}: cada worker consume entre 1,5 y 2 GB de RAM y ${tope} es el máximo permitido para ese tipo.`, "error"); return; }
+    if (!zoneKey) { flash("Elegí una zona antes de levantar instancias.", "error"); return; }
+    if (!window.confirm(`¿Levantar ${count} instancia(s) ${instance_type} en la zona ${zoneLabel(zone) || zoneKey} con un semaphore de ${concurrency} workers por instancia (sugerido: ${row.suggested_concurrency}, máximo por RAM: ${tope})? Generan costo hasta que las elimines.`)) return;
+    try { const data = await api("/admin/autoscale/scale-up", { method: "POST", body: JSON.stringify({ count, motivo, manual: true, instance_type, concurrency, zone: zoneKey }) }); flash(`Solicitadas ${data.requested}, lanzadas ${(data.launched || []).length} en la zona ${zoneKey}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
   }
   async function terminateEphemeral(body, label) {
     try { const data = await api("/admin/autoscale/terminate", { method: "POST", body: JSON.stringify(body) }); flash(`${label}: eliminadas ${(data.terminated || []).length}, drenando ${(data.draining || []).length}, pendientes de confirmar ${(data.pending || []).length}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
@@ -1339,7 +1434,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
   $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
-  $("#eph-refresh").addEventListener("click", loadEphemeral); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-launch-type").addEventListener("change", () => syncTypeInfo(true)); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
+  $("#eph-refresh").addEventListener("click", () => loadEphemeral(true)); $("#eph-zone").addEventListener("change", changeZone); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-launch-type").addEventListener("change", () => syncTypeInfo(true)); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>

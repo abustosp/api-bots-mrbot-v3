@@ -337,3 +337,69 @@ def test_panel_formulario_de_alta_con_tipo_y_semaphore() -> None:
         assert f'id="{ident}"' in html
     assert "/admin/autoscale/instance-types" in html and "vCPU" in html
     assert "instance_type, concurrency" in html
+
+
+def test_panel_selector_de_zona_de_efimeros() -> None:
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    for ident in ("eph-zone", "eph-zone-info", "eph-zone-help"):
+        assert f'id="{ident}"' in html
+    # Zona activa visible y endpoint de zonas referenciado.
+    assert "Zona activa" in html
+    assert "/admin/autoscale/zones" in html
+    assert "/admin/autoscale/zone" in html
+    assert "loadZones" in html and "changeZone" in html
+    # El cambio de zona pide motivo (>= 10) y se envía por PUT con la zona elegida.
+    assert 'method: "PUT"' in html
+    assert "zone: target, motivo: limpio" in html
+    assert "limpio.length < 10" in html
+    assert "cambio de zona desde panel V3" in html
+    assert '"change", changeZone' in html
+    assert " — activa" in html
+    # Si el listado de zonas no responde, la vista degrada con la zona del estado.
+    assert "No se pudo cargar la lista de zonas" in html
+    assert "zoneRowFromStatus" in html
+
+
+def test_panel_catalogo_de_tipos_se_recarga_por_zona_y_muestra_la_zona() -> None:
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    # El catálogo se consulta con la zona activa y no se cachea entre zonas.
+    assert "/admin/autoscale/instance-types?zone=" in html
+    assert "typeCatalog = { rows: [], zone: null, maxPermitido: 10 }" in html
+    assert "typeCatalog.zone === clave" in html
+    assert "typeCatalog.zone = clave" in html
+    assert "loadInstanceTypes(currentZoneKey() || zoneFromStatus" in html
+    assert "applyTypeCatalog" in html
+    assert "Catálogo de respaldo de la zona" in html
+    # La tabla de instancias muestra la zona y el alta manda la zona elegida.
+    assert "<th>Zona</th>" in html
+    assert 'colspan="9"' in html
+    assert "zone: zoneKey" in html
+
+
+def test_panel_altas_efimeras_muestran_regla_de_ram_y_maximo_por_tipo() -> None:
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    # Regla de sizing visible: 1,5 a 2 GB por worker, sugerido, mínimo y máximo.
+    assert "cada worker consume entre 1,5 y 2 GB de RAM" in html
+    assert 'id="eph-launch-help"' in html
+    assert 'aria-describedby="eph-launch-help"' in html
+    for marca in (
+        "gb_per_worker_min", "gb_per_worker_max", "max_concurrency", "suggested_concurrency",
+        "recommended_min", "semaphore sugerido", "mínimo recomendado", "máximo permitido",
+    ):
+        assert marca in html, marca
+    # El máximo del tipo se aplica al input y bloquea envíos por encima.
+    assert "input.max = String(tope)" in html
+    assert "concurrency > tope" in html
+    assert "máximo permitido para ese tipo" in html
+    assert "input.value = String(Math.max(1, Math.min(Number(row.suggested_concurrency) || 1, tope)))" in html
+    # El tope respeta el máximo global que informa el backend.
+    assert "function topeDeTipo(row)" in html
+    assert "typeCatalog.maxPermitido" in html
+
+    # El confirm de alta menciona tipo, semaphore y zona.
+    confirmacion = html.split("¿Levantar ${count} instancia(s)")[1].split("Generan costo")[0]
+    for marca in ("${instance_type}", "en la zona", "semaphore", "sugerido:", "máximo por RAM:"):
+        assert marca in confirmacion, marca
