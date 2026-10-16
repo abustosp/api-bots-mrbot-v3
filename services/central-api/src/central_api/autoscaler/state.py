@@ -1,7 +1,7 @@
 """Estado editable del autoscaler: política definida en el panel e instancias manuales.
 
 Los valores viven en memoria y, con PostgreSQL configurado, se persisten en
-la tabla clave/valor ``autoscale_state`` (migración 0026) para sobrevivir a
+la tabla clave/valor ``autoscale_state`` (migración 0027) para sobrevivir a
 reinicios de la central. Sin base se usa solo la memoria.
 
 ``POLICY_OVERRIDES`` pisa los valores de ``AUTOSCALE_*`` del entorno. Solo se

@@ -1,4 +1,4 @@
-"""0026: estado editable del autoscaler (política y workers efímeros manuales).
+"""0027: estado editable del autoscaler (política y workers efímeros manuales).
 
 Tabla clave/valor ``autoscale_state``. ``policy`` guarda los overrides de la
 política definidos desde el panel y ``manual_instances`` la lista de
@@ -10,8 +10,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0026"
-down_revision = "0025"
+revision = "0027"
+down_revision = "0026"
 branch_labels = None
 depends_on = None
 
