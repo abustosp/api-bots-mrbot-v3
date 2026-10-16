@@ -174,7 +174,7 @@ td details > summary { padding: 7px 11px; font-size: 12px; font-weight: 600; whi
 td details[open] > summary { border-bottom: 1px solid var(--line); }
 td details > .details-body { padding: 10px 11px; }
 .job-id { white-space: nowrap; user-select: all; word-break: normal; }
-.user-id { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.user-id { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .user-id code { font-size: 12px; }
 .key-cell { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* padding-right: deja libre el icono del gestor de contraseñas del navegador. */
