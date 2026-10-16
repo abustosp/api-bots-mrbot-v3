@@ -230,10 +230,18 @@ class Ec2Fleet:
         self._reconcile_ingress(group_id)
         return group_id
 
-    def launch(self, count: int, instance_type: str | None = None) -> list[Ec2Worker]:
-        """Lanza hasta ``count`` workers, respetando el máximo y cuota/capacidad."""
+    def launch(
+        self, count: int, instance_type: str | None = None, concurrency: int | None = None
+    ) -> list[Ec2Worker]:
+        """Lanza hasta ``count`` workers, respetando el máximo y cuota/capacidad.
+
+        ``concurrency`` fija el semaphore (jobs simultaneos) del worker; sin el se
+        deriva de la RAM del tipo.
+        """
         if count <= 0 or self.settings.max_instances == 0:
             return []
+        if concurrency is not None and not 1 <= int(concurrency) <= 10:
+            raise ValueError("concurrency debe estar entre 1 y 10")
         if not self.settings.worker_image:
             raise ValueError("AUTOSCALE_WORKER_IMAGE es obligatorio para lanzar workers")
         if not self.settings.central_url:
@@ -245,7 +253,8 @@ class Ec2Fleet:
 
         self.last_launch_limit = None
         launch_type = instance_type or self.settings.instance_type
-        ram_gib, concurrency = self._instance_runtime(launch_type)
+        ram_gib, default_concurrency = self._instance_runtime(launch_type)
+        concurrency = int(concurrency) if concurrency else default_concurrency
         existing = self.list_managed(states=("pending", "running"))
         remaining = min(count, max(0, self.settings.max_instances - len(existing)))
         if remaining == 0:
@@ -279,7 +288,9 @@ class Ec2Fleet:
                         InstanceType=launch_type,
                         MinCount=1,
                         MaxCount=1,
-                        UserData=self._user_data(instance_type=launch_type),
+                        UserData=self._user_data(
+                            instance_type=launch_type, concurrency=concurrency
+                        ),
                         InstanceInitiatedShutdownBehavior="terminate",
                         BlockDeviceMappings=[
                             {
@@ -600,7 +611,9 @@ class Ec2Fleet:
             tags.append({"Key": "WorkerConcurrency", "Value": str(concurrency)})
         return tags
 
-    def _user_data(self, instance_type: str | None = None) -> str:
+    def _user_data(
+        self, instance_type: str | None = None, concurrency: int | None = None
+    ) -> str:
         """Cloud-init worker runtime matching worker.compose.yml resource limits."""
         settings = self.settings
         instance_type = instance_type or settings.instance_type
@@ -620,7 +633,8 @@ class Ec2Fleet:
         image = shlex.quote(settings.worker_image)
         central_url = shlex.quote(settings.central_url)
         port = settings.worker_port
-        ram_gib, concurrency = self._instance_runtime(instance_type)
+        ram_gib, default_concurrency = self._instance_runtime(instance_type)
+        concurrency = int(concurrency) if concurrency else default_concurrency
         memory_gib = max(1, floor(ram_gib * 0.85))
         shm_gib = max(1, floor(ram_gib * 0.2 + 0.5))
         work_gib = max(1, floor(ram_gib * 0.375))
@@ -763,6 +777,65 @@ public_ip=$(curl -fsS -H \"X-aws-ec2-metadata-token: $token\" \\
                     pass
             self._ram_cache[instance_type] = ram_gib
         return ram_gib, self.settings.concurrency_for_type(instance_type, ram_gib)
+
+    # Respaldo cuando EC2 no responde: (vCPU, RAM GiB) de los tipos habituales.
+    _OFFLINE_SPECS: dict[str, tuple[int, float]] = {
+        "c5.large": (2, 4.0), "c5.xlarge": (4, 8.0), "c5.2xlarge": (8, 16.0),
+        "c5.4xlarge": (16, 32.0), "c5.12xlarge": (48, 96.0),
+        "m5.2xlarge": (8, 32.0), "m5.4xlarge": (16, 64.0),
+        "r5.xlarge": (4, 32.0), "r5.2xlarge": (8, 64.0),
+        "t3.medium": (2, 4.0), "t3.xlarge": (4, 16.0),
+        "c6i.large": (2, 4.0), "c6i.xlarge": (4, 8.0), "c6i.2xlarge": (8, 16.0),
+    }
+
+    def list_instance_types(self) -> list[dict[str, Any]]:
+        """Tipos lanzables en la(s) zona(s) de las subnets configuradas, con vCPU y RAM.
+
+        Consulta ``describe_instance_type_offerings`` por zona y
+        ``describe_instance_types`` para vCPU/RAM. Cada fila trae el semaphore
+        sugerido segun la RAM. Si EC2 falla, devuelve la tabla de respaldo.
+        """
+        names: set[str] = set()
+        try:
+            zones: set[str] = set()
+            if self.settings.subnet_ids:
+                resp = self.client.describe_subnets(SubnetIds=list(self.settings.subnet_ids))
+                zones = {s["AvailabilityZone"] for s in resp.get("Subnets", [])}
+            kwargs: dict[str, Any] = {"LocationType": "availability-zone"} if zones else {}
+            if zones:
+                kwargs["Filters"] = [{"Name": "location", "Values": sorted(zones)}]
+            offers = self._call_pages(
+                "describe_instance_type_offerings", result_key="InstanceTypeOfferings", **kwargs
+            )
+            names = {o["InstanceType"] for o in offers}
+        except Exception:  # noqa: BLE001 - se usa el respaldo
+            names = set()
+        specs: dict[str, tuple[int, float]] = {}
+        if names:
+            ordered = sorted(names)
+            try:
+                for start in range(0, len(ordered), 100):
+                    chunk = ordered[start:start + 100]
+                    for item in self.client.describe_instance_types(InstanceTypes=chunk).get(
+                        "InstanceTypes", []
+                    ):
+                        specs[item["InstanceType"]] = (
+                            int(item["VCpuInfo"]["DefaultVCpus"]),
+                            round(float(item["MemoryInfo"]["SizeInMiB"]) / 1024.0, 2),
+                        )
+            except Exception:  # noqa: BLE001
+                specs = {}
+        if not specs:
+            specs = dict(self._OFFLINE_SPECS)
+            if names:
+                specs = {k: v for k, v in specs.items() if k in names} or specs
+        rows = []
+        for name, (vcpu, ram) in sorted(specs.items(), key=lambda kv: (kv[1][0], kv[1][1], kv[0])):
+            rows.append({
+                "instance_type": name, "vcpu": vcpu, "ram_gib": ram,
+                "suggested_concurrency": self.settings.concurrency_for_type(name, ram),
+            })
+        return rows
 
     def instance_runtime(self) -> dict[str, float | int | str]:
         """Effective RAM and concurrency for the configured EC2 instance type."""

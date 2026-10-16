@@ -328,3 +328,12 @@ def test_panel_incluye_vista_workers_efimeros() -> None:
     for ident in ("eph-policy-form", "eph-launch-form", "eph-terminate-all", "eph-terminate-all-hard"):
         assert f'id="{ident}"' in html
     assert 'data-action="eph-hard"' in html and "mode: hard" in html
+
+
+def test_panel_formulario_de_alta_con_tipo_y_semaphore() -> None:
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    for ident in ("eph-launch-type", "eph-launch-concurrency", "eph-type-info"):
+        assert f'id="{ident}"' in html
+    assert "/admin/autoscale/instance-types" in html and "vCPU" in html
+    assert "instance_type, concurrency" in html

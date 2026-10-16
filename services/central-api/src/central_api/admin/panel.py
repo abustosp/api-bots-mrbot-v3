@@ -294,7 +294,8 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="card" id="eph-estimate"><div class="muted">Cargando estimación...</div></div>
         <form id="eph-sim-form" class="toolbar"><div class="field"><label for="eph-sim-pending">Simular cola de N pendientes</label><input id="eph-sim-pending" type="number" min="0" step="1" placeholder="cola actual"></div><button class="button secondary" type="submit">Estimar</button></form>
         <h3 style="margin-top:24px">Levantar instancias manualmente</h3>
-        <form id="eph-launch-form" class="toolbar"><div class="field"><label for="eph-launch-count">Cantidad</label><input id="eph-launch-count" type="number" min="1" max="100" step="1" value="1" required></div><div class="field wide"><label for="eph-launch-reason">Motivo</label><input id="eph-launch-reason" type="text" value="alta manual desde panel V3" minlength="10" maxlength="500" required></div><button class="button primary" type="submit">Levantar</button></form>
+        <form id="eph-launch-form" class="toolbar"><div class="field"><label for="eph-launch-count">Cantidad</label><input id="eph-launch-count" type="number" min="1" max="100" step="1" value="1" required></div><div class="field wide"><label for="eph-launch-type">Tipo de instancia (vCPU / RAM)</label><select id="eph-launch-type"><option value="c5.xlarge">c5.xlarge</option></select></div><div class="field"><label for="eph-launch-concurrency">Workers por instancia (semaphore, 1 a 10)</label><input id="eph-launch-concurrency" type="number" min="1" max="10" step="1" value="5" required></div><div class="field wide"><label for="eph-launch-reason">Motivo</label><input id="eph-launch-reason" type="text" value="alta manual desde panel V3" minlength="10" maxlength="500" required></div><button class="button primary" type="submit">Levantar</button></form>
+        <p class="muted" id="eph-type-info" aria-live="polite">Cargando tipos disponibles...</p>
         <h3 style="margin-top:24px">Instancias <span class="pill" id="eph-count">0</span></h3>
         <div class="form-actions"><button class="button danger" type="button" id="eph-terminate-all">Eliminar todas (suave)</button><button class="button danger" type="button" id="eph-terminate-all-hard">Forzar eliminación de todas (hard)</button></div>
         <p class="muted">Suave: deja de asignar jobs y elimina la instancia cuando llega a 0 trabajos. Hard: libera de inmediato sus jobs (se reencolan si tienen intentos disponibles, si no quedan fallidos) y termina la instancia ya. Al eliminar se liberan disco, red y resto de recursos de la instancia.</p>
@@ -1244,6 +1245,7 @@ details > .details-body { padding: 0 14px 14px; }
   async function loadEphemeral() {
     try {
       const [data, policy] = await Promise.all([api("/admin/autoscale"), api("/admin/autoscale/policy")]);
+      loadInstanceTypes();
       const cfg = data.config || {}; const snap = data.snapshot || {};
       $("#eph-enabled").textContent = cfg.enabled ? "Autoscaler habilitado" : "Autoscaler deshabilitado";
       $("#eph-enabled").dataset.enabled = cfg.enabled ? "1" : "0";
@@ -1273,10 +1275,31 @@ details > .details-body { padding: 0 14px 14px; }
     event.preventDefault(); const pending = $("#eph-sim-pending").value;
     try { const policy = await api(`/admin/autoscale/policy${pending === "" ? "" : `?pending=${encodeURIComponent(pending)}`}`); renderEphEstimate(policy.estimate); } catch (error) { flash(error.message, "error"); }
   }
+  const typeCatalog = { rows: [], loaded: false };
+  function describeType(row) { return `${row.instance_type}: ${row.vcpu} vCPU, ${row.ram_gib} GiB RAM (semaphore sugerido: ${row.suggested_concurrency})`; }
+  function syncTypeInfo(applySuggested) {
+    const row = typeCatalog.rows.find((item) => item.instance_type === $("#eph-launch-type").value);
+    $("#eph-type-info").textContent = row ? describeType(row) : "Sin información del tipo seleccionado.";
+    if (row && applySuggested) $("#eph-launch-concurrency").value = row.suggested_concurrency;
+  }
+  async function loadInstanceTypes() {
+    if (typeCatalog.loaded) return;
+    try {
+      const data = await api("/admin/autoscale/instance-types");
+      typeCatalog.rows = data.types || [];
+      if (!typeCatalog.rows.length) { $("#eph-type-info").textContent = data.error ? `No se pudo consultar los tipos (${data.error}).` : "No hay tipos disponibles."; return; }
+      typeCatalog.loaded = true;
+      const preferred = typeCatalog.rows.some((row) => row.instance_type === data.default) ? data.default : typeCatalog.rows[0].instance_type;
+      $("#eph-launch-type").innerHTML = typeCatalog.rows.map((row) => `<option value="${esc(row.instance_type)}"${row.instance_type === preferred ? " selected" : ""}>${esc(`${row.instance_type} — ${row.vcpu} vCPU, ${row.ram_gib} GiB RAM`)}</option>`).join("");
+      syncTypeInfo(true);
+    } catch (error) { $("#eph-type-info").textContent = `No se pudo cargar los tipos: ${error.message}`; }
+  }
   async function launchEphemeral(event) {
     event.preventDefault(); const count = Number($("#eph-launch-count").value); const motivo = $("#eph-launch-reason").value.trim();
-    if (!window.confirm(`¿Levantar ${count} instancia(s) EC2 manual(es)? Generan costo hasta que las elimines.`)) return;
-    try { const data = await api("/admin/autoscale/scale-up", { method: "POST", body: JSON.stringify({ count, motivo, manual: true }) }); flash(`Solicitadas ${data.requested}, lanzadas ${(data.launched || []).length}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
+    const instance_type = $("#eph-launch-type").value; const concurrency = Number($("#eph-launch-concurrency").value);
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 10) { flash("El semaphore debe ser un entero entre 1 y 10.", "error"); return; }
+    if (!window.confirm(`¿Levantar ${count} instancia(s) ${instance_type} con ${concurrency} workers cada una? Generan costo hasta que las elimines.`)) return;
+    try { const data = await api("/admin/autoscale/scale-up", { method: "POST", body: JSON.stringify({ count, motivo, manual: true, instance_type, concurrency }) }); flash(`Solicitadas ${data.requested}, lanzadas ${(data.launched || []).length}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
   }
   async function terminateEphemeral(body, label) {
     try { const data = await api("/admin/autoscale/terminate", { method: "POST", body: JSON.stringify(body) }); flash(`${label}: eliminadas ${(data.terminated || []).length}, drenando ${(data.draining || []).length}, pendientes de confirmar ${(data.pending || []).length}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
@@ -1312,7 +1335,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
   $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
-  $("#eph-refresh").addEventListener("click", loadEphemeral); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
+  $("#eph-refresh").addEventListener("click", loadEphemeral); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-launch-type").addEventListener("change", () => syncTypeInfo(true)); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>

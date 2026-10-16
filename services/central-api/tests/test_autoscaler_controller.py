@@ -716,3 +716,33 @@ def test_startup_adopts_ephemerals_when_loop_disabled(monkeypatch):
                 break
             time.sleep(0.05)
     assert "i-survivor" in EPHEMERAL_WORKERS
+
+
+def test_scale_up_endpoint_validates_type_and_passes_semaphore(monkeypatch):
+    from fastapi import HTTPException
+
+    from central_api.admin import autoscale as admin_autoscale
+
+    fleet = FakeFleet()
+    fleet.list_instance_types = lambda: [{"instance_type": "c5.xlarge", "vcpu": 4, "ram_gib": 8.0,
+                                          "suggested_concurrency": 5}]
+    calls = []
+    orig = fleet.launch
+    fleet.launch = lambda count, instance_type=None, concurrency=None: (
+        calls.append((count, instance_type, concurrency)), orig(count))[1]
+    controller.set_fleet_for_testing(fleet)
+    monkeypatch.setattr(admin_autoscale, "require_admin", lambda _a: "admin")
+    monkeypatch.setattr(admin_autoscale, "log_event", lambda *a, **k: None)
+
+    ok = admin_autoscale.ScaleUpBody(count=1, motivo="alta de prueba manual", concurrency=3)
+    assert ok.instance_type == "c5.xlarge"  # valor por defecto
+    result = asyncio.run(admin_autoscale.autoscale_scale_up(ok))
+    assert result["success"] and calls == [(1, "c5.xlarge", 3)]
+
+    bad = admin_autoscale.ScaleUpBody(count=1, motivo="alta de prueba manual", instance_type="p4d.24xlarge")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(admin_autoscale.autoscale_scale_up(bad))
+    assert exc.value.status_code == 400 and len(calls) == 1
+
+    with pytest.raises(Exception):
+        admin_autoscale.ScaleUpBody(count=1, motivo="alta de prueba manual", concurrency=11)

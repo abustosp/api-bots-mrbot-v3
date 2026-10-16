@@ -596,6 +596,7 @@ async def launch_workers(
     pending_at_decision: int | None = None,
     formula: dict[str, float | int] | None = None,
     manual: bool = False,
+    concurrency: int | None = None,
 ) -> list[dict]:
     """Lanza y registra instancias. La espera por EC2 se mantiene fuera del loop."""
     global LAST_ACTION_AT, LAST_SCALE_UP_PENDING
@@ -613,13 +614,17 @@ async def launch_workers(
     if dry_run:
         _event("dry_run", reason=reason, scale_up=count)
         return []
+    launch_kwargs: dict[str, Any] = {}
     if instance_type:
+        launch_kwargs["instance_type"] = instance_type
+    if concurrency:
+        launch_kwargs["concurrency"] = int(concurrency)
+    if launch_kwargs:
         try:
-            workers = await asyncio.to_thread(
-                fleet.launch, count, instance_type=instance_type
-            )
+            workers = await asyncio.to_thread(fleet.launch, count, **launch_kwargs)
         except TypeError as exc:
-            if "instance_type" not in str(exc):
+            # Flotas de prueba sin soporte de estos argumentos.
+            if "instance_type" not in str(exc) and "concurrency" not in str(exc):
                 raise
             workers = await asyncio.to_thread(fleet.launch, count)
     else:

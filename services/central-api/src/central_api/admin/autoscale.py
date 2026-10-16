@@ -37,6 +37,23 @@ class ScaleUpBody(BaseModel):
             "automático no las retira, solo se eliminan desde el panel."
         ),
     )
+    instance_type: str = Field(
+        default="c5.xlarge",
+        max_length=40,
+        pattern=r"^[a-z0-9]+\.[a-z0-9]+$",
+        description="Tipo EC2 (ver GET /admin/autoscale/instance-types). Por defecto c5.xlarge.",
+        examples=["c5.xlarge"],
+    )
+    concurrency: int | None = Field(
+        default=None,
+        ge=1,
+        le=10,
+        description=(
+            "Semaphore: jobs simultáneos que acepta cada worker (1 a 10). "
+            "Sin valor se deduce de la RAM del tipo."
+        ),
+        examples=[5],
+    )
 
 
 class PolicyBody(BaseModel):
@@ -381,9 +398,22 @@ async def autoscale_scale_up(
     motivo = _require_reason(body.motivo)
     try:
         await controller.reconcile_managed()
+        fleet = controller._make_fleet()
+        catalog = await asyncio.to_thread(fleet.list_instance_types)
+        if body.instance_type not in {row["instance_type"] for row in catalog}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"tipo {body.instance_type} no disponible en la zona configurada; "
+                    "consulte /admin/autoscale/instance-types"
+                ),
+            )
         launched = await controller.launch_workers(
-            body.count, reason=motivo, dry_run=False, manual=body.manual
+            body.count, reason=motivo, dry_run=False, manual=body.manual,
+            instance_type=body.instance_type, concurrency=body.concurrency,
         )
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 - don't expose AWS error details
         log_event(
             "autoscaler.scale_up", actor_id=actor, target_type="ec2-fleet", target_id="all",
@@ -683,3 +713,30 @@ async def put_autoscale_policy(
     except Exception:  # noqa: BLE001
         snapshot = {}
     return {"success": True, **_policy_view(None, snapshot)}
+
+
+@router.get(
+    "/autoscale/instance-types",
+    summary="Listar tipos de instancia disponibles",
+    description=(
+        "Tipos EC2 lanzables en la zona de las subnets configuradas, con vCPU, RAM y "
+        "el semaphore sugerido (jobs simultáneos por worker). El tipo por defecto "
+        "para altas manuales es c5.xlarge. Requiere autorización administrativa."
+    ),
+    responses={**_errores_admin()},
+)
+async def get_instance_types(authorization: str | None = Header(default=None)) -> dict:
+    require_admin(authorization)
+    fleet = controller._make_fleet()
+    try:
+        rows = await asyncio.to_thread(fleet.list_instance_types)
+        error = None
+    except Exception as exc:  # noqa: BLE001 - el formulario debe seguir usable
+        rows, error = [], type(exc).__name__
+    return {
+        "success": error is None,
+        "default": "c5.xlarge",
+        "types": rows,
+        "max_concurrency": 10,
+        "error": error,
+    }

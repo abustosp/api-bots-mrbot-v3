@@ -499,3 +499,46 @@ def test_volume_type_is_configurable_for_local_zones(monkeypatch):
     from central_api.autoscaler.ec2 import INSTANCE_TYPE_RAM_GIB
 
     assert INSTANCE_TYPE_RAM_GIB["t3.xlarge"] == 16.0
+
+
+def _catalog_client():
+    client = Mock()
+    client.describe_subnets.return_value = {"Subnets": [{"SubnetId": "s-1", "AvailabilityZone": "us-east-1-bue-1a"}]}
+    client.describe_instance_type_offerings.return_value = {"InstanceTypeOfferings": [
+        {"InstanceType": "c5.xlarge"}, {"InstanceType": "c5.2xlarge"}]}
+    client.describe_instance_types.return_value = {"InstanceTypes": [
+        {"InstanceType": "c5.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 16384}},
+        {"InstanceType": "c5.xlarge", "VCpuInfo": {"DefaultVCpus": 4}, "MemoryInfo": {"SizeInMiB": 8192}}]}
+    return client
+
+
+def test_list_instance_types_reports_vcpu_ram_and_filters_by_zone():
+    client = _catalog_client()
+    fleet = Ec2Fleet(Ec2Settings(subnet_ids=("s-1",)), client=client)
+    rows = fleet.list_instance_types()
+    assert [r["instance_type"] for r in rows] == ["c5.xlarge", "c5.2xlarge"]
+    assert rows[0] == {"instance_type": "c5.xlarge", "vcpu": 4, "ram_gib": 8.0, "suggested_concurrency": 5}
+    assert rows[1]["vcpu"] == 8 and rows[1]["ram_gib"] == 16.0 and rows[1]["suggested_concurrency"] == 10
+    kwargs = client.describe_instance_type_offerings.call_args.kwargs
+    assert {"Name": "location", "Values": ["us-east-1-bue-1a"]} in kwargs["Filters"]
+
+
+def test_list_instance_types_falls_back_offline():
+    client = Mock()
+    client.describe_subnets.side_effect = RuntimeError("sin red")
+    client.describe_instance_type_offerings.side_effect = RuntimeError("sin red")
+    rows = Ec2Fleet(Ec2Settings(), client=client).list_instance_types()
+    assert any(r["instance_type"] == "c5.xlarge" and r["vcpu"] == 4 and r["ram_gib"] == 8.0 for r in rows)
+
+
+def test_user_data_uses_requested_semaphore():
+    fleet = Ec2Fleet(Ec2Settings(worker_image="img:1", central_url="https://c"), client=Mock())
+    assert "--concurrency 7" in fleet._user_data(instance_type="c5.xlarge", concurrency=7)
+    assert "--concurrency 5" in fleet._user_data(instance_type="c5.xlarge")
+
+
+def test_launch_rejects_out_of_range_semaphore():
+    fleet = Ec2Fleet(Ec2Settings(worker_image="img:1", central_url="https://c"), client=Mock())
+    for bad in (0, 11, -1):
+        with pytest.raises(ValueError):
+            fleet.launch(1, instance_type="c5.xlarge", concurrency=bad)
