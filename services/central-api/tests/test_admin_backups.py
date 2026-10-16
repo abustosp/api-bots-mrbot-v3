@@ -63,12 +63,15 @@ class CursorFalso:
         filas_copy: int = 0,
         respuestas: tuple[int, ...] = (),
         fallar_en: str | None = None,
+        upsert_filas: tuple[int, int] | None = None,
     ):
         self.pk = list(pk)
         self.columnas = list(columnas)
         self.filas_copy = filas_copy
         self.respuestas = list(respuestas)
         self.fallar_en = fallar_en
+        # (insertadas, reemplazadas) que devuelve el upsert con RETURNING.
+        self.upsert_filas = upsert_filas
         self.ejecutados: list[str] = []
         self.copias: list[str] = []
         self.rowcount = 0
@@ -96,6 +99,9 @@ class CursorFalso:
             self._ultimo = [("0027",)]
         elif sql.startswith("SELECT count(*)"):
             self._ultimo = [(self.respuestas.pop(0),)] if self.respuestas else [(0,)]
+        elif "RETURNING (xmax = 0)" in sql:
+            nuevas, pisadas = self.upsert_filas or (0, 0)
+            self._ultimo = [(True,)] * nuevas + [(False,)] * pisadas
         elif sql.startswith(("DELETE", "INSERT")):
             self.rowcount = self.respuestas.pop(0) if self.respuestas else 0
         else:
@@ -256,14 +262,18 @@ def test_validar_nombre_tabla_rechaza_inyeccion() -> None:
 
 
 def test_sql_overwrite_y_append_con_pk_simple_compuesta_y_sin_pk() -> None:
-    simple = B._sql_delete_solapados("users", ["id"])
-    assert simple == (
-        'DELETE FROM public."users" AS t USING "_bkp_users" AS b WHERE t."id" = b."id"'
+    upsert = B._sql_upsert("users", ["id", "email"], ["id"])
+    assert upsert == (
+        'INSERT INTO public."users" ("id", "email") SELECT "id", "email" '
+        'FROM "_bkp_users" ON CONFLICT ("id") DO UPDATE SET "email" = EXCLUDED."email" '
+        "RETURNING (xmax = 0)"
     )
-    compuesta = B._sql_delete_solapados("billing_usage", ["cuenta_id", "periodo"])
-    assert compuesta.endswith(
-        'WHERE t."cuenta_id" = b."cuenta_id" AND t."periodo" = b."periodo"'
-    )
+    # PK compuesta y sin columnas actualizables (la PK es todo).
+    compuesta = B._sql_upsert("billing_usage", ["cuenta_id", "periodo", "monto"],
+                              ["cuenta_id", "periodo"])
+    assert 'ON CONFLICT ("cuenta_id", "periodo") DO UPDATE SET "monto" = EXCLUDED."monto"' in compuesta
+    solo_pk = B._sql_upsert("t", ["a", "b"], ["a", "b"])
+    assert 'ON CONFLICT ("a", "b") DO NOTHING' in solo_pk
     insert = B._sql_insert("users", ["id", "email"])
     assert insert == (
         'INSERT INTO public."users" ("id", "email") '
@@ -273,12 +283,13 @@ def test_sql_overwrite_y_append_con_pk_simple_compuesta_y_sin_pk() -> None:
     assert colisiones == (
         'SELECT count(*) FROM "_bkp_users" AS b JOIN public."users" AS t ON b."id" = t."id"'
     )
-    # overwrite con PK: primero reemplaza lo que se pisa, después inserta.
+    # overwrite con PK: un upsert que pisa los valores en el lugar (no borra
+    # la fila, así no choca con las referencias de otras tablas).
     plan = B._plan_sql("users", ["id", "email"], ["id"], B.MODO_OVERWRITE)
-    assert plan == [simple, insert]
-    # append: nunca borra, solo inserta sin pisar.
+    assert plan == [upsert]
+    # append: solo inserta sin pisar.
     assert B._plan_sql("users", ["id", "email"], ["id"], B.MODO_APPEND) == [insert]
-    # sin PK no se puede decidir el pisotón: tampoco se arma el DELETE.
+    # sin PK no se puede decidir el pisotón: solo inserta.
     assert B._plan_sql("sin_pk", ["a"], [], B.MODO_OVERWRITE) == [
         B._sql_insert("sin_pk", ["a"])
     ]
@@ -361,7 +372,7 @@ def _archivo_copy(tmp_path: Path, contenido: bytes = b"1\tuno\n2\tdos\n") -> str
 
 
 def test_restaurar_tabla_overwrite_con_pk_reemplaza_y_cuenta(tmp_path: Path) -> None:
-    cur = CursorFalso(pk=("id",), filas_copy=3, respuestas=(2, 1))
+    cur = CursorFalso(pk=("id",), filas_copy=3, upsert_filas=(1, 2))
     resultado = B._restaurar_tabla(
         cur,
         entrada={"nombre": "t", "columnas": ["id", "nombre"]},
@@ -372,14 +383,14 @@ def test_restaurar_tabla_overwrite_con_pk_reemplaza_y_cuenta(tmp_path: Path) -> 
     assert resultado["filas_archivo"] == 3
     assert resultado["reemplazadas"] == 2
     assert resultado["insertadas"] == 1
-    assert resultado["omitidas"] == 2
+    assert resultado["omitidas"] == 0
     assert resultado["sin_pk"] is False
     assert any(sql.startswith("CREATE TEMP TABLE") for sql in cur.ejecutados)
     assert '"id", "nombre"' in cur.copias[0]
-    delete = [sql for sql in cur.ejecutados if sql.startswith("DELETE")]
-    insert = [sql for sql in cur.ejecutados if sql.startswith("INSERT")]
-    assert len(delete) == 1 and len(insert) == 1
-    assert cur.ejecutados.index(delete[0]) < cur.ejecutados.index(insert[0])
+    # Una sola sentencia de upsert: nada de DELETE (fallaría con FKs RESTRICT).
+    assert not any(sql.startswith("DELETE") for sql in cur.ejecutados)
+    upsert = [sql for sql in cur.ejecutados if sql.startswith("INSERT")]
+    assert len(upsert) == 1 and "DO UPDATE SET" in upsert[0]
 
 
 def test_restaurar_tabla_append_no_borra_nada(tmp_path: Path) -> None:
@@ -426,7 +437,8 @@ def test_restaurar_tabla_dry_run_no_muta_y_cuenta_colisiones(tmp_path: Path) -> 
     assert resultado["colisionarian"] == 3
     assert resultado["reemplazadas"] == 3
     assert resultado["insertadas"] == 0
-    assert resultado["plan"][0].startswith("DELETE FROM public.")
+    assert resultado["plan"][0].startswith("INSERT INTO public.")
+    assert "DO UPDATE SET" in resultado["plan"][0]
     assert not any(
         sql.startswith(("DELETE", "INSERT")) for sql in cur.ejecutados
     ), cur.ejecutados

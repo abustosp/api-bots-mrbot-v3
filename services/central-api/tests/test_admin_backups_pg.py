@@ -312,9 +312,11 @@ def test_restore_overwrite_reemplaza_por_clave_primaria(pg_backups) -> None:
     cuerpo = respuesta.json()
     assert cuerpo["success"] is True
     por_tabla = {item["tabla"]: item for item in cuerpo["tablas"]}
-    # padre: p1 y p2 se pisan (reemplazadas) y se vuelven a insertar.
+    # padre: p1 y p2 se pisan en el lugar (upsert), sin borrar la fila: el padre
+    # tiene un hijo que lo referencia con ON DELETE RESTRICT.
     assert por_tabla[PADRE]["reemplazadas"] == 2
-    assert por_tabla[PADRE]["insertadas"] == 2
+    assert por_tabla[PADRE]["insertadas"] == 0
+    assert por_tabla[PADRE].get("error") is None
     assert por_tabla[PADRE]["sin_pk"] is False
     # hijo: no existía en el destino -> solo inserta.
     assert por_tabla[HIJO]["reemplazadas"] == 0
@@ -350,9 +352,10 @@ def test_restore_dry_run_no_muta_la_base(pg_backups) -> None:
     por_tabla = {item["tabla"]: item for item in cuerpo["tablas"]}
     assert por_tabla[PADRE]["colisionarian"] == 2
     assert por_tabla[PADRE]["insertadas"] == 0
-    assert any(
-        sentencia.startswith("DELETE FROM public.") for sentencia in por_tabla[PADRE]["plan"]
-    )
+    # El plan del overwrite es un upsert (no borra la fila).
+    assert len(por_tabla[PADRE]["plan"]) == 1
+    assert por_tabla[PADRE]["plan"][0].startswith("INSERT INTO public.")
+    assert "DO UPDATE SET" in por_tabla[PADRE]["plan"][0]
     assert por_tabla[HIJO]["colisionarian"] == 0
     # Nada cambió: la fila modificada sigue modificada y la borrada sigue ausente.
     assert _filas(PADRE) == [("p1", "CAMBIADO"), ("p2", "dos")]

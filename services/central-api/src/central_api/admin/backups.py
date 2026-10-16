@@ -153,15 +153,6 @@ def _dsn_psycopg(url: str) -> str:
     return normalizar_dsn(url).replace("postgresql+psycopg://", "postgresql://", 1)
 
 
-def _sql_delete_solapados(tabla: str, pk: Sequence[str]) -> str:
-    """DELETE de las filas del destino que se pisan por clave primaria."""
-    condicion = " AND ".join(f"t.{_citar(c)} = b.{_citar(c)}" for c in pk)
-    return (
-        f"DELETE FROM public.{_citar(tabla)} AS t "
-        f"USING {_citar(f'_bkp_{tabla}')} AS b WHERE {condicion}"
-    )
-
-
 def _sql_contar_colisiones(tabla: str, pk: Sequence[str]) -> str:
     """Cuenta las filas del backup que ya existen en el destino (por PK)."""
     condicion = " AND ".join(f"b.{_citar(c)} = t.{_citar(c)}" for c in pk)
@@ -180,14 +171,40 @@ def _sql_insert(tabla: str, columnas: Sequence[str]) -> str:
     )
 
 
+def _sql_upsert(tabla: str, columnas: Sequence[str], pk: Sequence[str]) -> str:
+    """Upsert del modo overwrite: reemplaza por PK sin borrar la fila.
+
+    Con ``DELETE`` + ``INSERT`` el reemplazo fallaba cuando otra tabla
+    referenciaba la fila (``ON DELETE RESTRICT``), dejando esa tabla sin
+    restaurar. ``ON CONFLICT DO UPDATE`` pisa los valores en el lugar.
+    ``RETURNING (xmax = 0)`` permite contar por separado insertadas y
+    reemplazadas en una sola sentencia.
+    """
+    lista = ", ".join(_citar(c) for c in columnas)
+    claves = ", ".join(_citar(c) for c in pk)
+    asignaciones = ", ".join(
+        f"{_citar(c)} = EXCLUDED.{_citar(c)}" for c in columnas if c not in pk
+    )
+    conflicto = f"ON CONFLICT ({claves}) DO UPDATE SET {asignaciones}"
+    if not asignaciones:
+        # Tabla cuya PK son todas sus columnas: no hay nada que actualizar.
+        conflicto = f"ON CONFLICT ({claves}) DO NOTHING"
+    return (
+        f"INSERT INTO public.{_citar(tabla)} ({lista}) "
+        f"SELECT {lista} FROM {_citar(f'_bkp_{tabla}')} {conflicto} "
+        "RETURNING (xmax = 0)"
+    )
+
+
 def _plan_sql(
     tabla: str, columnas: Sequence[str], pk: Sequence[str], modo: str
 ) -> list[str]:
     """Sentencias que aplicaría el restore (usadas como plan en ``dry_run``)."""
     pasos: list[str] = []
     if modo == MODO_OVERWRITE and pk:
-        pasos.append(_sql_delete_solapados(tabla, pk))
-    pasos.append(_sql_insert(tabla, columnas))
+        pasos.append(_sql_upsert(tabla, columnas, pk))
+    else:
+        pasos.append(_sql_insert(tabla, columnas))
     return pasos
 
 
@@ -527,8 +544,14 @@ def _restaurar_tabla(
             )
         return resultado
     if modo == MODO_OVERWRITE and pk:
-        cur.execute(_sql_delete_solapados(tabla, pk))
-        resultado["reemplazadas"] = max(0, int(cur.rowcount))
+        # Upsert: no borra la fila, así no choca con las referencias de otras
+        # tablas y el conteo sale de la propia sentencia.
+        cur.execute(_sql_upsert(tabla, columnas, pk))
+        marcas = [fila[0] for fila in cur.fetchall()]
+        resultado["insertadas"] = sum(1 for es_nueva in marcas if es_nueva)
+        resultado["reemplazadas"] = len(marcas) - resultado["insertadas"]
+        resultado["omitidas"] = max(0, filas - len(marcas))
+        return resultado
     cur.execute(_sql_insert(tabla, columnas))
     resultado["insertadas"] = max(0, int(cur.rowcount))
     resultado["omitidas"] = max(0, filas - resultado["insertadas"])
