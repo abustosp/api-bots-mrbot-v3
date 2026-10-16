@@ -209,6 +209,7 @@ details > .details-body { padding: 0 14px 14px; }
       <button type="button" data-view="fleet">Flota</button>
       <button type="button" data-view="ephemeral">Workers efímeros</button>
       <button type="button" data-view="audit">Auditoría</button>
+      <button type="button" data-view="backups">Backups</button>
     </nav>
     <div class="user-box hidden" id="user-box"><span class="muted">Sesión ADMIN_TOKEN</span><button class="button secondary small" type="button" id="logout-button">Salir</button></div>
   </header>
@@ -312,6 +313,24 @@ details > .details-body { padding: 0 14px 14px; }
         <form id="audit-filter" class="toolbar"><div class="field"><label for="audit-action">Acción</label><input id="audit-action" type="text" placeholder="user."></div><div class="field"><label for="audit-actor">Actor</label><input id="audit-actor" type="text" placeholder="admin:"></div><button class="button primary" type="submit">Filtrar</button></form>
         <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Actor</th><th>Objetivo</th><th>Resultado</th><th>Motivo</th></tr></thead><tbody id="audit-table"><tr><td colspan="6" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
+
+      <section class="view hidden" data-panel="backups">
+        <div class="kicker">Continuidad de datos</div><h2>Backups de la base</h2><p class="subtle">Los dumps se guardan en el bucket configurado (BACKUP_BUCKET) como un tar.gz con una tabla por archivo COPY y un manifiesto con la revisión de Alembic, columnas, filas y sha256. El restore requiere el esquema ya migrado: no recrea tablas. <strong>overwrite</strong> reemplaza los registros que se pisan por clave primaria; <strong>append</strong> agrega sin pisar nada (ON CONFLICT DO NOTHING). Las tablas sin clave primaria no permiten decidir el pisotón: se informan como «sin PK». El dump incluye alembic_version: si restaurás un dump de otra revisión, el marcador vuelve a la del dump (el restore no recrea el esquema).</p>
+        <div class="form-actions"><button class="button primary" type="button" id="backups-dump">Crear dump</button><button class="button secondary" type="button" id="backups-refresh">Actualizar lista</button><span class="muted" id="backups-status" aria-live="polite"></span></div>
+        <div class="grid" id="backups-summary"></div>
+        <div class="table-wrap"><table><thead><tr><th>Archivo (key)</th><th>Tamaño</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody id="backups-table"><tr><td colspan="4" class="empty">Cargando dumps...</td></tr></tbody></table></div>
+        <details id="backups-restore-panel" class="hidden"><summary>Restaurar dump <code id="backups-restore-key"></code></summary><div class="details-body">
+          <p class="muted">Elegí el modo, el motivo y escribí RESTAURAR para confirmar. En overwrite se reemplazan los registros que se pisan por clave primaria; append no pisa nada. La simulación (dry run) cuenta filas y colisiones sin cambiar datos.</p>
+          <div class="form-grid">
+            <div class="field"><label for="backups-restore-mode">Modo</label><select id="backups-restore-mode"><option value="overwrite">overwrite — reemplaza por clave primaria</option><option value="append">append — agrega sin pisar</option></select></div>
+            <div class="field"><label for="backups-restore-reason">Motivo (mínimo 10)</label><input id="backups-restore-reason" type="text" minlength="10" maxlength="500" value="restore desde panel V3"></div>
+            <div class="field"><label for="backups-restore-confirm">Confirmación (escribí RESTAURAR)</label><input id="backups-restore-confirm" type="text" placeholder="RESTAURAR"></div>
+            <div class="field"><label>Simulación</label><label class="checkbox-inline"><input id="backups-restore-dry" type="checkbox"> Simular (dry run): no cambia datos</label></div>
+          </div>
+          <div class="form-actions"><button class="button danger" type="button" id="backups-restore-run">Ejecutar restore</button><button class="button secondary" type="button" id="backups-restore-cancel">Cancelar</button></div>
+        </div></details>
+        <div id="backups-restore-result"></div>
+      </section>
     </section>
   </main>
 </div>
@@ -377,7 +396,7 @@ details > .details-body { padding: 0 14px 14px; }
       link.href = url; link.download = `reporte_${$("#reports-tipo").value}_${$("#reports-desde").value}_${$("#reports-hasta").value}.csv`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
     } catch (error) { flash(error.message, "error"); }
   }
-  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, reports: initReports, fleet: loadFleet, ephemeral: loadEphemeral, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, reports: initReports, fleet: loadFleet, ephemeral: loadEphemeral, audit: loadAudit, backups: loadBackups }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
   function cellValue(value) {
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "object") return payloadView(value, "Ver datos");
@@ -1418,6 +1437,86 @@ details > .details-body { padding: 0 14px 14px; }
     if (!window.confirm(enabled ? "¿Deshabilitar el autoscaler automático? Las instancias existentes no se tocan." : "¿Habilitar el autoscaler automático?")) return;
     try { await api(`/admin/autoscale/${enabled ? "disable" : "enable"}`, { method: "POST", body: JSON.stringify({ motivo: enabled ? "deshabilitar autoscaler desde panel V3" : "habilitar autoscaler desde panel V3" }) }); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
   }
+  const backupState = { key: "" };
+  const humanBytes = (value) => { const n = Number(value || 0); if (!Number.isFinite(n) || n <= 0) return "0 B"; const units = ["B", "KB", "MB", "GB"]; const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024))); return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`; };
+  const backupPath = (key) => `/admin/backups/${String(key || "").split("/").map(encodeURIComponent).join("/")}`;
+  function renderBackupSummary(data) {
+    const estado = data.success ? "disponible" : `error: ${data.error || "desconocido"}`;
+    $("#backups-summary").innerHTML = [["Bucket", data.bucket || "—"], ["Dumps", data.count ?? 0], ["Prefijo", data.prefijo || "(raíz)"], ["Estado", estado]].map(([label, value]) => `<div class="card"><div class="muted">${esc(label)}</div><strong>${esc(value)}</strong></div>`).join("");
+  }
+  async function loadBackups() {
+    $("#backups-status").textContent = "Consultando el bucket...";
+    try {
+      const data = await api("/admin/backups");
+      renderBackupSummary(data);
+      const rows = data.objects || [];
+      $("#backups-table").innerHTML = rows.length ? rows.map((item) => `<tr><td><code>${esc(item.key)}</code></td><td>${esc(humanBytes(item.size_bytes))}</td><td>${esc(date(item.last_modified))}</td><td class="actions"><div class="actions-inner"><button class="button secondary small" data-action="backup-restore" data-key="${esc(item.key)}">Restaurar</button><button class="button secondary small" data-action="backup-download" data-key="${esc(item.key)}">Descargar</button></div></td></tr>`).join("") : `<tr><td colspan="4" class="empty">${data.success ? "Todavía no hay dumps en el bucket." : `No se pudo listar el bucket (${esc(data.error || "error")}): ${esc(data.detalle || "")}`}</td></tr>`;
+      $("#backups-status").textContent = data.success ? `${rows.length} dump(s) en ${data.bucket}.` : `El bucket no respondió: ${data.error || "error"}.`;
+    } catch (error) { flash(error.message, "error"); $("#backups-status").textContent = ""; }
+  }
+  async function createDump() {
+    const motivo = window.prompt("Motivo del dump (mínimo 10 caracteres):", "dump manual desde panel V3");
+    if (motivo === null) return;
+    const limpio = motivo.trim();
+    if (limpio.length < 10) { flash("El motivo del dump debe tener al menos 10 caracteres.", "error"); return; }
+    $("#backups-status").textContent = "Creando dump (puede tardar según el tamaño de la base)...";
+    try {
+      const data = await api("/admin/backups/dump", { method: "POST", body: JSON.stringify({ motivo: limpio }) });
+      flash(`Dump creado: ${data.key} (${humanBytes(data.size_bytes)}, ${data.total_filas} filas, ${data.duracion_segundos} s).`);
+      await loadBackups();
+    } catch (error) { flash(error.message, "error"); $("#backups-status").textContent = ""; }
+  }
+  function openRestore(key) {
+    backupState.key = key;
+    $("#backups-restore-key").textContent = key;
+    $("#backups-restore-panel").classList.remove("hidden");
+    $("#backups-restore-panel").open = true;
+    $("#backups-restore-confirm").value = "";
+    $("#backups-restore-result").innerHTML = "";
+    $("#backups-restore-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function closeRestore() { backupState.key = ""; $("#backups-restore-panel").classList.add("hidden"); $("#backups-restore-result").innerHTML = ""; }
+  async function downloadBackup(key) {
+    try { const data = await api(backupPath(key)); window.open(data.download_url, "_blank", "noopener"); }
+    catch (error) { flash(error.message, "error"); }
+  }
+  function renderRestoreResult(data) {
+    const filas = (data.tablas || []).map((item) => `<tr><td><code>${esc(item.tabla)}</code></td><td>${esc(item.filas_archivo)}</td><td>${esc(item.insertadas)}</td><td>${esc(item.reemplazadas)}</td><td>${esc(item.omitidas)}</td><td>${item.sin_pk ? '<span class="status status-warn">sin PK</span>' : "—"}</td><td>${item.error ? `<span class="status status-bad">${esc(item.error)}</span>` : "—"}</td></tr>`).join("");
+    const resumen = data.resumen || {};
+    const aviso = data.alembic_mismatch ? ' · <span class="status status-warn">alembic_mismatch</span>' : "";
+    const metricas = [["Insertadas", resumen.insertadas ?? 0], ["Reemplazadas", resumen.reemplazadas ?? 0], ["Omitidas", resumen.omitidas ?? 0], ["Tablas con error", resumen.tablas_con_error ?? 0]];
+    const advertencias = (data.advertencias || []).map((texto) => `<li>${esc(texto)}</li>`).join("");
+    $("#backups-restore-result").innerHTML = `<h3 style="margin-top:18px">${data.dry_run ? "Simulación (dry run)" : "Restore"} · ${esc(data.modo)} · <code>${esc(data.key || "")}</code></h3>`
+      + `<p class="muted">Revisión Alembic del dump: <code>${esc(data.alembic_revision || "—")}</code> · del destino: <code>${esc(data.alembic_revision_destino || "—")}</code>${aviso} · ${esc(data.duracion_segundos ?? 0)} s</p>`
+      + (advertencias ? `<ul class="muted">${advertencias}</ul>` : "")
+      + `<div class="grid">${metricas.map(([label, value]) => `<div class="card"><div class="muted">${esc(label)}</div><strong>${esc(value)}</strong></div>`).join("")}</div>`
+      + `<div class="table-wrap"><table><thead><tr><th>Tabla</th><th>Filas del archivo</th><th>Insertadas</th><th>Reemplazadas</th><th>Omitidas</th><th>Sin PK</th><th>Error</th></tr></thead><tbody>${filas || '<tr><td colspan="7" class="empty">Sin tablas procesadas.</td></tr>'}</tbody></table></div>`;
+  }
+  async function runRestore() {
+    const key = backupState.key;
+    if (!key) { flash("Elegí un dump de la lista para restaurar.", "error"); return; }
+    const modo = $("#backups-restore-mode").value;
+    const motivo = $("#backups-restore-reason").value.trim();
+    const confirmacion = $("#backups-restore-confirm").value.trim();
+    const dry_run = $("#backups-restore-dry").checked;
+    if (motivo.length < 10) { flash("El motivo del restore debe tener al menos 10 caracteres.", "error"); return; }
+    if (confirmacion !== "RESTAURAR") { flash('Escribí exactamente "RESTAURAR" en la confirmación para ejecutar el restore.', "error"); return; }
+    if (!dry_run && !window.confirm(modo === "overwrite" ? "¿Restaurar en modo overwrite? Los registros que se pisen por clave primaria se reemplazan por los del dump." : "¿Restaurar en modo append? Se agregan solo los registros que no existan (no se pisa nada).")) return;
+    $("#backups-status").textContent = dry_run ? "Simulando restore..." : "Restaurando...";
+    try {
+      const data = await api("/admin/backups/restore", { method: "POST", body: JSON.stringify({ key, modo, motivo, dry_run, confirmacion }) });
+      renderRestoreResult(data);
+      flash(dry_run ? `Simulación lista: ${data.resumen?.insertadas ?? 0} se insertarían, ${data.resumen?.reemplazadas ?? 0} colisionarían.` : `Restore terminado: ${data.resumen?.insertadas ?? 0} insertadas, ${data.resumen?.reemplazadas ?? 0} reemplazadas.`, data.success ? "ok" : "error");
+      if (!dry_run) await loadBackups();
+    } catch (error) { flash(error.message, "error"); } finally { $("#backups-status").textContent = ""; }
+  }
+  function backupsAction(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const key = button.dataset.key || "";
+    if (button.dataset.action === "backup-restore") { openRestore(key); return; }
+    if (button.dataset.action === "backup-download") { downloadBackup(key); }
+  }
   async function loadAudit(event) { if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const action = $("#audit-action").value.trim(); const actor = $("#audit-actor").value.trim(); if (action) params.set("accion", action); if (actor) params.set("actor", actor); try { const data = await api(`/admin/audit?${params}`); const rows = data.eventos || []; $("#audit-table").innerHTML = rows.length ? rows.slice().reverse().map((item) => `<tr><td>${esc(date(item.occurred_at))}</td><td><strong>${esc(item.action)}</strong></td><td>${esc(item.actor_id)}</td><td>${esc(item.target_type)}<br><span class="muted">${esc(short(item.target_id, 22))}</span></td><td><span class="status ${item.result === "success" ? "status-good" : "status-bad"}">${esc(item.result)}</span></td><td>${esc(item.reason || "—")}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No hay eventos para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
   $("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); state.token = $("#admin-token").value.trim(); if (!state.token) return; try { await api("/admin/users?limit=1"); sessionStorage.setItem(TOKEN_KEY, state.token); loginError(""); showLoggedIn(true); setView(state.view); } catch (_) { state.token = ""; loginError("No se pudo validar el token de administración."); } });
   $("#logout-button").addEventListener("click", () => logout());
@@ -1435,6 +1534,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
   $("#eph-refresh").addEventListener("click", () => loadEphemeral(true)); $("#eph-zone").addEventListener("change", changeZone); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-launch-type").addEventListener("change", () => syncTypeInfo(true)); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
+  $("#backups-dump").addEventListener("click", createDump); $("#backups-refresh").addEventListener("click", loadBackups); $("#backups-table").addEventListener("click", backupsAction); $("#backups-restore-run").addEventListener("click", runRestore); $("#backups-restore-cancel").addEventListener("click", closeRestore);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>

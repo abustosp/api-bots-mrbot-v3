@@ -76,6 +76,16 @@ class Settings(BaseSettings):
     object_storage_secret_key: str = Field(default="", alias="OBJECT_STORAGE_SECRET_KEY")
     object_storage_use_ssl: bool = Field(default=True, alias="OBJECT_STORAGE_USE_SSL")
 
+    # Backups de la base del panel /admin (dump propio en COPY texto + tar.gz).
+    # El bucket de backups es propio y NO se reutiliza OBJECT_STORAGE_BUCKET: un
+    # dump completo de PostgreSQL no debe mezclarse con artefactos de clientes.
+    # La conexión (endpoint, región y credenciales) sí es la de object storage.
+    backup_bucket: str = Field(default="mrbot-bots-api-bkp-db", alias="BACKUP_BUCKET")
+    backup_prefix: str = Field(default="dump", alias="BACKUP_PREFIX")
+    # Directorio temporal de trabajo: el dump se escribe en disco (nunca en
+    # memoria) y se borra al terminar, tanto el archivo como la carpeta.
+    backup_dir: str = Field(default="/tmp/mrbot-backups", alias="BACKUP_DIR")
+
     # Inventario de workers: SOLO direcciones "ip:port", contactadas por HTTP.
     # El panel de administración puede sumar nodos en caliente (ADMIN_NODES).
     worker_nodes: str = Field(default="", alias="WORKER_NODES")
@@ -224,6 +234,20 @@ class Settings(BaseSettings):
         return bool(
             self.object_storage_endpoint
             and self.object_storage_bucket
+            and self.object_storage_access_key
+            and self.object_storage_secret_key
+        )
+
+    @property
+    def backup_configurado(self) -> bool:
+        """Indica si se puede subir/leer un dump (endpoint+bucket+credenciales).
+
+        Espeja ``object_storage_configurado`` pero con el bucket de backups: sin
+        esta configuración el panel informa 503 y nunca intenta firmar ni subir.
+        """
+        return bool(
+            self.object_storage_endpoint
+            and self.backup_bucket
             and self.object_storage_access_key
             and self.object_storage_secret_key
         )

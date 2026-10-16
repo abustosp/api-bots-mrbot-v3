@@ -423,3 +423,78 @@ def test_grupos_de_botones_no_se_pegan_ni_se_solapan() -> None:
         assert re.search(patron, css), f"{nombre} debe declarar gap y flex-wrap"
     # Las tablas anchas hacen scroll en vez de comprimir los botones de acciones.
     assert "overflow-x: auto" in css and "min-width: 760px" in css
+
+
+def test_panel_backups_tiene_nav_vista_y_endpoints() -> None:
+    """La vista Backups existe, está en la navegación y usa los endpoints reales."""
+    html = TestClient(create_app()).get("/admin/").text
+
+    assert 'data-view="backups"' in html
+    assert 'data-panel="backups"' in html
+    assert ">Backups</button>" in html
+    # Cargador registrado en setView para que la vista se pueble al entrar.
+    assert "backups: loadBackups" in html
+    for endpoint in (
+        '"/admin/backups"',
+        '"/admin/backups/dump"',
+        '"/admin/backups/restore"',
+        "/admin/backups/${String(key",
+    ):
+        assert endpoint in html, endpoint
+    # Acciones de la tabla: crear dump, restaurar y descargar.
+    for marca in (
+        'id="backups-dump"',
+        'id="backups-refresh"',
+        'id="backups-restore-run"',
+        'id="backups-restore-cancel"',
+        'id="backups-restore-dry"',
+        'id="backups-restore-confirm"',
+        'data-action="backup-restore"',
+        'data-action="backup-download"',
+        "function loadBackups()",
+        "function createDump()",
+        "function runRestore()",
+        "function renderRestoreResult(data)",
+    ):
+        assert marca in html, marca
+    # El modo elegido y la confirmación explícita viajan al endpoint.
+    assert '{ key, modo, motivo, dry_run, confirmacion }' in html
+    assert 'confirmacion !== "RESTAURAR"' in html
+    assert 'value="overwrite"' in html and 'value="append"' in html
+    # La ayuda explica bucket, esquema migrado y semántica de cada modo.
+    for texto in (
+        "bucket configurado",
+        "esquema ya migrado",
+        "clave primaria",
+        "no pisa nada",
+        "sin PK",
+    ):
+        assert texto in html, texto
+    # Nunca se muestran credenciales del bucket ni URLs prefirmadas en el DOM.
+    assert "OBJECT_STORAGE_SECRET_KEY" not in html
+    assert "secreto" not in html.split('data-panel="backups"')[1].split("</section>")[0]
+
+
+def test_panel_backups_javascript_pasa_node_check() -> None:
+    """El <script> del panel debe ser JavaScript válido (node --check rc=0)."""
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+
+        pytest.skip("node no está disponible para --check")
+
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+    with tempfile.TemporaryDirectory() as carpeta:
+        ruta = Path(carpeta) / "panel.js"
+        ruta.write_text(script, encoding="utf-8")
+        completado = subprocess.run(
+            [node, "--check", str(ruta)], capture_output=True, text=True
+        )
+    assert completado.returncode == 0, completado.stderr
