@@ -705,8 +705,18 @@ async def _release_jobs_hard(record: dict) -> int:
             if lease.get("worker") == node:
                 lease["expires_at"] = past
                 released += 0 if db_configurado() else 1
+        # Procesar ya: sin esto los leases se borrarian al retirar la instancia
+        # y los jobs quedarian ASIGNADO/CORRIENDO sin dueno.
+        reaper_mod.reap_expired(utcnow())
     except Exception:  # noqa: BLE001
         log.debug("no se pudieron vencer leases en memoria de %s", node, exc_info=True)
+    if db_configurado():
+        try:
+            from central_api.scheduler.loop import reap_pg_vencidas
+
+            await reap_pg_vencidas()
+        except Exception:  # noqa: BLE001 - el scheduler lo repite en su ciclo
+            log.debug("reaper PG inmediato fallo para %s", node, exc_info=True)
     return released
 
 

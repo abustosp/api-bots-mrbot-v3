@@ -673,3 +673,25 @@ def test_hard_terminate_does_not_wait_for_jobs_and_cleans_resources():
 def test_terminate_rejects_invalid_mode():
     with pytest.raises(ValueError):
         asyncio.run(controller.terminate_workers(["x"], reason="modo invalido", mode="rapido"))
+
+
+def test_hard_terminate_requeues_in_memory_jobs():
+    from central_api.scheduler import reaper as reaper_mod
+    from central_api.store import Job
+
+    fleet = FakeFleet()
+    controller.set_fleet_for_testing(fleet)
+    worker = FakeWorker("i-rq", "running", "198.51.100.88")
+    node = worker.node
+    fleet.workers.append(worker)
+    controller._register_instance(worker)
+    ADMIN_NODES.add(node)
+    WORKERS[node] = WorkerEntry(node, status="SANO", running_jobs=1, capacity=5,
+                                last_heartbeat_at=utcnow())
+    JOBS["j1"] = Job(id="j1", bot="b", operation="o", payload={}, status="CORRIENDO",
+                     worker_node=node, assignment_attempt=1)
+    reaper_mod.LEASES["j1"] = {"worker": node, "token": "t", "attempt": 1,
+                               "expires_at": utcnow() + timedelta(seconds=60)}
+    asyncio.run(controller.terminate_workers(["i-rq"], reason="hard requeue prueba", mode="hard"))
+    assert JOBS["j1"].status == "PENDIENTE" and JOBS["j1"].worker_node is None
+    assert "j1" not in reaper_mod.LEASES
