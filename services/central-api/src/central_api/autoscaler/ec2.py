@@ -404,6 +404,11 @@ class Ec2Fleet:
 
         Disco raiz y ENI se eliminan solos con la instancia
         (``DeleteOnTermination``); esto cubre lo que pudiera quedar suelto.
+
+        Requiere los permisos IAM ``ec2:DeleteVolume`` y ``ec2:ReleaseAddress``
+        ademas de los de lectura de la auditoria. Sin ellos cada borrado falla
+        en silencio y el controlador solo registra el evento ``cleanup``
+        vacio: concedalos si quiere que se libere el resto de recursos.
         """
         report = self.audit_orphans()
         deleted_volumes: list[str] = []

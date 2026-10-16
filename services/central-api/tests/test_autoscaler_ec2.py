@@ -437,3 +437,55 @@ def test_status_cli_emits_json_without_settings_or_registry_secret(capsys):
     assert payload["workers"][0]["node"] == "203.0.113.4:8080"
     assert payload["estimated_cost_usd"] == 0.01
     assert fake_secret not in output
+
+
+def test_cleanup_orphans_deletes_only_audited_free_resources():
+    client = Mock()
+    client.describe_instances.return_value = {"Reservations": []}
+    client.describe_volumes.return_value = {"Volumes": [
+        {"VolumeId": "vol-free", "State": "available"},
+        {"VolumeId": "vol-busy", "State": "in-use"},
+    ]}
+    client.describe_addresses.return_value = {"Addresses": [
+        {"AllocationId": "eip-free", "PublicIp": "203.0.113.4"},
+        {"AllocationId": "eip-used", "PublicIp": "203.0.113.5", "InstanceId": "i-1"},
+    ]}
+    result = Ec2Fleet(Ec2Settings(), client=client).cleanup_orphans()
+    assert result == {"volumes": ["vol-free"], "eips": ["eip-free"]}
+    client.delete_volume.assert_called_once_with(VolumeId="vol-free")
+    client.release_address.assert_called_once_with(AllocationId="eip-free")
+    # La auditoria que decide que borrar sigue filtrando por nuestro tag.
+    assert {"Name": "tag:Project", "Values": ["mrbot-v3-autoscale"]} in (
+        client.describe_volumes.call_args.kwargs["Filters"]
+    )
+
+
+def test_cleanup_orphans_tolerates_partial_failures():
+    client = Mock()
+    client.describe_instances.return_value = {"Reservations": []}
+    client.describe_volumes.return_value = {"Volumes": [
+        {"VolumeId": "vol-a", "State": "available"},
+        {"VolumeId": "vol-b", "State": "available"},
+    ]}
+    client.describe_addresses.return_value = {"Addresses": []}
+    client.delete_volume.side_effect = [RuntimeError("VolumeInUse"), None]
+    result = Ec2Fleet(Ec2Settings(), client=client).cleanup_orphans()
+    assert result == {"volumes": ["vol-b"]}
+    assert Ec2Fleet(Ec2Settings(), client=Mock(
+        describe_instances=Mock(return_value={"Reservations": []}),
+        describe_volumes=Mock(return_value={"Volumes": []}),
+        describe_addresses=Mock(return_value={"Addresses": []}),
+    )).cleanup_orphans() == {}
+
+
+def test_controller_cleanup_failure_does_not_break_termination():
+    import asyncio
+
+    from central_api.autoscaler import controller
+
+    class Boom:
+        def cleanup_orphans(self):
+            raise RuntimeError("AccessDenied")
+
+    asyncio.run(controller._cleanup_resources(Boom(), ["i-1"]))
+    assert any(e["action"] == "cleanup_failed" for e in controller.event_list())
