@@ -112,6 +112,9 @@ class Ec2Settings:
     availability_zones: tuple[str, ...] = ()
     subnet_ids: tuple[str, ...] = ()
     project_tag: str = "mrbot-v3-autoscale"
+    # Nombre del security group de los workers. Debe ser unico por proyecto y
+    # region: dos proyectos en la misma region no pueden compartirlo.
+    sg_name: str = "mrbot-autoscale-worker-sg"
     worker_image: str = ""
     registry_url: str = ""
     registry_user: str = ""
@@ -133,6 +136,8 @@ class Ec2Settings:
             raise ValueError("region no puede estar vacío")
         if not self.project_tag.strip():
             raise ValueError("project_tag no puede estar vacío")
+        if not self.sg_name.strip():
+            raise ValueError("sg_name no puede estar vacío")
         if self.volume_gb < 1:
             raise ValueError("volume_gb debe ser positivo")
         if not 1 <= self.worker_port <= 65535:
@@ -173,6 +178,7 @@ class Ec2Settings:
             volume_type=value("VOLUME_TYPE", "gp3"),
             subnet_ids=csv("SUBNET_IDS"),
             project_tag=value("PROJECT_TAG", "mrbot-v3-autoscale"),
+            sg_name=value("SG_NAME", "mrbot-autoscale-worker-sg"),
             worker_image=value("WORKER_IMAGE"),
             registry_url=value("REGISTRY_URL"),
             registry_user=value("REGISTRY_USER"),
@@ -286,7 +292,7 @@ class Ec2Fleet:
         groups = self._call_pages(
             "describe_security_groups",
             Filters=[
-                {"Name": "group-name", "Values": ["mrbot-autoscale-worker-sg"]},
+                {"Name": "group-name", "Values": [self.settings.sg_name]},
                 {"Name": "vpc-id", "Values": [vpc_id]},
             ],
             result_key="SecurityGroups",
@@ -297,11 +303,12 @@ class Ec2Fleet:
             tags = {tag.get("Key"): tag.get("Value") for tag in group.get("Tags", [])}
             if tags.get("Project") not in (None, self.settings.project_tag):
                 raise RuntimeError(
-                    "mrbot-autoscale-worker-sg existe pero pertenece a otro Project"
+                    f"{self.settings.sg_name} existe pero pertenece a otro Project "
+                    "(use AUTOSCALE_SG_NAME para no compartir el nombre entre proyectos)"
                 )
         else:
             response = self.client.create_security_group(
-                GroupName="mrbot-autoscale-worker-sg",
+                GroupName=self.settings.sg_name,
                 Description="Managed MrBot autoscaler worker ingress",
                 VpcId=vpc_id,
             )
@@ -310,7 +317,7 @@ class Ec2Fleet:
         self.client.create_tags(
             Resources=[group_id],
             Tags=[
-                {"Key": "Name", "Value": "mrbot-autoscale-worker-sg"},
+                {"Key": "Name", "Value": self.settings.sg_name},
                 {"Key": "Project", "Value": self.settings.project_tag},
                 {"Key": "Role", "Value": "worker-security-group"},
                 {"Key": "ManagedBy", "Value": "mrbot-central"},

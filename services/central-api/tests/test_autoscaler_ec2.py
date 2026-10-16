@@ -554,3 +554,26 @@ def test_launch_rejects_out_of_range_semaphore():
     for bad in (0, 11, -1):
         with pytest.raises(ValueError):
             fleet.launch(1, instance_type="c5.xlarge", concurrency=bad)
+
+
+def test_sg_name_es_configurable_por_proyecto(monkeypatch):
+    """Dos proyectos en la misma región no pueden compartir el SG: es configurable."""
+    monkeypatch.setenv("AUTOSCALE_SG_NAME", "mrbot-autoscale-testing-sg")
+    assert Ec2Settings.from_env().sg_name == "mrbot-autoscale-testing-sg"
+    monkeypatch.delenv("AUTOSCALE_SG_NAME")
+    assert Ec2Settings.from_env().sg_name == "mrbot-autoscale-worker-sg"
+    with pytest.raises(ValueError):
+        Ec2Settings(sg_name="   ")
+    # El nombre propio se usa al buscar y al crear el grupo.
+    client = Mock()
+    client.describe_vpcs.return_value = {"Vpcs": [{"VpcId": "vpc-1"}]}
+    # Primero la búsqueda por nombre (no existe) y luego la relectura del grupo creado.
+    client.describe_security_groups.side_effect = [
+        {"SecurityGroups": []},
+        {"SecurityGroups": [{"GroupId": "sg-new", "IpPermissions": []}]},
+    ]
+    client.create_security_group.return_value = {"GroupId": "sg-new"}
+    fleet = Ec2Fleet(Ec2Settings(sg_name="sg-propio"), client=client)
+    assert fleet.ensure_security_group() == "sg-new"
+    assert client.create_security_group.call_args.kwargs["GroupName"] == "sg-propio"
+    assert {"Name": "group-name", "Values": ["sg-propio"]} in client.describe_security_groups.call_args_list[0].kwargs["Filters"]
