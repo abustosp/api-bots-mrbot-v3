@@ -535,3 +535,141 @@ def test_snapshot_marca_registrado_a_un_worker_saturado_y_nunca_registrado_al_mu
         for n in (sat, mudo):
             WORKERS.pop(n, None)
             ADMIN_NODES.discard(n)
+
+
+# --- Panel de workers efimeros: politica, manuales y baja suave/hard ----------
+
+@pytest.fixture(autouse=True)
+def _reset_policy_state():
+    from central_api.autoscaler import state as policy_state
+
+    policy_state.POLICY_OVERRIDES.clear()
+    policy_state.MANUAL_IDS.clear()
+    yield
+    policy_state.POLICY_OVERRIDES.clear()
+    policy_state.MANUAL_IDS.clear()
+
+
+def test_policy_validation_rejects_unknown_and_out_of_range():
+    from central_api.autoscaler import state as policy_state
+
+    assert policy_state.validate_policy({"queue_threshold": 7}) == {"queue_threshold": 7}
+    with pytest.raises(ValueError):
+        policy_state.validate_policy({"nope": 1})
+    with pytest.raises(ValueError):
+        policy_state.validate_policy({"max_instances": 1000})
+    with pytest.raises(ValueError):
+        policy_state.validate_policy({"step": True})
+
+
+def test_policy_override_changes_effective_settings_and_decision():
+    from central_api.autoscaler import state as policy_state
+
+    assert controller._settings().autoscale_queue_threshold == 10
+    policy_state.POLICY_OVERRIDES.update({"queue_threshold": 3, "jobs_per_worker": 4})
+    effective = controller._settings()
+    assert effective.autoscale_queue_threshold == 3
+    assert effective.autoscale_jobs_per_worker == 4
+    # El entorno queda intacto.
+    assert get_settings().autoscale_queue_threshold == 10
+
+
+def test_admin_policy_put_and_estimate(monkeypatch):
+    from central_api.admin import autoscale as admin_autoscale
+    from central_api.autoscaler import state as policy_state
+
+    monkeypatch.setattr(admin_autoscale, "require_admin", lambda _a: "admin")
+    monkeypatch.setattr(admin_autoscale, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(
+        controller, "build_snapshot",
+        lambda: asyncio.sleep(0, result={"pendientes": 40, "workers_fijos": 1,
+                                         "capacidad_nueva": 5, "avg_job_seconds": 60}),
+    )
+    body = admin_autoscale.PolicyBody(
+        values={"queue_threshold": 5, "jobs_per_worker": 8, "max_instances": 6},
+        motivo="ajuste de politica de prueba",
+    )
+    result = asyncio.run(admin_autoscale.put_autoscale_policy(body))
+    assert policy_state.POLICY_OVERRIDES["jobs_per_worker"] == 8
+    est = result["estimate"]
+    assert est["requests_per_instance"] == 8
+    assert est["estimated_instances"] == 4  # ceil(40/8)=5 menos 1 fijo
+    assert result["values"]["queue_threshold"]["overridden"] is True
+
+    reset = admin_autoscale.PolicyBody(reset=["jobs_per_worker"], motivo="restablecer politica prueba")
+    asyncio.run(admin_autoscale.put_autoscale_policy(reset))
+    assert "jobs_per_worker" not in policy_state.POLICY_OVERRIDES
+
+    from fastapi import HTTPException
+
+    bad = admin_autoscale.PolicyBody(values={"zzz": 1}, motivo="parametro invalido prueba")
+    with pytest.raises(HTTPException):
+        asyncio.run(admin_autoscale.put_autoscale_policy(bad))
+
+
+def test_manual_instances_are_flagged_and_skipped_by_auto_scale_down():
+    from central_api.autoscaler import state as policy_state
+    from central_api.autoscaler.policy import decide
+
+    fleet = FakeFleet()
+    controller.set_fleet_for_testing(fleet)
+    records = asyncio.run(controller.launch_workers(1, reason="alta manual de prueba", manual=True))
+    iid = records[0]["instance_id"]
+    assert iid in policy_state.MANUAL_IDS
+    assert EPHEMERAL_WORKERS[iid]["manual"] is True
+
+    now = utcnow()
+    snapshot = {
+        "pendientes": 0, "capacidad_libre_fija": 0, "capacidad_total_fija": 0,
+        "efimeros": [{
+            "instance_id": iid, "launched_at": now - timedelta(hours=5), "jobs_activos": 0,
+            "last_busy_at": now - timedelta(hours=5), "sano": True, "concurrency": 5,
+            "manual": True, "state": "running",
+        }],
+    }
+    cfg = {"autoscale_idle_seconds": 10, "autoscale_max_lifetime_seconds": 60}
+    decision = decide(snapshot, cfg, now)
+    assert decision.scale_down_ids == []  # ni ocio ni limite de vida la retiran
+
+    snapshot["efimeros"][0]["manual"] = False
+    assert decide(snapshot, cfg, now).scale_down_ids == [iid]
+
+
+def test_hard_terminate_does_not_wait_for_jobs_and_cleans_resources():
+    from central_api.autoscaler import state as policy_state
+    from central_api.scheduler import reaper as reaper_mod
+
+    fleet = FakeFleet()
+    calls = []
+    fleet.cleanup_orphans = lambda: calls.append(1) or {"volumes": ["vol-1"]}
+    controller.set_fleet_for_testing(fleet)
+    worker = FakeWorker("i-hard", "running", "198.51.100.77")
+    node = worker.node
+    fleet.workers.append(worker)
+    controller._register_instance(worker)
+    policy_state.MANUAL_IDS.add("i-hard")
+    ADMIN_NODES.add(node)
+    WORKERS[node] = WorkerEntry(node, status="SANO", running_jobs=3, capacity=5,
+                                last_heartbeat_at=utcnow())
+    PAUSED = __import__("central_api.store", fromlist=["PAUSED_NODES"]).PAUSED_NODES
+    PAUSED.add(node)
+    reaper_mod.LEASES["job-1"] = {"worker": node, "token": "t", "attempt": 1,
+                                  "expires_at": utcnow() + timedelta(seconds=60)}
+
+    soft = asyncio.run(controller.terminate_workers(["i-hard"], reason="baja suave prueba"))
+    assert soft["draining"] == ["i-hard"] and fleet.terminate_calls == []
+    assert reaper_mod.LEASES["job-1"]["expires_at"] > utcnow()  # soft no toca leases
+
+    result = asyncio.run(controller.terminate_workers(["i-hard"], reason="baja hard prueba", mode="hard"))
+    assert fleet.terminate_calls == [["i-hard"]]
+    assert result["terminated"] == ["i-hard"]
+    assert "i-hard" not in EPHEMERAL_WORKERS
+    assert "i-hard" not in policy_state.MANUAL_IDS
+    assert node not in ADMIN_NODES and node not in WORKERS and node not in PAUSED
+    assert "job-1" not in reaper_mod.LEASES
+    assert calls == [1]
+
+
+def test_terminate_rejects_invalid_mode():
+    with pytest.raises(ValueError):
+        asyncio.run(controller.terminate_workers(["x"], reason="modo invalido", mode="rapido"))

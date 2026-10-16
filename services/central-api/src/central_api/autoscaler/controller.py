@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from statistics import fmean
 from typing import Any
 
+from central_api.autoscaler import state as policy_state
 from central_api.autoscaler.policy import Decision, decide
 from central_api.db import db_configurado, nueva_sesion
 from central_api.settings import get_settings
@@ -36,6 +37,11 @@ LAST_SCALE_UP_PENDING: int | None = None
 QUEUE_PRESSURE_SINCE: datetime | None = None
 AUTOSCALER_TASK: asyncio.Task | None = None
 DRAIN_TASK: asyncio.Task | None = None
+
+
+def _settings() -> Any:
+    """Settings del entorno con los overrides de política del panel aplicados."""
+    return policy_state.effective_settings()
 
 
 def set_fleet_for_testing(fleet: Any | None) -> None:
@@ -190,6 +196,7 @@ def _register_instance(worker: Any, *, adopted: bool = False) -> dict | None:
         "first_healthy_at": previous.get("first_healthy_at"),
         "inventory_owned": inventory_owned,
         "adopted": bool(previous.get("adopted", adopted)),
+        "manual": bool(previous.get("manual")) or instance_id in policy_state.MANUAL_IDS,
     }
     EPHEMERAL_WORKERS[instance_id] = record
     return record
@@ -222,9 +229,25 @@ def _drop_inventory(record: dict) -> None:
 
 def _remove_instance(instance_id: str) -> None:
     record = EPHEMERAL_WORKERS.pop(instance_id, None)
+    policy_state.MANUAL_IDS.discard(instance_id)
     if record is not None:
         _drop_inventory(record)
         node = str(record.get("node") or "")
+        if node:
+            # Libera todo lo asociado al nodo: pausa, alias y leases en memoria.
+            from central_api.store import WORKER_ALIAS_OVERRIDES
+
+            PAUSED_NODES.discard(node)
+            WORKER_ALIAS_OVERRIDES.pop(node, None)
+            try:
+                from central_api.scheduler import reaper as reaper_mod
+
+                for job_id, lease in list(reaper_mod.LEASES.items()):
+                    if lease.get("worker") == node:
+                        reaper_mod.clear_lease(job_id)
+                reaper_mod.WORKER_LOAD.pop(node, None)
+            except Exception:  # noqa: BLE001 - limpieza best-effort
+                log.debug("no se pudieron limpiar leases de %s", node, exc_info=True)
         is_fixed = node in get_settings().worker_node_list
         shared_by_ephemeral = any(
             item.get("node") == node for item in EPHEMERAL_WORKERS.values()
@@ -429,7 +452,7 @@ def _instance_policy_info(settings: Any) -> dict[str, Any]:
 
 async def build_snapshot(now: datetime | None = None) -> dict:
     now = now or utcnow()
-    settings = get_settings()
+    settings = _settings()
     pending, running, oldest, source = await _queue_metrics()
     active_by_node = await _active_jobs_by_node()
     ephem_nodes = {str(info.get("node") or "") for info in EPHEMERAL_WORKERS.values()}
@@ -498,6 +521,7 @@ async def build_snapshot(now: datetime | None = None) -> dict:
             "instance_type": record.get("instance_type", ""),
             "ram_gib": record.get("ram_gib", 0),
             "concurrency": concurrency,
+            "manual": bool(record.get("manual")),
             "jobs_activos": active,
             "last_busy_at": record.get("last_busy_at"),
             "sano": healthy,
@@ -571,10 +595,11 @@ async def launch_workers(
     instance_type: str | None = None,
     pending_at_decision: int | None = None,
     formula: dict[str, float | int] | None = None,
+    manual: bool = False,
 ) -> list[dict]:
     """Lanza y registra instancias. La espera por EC2 se mantiene fuera del loop."""
     global LAST_ACTION_AT, LAST_SCALE_UP_PENDING
-    settings = get_settings()
+    settings = _settings()
     count = max(0, int(count))
     fleet = _make_fleet()
     maximum = _effective_max(settings, fleet)
@@ -599,6 +624,12 @@ async def launch_workers(
             workers = await asyncio.to_thread(fleet.launch, count)
     else:
         workers = await asyncio.to_thread(fleet.launch, count)
+    if manual:
+        # Marcar antes de registrar: el autoscaler automatico no las retira.
+        for worker in workers:
+            if _instance_id(worker):
+                policy_state.MANUAL_IDS.add(_instance_id(worker))
+        await policy_state.save_manual()
     records = [record for worker in workers if (record := _register_instance(worker)) is not None]
     limit = getattr(fleet, "last_launch_limit", None)
     if limit or len(workers) < count:
@@ -637,9 +668,54 @@ async def launch_workers(
     return records
 
 
+async def _release_jobs_hard(record: dict) -> int:
+    """Finaliza ya los jobs de un nodo: vence sus leases para que el reaper actue.
+
+    El reaper existente reencola cada job si le quedan intentos y no hay
+    resultado durable, o lo cierra como FALLIDO en caso contrario (sin replay
+    de efectos ambiguos). Devuelve la cantidad de jobs liberados.
+    """
+    node = str(record.get("node") or "")
+    if not node:
+        return 0
+    released = 0
+    if db_configurado():
+        try:
+            from sqlalchemy import text
+
+            async with nueva_sesion() as session:
+                result = await session.execute(
+                    text(
+                        "UPDATE jobs SET lease_expires_at = CURRENT_TIMESTAMP - interval '1 second' "
+                        "WHERE status IN ('ASIGNADO','CORRIENDO') AND worker_id IN "
+                        "(SELECT id FROM workers WHERE endpoint = :node)"
+                    ),
+                    {"node": node},
+                )
+                released = int(result.rowcount or 0)
+        except Exception as exc:  # noqa: BLE001 - se reintenta en el siguiente ciclo
+            log.warning("no se pudieron vencer leases de %s: %s", node, type(exc).__name__)
+    try:
+        from datetime import timedelta
+
+        from central_api.scheduler import reaper as reaper_mod
+
+        past = utcnow() - timedelta(seconds=1)
+        for lease in reaper_mod.LEASES.values():
+            if lease.get("worker") == node:
+                lease["expires_at"] = past
+                released += 0 if db_configurado() else 1
+    except Exception:  # noqa: BLE001
+        log.debug("no se pudieron vencer leases en memoria de %s", node, exc_info=True)
+    return released
+
+
 async def _active_jobs(record: dict) -> int:
     node = str(record.get("node") or "")
     if not node:
+        return 0
+    if record.get("hard_terminate"):
+        # Terminacion forzada: ya se vencieron los leases, no se espera a nadie.
         return 0
     canonical = await _db_active_by_node()
     if canonical is not None:
@@ -673,15 +749,31 @@ async def _mark_draining(record: dict) -> None:
             log.warning("no se pudo persistir DRENANDO para %s: %s", node, type(exc).__name__)
 
 
-async def terminate_workers(instance_ids: list[str], *, reason: str) -> dict:
-    """Drena primero, y retira el nodo solo al observar EC2 ``terminated``."""
+async def terminate_workers(
+    instance_ids: list[str], *, reason: str, mode: str = "soft"
+) -> dict:
+    """Drena primero, y retira el nodo solo al observar EC2 ``terminated``.
+
+    ``mode="soft"`` espera a que los jobs terminen. ``mode="hard"`` corta el
+    dispatch, libera de inmediato los jobs del nodo (reencolados o fallidos
+    por el reaper) y termina la instancia sin esperar.
+    """
     global LAST_ACTION_AT
+    if mode not in {"soft", "hard"}:
+        raise ValueError("mode debe ser soft o hard")
     known = [iid for iid in dict.fromkeys(instance_ids) if iid in EPHEMERAL_WORKERS]
     if not known:
         return {"terminated": [], "draining": [], "ignored": list(instance_ids)}
     for iid in known:
         if not EPHEMERAL_WORKERS[iid].get("drain_requested"):
             await _mark_draining(EPHEMERAL_WORKERS[iid])
+    if mode == "hard":
+        for iid in known:
+            record = EPHEMERAL_WORKERS[iid]
+            if not record.get("hard_terminate"):
+                released = await _release_jobs_hard(record)
+                record["hard_terminate"] = True
+                _event("hard_terminate", reason=reason, instance=iid, jobs_released=released)
     ready: list[str] = []
     draining: list[str] = []
     for iid in known:
@@ -745,6 +837,7 @@ async def terminate_workers(instance_ids: list[str], *, reason: str) -> dict:
             pending_confirmation.append(iid)
     if removed:
         _event("terminated", reason=reason, instances=removed)
+        await _cleanup_resources(fleet, removed)
     if draining:
         _event("draining", reason=reason, instances=draining)
     if pending_confirmation or draining:
@@ -754,13 +847,38 @@ async def terminate_workers(instance_ids: list[str], *, reason: str) -> dict:
             "pending": pending_confirmation, "ignored": ignored}
 
 
+async def _cleanup_resources(fleet: Any, instance_ids: list[str]) -> None:
+    """Libera lo que EC2 pudo dejar colgado de las instancias eliminadas.
+
+    Disco raiz e interfaz de red se borran con la instancia
+    (``DeleteOnTermination``). Esto barre volumenes huerfanos etiquetados con
+    el proyecto. Es best-effort: un fallo no revierte la baja.
+    """
+    cleanup = getattr(fleet, "cleanup_orphans", None)
+    if not callable(cleanup):
+        return
+    try:
+        report = await asyncio.to_thread(cleanup)
+    except Exception as exc:  # noqa: BLE001
+        _event("cleanup_failed", reason=type(exc).__name__, instances=instance_ids)
+        return
+    if report:
+        _event("cleanup", reason="recursos huerfanos liberados", instances=instance_ids,
+               resources=report)
+
+
 async def _process_draining() -> None:
     requested = [
         iid for iid, record in EPHEMERAL_WORKERS.items()
         if record.get("drain_requested")
     ]
     if requested:
-        await terminate_workers(requested, reason="drenaje previamente solicitado")
+        soft = [iid for iid in requested if not EPHEMERAL_WORKERS[iid].get("hard_terminate")]
+        hard = [iid for iid in requested if EPHEMERAL_WORKERS[iid].get("hard_terminate")]
+        if soft:
+            await terminate_workers(soft, reason="drenaje previamente solicitado")
+        if hard:
+            await terminate_workers(hard, reason="terminación forzada pendiente", mode="hard")
 
 
 def _ensure_drain_monitor() -> None:
@@ -771,7 +889,7 @@ def _ensure_drain_monitor() -> None:
 
 async def _drain_monitor_loop() -> None:
     """Finish requested drains even while automatic scaling is disabled."""
-    settings = get_settings()
+    settings = _settings()
     try:
         while any(item.get("drain_requested") for item in EPHEMERAL_WORKERS.values()):
             try:
@@ -789,7 +907,7 @@ async def autoscaler_tick(*, now: datetime | None = None) -> Decision:
     """Ejecuta un ciclo, separable del loop para pruebas y operaciones."""
     global LAST_ACTION_AT, QUEUE_PRESSURE_SINCE
     now = now or utcnow()
-    settings = get_settings()
+    settings = _settings()
     snapshot = await build_snapshot(now)
     pressure = (
         snapshot["pendientes"] > settings.autoscale_queue_threshold
@@ -838,7 +956,7 @@ async def autoscaler_tick(*, now: datetime | None = None) -> Decision:
 
 async def autoscaler_loop() -> None:
     """Bucle resiliente: ningún error individual termina esta tarea supervisada."""
-    settings = get_settings()
+    settings = _settings()
     try:
         try:
             await reconcile_managed()

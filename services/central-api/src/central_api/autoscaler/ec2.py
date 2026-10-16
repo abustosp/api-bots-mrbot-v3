@@ -399,6 +399,37 @@ class Ec2Fleet:
         workers = self.list_managed(states=self._INSTANCE_STATES)
         return self.terminate(worker.instance_id for worker in workers)
 
+    def cleanup_orphans(self) -> dict[str, list[str]]:
+        """Borra volumenes ``available`` y libera EIP sin asociar con nuestro tag Project.
+
+        Disco raiz y ENI se eliminan solos con la instancia
+        (``DeleteOnTermination``); esto cubre lo que pudiera quedar suelto.
+        """
+        report = self.audit_orphans()
+        deleted_volumes: list[str] = []
+        released_eips: list[str] = []
+        for volume in report.get("volumes", []):
+            try:
+                self.client.delete_volume(VolumeId=volume["volume_id"])
+                deleted_volumes.append(volume["volume_id"])
+            except Exception:  # noqa: BLE001 - puede seguir ocupado; se barre luego
+                continue
+        for eip in report.get("eips", []):
+            allocation = eip.get("allocation_id")
+            if not allocation:
+                continue
+            try:
+                self.client.release_address(AllocationId=allocation)
+                released_eips.append(allocation)
+            except Exception:  # noqa: BLE001
+                continue
+        result: dict[str, list[str]] = {}
+        if deleted_volumes:
+            result["volumes"] = deleted_volumes
+        if released_eips:
+            result["eips"] = released_eips
+        return result
+
     def audit_orphans(self) -> dict[str, list[dict[str, Any]]]:
         """Lista recursos disponibles/no terminados exclusivamente con nuestro tag."""
         instances = self._call_pages(

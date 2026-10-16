@@ -207,6 +207,7 @@ details > .details-body { padding: 0 14px 14px; }
       <button type="button" data-view="executions">Tablas / registros</button>
       <button type="button" data-view="reports">Reportes</button>
       <button type="button" data-view="fleet">Flota</button>
+      <button type="button" data-view="ephemeral">Workers efímeros</button>
       <button type="button" data-view="audit">Auditoría</button>
     </nav>
     <div class="user-box hidden" id="user-box"><span class="muted">Sesión ADMIN_TOKEN</span><button class="button secondary small" type="button" id="logout-button">Salir</button></div>
@@ -273,6 +274,33 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="table-wrap"><table><thead><tr><th>Alias</th><th>Nodo</th><th>IP</th><th>Origen</th><th>Estado</th><th>Versión</th><th>Ejecución</th><th>Protocolo</th><th>Bots</th><th>Error</th><th>Alertas</th><th>Acciones</th></tr></thead><tbody id="fleet-manual-table"><tr><td colspan="12" class="empty">Cargando...</td></tr></tbody></table></div>
         <h3 style="margin-top:24px">Workers efímeros (EC2) <span class="pill" id="fleet-ephemeral-count">0</span></h3>
         <div class="table-wrap"><table><thead><tr><th>Instancia</th><th>Tipo</th><th>RAM</th><th>Semaphore (slots)</th><th>Edad</th><th>Estado</th><th>Versión</th><th>Ejecución</th><th>Acciones</th></tr></thead><tbody id="fleet-ephemeral-table"><tr><td colspan="9" class="empty">Cargando...</td></tr></tbody></table></div>
+      </section>
+
+      <section class="view hidden" data-panel="ephemeral">
+        <div class="kicker">Capacidad bajo demanda</div><h2>Workers efímeros</h2><p class="subtle">Política de escalado automático, alta manual de instancias EC2 y baja suave o forzada. Las instancias manuales no las retira el autoscaler: solo se eliminan desde acá.</p>
+        <div class="form-actions"><button class="button primary" type="button" id="eph-refresh">Actualizar</button><span class="pill" id="eph-enabled">—</span><button class="button secondary" type="button" id="eph-toggle">Habilitar / deshabilitar autoscaler</button><span class="muted" id="eph-aws-error"></span></div>
+        <div class="grid" id="eph-summary"></div>
+        <h3>Política de escalado</h3>
+        <form id="eph-policy-form"><div class="form-grid">
+          <div class="field"><label for="pol-queue_threshold">Levantar instancias cuando haya más de N en cola sin asignar</label><input id="pol-queue_threshold" data-policy="queue_threshold" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-jobs_per_worker">Solicitudes por instancia (0 = cálculo por tiempo)</label><input id="pol-jobs_per_worker" data-policy="jobs_per_worker" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-max_instances">Máximo de instancias efímeras</label><input id="pol-max_instances" data-policy="max_instances" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-max_total_workers">Tope total de workers, fijos + efímeros (0 = sin tope)</label><input id="pol-max_total_workers" data-policy="max_total_workers" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-step">Máx. instancias por ciclo (0 = sin límite)</label><input id="pol-step" data-policy="step" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-up_after_seconds">Presión sostenida antes de escalar (s)</label><input id="pol-up_after_seconds" data-policy="up_after_seconds" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-cooldown_seconds">Enfriamiento entre acciones (s)</label><input id="pol-cooldown_seconds" data-policy="cooldown_seconds" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-idle_seconds">Ocio antes de retirar una instancia (s)</label><input id="pol-idle_seconds" data-policy="idle_seconds" type="number" min="0" step="1"></div>
+        </div><div class="form-actions"><button class="button primary" type="submit">Guardar política</button><button class="button secondary" type="button" id="eph-policy-reset">Restablecer a valores del entorno</button></div></form>
+        <div class="card" id="eph-estimate"><div class="muted">Cargando estimación...</div></div>
+        <form id="eph-sim-form" class="toolbar"><div class="field"><label for="eph-sim-pending">Simular cola de N pendientes</label><input id="eph-sim-pending" type="number" min="0" step="1" placeholder="cola actual"></div><button class="button secondary" type="submit">Estimar</button></form>
+        <h3 style="margin-top:24px">Levantar instancias manualmente</h3>
+        <form id="eph-launch-form" class="toolbar"><div class="field"><label for="eph-launch-count">Cantidad</label><input id="eph-launch-count" type="number" min="1" max="100" step="1" value="1" required></div><div class="field wide"><label for="eph-launch-reason">Motivo</label><input id="eph-launch-reason" type="text" value="alta manual desde panel V3" minlength="10" maxlength="500" required></div><button class="button primary" type="submit">Levantar</button></form>
+        <h3 style="margin-top:24px">Instancias <span class="pill" id="eph-count">0</span></h3>
+        <div class="form-actions"><button class="button danger" type="button" id="eph-terminate-all">Eliminar todas (suave)</button><button class="button danger" type="button" id="eph-terminate-all-hard">Forzar eliminación de todas (hard)</button></div>
+        <p class="muted">Suave: deja de asignar jobs y elimina la instancia cuando llega a 0 trabajos. Hard: libera de inmediato sus jobs (se reencolan si tienen intentos disponibles, si no quedan fallidos) y termina la instancia ya. Al eliminar se liberan disco, red y resto de recursos de la instancia.</p>
+        <div class="table-wrap"><table><thead><tr><th>Instancia</th><th>Origen</th><th>Tipo</th><th>Slots</th><th>Edad</th><th>Estado</th><th>Jobs</th><th>Acciones</th></tr></thead><tbody id="eph-table"><tr><td colspan="8" class="empty">Cargando...</td></tr></tbody></table></div>
+        <h3 style="margin-top:24px">Eventos recientes</h3>
+        <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Detalle</th></tr></thead><tbody id="eph-events"><tr><td colspan="3" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="audit">
@@ -345,7 +373,7 @@ details > .details-body { padding: 0 14px 14px; }
       link.href = url; link.download = `reporte_${$("#reports-tipo").value}_${$("#reports-desde").value}_${$("#reports-hasta").value}.csv`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
     } catch (error) { flash(error.message, "error"); }
   }
-  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, reports: initReports, fleet: loadFleet, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, reports: initReports, fleet: loadFleet, ephemeral: loadEphemeral, audit: loadAudit }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
   function cellValue(value) {
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "object") return payloadView(value, "Ver datos");
@@ -1208,6 +1236,66 @@ details > .details-body { padding: 0 14px 14px; }
       try { await api("/admin/autoscale/terminate", { method: "POST", body: JSON.stringify({ instance_ids: [button.dataset.id], motivo }) }); flash(`Instancia ${button.dataset.id} enviada a terminación.`); await loadFleet(); } catch (error) { flash(error.message, "error"); }
     }
   }
+  const POLICY_KEYS = ["queue_threshold", "jobs_per_worker", "max_instances", "max_total_workers", "step", "up_after_seconds", "cooldown_seconds", "idle_seconds"];
+  function renderEphEstimate(est) {
+    if (!est) { $("#eph-estimate").innerHTML = `<div class="muted">Sin estimación.</div>`; return; }
+    $("#eph-estimate").innerHTML = `<h3>Estimación (${esc(est.mode)})</h3><div>Cola simulada/actual: <strong>${esc(est.pending)}</strong> · se escala por encima de <strong>${esc(est.trigger_when_pending_over)}</strong> · <strong>${esc(est.requests_per_instance)}</strong> solicitudes por instancia (${esc(est.slots_per_instance)} slots, ~${esc(est.avg_job_seconds)} s por job)</div><div style="margin-top:6px">Instancias adicionales estimadas: <strong>${esc(est.estimated_instances)}</strong> · tiempo aprox. para vaciar la cola: <strong>${esc(est.estimated_minutes_to_drain)} min</strong></div><div class="muted" style="margin-top:6px">${esc(est.note)}</div>`;
+  }
+  async function loadEphemeral() {
+    try {
+      const [data, policy] = await Promise.all([api("/admin/autoscale"), api("/admin/autoscale/policy")]);
+      const cfg = data.config || {}; const snap = data.snapshot || {};
+      $("#eph-enabled").textContent = cfg.enabled ? "Autoscaler habilitado" : "Autoscaler deshabilitado";
+      $("#eph-enabled").dataset.enabled = cfg.enabled ? "1" : "0";
+      $("#eph-aws-error").textContent = data.aws_error ? `AWS no disponible: ${data.aws_error}` : (cfg.dry_run ? "Modo simulación (dry run)" : "");
+      const efimeros = data.efimeros || [];
+      const activos = new Map((snap.efimeros || []).map((item) => [item.instance_id, item]));
+      $("#eph-summary").innerHTML = [["Cola sin asignar", snap.pendientes ?? 0], ["En ejecución", snap.en_ejecucion ?? 0], ["Efímeras", efimeros.length], ["Workers fijos sanos", snap.workers_fijos ?? 0], ["Costo estimado", data.costo_estimado == null ? "—" : `${data.costo_estimado} ${data.costo_moneda || "USD"}`]].map(([label, value]) => `<div class="card"><div class="muted">${esc(label)}</div><strong>${esc(value)}</strong></div>`).join("");
+      for (const key of POLICY_KEYS) { const input = document.querySelector(`[data-policy="${key}"]`); const meta = policy.values?.[key]; if (input && meta && document.activeElement !== input) { input.value = meta.value; input.title = `Entorno: ${meta.env}${meta.overridden ? " (modificado desde el panel)" : ""}`; } }
+      renderEphEstimate(policy.estimate);
+      $("#eph-count").textContent = String(efimeros.length);
+      $("#eph-table").innerHTML = efimeros.length ? efimeros.map((item) => { const live = activos.get(item.instance_id) || {}; const edad = item.launched_at ? (Date.now() - new Date(item.launched_at).getTime()) / 1000 : null; const estado = item.hard_terminate ? "ELIMINANDO (forzado)" : item.drain_requested ? "DRENANDO" : (item.state || "—"); const id = esc(item.instance_id || ""); return `<tr><td><code>${id}</code><br><span class="muted">${esc(item.node || "sin IP aún")}</span></td><td>${item.manual ? "Manual" : "Automática"}</td><td>${esc(item.instance_type || "—")}</td><td>${esc(item.concurrency ?? "—")}</td><td>${esc(formatAge(edad))}</td><td><span class="status ${statusClass(item.drain_requested ? "PAUSADO" : live.sano ? "SANO" : "")}">${esc(estado)}</span></td><td>${esc(live.jobs_activos ?? 0)}/${esc(item.concurrency ?? 0)}</td><td class="actions"><div class="actions-inner"><button class="button danger small" data-action="eph-soft" data-id="${id}">Eliminar</button><button class="button danger small" data-action="eph-hard" data-id="${id}">Forzar</button></div></td></tr>`; }).join("") : `<tr><td colspan="8" class="empty">No hay workers efímeros.</td></tr>`;
+      const eventos = data.eventos || [];
+      $("#eph-events").innerHTML = eventos.length ? eventos.slice(0, 30).map((ev) => `<tr><td>${esc(date(ev.at))}</td><td><strong>${esc(ev.action)}</strong></td><td>${esc(ev.reason || "")}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">Sin eventos.</td></tr>`;
+    } catch (error) { flash(error.message, "error"); }
+  }
+  async function savePolicy(event) {
+    event.preventDefault();
+    const values = {}; for (const key of POLICY_KEYS) { const input = document.querySelector(`[data-policy="${key}"]`); if (input && input.value !== "") values[key] = Number(input.value); }
+    const motivo = window.prompt("Motivo del cambio de política (mínimo 10 caracteres):", "ajuste de política desde panel V3"); if (!motivo) return;
+    try { await api("/admin/autoscale/policy", { method: "PUT", body: JSON.stringify({ values, motivo }) }); flash("Política guardada."); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
+  }
+  async function resetPolicy() {
+    if (!window.confirm("¿Volver todos los parámetros a los valores del entorno?")) return;
+    try { await api("/admin/autoscale/policy", { method: "PUT", body: JSON.stringify({ reset: POLICY_KEYS, motivo: "restablecer política desde panel V3" }) }); flash("Política restablecida."); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
+  }
+  async function simulatePolicy(event) {
+    event.preventDefault(); const pending = $("#eph-sim-pending").value;
+    try { const policy = await api(`/admin/autoscale/policy${pending === "" ? "" : `?pending=${encodeURIComponent(pending)}`}`); renderEphEstimate(policy.estimate); } catch (error) { flash(error.message, "error"); }
+  }
+  async function launchEphemeral(event) {
+    event.preventDefault(); const count = Number($("#eph-launch-count").value); const motivo = $("#eph-launch-reason").value.trim();
+    if (!window.confirm(`¿Levantar ${count} instancia(s) EC2 manual(es)? Generan costo hasta que las elimines.`)) return;
+    try { const data = await api("/admin/autoscale/scale-up", { method: "POST", body: JSON.stringify({ count, motivo, manual: true }) }); flash(`Solicitadas ${data.requested}, lanzadas ${(data.launched || []).length}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
+  }
+  async function terminateEphemeral(body, label) {
+    try { const data = await api("/admin/autoscale/terminate", { method: "POST", body: JSON.stringify(body) }); flash(`${label}: eliminadas ${(data.terminated || []).length}, drenando ${(data.draining || []).length}, pendientes de confirmar ${(data.pending || []).length}.`); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
+  }
+  async function ephemeralAction(event) {
+    const button = event.target.closest("button[data-action]"); if (!button || !button.dataset.action.startsWith("eph-")) return;
+    const hard = button.dataset.action === "eph-hard"; const id = button.dataset.id;
+    if (hard ? !window.confirm(`FORZAR eliminación de ${id}: sus jobs se liberan YA (se reencolan o fallan) y la instancia se termina. ¿Continuar?`) : !window.confirm(`Eliminar ${id}: no recibirá más jobs y se eliminará al llegar a 0. ¿Continuar?`)) return;
+    await terminateEphemeral({ instance_ids: [id], mode: hard ? "hard" : "soft", motivo: hard ? "eliminación forzada desde panel V3" : "eliminación suave desde panel V3" }, hard ? "Eliminación forzada" : "Eliminación suave");
+  }
+  async function terminateAllEphemeral(hard) {
+    if (hard ? !window.confirm("FORZAR eliminación de TODAS las instancias efímeras: los jobs en curso se liberan ya. ¿Continuar?") : !window.confirm("Eliminar TODAS las instancias efímeras: dejan de recibir jobs y se eliminan al llegar a 0. ¿Continuar?")) return;
+    await terminateEphemeral({ all: true, mode: hard ? "hard" : "soft", motivo: hard ? "eliminación forzada de todas desde panel V3" : "eliminación suave de todas desde panel V3" }, hard ? "Eliminación forzada" : "Eliminación suave");
+  }
+  async function toggleAutoscaler() {
+    const enabled = $("#eph-enabled").dataset.enabled === "1";
+    if (!window.confirm(enabled ? "¿Deshabilitar el autoscaler automático? Las instancias existentes no se tocan." : "¿Habilitar el autoscaler automático?")) return;
+    try { await api(`/admin/autoscale/${enabled ? "disable" : "enable"}`, { method: "POST", body: JSON.stringify({ motivo: enabled ? "deshabilitar autoscaler desde panel V3" : "habilitar autoscaler desde panel V3" }) }); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
+  }
   async function loadAudit(event) { if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const action = $("#audit-action").value.trim(); const actor = $("#audit-actor").value.trim(); if (action) params.set("accion", action); if (actor) params.set("actor", actor); try { const data = await api(`/admin/audit?${params}`); const rows = data.eventos || []; $("#audit-table").innerHTML = rows.length ? rows.slice().reverse().map((item) => `<tr><td>${esc(date(item.occurred_at))}</td><td><strong>${esc(item.action)}</strong></td><td>${esc(item.actor_id)}</td><td>${esc(item.target_type)}<br><span class="muted">${esc(short(item.target_id, 22))}</span></td><td><span class="status ${item.result === "success" ? "status-good" : "status-bad"}">${esc(item.result)}</span></td><td>${esc(item.reason || "—")}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No hay eventos para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
   $("#login-form").addEventListener("submit", async (event) => { event.preventDefault(); state.token = $("#admin-token").value.trim(); if (!state.token) return; try { await api("/admin/users?limit=1"); sessionStorage.setItem(TOKEN_KEY, state.token); loginError(""); showLoggedIn(true); setView(state.view); } catch (_) { state.token = ""; loginError("No se pudo validar el token de administración."); } });
   $("#logout-button").addEventListener("click", () => logout());
@@ -1224,6 +1312,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
   $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#audit-filter").addEventListener("submit", loadAudit);
+  $("#eph-refresh").addEventListener("click", loadEphemeral); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>

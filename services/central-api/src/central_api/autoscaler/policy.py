@@ -211,8 +211,15 @@ def decide(snapshot: Any, cfg: Any, now: datetime) -> Decision:
         ),
     )
     work = pending * avg_job
-    ephemerals = list(_get(snapshot, "efimeros", []) or [])
-    ephemeral_slots = sum(_slots(item, base_slots) for item in ephemerals)
+    all_ephemerals = list(_get(snapshot, "efimeros", []) or [])
+    # Las instancias manuales aportan capacidad (slots) pero el autoscaler
+    # automatico nunca las retira ni las cuenta como propias: solo se eliminan
+    # a mano desde el panel.
+    ephemerals = [
+        item for item in all_ephemerals
+        if not (isinstance(item, Mapping) and item.get("manual"))
+    ]
+    ephemeral_slots = sum(_slots(item, base_slots) for item in all_ephemerals)
     slots = fixed_slots + ephemeral_slots
     remaining = max(0.0, work - slots * boot_seconds)
 

@@ -30,6 +30,29 @@ class ScaleUpBody(BaseModel):
         description="Justificación de auditoría para aumentar la capacidad.",
         examples=["Aumento temporal por crecimiento de la cola"],
     )
+    manual: bool = Field(
+        default=True,
+        description=(
+            "Si es true (por defecto) las instancias son manuales: el autoscaler "
+            "automático no las retira, solo se eliminan desde el panel."
+        ),
+    )
+
+
+class PolicyBody(BaseModel):
+    values: dict[str, int] = Field(
+        default_factory=dict,
+        description="Parámetros de política a fijar (ver GET /admin/autoscale/policy).",
+        examples=[{"queue_threshold": 10, "jobs_per_worker": 8, "max_instances": 6}],
+    )
+    reset: list[str] = Field(
+        default_factory=list,
+        description="Parámetros que vuelven al valor del entorno (AUTOSCALE_*).",
+    )
+    motivo: str = Field(
+        description="Justificación de auditoría para cambiar la política.",
+        examples=["Ajuste de política por horario pico"],
+    )
 
 
 class TerminateBody(BaseModel):
@@ -47,6 +70,15 @@ class TerminateBody(BaseModel):
     motivo: str = Field(
         description="Justificación de auditoría para terminar las instancias.",
         examples=["Retiro de capacidad temporal sobrante"],
+    )
+    mode: str = Field(
+        default="soft",
+        pattern="^(soft|hard)$",
+        description=(
+            "soft: deja de asignar jobs y termina cuando llegan a 0. "
+            "hard: libera de inmediato los jobs de la instancia y la termina ya."
+        ),
+        examples=["soft"],
     )
 
     @model_validator(mode="after")
@@ -172,7 +204,7 @@ def _require_reason(motivo: str) -> str:
 def _safe_config(
     *, fleet: Any | None = None, runtime: dict[str, Any] | None = None
 ) -> dict:
-    settings = get_settings()
+    settings = controller._settings()
     runtime = dict(runtime or {})
     if fleet is not None and not runtime:
         try:
@@ -279,10 +311,10 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
                 runtime=runtime if aws_error is None else None,
             ),
             "avg_job_seconds": snapshot.get(
-                "avg_job_seconds", get_settings().autoscale_avg_job_seconds
+                "avg_job_seconds", controller._settings().autoscale_avg_job_seconds
             ),
             "boot_seconds": snapshot.get(
-                "boot_seconds", get_settings().autoscale_boot_estimate_seconds
+                "boot_seconds", controller._settings().autoscale_boot_estimate_seconds
             ),
             "ec2": ({
                 "region": fleet.settings.region,
@@ -349,7 +381,9 @@ async def autoscale_scale_up(
     motivo = _require_reason(body.motivo)
     try:
         await controller.reconcile_managed()
-        launched = await controller.launch_workers(body.count, reason=motivo, dry_run=False)
+        launched = await controller.launch_workers(
+            body.count, reason=motivo, dry_run=False, manual=body.manual
+        )
     except Exception as exc:  # noqa: BLE001 - don't expose AWS error details
         log_event(
             "autoscaler.scale_up", actor_id=actor, target_type="ec2-fleet", target_id="all",
@@ -418,7 +452,7 @@ async def autoscale_terminate(
             "unknown_instance_ids": unknown,
         })
     try:
-        result = await controller.terminate_workers(targets, reason=motivo)
+        result = await controller.terminate_workers(targets, reason=motivo, mode=body.mode)
     except Exception as exc:  # noqa: BLE001
         log_event(
             "autoscaler.terminate", actor_id=actor, target_type="ec2-fleet", target_id="all",
@@ -428,7 +462,7 @@ async def autoscale_terminate(
         raise HTTPException(status_code=503, detail=f"AWS no disponible: {type(exc).__name__}") from exc
     log_event(
         "autoscaler.terminate", actor_id=actor, target_type="ec2-instance", target_id=",".join(targets),
-        request_id=request_id or "", reason=motivo, metadata=result,
+        request_id=request_id or "", reason=motivo, metadata={**result, "mode": body.mode},
     )
     return {"success": True, **result}
 
@@ -536,3 +570,116 @@ async def autoscale_audit(authorization: str | None = Header(default=None)) -> d
         "error": error,
         "eventos": controller.event_list(),
     }
+
+
+def _policy_view(pending: int | None = None, snapshot: dict | None = None) -> dict:
+    """Política efectiva, valores del entorno y estimación aproximada de instancias."""
+    from central_api.autoscaler import state as policy_state
+
+    env = get_settings()
+    effective = controller._settings()
+    values = {}
+    for key, (attr, low, high) in policy_state.POLICY_FIELDS.items():
+        values[key] = {
+            "value": int(getattr(effective, attr)),
+            "env": int(getattr(env, attr)),
+            "overridden": key in policy_state.POLICY_OVERRIDES,
+            "min": low,
+            "max": high,
+        }
+    snapshot = snapshot or {}
+    slots = int(snapshot.get("capacidad_nueva") or effective.autoscale_capacity_per_worker or 5)
+    per_instance = int(effective.autoscale_jobs_per_worker) or slots
+    avg_job = float(snapshot.get("avg_job_seconds") or effective.autoscale_avg_job_seconds)
+    queue = int(pending if pending is not None else snapshot.get("pendientes", 0) or 0)
+    fixed = int(snapshot.get("workers_fijos", 0) or 0)
+    threshold = int(effective.autoscale_queue_threshold)
+    cap = int(effective.autoscale_max_instances)
+    if effective.autoscale_max_total_workers:
+        cap = min(cap, max(0, int(effective.autoscale_max_total_workers) - fixed))
+    needed = 0
+    if queue > threshold:
+        needed = min(cap, max(0, -(-queue // per_instance) - fixed))
+    return {
+        "values": values,
+        "estimate": {
+            "pending": queue,
+            "trigger_when_pending_over": threshold,
+            "requests_per_instance": per_instance,
+            "slots_per_instance": slots,
+            "avg_job_seconds": round(avg_job, 1),
+            "estimated_instances": needed,
+            "estimated_minutes_to_drain": round(
+                (queue * avg_job) / max(1, (needed + fixed) * slots) / 60, 1
+            ) if queue and (needed + fixed) else 0.0,
+            "mode": "por conteo" if effective.autoscale_jobs_per_worker else "por tiempo (W/S/R/n)",
+            "note": (
+                "Estimación aproximada: instancias = ceil(cola / solicitudes por instancia) "
+                "menos workers fijos, acotado por el máximo."
+            ),
+        },
+    }
+
+
+@router.get(
+    "/autoscale/policy",
+    summary="Consultar la política del autoscaler",
+    description=(
+        "Devuelve cada parámetro con su valor efectivo, el del entorno y si fue "
+        "modificado desde el panel, más una estimación de instancias y de "
+        "solicitudes por instancia. Con ?pending=N simula una cola distinta. "
+        "Requiere autorización administrativa."
+    ),
+    responses={**_errores_admin()},
+)
+async def get_autoscale_policy(
+    pending: int | None = None, authorization: str | None = Header(default=None)
+) -> dict:
+    require_admin(authorization)
+    try:
+        snapshot = await controller.build_snapshot()
+    except Exception:  # noqa: BLE001 - la política debe poder verse sin métricas
+        snapshot = {}
+    return {"success": True, **_policy_view(pending, snapshot)}
+
+
+@router.put(
+    "/autoscale/policy",
+    summary="Definir la política del autoscaler",
+    description=(
+        "Fija parámetros de política (umbral de cola, solicitudes por instancia, "
+        "máximos, esperas) sin reiniciar el servicio. Se persisten en la base. "
+        "'reset' devuelve parámetros al valor del entorno. Requiere motivo."
+    ),
+    responses={**_errores_admin(), **_ERROR_VALIDACION, **_ERROR_MOTIVO},
+)
+async def put_autoscale_policy(
+    body: PolicyBody,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    from central_api.autoscaler import state as policy_state
+
+    actor = require_admin(authorization)
+    motivo = _require_reason(body.motivo)
+    try:
+        clean = policy_state.validate_policy(body.values)
+        unknown = [key for key in body.reset if key not in policy_state.POLICY_FIELDS]
+        if unknown:
+            raise ValueError(f"parámetro de política desconocido: {unknown[0]}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    for key in body.reset:
+        policy_state.POLICY_OVERRIDES.pop(key, None)
+    policy_state.POLICY_OVERRIDES.update(clean)
+    await policy_state.save_policy()
+    log_event(
+        "autoscaler.policy", actor_id=actor, target_type="autoscaler", target_id="policy",
+        request_id=request_id or "", reason=motivo,
+        metadata={"values": clean, "reset": body.reset},
+    )
+    try:
+        snapshot = await controller.build_snapshot()
+    except Exception:  # noqa: BLE001
+        snapshot = {}
+    return {"success": True, **_policy_view(None, snapshot)}

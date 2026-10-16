@@ -319,3 +319,12 @@ def test_panel_tiene_botones_para_ir_a_reportes() -> None:
     assert 'document.addEventListener("click"' in cuerpo and "[data-goto]" in cuerpo
     # el destino existe y la pestaña del menu sigue disponible
     assert 'data-panel="reports"' in cuerpo and 'data-view="reports"' in cuerpo
+
+
+def test_panel_incluye_vista_workers_efimeros() -> None:
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    assert 'data-view="ephemeral"' in html and 'data-panel="ephemeral"' in html
+    for ident in ("eph-policy-form", "eph-launch-form", "eph-terminate-all", "eph-terminate-all-hard"):
+        assert f'id="{ident}"' in html
+    assert 'data-action="eph-hard"' in html and "mode: hard" in html

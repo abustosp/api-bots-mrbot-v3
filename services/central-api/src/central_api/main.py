@@ -260,6 +260,9 @@ async def lifespan(app: FastAPI):
             from central_api.admin.workers import cargar_pausados_persistidos
 
             await cargar_pausados_persistidos()
+            from central_api.autoscaler.state import load_state
+
+            await load_state()
         except Exception as exc:  # noqa: BLE001 - sin tabla aún, nadie pausado
             import logging
 
