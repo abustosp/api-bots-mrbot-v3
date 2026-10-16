@@ -695,3 +695,24 @@ def test_hard_terminate_requeues_in_memory_jobs():
     asyncio.run(controller.terminate_workers(["i-rq"], reason="hard requeue prueba", mode="hard"))
     assert JOBS["j1"].status == "PENDIENTE" and JOBS["j1"].worker_node is None
     assert "j1" not in reaper_mod.LEASES
+
+
+def test_startup_adopts_ephemerals_when_loop_disabled(monkeypatch):
+    """Con AUTOSCALE_ENABLED=false las instancias vivas se readoptan tras un reinicio."""
+    from fastapi.testclient import TestClient
+
+    from central_api.main import create_app
+
+    fleet = FakeFleet()
+    fleet.workers.append(FakeWorker("i-survivor", "running", "198.51.100.55"))
+    controller.set_fleet_for_testing(fleet)
+    monkeypatch.setenv("AUTOSCALE_WORKER_IMAGE", "registry/x:1")
+    get_settings.cache_clear()
+    with TestClient(create_app()):
+        import time
+
+        for _ in range(50):
+            if "i-survivor" in EPHEMERAL_WORKERS:
+                break
+            time.sleep(0.05)
+    assert "i-survivor" in EPHEMERAL_WORKERS

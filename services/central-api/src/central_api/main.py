@@ -15,6 +15,7 @@ nunca en el arranque).
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header
@@ -271,6 +272,7 @@ async def lifespan(app: FastAPI):
             )
     tarea_scheduler: asyncio.Task | None = None
     tarea_autoscaler: asyncio.Task | None = None
+    tarea_adopcion: asyncio.Task | None = None
     from central_api.services.apoc_base import refresh_loop as apoc_refresh_loop
 
     tarea_apoc = asyncio.create_task(apoc_refresh_loop())
@@ -282,10 +284,29 @@ async def lifespan(app: FastAPI):
         from central_api.autoscaler.controller import start_loop_task
 
         tarea_autoscaler = start_loop_task()
+    elif os.environ.get("AUTOSCALE_WORKER_IMAGE"):
+        # Con el loop apagado igual hay que readoptar las instancias efimeras
+        # (p. ej. las manuales) tras un reinicio: si no, quedarian vivas en AWS
+        # pero invisibles e imposibles de eliminar desde el panel.
+        async def _adoptar_efimeras() -> None:
+            import logging
+
+            from central_api.autoscaler.controller import reconcile_managed
+
+            try:
+                await reconcile_managed()
+            except Exception as exc:  # noqa: BLE001 - se reintenta al consultar el panel
+                logging.getLogger(__name__).warning(
+                    "no se pudieron adoptar instancias efimeras: %s", type(exc).__name__
+                )
+
+        tarea_adopcion = asyncio.create_task(_adoptar_efimeras())
     try:
         yield
     finally:
         tarea_apoc.cancel()
+        if tarea_adopcion is not None:
+            tarea_adopcion.cancel()
         try:
             await tarea_apoc
         except (asyncio.CancelledError, Exception):
