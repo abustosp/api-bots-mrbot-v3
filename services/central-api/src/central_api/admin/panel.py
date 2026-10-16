@@ -1289,9 +1289,13 @@ details > .details-body { padding: 0 14px 14px; }
       typeCatalog.rows = data.types || [];
       if (!typeCatalog.rows.length) { $("#eph-type-info").textContent = data.error ? `No se pudo consultar los tipos (${data.error}).` : "No hay tipos disponibles."; return; }
       typeCatalog.loaded = true;
-      const preferred = typeCatalog.rows.some((row) => row.instance_type === data.default) ? data.default : typeCatalog.rows[0].instance_type;
+      const hasDefault = typeCatalog.rows.some((row) => row.instance_type === data.default);
+      const family = String(data.default || "").split(".")[0];
+      const sameFamily = typeCatalog.rows.find((row) => row.instance_type.startsWith(`${family}.`));
+      const preferred = hasDefault ? data.default : (sameFamily || typeCatalog.rows[0]).instance_type;
       $("#eph-launch-type").innerHTML = typeCatalog.rows.map((row) => `<option value="${esc(row.instance_type)}"${row.instance_type === preferred ? " selected" : ""}>${esc(`${row.instance_type} — ${row.vcpu} vCPU, ${row.ram_gib} GiB RAM`)}</option>`).join("");
       syncTypeInfo(true);
+      if (!hasDefault) $("#eph-type-info").textContent = `${data.default} no está disponible en la zona configurada; se preseleccionó ${preferred}. ` + $("#eph-type-info").textContent;
     } catch (error) { $("#eph-type-info").textContent = `No se pudo cargar los tipos: ${error.message}`; }
   }
   async function launchEphemeral(event) {
