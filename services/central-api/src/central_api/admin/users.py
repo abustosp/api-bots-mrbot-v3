@@ -442,6 +442,64 @@ async def _cuentas_billing_pg() -> dict[str, tuple]:
     return {str(row.user_id): tuple(row[1:]) for row in rows}
 
 
+async def _periodos_vigentes_pg() -> dict[str, tuple[int, int, int]]:
+    """Cuota (incluidas, consumidas, reservadas) del periodo mensual vigente por usuario."""
+    from sqlalchemy import select
+
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.billing import BillingAccountPeriod as PeriodRow
+
+    if not db_configurado():
+        return {}
+    ahora = utcnow()
+    try:
+        async with nueva_sesion() as sesion:
+            rows = (
+                await sesion.execute(
+                    select(
+                        PeriodRow.user_id,
+                        PeriodRow.included_requests,
+                        PeriodRow.requests_consumed,
+                        PeriodRow.requests_reserved,
+                    ).where(
+                        PeriodRow.status == "ABIERTO",
+                        PeriodRow.starts_at <= ahora,
+                        PeriodRow.ends_at > ahora,
+                    )
+                )
+            ).all()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    return {
+        str(r.user_id): (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in rows
+    }
+
+
+def _consumo_usuario(
+    usuario: AdminUser, cuenta, periodo: tuple[int, int, int] | None
+) -> dict:
+    """Consultas actuales y restantes del mes corriente (None = ilimitado)."""
+    tipo = usuario.account_type
+    if tipo == "NORMAL":
+        limite, consumidas, reservadas = periodo or (
+            int(usuario.max_requests or 0),
+            0,
+            0,
+        )
+    else:
+        consumidas = int(getattr(cuenta, "requests_consumed", 0) or 0)
+        reservadas = int(getattr(cuenta, "requests_reserved", 0) or 0)
+        limite = None if tipo == "TESTING" else int(usuario.max_requests or 100)
+    return {
+        "consultas_limite": limite,
+        "consultas_consumidas": consumidas,
+        "consultas_reservadas": reservadas,
+        "consultas_restantes": (
+            None if limite is None else max(0, limite - consumidas - reservadas)
+        ),
+    }
+
+
 async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
     """Hidrata una identidad persistida para habilitar acciones desde el panel."""
     from central_api.db import db_configurado, nueva_sesion
@@ -848,6 +906,8 @@ async def listar_usuarios(
     response.headers["Cache-Control"] = "private, no-store"
     filas_usuarios, filas_claves = await _filas_identidad_pg()
     cuentas_billing = await _cuentas_billing_pg()
+    periodos_vigentes = await _periodos_vigentes_pg()
+    from central_api.billing.entitlements import BILLING_ACCOUNTS
     usuarios_por_id = {user.id: user for user in USERS.values()}
     claves_por_usuario: dict[str, dict[str, dict]] = {}
     ahora = utcnow()
@@ -873,7 +933,7 @@ async def listar_usuarios(
             usuario.account_type = str(account_type)
             usuario.max_requests = max_requests
             usuario.plan = str(account_type).lower()
-            from central_api.billing.entitlements import BillingAccount, BILLING_ACCOUNTS
+            from central_api.billing.entitlements import BillingAccount
 
             BILLING_ACCOUNTS[uid] = BillingAccount(
                 user_id=uid,
@@ -927,6 +987,9 @@ async def listar_usuarios(
         "usuarios": [
             {
                 **_vista_usuario(u),
+                **_consumo_usuario(
+                    u, BILLING_ACCOUNTS.get(u.id), periodos_vigentes.get(u.id)
+                ),
                 "claves_api": sorted(
                     claves_por_usuario.get(u.id, {}).values(),
                     key=lambda clave: clave["emitida_en"],
