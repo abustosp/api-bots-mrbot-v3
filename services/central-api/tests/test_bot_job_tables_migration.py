@@ -64,14 +64,20 @@ def test_frozen_codes_match_all_v3_plugin_manifest_names() -> None:
 
     assert len(revision.BOT_CODES) == 32
     assert len(set(revision.BOT_CODES)) == 32
-    # Bots agregados después de 0015 viven en revisiones posteriores (0023+).
-    later_spec = importlib.util.spec_from_file_location(
-        "bot_jobs_revision_0023", REVISION_PATH.parent / "0023_ccma_compensacion.py"
-    )
-    assert later_spec is not None and later_spec.loader is not None
-    later = importlib.util.module_from_spec(later_spec)
-    later_spec.loader.exec_module(later)
-    assert set(revision.BOT_CODES) | set(later.NEW_BOT_CODES) == registry_codes
+    # Bots agregados después de 0015 viven en revisiones posteriores (0023+):
+    # cada una declara sus códigos nuevos en NEW_BOT_CODES.
+    later_codes: set[str] = set()
+    for archivo in sorted(REVISION_PATH.parent.glob("00*_*.py")):
+        if archivo.name.startswith("0015"):
+            continue
+        spec = importlib.util.spec_from_file_location(
+            f"bot_jobs_later_{archivo.stem}", archivo
+        )
+        assert spec is not None and spec.loader is not None
+        modulo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modulo)
+        later_codes |= set(getattr(modulo, "NEW_BOT_CODES", ()))
+    assert set(revision.BOT_CODES) | later_codes == registry_codes
     assert all(re.fullmatch(r"[a-z][a-z0-9_]*", code) for code in revision.BOT_CODES)
 
 

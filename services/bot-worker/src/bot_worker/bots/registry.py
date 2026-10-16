@@ -127,6 +127,9 @@ from bot_worker.bots.hacienda.plugin import HaciendaPlugin  # noqa: E402
 from bot_worker.bots.libros_portal_iva.plugin import (  # noqa: E402
     LibrosPortalIvaPlugin,
 )
+from bot_worker.bots.libro_sueldos_digital.plugin import (  # noqa: E402
+    LibroSueldosDigitalPlugin,
+)
 from bot_worker.bots.liquidacion_granos.plugin import (  # noqa: E402
     LiquidacionGranosPlugin,
 )
@@ -182,6 +185,7 @@ _PLUGINS: tuple[BotPlugin, ...] = (
     FacturometroPlugin(),  # type: ignore[arg-type]
     HaciendaPlugin(),  # type: ignore[arg-type]
     LibrosPortalIvaPlugin(),  # type: ignore[arg-type]
+    LibroSueldosDigitalPlugin(),  # type: ignore[arg-type]
     LiquidacionGranosPlugin(),  # type: ignore[arg-type]
     MisComprobantesPlugin(),  # type: ignore[arg-type]
     MisFacilidadesPlugin(),  # type: ignore[arg-type]

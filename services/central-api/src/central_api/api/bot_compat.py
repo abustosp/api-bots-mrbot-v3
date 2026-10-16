@@ -97,6 +97,7 @@ BOT_ROUTE_ALIASES: tuple[tuple[str, str, str], ...] = (
     ("/moa/consulta", "moa", "consultar"),
     ("/libros_iva/consulta", "libros_portal_iva", "descargar"),
     ("/libros_iva/ddjj", "libros_portal_iva", "descargar_ddjj"),
+    ("/libro-sueldos-digital/consulta", "libro_sueldos_digital", "descargar"),
     ("/facturometro/consulta", "facturometro", "consultar"),
     ("/controladores-fiscales/carga", "controladores_fiscales", "presentar"),
     ("/certificado-mipyme/consulta", "certificado_mipyme", "descargar"),

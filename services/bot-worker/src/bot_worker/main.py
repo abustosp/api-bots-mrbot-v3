@@ -1407,7 +1407,13 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                     "data": {},
                 }
                 outcome = "cancelado"
-            except ArcaLoginError:
+            except ArcaLoginError as exc:
+                # Código fijo de diagnóstico (sin secretos ni texto del sitio).
+                log.warning(
+                    "login ARCA rechazado: %s (%s)",
+                    getattr(exc, "diagnostic_code", "arca_login_rejected"),
+                    exc,
+                )
                 category, bot_result = "CREDENTIALS_REJECTED", {
                     "result": "ERROR",
                     "data": {},

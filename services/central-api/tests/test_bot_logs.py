@@ -30,6 +30,7 @@ EXPECTED_PATHS = {
     "/aportes-en-linea/logs", "/ccma/logs", "/ccma/compensacion/logs", "/certificado-mipyme/logs",
     "/controladores-fiscales/logs", "/declaracion-en-linea/logs",
     "/facturometro/logs", "/hacienda/logs", "/libros_iva/logs",
+    "/libro-sueldos-digital/logs",
     "/liquidacion_granos/logs", "/mis_comprobantes/logs",
     "/mis_facilidades/logs", "/mis_retenciones/logs", "/moa/logs",
     "/pago_devoluciones/logs", "/portal_iva/logs", "/portal_iva/carga/logs",
@@ -83,7 +84,7 @@ def _job(
 
 def test_declarative_table_covers_the_28_v1_log_paths() -> None:
     assert {spec.path for spec in bot_logs.LOG_SPECS} == EXPECTED_PATHS
-    assert len(bot_logs.LOG_SPECS) == 28
+    assert len(bot_logs.LOG_SPECS) == 29
     paths = create_app().openapi()["paths"]
     for path in EXPECTED_PATHS:
         assert f"/api/v3{path}" in paths

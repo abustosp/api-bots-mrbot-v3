@@ -218,6 +218,26 @@ def normalize_v2_request_body(bot: str, operation: str, body: dict[str, Any]) ->
         if periods[0] > periods[1]:
             raise ValueError("El período inicial no puede ser posterior al período final.")
 
+    if bot == "libro_sueldos_digital" and operation == "descargar":
+        periods = []
+        for name in ("periodo_desde", "periodo_hasta"):
+            value = normalized.get(name)
+            if isinstance(value, str):
+                value = value.strip()
+                normalized[name] = value
+            if not isinstance(value, str) or not re.fullmatch(r"\d{6}", value):
+                raise ValueError(
+                    "Período inválido. Use AAAAMM, con mes 01-12."
+                )
+            month = int(value[4:6])
+            if not 1 <= month <= 12:
+                raise ValueError(
+                    "Período inválido. Use AAAAMM, con mes 01-12."
+                )
+            periods.append(value)
+        if periods[0] > periods[1]:
+            raise ValueError("El período inicial no puede ser posterior al período final.")
+
     if bot == "mis_retenciones_iva_simple" and operation == "consultar":
         try:
             desde = datetime.strptime(str(normalized.get("desde", "")).strip(), "%d/%m/%Y").date()

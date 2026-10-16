@@ -109,6 +109,9 @@ class Loc:
         if state == "visible" and not _val(el.visible):
             raise TimeoutError(f"wait_for visible {self._clave}")
 
+    async def evaluate(self, script: str, arg: Any = None) -> Any:
+        return await self._pagina.evaluate(script, arg)
+
     # -- acciones -------------------------------------------------------
     async def _accion(self, nombre: str, *args: Any, exige_visible: bool = True) -> None:
         el = self._el()
@@ -139,8 +142,16 @@ class Loc:
         if el is not None:
             el.marcado = True
 
-    async def select_option(self, valor: Any = None, **_: Any) -> None:
-        await self._accion("select_option", valor)
+    async def select_option(
+        self,
+        valor: Any = None,
+        *,
+        value: Any = None,
+        label: Any = None,
+        **_: Any,
+    ) -> None:
+        efectivo = valor if valor is not None else value if value is not None else label
+        await self._accion("select_option", efectivo)
 
     async def set_input_files(self, ruta: str, **_: Any) -> None:
         await self._accion("set_input_files", Path(ruta).name, exige_visible=False)

@@ -161,6 +161,15 @@ def artifact_upload_slots(job: Job) -> list[dict]:
                 "content_types": ["application/pdf"],
             }
         )
+    if job.bot == "libro_sueldos_digital" and payload.get("subir_archivos", True):
+        slots.append(
+            {
+                "artifact_id": "lsd_pdf",
+                "name_hint": "libro_sueldos_digital.pdf",
+                "max_bytes": 52_428_800,
+                "content_types": ["application/pdf"],
+            }
+        )
     if job.bot == "mis_comprobantes" and payload.get("subir_csv", True):
         for tipo, artifact_id in (
             ("emitidos", "emitidos_csv"),

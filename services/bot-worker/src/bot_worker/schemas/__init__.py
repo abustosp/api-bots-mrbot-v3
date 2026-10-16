@@ -158,6 +158,13 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "incluir_json": _boolean(default=True), "subir_excel": _boolean(default=True),
         "descargar_pdf": _boolean(default=True),
     },
+    "libro_sueldos_digital": {
+        "cuit_representante": _string(pattern=CUIT),
+        "representado_cuit": _string(pattern=CUIT),
+        "periodo_desde": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
+        "periodo_hasta": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
+        "incluir_json": _boolean(default=True), "subir_archivos": _boolean(default=True),
+    },
     "libros_portal_iva": {
         "representado_cuit": _string(pattern=CUIT),
         "periodo_desde": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),

@@ -166,6 +166,13 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "por_emisor": _boolean(default=True), "por_receptor": _boolean(default=True),
         "incluir_json": _boolean(default=True), "subir_excel": _boolean(default=True),
     },
+    "libro_sueldos_digital": {
+        "cuit_representante": _string(pattern=CUIT),
+        "representado_cuit": _string(pattern=CUIT),
+        "periodo_desde": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
+        "periodo_hasta": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
+        "incluir_json": _boolean(default=True), "subir_archivos": _boolean(default=True),
+    },
     "libros_portal_iva": {
         "representado_cuit": _string(pattern=CUIT),
         "periodo_desde": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
@@ -862,6 +869,7 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "seleccionar_impuestos": "Incluye las obligaciones impositivas en la selección para generar el VEP.",
     "seleccionar_intereses": "Incluye los intereses en la selección para generar el VEP.",
     "subir_csv": "Solicita cargar el archivo CSV de resultado en el almacenamiento de la API; si se genera, queda disponible en `files[]`.",
+    "subir_archivos": "Solicita guardar en el almacenamiento de la API los archivos de resultado de esta operación; los archivos disponibles se informan en `files[]`.",
     "timeout_mc": "Tiempo máximo de espera, en segundos, para obtener el archivo CSV de comprobantes.",
     "tipo_agente": "Tipo de agente con el que se realiza la consulta de operaciones de comercio exterior.",
     "usuario": "Nombre de usuario de la cuenta del organismo que inicia sesión.",

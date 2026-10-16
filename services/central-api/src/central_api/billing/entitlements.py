@@ -88,6 +88,7 @@ BOT_CREDIT_COST: dict[tuple[str, str], int] = {
     ("libros_portal_iva", "descargar"): 2,
     ("libros_portal_iva", "descargar_libros"): 2,
     ("libros_portal_iva", "descargar_ddjj"): 2,
+    ("libro_sueldos_digital", "descargar"): 2,
     ("liquidacion_granos", "consultar"): 2,
     ("mis_comprobantes", "consultar"): 2,
     ("mis_comprobantes", "solicitar"): 2,
