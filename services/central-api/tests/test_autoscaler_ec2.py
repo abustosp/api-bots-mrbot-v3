@@ -101,7 +101,8 @@ def test_settings_rejects_world_open_ingress():
 
 @pytest.mark.parametrize(
     ("ram_gib", "expected"),
-    [(4, 5), (8, 5), (15.49, 5), (15.5, 10), (16, 10), (32, 10)],
+    # Recomendado = floor(RAM / 1,5 GB por worker), acotado al tope duro de 10.
+    [(4, 2), (8, 5), (15.49, 10), (15.5, 10), (16, 10), (32, 10)],
 )
 def test_concurrency_is_derived_from_ram(ram_gib, expected):
     assert concurrency_for_ram_gib(ram_gib) == expected
@@ -517,8 +518,19 @@ def test_list_instance_types_reports_vcpu_ram_and_filters_by_zone():
     fleet = Ec2Fleet(Ec2Settings(subnet_ids=("s-1",)), client=client)
     rows = fleet.list_instance_types()
     assert [r["instance_type"] for r in rows] == ["c5.xlarge", "c5.2xlarge"]
-    assert rows[0] == {"instance_type": "c5.xlarge", "vcpu": 4, "ram_gib": 8.0, "suggested_concurrency": 5}
-    assert rows[1]["vcpu"] == 8 and rows[1]["ram_gib"] == 16.0 and rows[1]["suggested_concurrency"] == 10
+    assert rows[0] == {
+        "instance_type": "c5.xlarge",
+        "vcpu": 4,
+        "ram_gib": 8.0,
+        "suggested_concurrency": 5,
+        "recommended_min": 4,
+        "recommended_max": 5,
+        "max_concurrency": 8,
+        "gb_per_worker_min": 1.5,
+        "gb_per_worker_max": 2.0,
+    }
+    assert rows[1]["vcpu"] == 8 and rows[1]["ram_gib"] == 16.0
+    assert rows[1]["suggested_concurrency"] == 10 and rows[1]["max_concurrency"] == 10
     kwargs = client.describe_instance_type_offerings.call_args.kwargs
     assert {"Name": "location", "Values": ["us-east-1-bue-1a"]} in kwargs["Filters"]
 

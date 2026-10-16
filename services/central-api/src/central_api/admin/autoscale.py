@@ -50,9 +50,32 @@ class ScaleUpBody(BaseModel):
         le=10,
         description=(
             "Semaphore: jobs simultáneos que acepta cada worker (1 a 10). "
-            "Sin valor se deduce de la RAM del tipo."
+            "Sin valor se deduce de la RAM del tipo. Se rechaza si supera el "
+            "máximo del tipo en esa zona."
         ),
         examples=[5],
+    )
+    zone: str | None = Field(
+        default=None,
+        max_length=20,
+        description=(
+            "Zona de lanzamiento (ver GET /admin/autoscale/zones). Sin valor se "
+            "usa la zona activa del panel."
+        ),
+        examples=["bue"],
+    )
+
+
+class ZoneBody(BaseModel):
+    zone: str = Field(
+        min_length=1,
+        max_length=20,
+        description="Clave de la zona que pasa a estar activa (ver GET /admin/autoscale/zones).",
+        examples=["sp"],
+    )
+    motivo: str = Field(
+        description="Justificación de auditoría para cambiar la zona de lanzamiento.",
+        examples=["Menor latencia hacia los clientes de São Paulo"],
     )
 
 
@@ -132,7 +155,21 @@ _DESCRIPCIONES_CAMPOS_RESPUESTA = {
     "ignored": "Instancias que no requirieron una nueva solicitud de terminación.",
     "enabled": "Indica si el escalado automático está habilitado.",
     "audit_orphans": "Informe de instancias activas sin correspondencia en el inventario.",
-    "error": "Tipo de error de auditoría, o null si la revisión terminó correctamente.",
+    "error": "Tipo de error de la operación, o null si terminó correctamente.",
+    "zone": (
+        "Zona de lanzamiento: objeto con su clave, etiqueta, región, tipo de "
+        "volumen y zonas de disponibilidad; en cada efímera, la zona a la que "
+        "pertenece."
+    ),
+    "zones": "Zonas de lanzamiento disponibles con su catálogo de tipos.",
+    "active": "Clave de la zona de lanzamiento activa.",
+    "types": "Catálogo de tipos lanzables con vCPU, RAM y sizing por RAM.",
+    "instances": "Cantidad de instancias efímeras registradas en la zona.",
+    "label": "Nombre legible de la zona.",
+    "region": "Región AWS de la zona.",
+    "volume_type": "Tipo de volumen EBS de la zona (gp2 en Local Zones).",
+    "availability_zones": "Zonas de disponibilidad donde se lanzan los workers.",
+    "max_concurrency": "Semaphore máximo permitido (tope duro del worker: 10).",
 }
 
 
@@ -268,9 +305,107 @@ def _safe_config(
     }
 
 
+def _zone_meta(zone_key: str) -> dict:
+    """Metadatos de la zona (``ZONES``) sin tocar AWS ni sus settings."""
+    from central_api.autoscaler.ec2 import ZONES
+
+    meta = ZONES.get(zone_key) or {}
+    return {
+        "key": zone_key,
+        "label": str(meta.get("label") or zone_key),
+        "region": str(meta.get("region") or ""),
+        "volume_type": str(meta.get("volume_type") or ""),
+        "availability_zones": list(meta.get("availability_zones") or ()),
+    }
+
+
+def _resolver_zona(zone: str | None) -> str:
+    """Valida la zona pedida y devuelve su clave (400 si no existe)."""
+    try:
+        return controller.resolve_zone(zone)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _gb(value: Any) -> str:
+    """Formatea GB con coma decimal para el mensaje de error."""
+    try:
+        return f"{float(value):g}".replace(".", ",")
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _type_sizing(row: dict) -> dict:
+    """Sizing del tipo: lo que informe el catálogo, completado con ``worker_sizing``.
+
+    El catálogo ya trae ``recommended_min/max`` y ``max_concurrency``; si una
+    flota de prueba no los informa, se derivan de su RAM.
+    """
+    from central_api.autoscaler.ec2 import worker_sizing
+
+    try:
+        ram = float(row.get("ram_gib") or 0)
+    except (TypeError, ValueError):
+        ram = 0.0
+    sizing: dict[str, Any] = worker_sizing(ram) if ram > 0 else {}
+    for key in (
+        "recommended_min",
+        "recommended_max",
+        "max_concurrency",
+        "gb_per_worker_min",
+        "gb_per_worker_max",
+    ):
+        if row.get(key) is not None:
+            sizing[key] = row[key]
+    return sizing
+
+
+def _validar_semaphore(concurrency: int | None, row: dict, instance_type: str, zone: str) -> None:
+    """Rechaza (400) un semaphore por encima del máximo del tipo en esa zona.
+
+    El máximo sale de ``worker_sizing``: cada worker consume entre 1,5 y 2 GB, y
+    el worker nunca acepta más de 10 jobs simultáneos (invariante W-2).
+    """
+    from central_api.autoscaler.ec2 import MAX_WORKER_SEMAPHORE
+
+    if concurrency is None:
+        return
+    sizing = _type_sizing(row)
+    maximo = int(sizing.get("max_concurrency") or MAX_WORKER_SEMAPHORE)
+    permitido = min(maximo, MAX_WORKER_SEMAPHORE)
+    if int(concurrency) <= permitido:
+        return
+    ram = row.get("ram_gib")
+    recomendado = sizing.get("recommended_max")
+    detalle = (
+        f"semaphore {concurrency} inválido para {instance_type} en la zona {zone}: "
+        f"máximo {permitido} con {_gb(ram)} GiB de RAM"
+    )
+    if recomendado:
+        detalle += f" (recomendado {sizing.get('recommended_min')}-{recomendado})"
+    detalle += (
+        f"; cada worker consume entre {_gb(sizing.get('gb_per_worker_min', 1.5))} y "
+        f"{_gb(sizing.get('gb_per_worker_max', 2.0))} GB y nunca más de "
+        f"{MAX_WORKER_SEMAPHORE} jobs simultáneos"
+    )
+    raise HTTPException(status_code=400, detail=detalle)
+
+
+def _tipos_de_zona(zone: str) -> tuple[list[dict], str | None]:
+    """Catálogo de una zona, tolerante a fallos de AWS (error por zona)."""
+    try:
+        fleet = controller._make_fleet(zone)
+        return list(fleet.list_instance_types()), None
+    except Exception as exc:  # noqa: BLE001 - el listado debe seguir disponible
+        return [], type(exc).__name__
+
+
 def _serialize_ephemeral(instance_id: str, item: dict) -> dict:
     result = dict(item)
     result.setdefault("instance_id", instance_id)
+    # Una efímera adoptada antes de existir zonas no trae el dato: se informa la
+    # activa, que es la usada para operarla.
+    result.setdefault("zone", controller.record_zone(item))
     for key in ("launched_at", "last_busy_at", "last_heartbeat_at", "registered_at"):
         value = result.get(key)
         if isinstance(value, datetime):
@@ -294,9 +429,10 @@ def _serialize_ephemeral(instance_id: str, item: dict) -> dict:
             "Estado y configuración del escalado automático; aws_error puede indicar que faltan datos externos.",
             {
                 "success": True,
-                "config": {"enabled": True, "dry_run": False, "queue_threshold": 10, "max_instances": 8, "capacity_per_worker": 5, "ec2": {"region": "sa-east-1", "instance_type": "c6i.xlarge", "worker_concurrency": 5}},
+                "zone": {"key": "bue", "label": "N. Virginia - Buenos Aires", "region": "us-east-1", "volume_type": "gp2", "availability_zones": ["us-east-1-bue-1a"], "instances": 1},
+                "config": {"enabled": True, "dry_run": False, "queue_threshold": 10, "max_instances": 8, "capacity_per_worker": 5, "ec2": {"zone": "bue", "region": "us-east-1", "instance_type": "c6i.xlarge", "worker_concurrency": 5}},
                 "snapshot": {"queued": 3, "running": 2},
-                "efimeros": [{"instance_id": "i-0123456789abcdef0", "state": "running", "node": "10.0.0.13:8080"}],
+                "efimeros": [{"instance_id": "i-0123456789abcdef0", "zone": "bue", "state": "running", "node": "10.0.0.13:8080"}],
                 "costo_estimado": 0.12,
                 "costo_moneda": "USD",
                 "aws_error": None,
@@ -309,12 +445,13 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
     """Consulta configuración, demanda, instancias y costo estimado."""
     require_admin(authorization)
     snapshot = await controller.build_snapshot()
+    zone_key = controller.resolve_zone()
     workers = []
     estimated_cost: float | None = None
     aws_error: str | None = None
     runtime: dict[str, Any] = {}
     try:
-        fleet = controller._make_fleet()
+        fleet = controller._make_fleet(zone_key)
         workers = await asyncio.to_thread(fleet.list_managed)
         estimated_cost = await asyncio.to_thread(fleet.estimate_cost, workers, utcnow())
         runtime = await asyncio.to_thread(fleet.instance_runtime)
@@ -322,6 +459,10 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
         aws_error = type(exc).__name__
     return {
         "success": True,
+        "zone": {
+            **_zone_meta(zone_key),
+            "instances": controller.instances_in_zone(zone_key),
+        },
         "config": {
             **_safe_config(
                 fleet=fleet if aws_error is None else None,
@@ -334,6 +475,7 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
                 "boot_seconds", controller._settings().autoscale_boot_estimate_seconds
             ),
             "ec2": ({
+                "zone": zone_key,
                 "region": fleet.settings.region,
                 "instance_type": fleet.settings.instance_type,
                 "worker_port": fleet.settings.worker_port,
@@ -360,9 +502,11 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
     "/autoscale/scale-up",
     summary="Aumentar la capacidad del autoscaler",
     description=(
-        "Solicita iniciar la cantidad indicada de instancias efímeras. La cantidad "
-        "debe estar entre 1 y 100 y la operación requiere un motivo de al menos 10 "
-        "caracteres. Requiere autorización administrativa."
+        "Solicita iniciar la cantidad indicada de instancias efímeras en una zona "
+        "(la activa si no se indica). La cantidad debe estar entre 1 y 100 y la "
+        "operación requiere un motivo de al menos 10 caracteres. El tipo debe "
+        "existir en el catálogo de esa zona y el semaphore no puede superar su "
+        "máximo. Requiere autorización administrativa."
     ),
     responses={
         **_errores_admin(),
@@ -373,9 +517,10 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
             {
                 "success": True,
                 "requested": 2,
+                "zone": "bue",
                 "launched": [
-                    {"instance_id": "i-0123456789abcdef0", "node": "10.0.0.13:8080", "state": "running", "instance_type": "c6i.xlarge", "concurrency": 5},
-                    {"instance_id": "i-abcdef0123456789", "node": "10.0.0.14:8080", "state": "running", "instance_type": "c6i.xlarge", "concurrency": 5},
+                    {"instance_id": "i-0123456789abcdef0", "zone": "bue", "node": "10.0.0.13:8080", "state": "running", "instance_type": "c6i.xlarge", "concurrency": 5},
+                    {"instance_id": "i-abcdef0123456789", "zone": "bue", "node": "10.0.0.14:8080", "state": "running", "instance_type": "c6i.xlarge", "concurrency": 5},
                 ],
             },
         ),
@@ -396,21 +541,30 @@ async def autoscale_scale_up(
     """Solicita nuevas instancias efímeras para ampliar la capacidad."""
     actor = require_admin(authorization)
     motivo = _require_reason(body.motivo)
+    zone_key = _resolver_zona(body.zone)
     try:
         await controller.reconcile_managed()
-        fleet = controller._make_fleet()
+        fleet = controller._make_fleet(zone_key)
         catalog = await asyncio.to_thread(fleet.list_instance_types)
-        if body.instance_type not in {row["instance_type"] for row in catalog}:
+        row = next(
+            (item for item in catalog if item.get("instance_type") == body.instance_type),
+            None,
+        )
+        if row is None:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"tipo {body.instance_type} no disponible en la zona configurada; "
-                    "consulte /admin/autoscale/instance-types"
+                    f"tipo {body.instance_type} no disponible en la zona {zone_key}; "
+                    f"consulte /admin/autoscale/instance-types?zone={zone_key}"
                 ),
             )
+        # El semaphore se valida contra el catálogo de esa zona: por encima del
+        # máximo del tipo la instancia no puede atender tantos jobs.
+        _validar_semaphore(body.concurrency, row, body.instance_type, zone_key)
         launched = await controller.launch_workers(
             body.count, reason=motivo, dry_run=False, manual=body.manual,
             instance_type=body.instance_type, concurrency=body.concurrency,
+            zone=zone_key,
         )
     except HTTPException:
         raise
@@ -418,15 +572,20 @@ async def autoscale_scale_up(
         log_event(
             "autoscaler.scale_up", actor_id=actor, target_type="ec2-fleet", target_id="all",
             request_id=request_id or "", result="error", reason=motivo,
-            metadata={"count": body.count, "error": type(exc).__name__},
+            metadata={"count": body.count, "zone": zone_key, "error": type(exc).__name__},
         )
         raise HTTPException(status_code=503, detail=f"AWS no disponible: {type(exc).__name__}") from exc
     log_event(
         "autoscaler.scale_up", actor_id=actor, target_type="ec2-fleet", target_id="all",
         request_id=request_id or "", reason=motivo,
-        metadata={"requested": body.count, "launched": len(launched)},
+        metadata={"requested": body.count, "launched": len(launched), "zone": zone_key},
     )
-    return {"success": True, "requested": body.count, "launched": launched}
+    return {
+        "success": True,
+        "requested": body.count,
+        "launched": launched,
+        "zone": zone_key,
+    }
 
 
 @router.post(
@@ -719,24 +878,113 @@ async def put_autoscale_policy(
     "/autoscale/instance-types",
     summary="Listar tipos de instancia disponibles",
     description=(
-        "Tipos EC2 lanzables en la zona de las subnets configuradas, con vCPU, RAM y "
-        "el semaphore sugerido (jobs simultáneos por worker). El tipo por defecto "
-        "para altas manuales es c5.xlarge. Requiere autorización administrativa."
+        "Tipos EC2 lanzables en una zona, con vCPU, RAM, el semaphore sugerido "
+        "(jobs simultáneos por worker) y su sizing (mínimo/máximo recomendado y "
+        "máximo permitido). Sin ?zone se usa la zona activa; el rango se explica "
+        "por el consumo de 1,5 a 2 GB por worker. El tipo por defecto para altas "
+        "manuales es c5.xlarge. Requiere autorización administrativa."
     ),
-    responses={**_errores_admin()},
+    responses={
+        **_errores_admin(),
+        400: {
+            "description": (
+                "La zona indicada no existe. Consulte GET /admin/autoscale/zones "
+                "para ver las zonas válidas."
+            )
+        },
+    },
 )
-async def get_instance_types(authorization: str | None = Header(default=None)) -> dict:
+async def get_instance_types(
+    zone: str | None = None, authorization: str | None = Header(default=None)
+) -> dict:
     require_admin(authorization)
-    fleet = controller._make_fleet()
-    try:
-        rows = await asyncio.to_thread(fleet.list_instance_types)
-        error = None
-    except Exception as exc:  # noqa: BLE001 - el formulario debe seguir usable
-        rows, error = [], type(exc).__name__
+    zone_key = _resolver_zona(zone)
+    rows, error = _tipos_de_zona(zone_key)
     return {
         "success": error is None,
         "default": "c5.xlarge",
+        "zone": zone_key,
+        "active": controller.resolve_zone(),
         "types": rows,
         "max_concurrency": 10,
         "error": error,
+    }
+
+
+@router.get(
+    "/autoscale/zones",
+    summary="Listar zonas de lanzamiento",
+    description=(
+        "Devuelve la zona activa y, por cada zona, su región, tipo de volumen, "
+        "zonas de disponibilidad, cuántas instancias efímeras tiene registradas y "
+        "el catálogo de tipos con su sizing. Si el catálogo de una zona no se "
+        "puede consultar, esa zona informa su error y las demás siguen "
+        "disponibles. Requiere autorización administrativa."
+    ),
+    responses={**_errores_admin()},
+)
+async def get_zones(authorization: str | None = Header(default=None)) -> dict:
+    require_admin(authorization)
+    zones = []
+    for key in controller.known_zones():
+        rows, error = await asyncio.to_thread(_tipos_de_zona, key)
+        zones.append({
+            **_zone_meta(key),
+            "instances": controller.instances_in_zone(key),
+            "types": rows,
+            "error": error,
+        })
+    return {
+        "success": True,
+        "active": controller.resolve_zone(),
+        "zones": zones,
+        "max_concurrency": 10,
+    }
+
+
+@router.put(
+    "/autoscale/zone",
+    summary="Definir la zona de lanzamiento activa",
+    description=(
+        "Cambia la zona donde el autoscaler y las altas manuales lanzan "
+        "instancias nuevas; se persiste y queda auditado. Las instancias ya "
+        "creadas siguen en su zona. Requiere motivo de al menos 10 caracteres."
+    ),
+    responses={
+        **_errores_admin(),
+        **_ERROR_MOTIVO,
+        400: {
+            "description": (
+                "La zona indicada no existe. Consulte GET /admin/autoscale/zones "
+                "para ver las zonas válidas."
+            )
+        },
+    },
+)
+async def put_autoscale_zone(
+    body: ZoneBody,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    from central_api.autoscaler import state as zone_state
+
+    actor = require_admin(authorization)
+    motivo = _require_reason(body.motivo)
+    previous = controller.resolve_zone()
+    try:
+        active = await zone_state.set_zone(body.zone)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log_event(
+        "autoscaler.zone", actor_id=actor, target_type="autoscaler", target_id="zone",
+        request_id=request_id or "", reason=motivo,
+        metadata={"zone": active, "previous": previous},
+    )
+    return {
+        "success": True,
+        "active": active,
+        "zone": {
+            **_zone_meta(active),
+            "instances": controller.instances_in_zone(active),
+        },
     }

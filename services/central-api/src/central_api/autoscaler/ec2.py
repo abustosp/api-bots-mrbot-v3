@@ -14,7 +14,7 @@ import os
 import shlex
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from math import floor
 from typing import Any, Iterable, Sequence
@@ -43,9 +43,55 @@ INSTANCE_TYPE_RAM_GIB: dict[str, float] = {
 }
 
 
+# Memoria que consume cada worker (navegador + bot): entre 1,5 y 2 GB.
+GB_PER_WORKER_MIN = 1.5
+GB_PER_WORKER_MAX = 2.0
+# Tope duro del worker (invariante W-2): nunca mas de 10 jobs simultaneos.
+MAX_WORKER_SEMAPHORE = 10
+
+# Zonas de lanzamiento seleccionables desde el panel.
+ZONES: dict[str, dict[str, Any]] = {
+    "bue": {
+        "label": "N. Virginia - Buenos Aires",
+        "region": "us-east-1",
+        # Local Zone de Buenos Aires: solo admite gp2.
+        "availability_zones": ("us-east-1-bue-1a",),
+        "volume_type": "gp2",
+    },
+    "sp": {
+        "label": "Brasil - São Paulo",
+        "region": "sa-east-1",
+        "availability_zones": (),
+        "volume_type": "gp3",
+    },
+}
+
+
+def worker_sizing(ram_gib: float) -> dict[str, Any]:
+    """Semaphore recomendado y maximo para una instancia segun su RAM.
+
+    Cada worker necesita entre 1,5 y 2 GB. El recomendado maximo es
+    ``RAM / 1,5`` (8 GB -> 5 workers), el minimo ``RAM / 2``. El maximo
+    permitido es la cantidad de GB de RAM (8 GB -> 8), siempre acotado por el
+    tope duro de 10 del worker (W-2).
+    """
+    ram = float(ram_gib)
+    eps = 1e-9
+    rec_max = max(1, min(MAX_WORKER_SEMAPHORE, floor(ram / GB_PER_WORKER_MIN + eps)))
+    rec_min = max(1, min(rec_max, floor(ram / GB_PER_WORKER_MAX + eps)))
+    hard_max = max(1, min(MAX_WORKER_SEMAPHORE, floor(ram + eps)))
+    return {
+        "recommended_min": rec_min,
+        "recommended_max": rec_max,
+        "max_concurrency": max(hard_max, rec_max),
+        "gb_per_worker_min": GB_PER_WORKER_MIN,
+        "gb_per_worker_max": GB_PER_WORKER_MAX,
+    }
+
+
 def concurrency_for_ram_gib(gib: float) -> int:
-    """Return worker slots for RAM in GiB, using a 15.5 GiB tolerance."""
-    return 10 if float(gib) >= 15.5 else 5
+    """Semaphore sugerido: el maximo recomendado (RAM / 1,5 GB por worker)."""
+    return worker_sizing(gib)["recommended_max"]
 
 
 @dataclass(frozen=True)
@@ -57,6 +103,8 @@ class Ec2Settings:
     volume_gb: int = 30
     # gp3 salvo en Local Zones (p. ej. Buenos Aires), que solo admiten gp2.
     volume_type: str = "gp3"
+    # Si se informan, las subnets se eligen solo en estas zonas (Local Zones).
+    availability_zones: tuple[str, ...] = ()
     subnet_ids: tuple[str, ...] = ()
     project_tag: str = "mrbot-v3-autoscale"
     worker_image: str = ""
@@ -133,7 +181,42 @@ class Ec2Settings:
             max_lifetime_minutes=int(value("MAX_LIFETIME_MINUTES", "120")),
         )
 
+    def for_zone(self, zone_key: str) -> "Ec2Settings":
+        """Copia de estos settings ajustada a ``ZONES[zone_key]``.
+
+        Pisa región, zonas de disponibilidad y tipo de volumen de la zona. Las
+        subnets solo se heredan cuando la zona no define las suyas **y** la
+        región base coincide: unos ``subnet_ids`` de otra región no sirven en la
+        zona elegida (y hoy ``bue`` no define subnets propias, con lo que en la
+        práctica quedan vacías y el adapter descubre las subnets por AZ).
+
+        Lanza ``ValueError`` si la clave de zona no existe.
+        """
+        zone = ZONES.get(zone_key)
+        if zone is None:
+            raise ValueError(
+                f"zona desconocida: {zone_key!r} (válidas: {', '.join(sorted(ZONES))})"
+            )
+        region = str(zone["region"])
+        subnet_ids = tuple(zone.get("subnet_ids") or ())
+        if not subnet_ids and self.region == region:
+            subnet_ids = tuple(self.subnet_ids)
+        return replace(
+            self,
+            region=region,
+            availability_zones=tuple(zone.get("availability_zones") or ()),
+            volume_type=str(zone["volume_type"]),
+            subnet_ids=subnet_ids,
+        )
+
     def concurrency_for_type(self, instance_type: str, ram_gib: float | None = None) -> int:
+        """Semaphore por defecto de un tipo de instancia.
+
+        Con ``worker_concurrency`` fijado en el entorno manda ese valor. Sin él
+        se usa ``worker_sizing(ram)["recommended_max"]``: cada worker consume
+        entre 1,5 y 2 GB, así que el recomendado es ``RAM / 1,5`` (8 GiB -> 5)
+        y el máximo permitido ``min(RAM, 10)``.
+        """
         if self.worker_concurrency:
             return self.worker_concurrency
         ram = ram_gib if ram_gib is not None else INSTANCE_TYPE_RAM_GIB.get(instance_type, 8.0)
@@ -141,6 +224,7 @@ class Ec2Settings:
 
     @property
     def effective_worker_concurrency(self) -> int:
+        """Semaphore efectivo del ``instance_type`` configurado (misma regla)."""
         return self.concurrency_for_type(self.instance_type)
 
 
@@ -545,6 +629,7 @@ class Ec2Fleet:
         return vpcs[0]["VpcId"]
 
     def _worker_subnets(self, vpc_id: str) -> list[dict[str, str]]:
+        zones = tuple(self.settings.availability_zones)
         if self.settings.subnet_ids:
             response = self.client.describe_subnets(SubnetIds=list(self.settings.subnet_ids))
             subnets = response.get("Subnets", [])
@@ -560,21 +645,36 @@ class Ec2Fleet:
             if wrong_vpc:
                 raise ValueError("todas las subnets deben pertenecer al VPC default")
         else:
-            response = self.client.describe_subnets(
-                Filters=[
-                    {"Name": "vpc-id", "Values": [vpc_id]},
-                    {"Name": "state", "Values": ["available"]},
-                ]
-            )
+            filters = [
+                {"Name": "vpc-id", "Values": [vpc_id]},
+                {"Name": "state", "Values": ["available"]},
+            ]
+            if zones:
+                # Zona activa (p. ej. la Local Zone de Buenos Aires): solo se
+                # lanzan instancias en las AZ de la zona elegida.
+                filters.append({"Name": "availability-zone", "Values": list(zones)})
+            response = self.client.describe_subnets(Filters=filters)
             subnets = response.get("Subnets", [])
+        selected = [
+            subnet for subnet in subnets
+            if subnet.get("State", "available") == "available"
+            # Con subnet_ids explícitas la zona sigue mandando: una subnet de
+            # otra AZ violaría la zona elegida, así que se descarta aquí.
+            and (not zones or subnet.get("AvailabilityZone", "") in zones)
+        ]
+        if zones and self.settings.subnet_ids and not selected:
+            raise ValueError(
+                "ninguna subnet configurada pertenece a "
+                + ", ".join(sorted(zones))
+                + " (revise AUTOSCALE_SUBNET_IDS o la zona activa)"
+            )
         return sorted(
             (
                 {
                     "SubnetId": subnet["SubnetId"],
                     "AvailabilityZone": subnet.get("AvailabilityZone", ""),
                 }
-                for subnet in subnets
-                if subnet.get("State", "available") == "available"
+                for subnet in selected
             ),
             key=lambda subnet: (subnet["AvailabilityZone"], subnet["SubnetId"]),
         )
@@ -789,16 +889,22 @@ public_ip=$(curl -fsS -H \"X-aws-ec2-metadata-token: $token\" \\
     }
 
     def list_instance_types(self) -> list[dict[str, Any]]:
-        """Tipos lanzables en la(s) zona(s) de las subnets configuradas, con vCPU y RAM.
+        """Tipos lanzables en la zona de estos settings, con vCPU, RAM y sizing.
 
-        Consulta ``describe_instance_type_offerings`` por zona y
-        ``describe_instance_types`` para vCPU/RAM. Cada fila trae el semaphore
-        sugerido segun la RAM. Si EC2 falla, devuelve la tabla de respaldo.
+        La zona se resuelve aquí, desde los propios settings: se usan sus
+        ``availability_zones`` y, si no están, la AZ de sus ``subnet_ids``. Para
+        el catálogo de otra zona el llamador debe construir la flota con
+        ``Ec2Settings.for_zone(key)`` (``Ec2Fleet(settings.for_zone(key))``),
+        que es lo que hace el controlador vía ``_make_fleet(zone)``.
+
+        Cada fila trae el semaphore sugerido y el sizing de ``worker_sizing``
+        (recomendado 1,5 GB por worker y máximo permitido del tipo). Si EC2
+        falla, devuelve la tabla de respaldo. Orden: vCPU y luego RAM.
         """
         names: set[str] = set()
         try:
-            zones: set[str] = set()
-            if self.settings.subnet_ids:
+            zones: set[str] = set(self.settings.availability_zones)
+            if not zones and self.settings.subnet_ids:
                 resp = self.client.describe_subnets(SubnetIds=list(self.settings.subnet_ids))
                 zones = {s["AvailabilityZone"] for s in resp.get("Subnets", [])}
             kwargs: dict[str, Any] = {"LocationType": "availability-zone"} if zones else {}
@@ -834,6 +940,7 @@ public_ip=$(curl -fsS -H \"X-aws-ec2-metadata-token: $token\" \\
             rows.append({
                 "instance_type": name, "vcpu": vcpu, "ram_gib": ram,
                 "suggested_concurrency": self.settings.concurrency_for_type(name, ram),
+                **worker_sizing(ram),
             })
         return rows
 

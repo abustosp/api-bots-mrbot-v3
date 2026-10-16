@@ -31,6 +31,10 @@ log = logging.getLogger(__name__)
 EVENTS: deque[dict] = deque(maxlen=200)
 BOOT_SECONDS_SAMPLES: deque[float] = deque(maxlen=32)
 FLEET: Any | None = None  # injectable in tests; production instance is lazy
+# Flotas reales por zona (una por clave de ZONES): un cliente EC2 está atado a
+# su región, así que cada zona necesita la suya. Vacío mientras FLEET (fake) esté
+# inyectado.
+FLEETS: dict[str, Any] = {}
 RUNTIME_ENABLED: bool | None = None
 LAST_ACTION_AT: datetime | None = None
 LAST_SCALE_UP_PENDING: int | None = None
@@ -45,9 +49,41 @@ def _settings() -> Any:
 
 
 def set_fleet_for_testing(fleet: Any | None) -> None:
-    """Inyecta un FakeFleet, sin importar ni construir el adaptador AWS."""
+    """Inyecta un FakeFleet, sin importar ni construir el adaptador AWS.
+
+    Un fake inyectado se devuelve para cualquier zona (``_make_fleet`` ignora el
+    argumento) y descarta las flotas reales por zona en caché.
+    """
     global FLEET
     FLEET = fleet
+    FLEETS.clear()
+
+
+def known_zones() -> tuple[str, ...]:
+    """Claves de zona soportadas por el adaptador EC2."""
+    from central_api.autoscaler.ec2 import ZONES
+
+    return tuple(ZONES)
+
+
+def resolve_zone(zone: str | None = None) -> str:
+    """Valida la zona pedida; sin zona devuelve la activa del panel."""
+    key = str(zone or "").strip() or policy_state.active_zone()
+    if key not in known_zones():
+        raise ValueError(
+            f"zona desconocida: {key!r} (válidas: {', '.join(sorted(known_zones()))})"
+        )
+    return key
+
+
+def record_zone(record: dict) -> str:
+    """Zona de una instancia registrada; sin dato se asume la activa."""
+    return str(record.get("zone") or policy_state.active_zone())
+
+
+def instances_in_zone(zone: str) -> int:
+    """Cantidad de efímeras registradas en una zona (el tope es por zona)."""
+    return sum(1 for record in EPHEMERAL_WORKERS.values() if record_zone(record) == zone)
 
 
 def effective_enabled() -> bool:
@@ -121,16 +157,27 @@ def event_list(limit: int = 100) -> list[dict]:
     return list(EVENTS)[: max(0, min(limit, EVENTS.maxlen or 200))]
 
 
-def _make_fleet() -> Any:
+def _make_fleet(zone: str | None = None) -> Any:
+    """Flota de la zona pedida (por defecto, la zona activa del panel).
+
+    Con un fake inyectado en pruebas se devuelve tal cual, sea cual sea la zona,
+    para que los tests no necesiten el adaptador AWS. En producción se construye
+    (y cachea) una flota por zona, porque el cliente EC2 está atado a su región.
+    """
     global FLEET
-    if FLEET is None:
+    if FLEET is not None:
+        return FLEET
+    key = resolve_zone(zone)
+    fleet = FLEETS.get(key)
+    if fleet is None:
         # Import diferido a propósito: la central no necesita boto3 si el
         # autoscaler está deshabilitado.
         from central_api.autoscaler.ec2 import Ec2Fleet, Ec2Settings, Ec2Worker
 
         _ = Ec2Worker  # included in the lazy adapter import contract
-        FLEET = Ec2Fleet(Ec2Settings.from_env())
-    return FLEET
+        fleet = Ec2Fleet(Ec2Settings.from_env().for_zone(key))
+        FLEETS[key] = fleet
+    return fleet
 
 
 def _instance_id(worker: Any) -> str:
@@ -153,7 +200,7 @@ def _parse_dt(value: Any, fallback: datetime | None = None) -> datetime:
     return fallback or utcnow()
 
 
-def _register_instance(worker: Any, *, adopted: bool = False) -> dict | None:
+def _register_instance(worker: Any, *, adopted: bool = False, zone: str | None = None) -> dict | None:
     instance_id = _instance_id(worker)
     if not instance_id:
         return None
@@ -184,6 +231,9 @@ def _register_instance(worker: Any, *, adopted: bool = False) -> dict | None:
         "instance_id": instance_id,
         "node": node,
         "launched_at": launched_at,
+        # Zona de lanzamiento: manda la que informe quien registra (alta o
+        # adopción); un registro viejo sin zona cae a la activa del panel.
+        "zone": str(zone or previous.get("zone") or policy_state.active_zone()),
         "instance_type": str(
             getattr(worker, "instance_type", previous.get("instance_type", "")) or ""
         ),
@@ -259,24 +309,47 @@ def _remove_instance(instance_id: str) -> None:
 async def reconcile_managed() -> list[str]:
     """Adopta lo que el adapter confirma como Project-managed al arrancar.
 
+    Recorre todas las zonas de ``ZONES``: cada una tiene su propia región y
+    credenciales efectivas, y el fallo de una (zona caída o sin permisos) no
+    debe impedir adoptar las instancias de las demás; el error se registra en el
+    evento. Las adoptadas conservan su zona y siguen siendo manuales si estaban
+    en la lista persistida (``_register_instance`` lo resuelve).
+
     La ausencia de un ID en ``list_managed`` no se interpreta como terminación:
     el adapter puede filtrar estados transitorios. Los estados no-running que
     sí vengan en la respuesta se desinventarian, pero nunca se terminan aquí.
     """
-    fleet = _make_fleet()
-    workers = await asyncio.to_thread(_list_managed_all_states, fleet)
     adopted: list[str] = []
-    for worker in workers:
-        record = _register_instance(worker, adopted=True)
-        if record is None:
+    errors: dict[str, str] = {}
+    for zone in known_zones():
+        try:
+            fleet = _make_fleet(zone)
+            workers = await asyncio.to_thread(_list_managed_all_states, fleet)
+        except Exception as exc:  # noqa: BLE001 - las otras zonas siguen
+            errors[zone] = type(exc).__name__
+            _event("reconcile_failed", reason=type(exc).__name__, zone=zone)
             continue
-        adopted.append(record["instance_id"])
-        state = record["state"].strip().lower()
-        if state == "terminated":
-            _remove_instance(record["instance_id"])
-        elif state in {"stopping", "stopped", "shutting-down"}:
-            _drop_inventory(record)
-    _event("reconciled", reason="adopción segura de instancias administradas", instances=len(adopted))
+        for worker in workers:
+            record = _register_instance(worker, adopted=True, zone=zone)
+            if record is None:
+                continue
+            instance_id = record["instance_id"]
+            if instance_id in adopted:
+                # Un fake inyectado en pruebas responde igual en toda zona.
+                continue
+            adopted.append(instance_id)
+            state = record["state"].strip().lower()
+            if state == "terminated":
+                _remove_instance(instance_id)
+            elif state in {"stopping", "stopped", "shutting-down"}:
+                _drop_inventory(record)
+    _event(
+        "reconciled",
+        reason="adopción segura de instancias administradas",
+        instances=len(adopted),
+        zones=list(known_zones()),
+        **({"errors": errors} if errors else {}),
+    )
     return adopted
 
 
@@ -517,6 +590,7 @@ async def build_snapshot(now: datetime | None = None) -> dict:
         ephemerals.append({
             "instance_id": instance_id,
             "node": node,
+            "zone": record_zone(record),
             "launched_at": record.get("launched_at"),
             "instance_type": record.get("instance_type", ""),
             "ram_gib": record.get("ram_gib", 0),
@@ -553,17 +627,30 @@ async def build_snapshot(now: datetime | None = None) -> dict:
     }
 
 
-def _effective_max(settings: Any, fleet: Any) -> int:
-    maximum = max(0, int(settings.autoscale_max_instances))
-    # Ec2Settings puede imponer un segundo límite. Leerlo solo al usar AWS.
-    try:
-        from central_api.autoscaler.ec2 import Ec2Settings
+def _effective_max(settings: Any, fleet: Any = None, zone: str | None = None) -> int:
+    """Máximo de instancias efímeras **de la zona** (política y tope del adapter).
 
-        aws_max = int(Ec2Settings.from_env().max_instances)
-        maximum = min(maximum, aws_max)
-    except (ImportError, AttributeError, TypeError, ValueError):
+    El tope de policy (``max_instances``) y el del adapter se aplican por zona:
+    cada zona tiene su propio presupuesto de instancias, así que el conteo se
+    hace con ``instances_in_zone``. Se prefiere el ``max_instances`` de la flota
+    de esa zona y, si no está disponible, el de ``Ec2Settings`` de su entorno.
+    """
+    maximum = max(0, int(settings.autoscale_max_instances))
+    limits: list[int] = []
+    try:
+        limits.append(int(getattr(getattr(fleet, "settings", None), "max_instances")))
+    except (AttributeError, TypeError, ValueError):
         pass
-    return maximum
+    if not limits:
+        # Ec2Settings puede imponer un segundo límite. Leerlo solo al usar AWS.
+        try:
+            from central_api.autoscaler.ec2 import Ec2Settings
+
+            base = Ec2Settings.from_env()
+            limits.append(int((base.for_zone(zone) if zone else base).max_instances))
+        except (ImportError, AttributeError, TypeError, ValueError):
+            pass
+    return min([maximum, *limits])
 
 
 def _effective_max_lifetime(settings: Any) -> int:
@@ -577,13 +664,15 @@ def _effective_max_lifetime(settings: Any) -> int:
     return seconds
 
 
-def _wait_until_running_and_register(fleet: Any, workers: list[Any], timeout: int) -> list[Any]:
+def _wait_until_running_and_register(
+    fleet: Any, workers: list[Any], timeout: int, zone: str | None = None
+) -> list[Any]:
     """Publish each assigned node immediately when its public IP becomes known."""
     running_workers = fleet.wait_until_running(workers, timeout)
     for worker in running_workers:
         # Do not perform logging, DB work, or another await between learning
         # the address and allowing the worker's first register request.
-        _register_instance(worker)
+        _register_instance(worker, zone=zone)
     return running_workers
 
 
@@ -597,22 +686,33 @@ async def launch_workers(
     formula: dict[str, float | int] | None = None,
     manual: bool = False,
     concurrency: int | None = None,
+    zone: str | None = None,
 ) -> list[dict]:
-    """Lanza y registra instancias. La espera por EC2 se mantiene fuera del loop."""
+    """Lanza y registra instancias en la zona pedida (por defecto la activa).
+
+    La espera por EC2 se mantiene fuera del loop. Cada registro guarda su
+    ``zone`` para que bajas, adopción y cupos se resuelvan por zona.
+    """
     global LAST_ACTION_AT, LAST_SCALE_UP_PENDING
     settings = _settings()
     count = max(0, int(count))
-    fleet = _make_fleet()
-    maximum = _effective_max(settings, fleet)
-    remaining = max(0, maximum - len(EPHEMERAL_WORKERS))
+    zone_key = resolve_zone(zone)
+    fleet = _make_fleet(zone_key)
+    maximum = _effective_max(settings, fleet, zone=zone_key)
+    remaining = max(0, maximum - instances_in_zone(zone_key))
     count = min(count, remaining)
     if count <= 0:
-        _event("scale_up_skipped", reason="máximo de instancias alcanzado", maximum=maximum)
+        _event(
+            "scale_up_skipped",
+            reason="máximo de instancias alcanzado",
+            maximum=maximum,
+            zone=zone_key,
+        )
         return []
     if dry_run is None:
         dry_run = settings.autoscale_dry_run
     if dry_run:
-        _event("dry_run", reason=reason, scale_up=count)
+        _event("dry_run", reason=reason, scale_up=count, zone=zone_key)
         return []
     launch_kwargs: dict[str, Any] = {}
     if instance_type:
@@ -635,14 +735,17 @@ async def launch_workers(
             if _instance_id(worker):
                 policy_state.MANUAL_IDS.add(_instance_id(worker))
         await policy_state.save_manual()
-    records = [record for worker in workers if (record := _register_instance(worker)) is not None]
+    records = [
+        record for worker in workers
+        if (record := _register_instance(worker, zone=zone_key)) is not None
+    ]
     limit = getattr(fleet, "last_launch_limit", None)
     if limit or len(workers) < count:
         # Pedimos ``count`` y AWS entrego menos (cuota vCPU o capacidad): no es un exito.
         _event(
             "scale_up_short",
             reason=f"se pidieron {count} y AWS entrego {len(workers)}" + (f" ({limit})" if limit else ""),
-            requested=count, launched=len(workers), limit=limit,
+            requested=count, launched=len(workers), limit=limit, zone=zone_key,
         )
     if not workers:
         return []
@@ -656,6 +759,7 @@ async def launch_workers(
         reason=reason,
         instances=[r["instance_id"] for r in records],
         instance_type=instance_type,
+        zone=zone_key,
         **(formula or {}),
     )
     # launch() puede devolver nodos sin IP hasta que estén running. Esperar
@@ -667,9 +771,10 @@ async def launch_workers(
                 fleet,
                 workers,
                 settings.autoscale_boot_grace_seconds,
+                zone_key,
             )
         except Exception as exc:  # noqa: BLE001 - el siguiente ciclo reconcilia
-            _event("wait_failed", reason=type(exc).__name__)
+            _event("wait_failed", reason=type(exc).__name__, zone=zone_key)
     return records
 
 
@@ -764,6 +869,15 @@ async def _mark_draining(record: dict) -> None:
             log.warning("no se pudo persistir DRENANDO para %s: %s", node, type(exc).__name__)
 
 
+def _group_by_zone(instance_ids: list[str]) -> dict[str, list[str]]:
+    """Agrupa IDs por la zona de su registro (sin zona: la activa)."""
+    groups: dict[str, list[str]] = {}
+    for instance_id in instance_ids:
+        record = EPHEMERAL_WORKERS.get(instance_id) or {}
+        groups.setdefault(record_zone(record), []).append(instance_id)
+    return groups
+
+
 async def terminate_workers(
     instance_ids: list[str], *, reason: str, mode: str = "soft"
 ) -> dict:
@@ -772,6 +886,11 @@ async def terminate_workers(
     ``mode="soft"`` espera a que los jobs terminen. ``mode="hard"`` corta el
     dispatch, libera de inmediato los jobs del nodo (reencolados o fallidos
     por el reaper) y termina la instancia sin esperar.
+
+    Las instancias se agrupan por su zona registrada y cada grupo se opera con
+    la flota de esa zona: un fallo en una zona no impide terminar las demás, y
+    el resultado agregado conserva las mismas claves más ``error`` solo si
+    alguna zona falló (``{zona: tipo_de_error}``).
     """
     global LAST_ACTION_AT
     if mode not in {"soft", "hard"}:
@@ -797,51 +916,62 @@ async def terminate_workers(
             ready.append(iid)
         else:
             draining.append(iid)
-    fleet = _make_fleet()
-    to_request = [
-        iid for iid in ready
-        if not EPHEMERAL_WORKERS[iid].get("termination_requested")
-    ]
+
+    errors: dict[str, str] = {}
+    by_zone = _group_by_zone(ready)
     accepted: set[str] = set()
-    if to_request:
+    for zone, ids in by_zone.items():
+        fleet = _make_fleet(zone)
+        to_request = [
+            iid for iid in ids
+            if not EPHEMERAL_WORKERS[iid].get("termination_requested")
+        ]
+        if not to_request:
+            continue
         try:
-            accepted = {
+            accepted.update(
                 str(iid) for iid in
                 (await asyncio.to_thread(fleet.terminate, to_request) or [])
-            }
-        except Exception as exc:  # noqa: BLE001 - retain inventory and retry next cycle
-            _event("terminate_failed", reason=type(exc).__name__, instances=to_request)
-            _ensure_drain_monitor()
-            return {"terminated": [], "draining": draining, "pending": ready,
-                    "error": type(exc).__name__}
-        for iid in accepted:
-            if iid in EPHEMERAL_WORKERS:
-                EPHEMERAL_WORKERS[iid]["termination_requested"] = True
-        if accepted:
-            LAST_ACTION_AT = utcnow()
-            _event("termination_requested", reason=reason, instances=sorted(accepted))
+            )
+        except Exception as exc:  # noqa: BLE001 - las otras zonas siguen
+            errors[zone] = type(exc).__name__
+            _event("terminate_failed", reason=type(exc).__name__, instances=to_request,
+                   zone=zone)
+    for iid in accepted:
+        if iid in EPHEMERAL_WORKERS:
+            EPHEMERAL_WORKERS[iid]["termination_requested"] = True
+    if accepted:
+        LAST_ACTION_AT = utcnow()
+        _event("termination_requested", reason=reason, instances=sorted(accepted))
 
     awaiting_confirmation = [
         iid for iid in ready
         if EPHEMERAL_WORKERS[iid].get("termination_requested")
     ]
     state_by_id: dict[str, str] = {}
-    if awaiting_confirmation:
+    for zone, ids in _group_by_zone(awaiting_confirmation).items():
+        # El adapter confirma estados con la flota (y región) de cada zona.
+        fleet = _make_fleet(zone)
         try:
             managed = await asyncio.to_thread(_list_managed_all_states, fleet)
-            state_by_id = {
-                _instance_id(worker): str(getattr(worker, "state", "unknown")).lower()
-                for worker in managed
-            }
-        except Exception as exc:  # noqa: BLE001 - accepted termination remains pending
+        except Exception as exc:  # noqa: BLE001 - la baja aceptada sigue pendiente
+            errors[zone] = type(exc).__name__
             _event("termination_confirmation_failed", reason=type(exc).__name__,
-                   instances=awaiting_confirmation)
+                   instances=ids, zone=zone)
+            continue
+        state_by_id.update({
+            _instance_id(worker): str(getattr(worker, "state", "unknown")).lower()
+            for worker in managed
+        })
 
     removed: list[str] = []
+    removed_by_zone: dict[str, list[str]] = {}
     pending_confirmation: list[str] = []
     for iid in awaiting_confirmation:
         state = state_by_id.get(iid)
         if state == "terminated":
+            record = EPHEMERAL_WORKERS.get(iid) or {}
+            removed_by_zone.setdefault(record_zone(record), []).append(iid)
             _remove_instance(iid)
             removed.append(iid)
         else:
@@ -852,14 +982,19 @@ async def terminate_workers(
             pending_confirmation.append(iid)
     if removed:
         _event("terminated", reason=reason, instances=removed)
-        await _cleanup_resources(fleet, removed)
+        for zone, ids in removed_by_zone.items():
+            await _cleanup_resources(_make_fleet(zone), ids)
     if draining:
         _event("draining", reason=reason, instances=draining)
-    if pending_confirmation or draining:
+    if pending_confirmation or draining or errors:
+        # Una zona con error se reintenta en el siguiente tick del monitor.
         _ensure_drain_monitor()
     ignored = [iid for iid in ready if iid not in awaiting_confirmation]
-    return {"terminated": removed, "draining": draining,
-            "pending": pending_confirmation, "ignored": ignored}
+    result = {"terminated": removed, "draining": draining,
+              "pending": pending_confirmation, "ignored": ignored}
+    if errors:
+        result["error"] = errors
+    return result
 
 
 async def _cleanup_resources(fleet: Any, instance_ids: list[str]) -> None:

@@ -203,11 +203,11 @@ def test_wait_until_running_registers_ip_before_any_worker_registration(monkeypa
     controller.set_fleet_for_testing(fleet)
     original_register = controller._register_instance
 
-    def track_registration(item, *, adopted=False):
+    def track_registration(item, *, adopted=False, zone=None):
         if item.public_ip:
             order.append("inventory_registration")
             assert "wait_returned_ip" in order
-        return original_register(item, adopted=adopted)
+        return original_register(item, adopted=adopted, zone=zone)
 
     monkeypatch.setattr(controller, "_register_instance", track_registration)
 
@@ -397,7 +397,7 @@ def test_admin_autoscale_exposes_effective_concurrency(monkeypatch):
 
     fleet = FleetForAdmin()
     monkeypatch.setattr(admin_autoscale, "require_admin", lambda _authorization: None)
-    monkeypatch.setattr(controller, "_make_fleet", lambda: fleet)
+    monkeypatch.setattr(controller, "_make_fleet", lambda zone=None: fleet)
     monkeypatch.setattr(
         controller,
         "build_snapshot",
@@ -506,7 +506,7 @@ def test_cuota_vcpu_agotada_se_registra_como_scale_up_short_y_no_como_exito(monk
         def launch(self, count, *a, **k):
             return []
 
-    monkeypatch.setattr(controller, "_make_fleet", lambda: SinCuota())
+    monkeypatch.setattr(controller, "_make_fleet", lambda zone=None: SinCuota())
     out = asyncio.run(controller.launch_workers(5, reason="t", dry_run=False))
     assert out == []
     acciones = [a for a, _ in eventos]
