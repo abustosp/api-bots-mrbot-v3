@@ -287,7 +287,7 @@ details > .details-body { padding: 0 14px 14px; }
         <form id="eph-policy-form"><div class="form-grid">
           <div class="field"><label for="pol-queue_threshold">Levantar instancias cuando haya más de N en cola sin asignar</label><input id="pol-queue_threshold" data-policy="queue_threshold" type="number" min="0" step="1"></div>
           <div class="field"><label for="pol-jobs_per_worker">Solicitudes por instancia (0 = cálculo por tiempo)</label><input id="pol-jobs_per_worker" data-policy="jobs_per_worker" type="number" min="0" step="1"></div>
-          <div class="field"><label for="pol-max_instances">Máximo de instancias efímeras</label><input id="pol-max_instances" data-policy="max_instances" type="number" min="0" step="1"></div>
+          <div class="field"><label for="pol-max_instances">Máximo de instancias efímeras (total, sumando zonas)</label><input id="pol-max_instances" data-policy="max_instances" type="number" min="0" step="1"></div>
           <div class="field"><label for="pol-max_total_workers">Tope total de workers, fijos + efímeros (0 = sin tope)</label><input id="pol-max_total_workers" data-policy="max_total_workers" type="number" min="0" step="1"></div>
           <div class="field"><label for="pol-step">Máx. instancias por ciclo (0 = sin límite)</label><input id="pol-step" data-policy="step" type="number" min="0" step="1"></div>
           <div class="field"><label for="pol-up_after_seconds">Presión sostenida antes de escalar (s)</label><input id="pol-up_after_seconds" data-policy="up_after_seconds" type="number" min="0" step="1"></div>

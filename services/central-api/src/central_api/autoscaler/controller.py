@@ -229,6 +229,11 @@ def _register_instance(worker: Any, *, adopted: bool = False, zone: str | None =
     if not instance_id:
         return None
     previous = EPHEMERAL_WORKERS.get(instance_id, {})
+    # La zona no se pisa si ya estaba registrada: una adopción desde otra zona
+    # (o un doble listado) mandaría la baja a la región equivocada y dejaría la
+    # instancia viva pero invisible al panel.
+    zona_previa = str(previous.get("zone") or "")
+    zona_efectiva = zona_previa or str(zone or "") or policy_state.active_zone()
     node = _worker_node(worker) or str(previous.get("node") or "")
     launched_at = _parse_dt(
         getattr(worker, "launched_at", None),
@@ -255,9 +260,9 @@ def _register_instance(worker: Any, *, adopted: bool = False, zone: str | None =
         "instance_id": instance_id,
         "node": node,
         "launched_at": launched_at,
-        # Zona de lanzamiento: manda la que informe quien registra (alta o
-        # adopción); un registro viejo sin zona cae a la activa del panel.
-        "zone": str(zone or previous.get("zone") or policy_state.active_zone()),
+        # Zona de lanzamiento: manda la ya registrada; un registro viejo sin
+        # zona cae a la que informe quien registra o a la activa del panel.
+        "zone": zona_efectiva,
         "instance_type": str(
             getattr(worker, "instance_type", previous.get("instance_type", "")) or ""
         ),
@@ -354,13 +359,13 @@ async def reconcile_managed() -> list[str]:
             _event("reconcile_failed", reason=type(exc).__name__, zone=zone)
             continue
         for worker in workers:
+            if _instance_id(worker) in adopted:
+                # Un fake inyectado en pruebas responde igual en toda zona.
+                continue
             record = _register_instance(worker, adopted=True, zone=zone)
             if record is None:
                 continue
             instance_id = record["instance_id"]
-            if instance_id in adopted:
-                # Un fake inyectado en pruebas responde igual en toda zona.
-                continue
             adopted.append(instance_id)
             state = record["state"].strip().lower()
             if state == "terminated":
@@ -652,12 +657,13 @@ async def build_snapshot(now: datetime | None = None) -> dict:
 
 
 def _effective_max(settings: Any, fleet: Any = None, zone: str | None = None) -> int:
-    """Máximo de instancias efímeras **de la zona** (política y tope del adapter).
+    """Máximo de instancias efímeras **en total** (todas las zonas).
 
-    El tope de policy (``max_instances``) y el del adapter se aplican por zona:
-    cada zona tiene su propio presupuesto de instancias, así que el conteo se
-    hace con ``instances_in_zone``. Se prefiere el ``max_instances`` de la flota
-    de esa zona y, si no está disponible, el de ``Ec2Settings`` de su entorno.
+    El tope de policy (``max_instances``) y el del adapter se aplican al total:
+    es un límite de costo y el panel lo muestra como un único máximo. El conteo
+    se hace sobre todas las efímeras registradas (``launch_workers``). Se prefiere
+    el ``max_instances`` de la flota de esa zona y, si no está disponible, el de
+    ``Ec2Settings`` de su entorno.
     """
     maximum = max(0, int(settings.autoscale_max_instances))
     limits: list[int] = []
@@ -715,7 +721,8 @@ async def launch_workers(
     """Lanza y registra instancias en la zona pedida (por defecto la activa).
 
     La espera por EC2 se mantiene fuera del loop. Cada registro guarda su
-    ``zone`` para que bajas, adopción y cupos se resuelvan por zona.
+    ``zone`` para que bajas, adopción y catálogos se resuelvan por zona; el cupo
+    máximo de instancias, en cambio, es un total entre todas las zonas.
     """
     global LAST_ACTION_AT, LAST_SCALE_UP_PENDING
     settings = _settings()
@@ -723,14 +730,20 @@ async def launch_workers(
     zone_key = resolve_zone(zone)
     fleet = _make_fleet(zone_key)
     maximum = _effective_max(settings, fleet, zone=zone_key)
-    remaining = max(0, maximum - instances_in_zone(zone_key))
+    # El cupo es TOTAL (suma de todas las zonas), igual que el de la política:
+    # el panel anuncia un único máximo y es lo que se factura.
+    remaining = max(0, maximum - len(EPHEMERAL_WORKERS))
     count = min(count, remaining)
     if count <= 0:
+        # Aplica enfriamiento: sin esto el ciclo automático reintenta y registra
+        # el mismo "no se pudo" en cada intervalo.
+        LAST_ACTION_AT = utcnow()
         _event(
             "scale_up_skipped",
             reason="máximo de instancias alcanzado",
             maximum=maximum,
             zone=zone_key,
+            registered=len(EPHEMERAL_WORKERS),
         )
         return []
     if dry_run is None:
@@ -973,6 +986,7 @@ async def terminate_workers(
         if EPHEMERAL_WORKERS[iid].get("termination_requested")
     ]
     state_by_id: dict[str, str] = {}
+    confirmadas: set[str] = set()
     for zone, ids in _group_by_zone(awaiting_confirmation).items():
         # El adapter confirma estados con la flota (y región) de cada zona.
         fleet = _make_fleet(zone)
@@ -983,6 +997,7 @@ async def terminate_workers(
             _event("termination_confirmation_failed", reason=type(exc).__name__,
                    instances=ids, zone=zone)
             continue
+        confirmadas.add(zone)
         state_by_id.update({
             _instance_id(worker): str(getattr(worker, "state", "unknown")).lower()
             for worker in managed
@@ -990,20 +1005,34 @@ async def terminate_workers(
 
     removed: list[str] = []
     removed_by_zone: dict[str, list[str]] = {}
+    ausentes: list[str] = []
     pending_confirmation: list[str] = []
     for iid in awaiting_confirmation:
         state = state_by_id.get(iid)
+        record = EPHEMERAL_WORKERS.get(iid) or {}
+        if state is None and record_zone(record) in confirmadas:
+            # EC2 no lo informa ni siquiera como 'terminated': la instancia ya
+            # no existe (la terminó un tercero, por ejemplo). Sin esto el
+            # registro queda vivo, muestra una instancia inexistente en el
+            # panel y bloquea el cupo de la zona.
+            removed_by_zone.setdefault(record_zone(record), []).append(iid)
+            _remove_instance(iid)
+            removed.append(iid)
+            ausentes.append(iid)
+            continue
         if state == "terminated":
-            record = EPHEMERAL_WORKERS.get(iid) or {}
             removed_by_zone.setdefault(record_zone(record), []).append(iid)
             _remove_instance(iid)
             removed.append(iid)
         else:
-            record = EPHEMERAL_WORKERS.get(iid)
-            if record is not None and state in {"stopping", "stopped", "shutting-down"}:
+            if state in {"stopping", "stopped", "shutting-down"}:
                 record["state"] = state
                 _drop_inventory(record)
             pending_confirmation.append(iid)
+    if ausentes:
+        _event("instances_gone",
+               reason="no figuran en EC2: se quitaron del inventario",
+               instances=ausentes)
     if removed:
         _event("terminated", reason=reason, instances=removed)
         for zone, ids in removed_by_zone.items():

@@ -439,7 +439,8 @@ def test_alta_sin_zona_usa_la_zona_activa(monkeypatch):
     assert records[0]["zone"] == "sp"
 
 
-def test_el_maximo_de_instancias_se_aplica_por_zona(monkeypatch):
+def test_el_maximo_de_instancias_se_aplica_al_total(monkeypatch):
+    """El máximo es un total (todas las zonas), igual que el de la política."""
     flotas = {"bue": FakeFleet(), "sp": FakeFleet()}
     _flota_por_zona(monkeypatch, flotas)
     for index in range(4):  # tope del entorno y de la flota falsa
@@ -447,10 +448,17 @@ def test_el_maximo_de_instancias_se_aplica_por_zona(monkeypatch):
             "instance_id": f"i-bue-{index}", "zone": "bue", "state": "running",
         }
 
-    lleno = asyncio.run(controller.launch_workers(1, reason="zona llena", zone="bue", dry_run=False))
-    libre = asyncio.run(controller.launch_workers(1, reason="otra zona", zone="sp", dry_run=False))
+    lleno = asyncio.run(controller.launch_workers(1, reason="tope total", zone="bue", dry_run=False))
+    otra_zona = asyncio.run(controller.launch_workers(1, reason="tope total", zone="sp", dry_run=False))
 
-    assert lleno == [] and flotas["bue"].launch_calls == []
+    assert lleno == [] and otra_zona == [] and flotas["sp"].launch_calls == []
+    assert controller.instances_in_zone("sp") == 0
+    # El rechazo por cupo aplica enfriamiento: no se repite en cada ciclo.
+    assert controller.LAST_ACTION_AT is not None
+
+    # Liberando una, la otra zona puede lanzar.
+    EPHEMERAL_WORKERS.pop("i-bue-0", None)
+    libre = asyncio.run(controller.launch_workers(1, reason="hay cupo", zone="sp", dry_run=False))
     assert len(libre) == 1 and libre[0]["zone"] == "sp"
     assert controller.instances_in_zone("sp") == 1
 
@@ -761,3 +769,26 @@ def test_catalogo_descarta_tipos_que_no_corren_un_worker():
     rows = Ec2Fleet(Ec2Settings(subnet_ids=("s-1",)), client=client).list_instance_types()
     assert [r["instance_type"] for r in rows] == ["c5.large", "c5.xlarge"]
     assert rows[0]["max_concurrency"] == 4 and rows[1]["recommended_max"] == 5
+
+
+def test_instancia_ausente_en_ec2_se_quita_del_inventario(monkeypatch):
+    """Si la instancia ya no existe en EC2, el registro no puede quedar vivo."""
+    flotas = {"bue": FakeFleet()}
+    _flota_por_zona(monkeypatch, flotas)
+    EPHEMERAL_WORKERS["i-fantasma"] = {
+        "instance_id": "i-fantasma", "zone": "bue", "state": "running",
+        "node": "198.51.100.9:8080", "termination_requested": True,
+        "inventory_owned": True,
+    }
+    ADMIN_NODES.add("198.51.100.9:8080")
+
+    assert controller.instances_in_zone("bue") == 1
+    resultado = asyncio.run(
+        controller.terminate_workers(["i-fantasma"], reason="zombie en inventario")
+    )
+
+    assert resultado["terminated"] == ["i-fantasma"]
+    assert "i-fantasma" not in EPHEMERAL_WORKERS
+    assert controller.instances_in_zone("bue") == 0
+    assert "198.51.100.9:8080" not in ADMIN_NODES
+    assert any(e["action"] == "instances_gone" for e in controller.event_list())

@@ -268,7 +268,11 @@ def test_ensure_security_group_revokes_open_ingress_and_keeps_allowlist():
     allow = "198.51.100.10/32"
     group = {
         "GroupId": "sg-worker",
-        "Tags": [{"Key": "Project", "Value": "mrbot-v3-autoscale"}],
+        # Un grupo propio lleva Project y ManagedBy; sin ManagedBy no se adopta.
+        "Tags": [
+            {"Key": "Project", "Value": "mrbot-v3-autoscale"},
+            {"Key": "ManagedBy", "Value": "mrbot-central"},
+        ],
         "IpPermissions": [
             {
                 "IpProtocol": "tcp",
@@ -304,7 +308,11 @@ def test_ensure_security_group_preserves_ipv6_allowlist_idempotently():
     cidr = "2001:db8::2/128"
     group = {
         "GroupId": "sg-worker",
-        "Tags": [{"Key": "Project", "Value": "mrbot-v3-autoscale"}],
+        # Un grupo propio lleva Project y ManagedBy; sin ManagedBy no se adopta.
+        "Tags": [
+            {"Key": "Project", "Value": "mrbot-v3-autoscale"},
+            {"Key": "ManagedBy", "Value": "mrbot-central"},
+        ],
         "IpPermissions": [
             {
                 "IpProtocol": "tcp",
@@ -577,3 +585,30 @@ def test_sg_name_es_configurable_por_proyecto(monkeypatch):
     assert fleet.ensure_security_group() == "sg-new"
     assert client.create_security_group.call_args.kwargs["GroupName"] == "sg-propio"
     assert {"Name": "group-name", "Values": ["sg-propio"]} in client.describe_security_groups.call_args_list[0].kwargs["Filters"]
+
+
+def test_no_adopta_un_sg_ajeno_aunque_se_llame_igual():
+    """Un SG homónimo sin nuestras etiquetas no se toca (no se le revoca nada)."""
+    ajeno = {"GroupId": "sg-ajeno", "Tags": [], "IpPermissions": [
+        {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+    ]}
+    client = Mock()
+    client.describe_vpcs.return_value = {"Vpcs": [{"VpcId": "vpc-default"}]}
+    client.describe_security_groups.return_value = {"SecurityGroups": [ajeno]}
+    fleet = Ec2Fleet(Ec2Settings(project_tag="mrbot-v3-autoscale"), client=client)
+    with pytest.raises(RuntimeError) as exc:
+        fleet.ensure_security_group()
+    assert "no es un grupo de MrBot" in str(exc.value)
+    client.revoke_security_group_ingress.assert_not_called()
+    client.create_tags.assert_not_called()
+    # Igual si es de otro Project, aunque tenga ManagedBy.
+    otro = {"GroupId": "sg-otro", "IpPermissions": [],
+            "Tags": [{"Key": "Project", "Value": "otro-proyecto"}, {"Key": "ManagedBy", "Value": "mrbot-central"}]}
+    client.describe_security_groups.return_value = {"SecurityGroups": [otro]}
+    with pytest.raises(RuntimeError):
+        fleet.ensure_security_group()
+
+
+def test_sg_name_default_es_rechazado():
+    with pytest.raises(ValueError):
+        Ec2Settings(sg_name="default")

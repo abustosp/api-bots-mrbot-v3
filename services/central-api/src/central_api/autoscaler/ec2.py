@@ -138,6 +138,11 @@ class Ec2Settings:
             raise ValueError("project_tag no puede estar vacío")
         if not self.sg_name.strip():
             raise ValueError("sg_name no puede estar vacío")
+        if self.sg_name.strip() == "default":
+            raise ValueError(
+                "sg_name no puede ser 'default': adoptar el security group del VPC "
+                "reescribiria reglas de terceros"
+            )
         if self.volume_gb < 1:
             raise ValueError("volume_gb debe ser positivo")
         if not 1 <= self.worker_port <= 65535:
@@ -301,10 +306,17 @@ class Ec2Fleet:
             group = groups[0]
             group_id = group["GroupId"]
             tags = {tag.get("Key"): tag.get("Value") for tag in group.get("Tags", [])}
-            if tags.get("Project") not in (None, self.settings.project_tag):
+            # Solo se adopta un grupo propio: sin las dos etiquetas no se toca,
+            # porque reetiquetarlo y reescribir su ingress afectaria a terceros.
+            propio = (
+                tags.get("Project") == self.settings.project_tag
+                and tags.get("ManagedBy") == "mrbot-central"
+            )
+            if not propio:
                 raise RuntimeError(
-                    f"{self.settings.sg_name} existe pero pertenece a otro Project "
-                    "(use AUTOSCALE_SG_NAME para no compartir el nombre entre proyectos)"
+                    f"{self.settings.sg_name} ya existe en el VPC y no es un grupo de "
+                    "MrBot (o es de otro Project). Use AUTOSCALE_SG_NAME con un nombre "
+                    "libre para este proyecto"
                 )
         else:
             response = self.client.create_security_group(
