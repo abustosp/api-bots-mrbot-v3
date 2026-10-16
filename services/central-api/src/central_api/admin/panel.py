@@ -99,8 +99,10 @@ h3 { margin: 0 0 7px; font-size: 17px; }
 .field textarea { min-height: 74px; resize: vertical; }
 .field input:focus, .field select:focus, .field textarea:focus { outline: 3px solid rgba(224,82,45,.16); border-color: var(--accent); }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 13px; margin: 16px 0; }
-.form-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
-.toolbar { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+.form-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.toolbar { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin: 16px 0; }
+/* Texto de estado junto a una fila de botones: nunca pegado a ellos. */
+.toolbar-note, .form-actions > .muted, .form-actions > .status { margin-left: 4px; }
 .toolbar .field { min-width: 150px; flex: 1 1 170px; }
 .toolbar .field.wide { flex-basis: 280px; }
 .table-combobox { position: relative; }
@@ -159,17 +161,24 @@ th.cf-th.cf-active .cf-caret { opacity: 1; color: var(--accent-strong); }
 .cf-bar .cf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; border: 1px solid #e9cfb8; background: #f3e2cf; font-size: 12px; }
 
 table { width: 100%; min-width: 760px; border-collapse: collapse; }
-th, td { padding: 12px 11px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
+th, td { padding: 12px 11px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; font-size: 13px; }
 th { color: var(--muted); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; }
 tr:last-child td { border-bottom: 0; }
 td.actions { display: table-cell; white-space: nowrap; }
-.actions { display: flex; gap: 6px; flex-wrap: wrap; }
-td.actions > .actions-inner { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+td.actions > .actions-inner { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* Dentro de una celda, un <details> es un chip compacto y alineado, no un
+   bloque con margen propio (eso desalineaba la fila). */
+td details { display: inline-block; margin-top: 0; vertical-align: middle; border-radius: 10px; background: var(--panel-strong); }
+td details > summary { padding: 7px 11px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+td details[open] > summary { border-bottom: 1px solid var(--line); }
+td details > .details-body { padding: 10px 11px; }
 .job-id { white-space: nowrap; user-select: all; word-break: normal; }
 .user-id { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .user-id code { font-size: 12px; }
-.key-cell { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
-.key-cell .key-input { width: 210px; min-width: 140px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-strong); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.key-cell { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* padding-right: deja libre el icono del gestor de contraseñas del navegador. */
+.key-cell .key-input { width: 210px; min-width: 140px; padding: 6px 30px 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-strong); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .key-cell .key-input:focus { outline: 3px solid rgba(224,82,45,.16); border-color: var(--accent); }
 .code { display: block; padding: 10px; overflow-x: auto; border-radius: 10px; color: #fff; background: #332b28; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
 .bot-sections { display: grid; gap: 14px; margin-top: 18px; }
@@ -778,7 +787,7 @@ details > .details-body { padding: 0 14px 14px; }
     });
     const bar = table.closest(".table-wrap") && table.closest(".table-wrap").nextElementSibling;
     if (bar && bar.classList.contains("cf-bar")) {
-      bar.querySelector(".cf-count").textContent = active ? `Mostrando ${shown} de ${rows.length}` : `${rows.length} filas`;
+      bar.querySelector(".cf-count").textContent = active ? `Mostrando ${shown} de ${rows.length}` : pluralFilas(rows.length);
       bar.querySelector(".cf-clear").classList.toggle("hidden", !active);
       const chips = bar.querySelector(".cf-chips"); chips.innerHTML = "";
       Object.entries(st.sel).forEach(([index, set]) => {
@@ -1172,7 +1181,7 @@ details > .details-body { padding: 0 14px 14px; }
       const total = Number(data.total || 0);
       const shown = Number((data.records || []).length);
       const tablaLabel = data.catalogo?.label || data.tabla_resuelta || tabla;
-      const countLabel = data.has_more ? `${shown} de al menos ${total} filas` : `${shown} de ${total} filas`;
+      const countLabel = data.has_more ? `${shown} de al menos ${total} filas` : `${shown} de ${total} ${total === 1 ? "fila" : "filas"}`;
       $("#execution-table-status").textContent = `${tablaLabel} · ${data.fuente || "—"} · ${countLabel}`;
       if (data.catalogo?.kind === "bot" || data.catalogo?.kind === "legacy") {
         $("#executions-head").innerHTML = "<tr><th>Tabla detallada por bot</th></tr>";
@@ -1199,6 +1208,7 @@ details > .details-body { padding: 0 14px 14px; }
     }
     const motivo = window.prompt("Motivo de cancelación:", "cancelación desde panel V3"); if (!motivo) return; try { await api(`/admin/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: JSON.stringify({ motivo }) }); flash("Comando de cancelación registrado."); await loadJobs(); } catch (error) { flash(error.message, "error"); }
   }
+  const pluralFilas = (n) => `${n} ${n === 1 ? "fila" : "filas"}`;
   const formatAge = (seconds) => { if (seconds == null || !Number.isFinite(Number(seconds))) return "—"; const total = Math.max(0, Math.floor(Number(seconds))); const days = Math.floor(total / 86400); const hours = Math.floor((total % 86400) / 3600); const minutes = Math.floor((total % 3600) / 60); return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`; };
   function fleetVersionBadge(worker) {
     const version = worker.version || worker.app_version || worker.image_digest || "";
