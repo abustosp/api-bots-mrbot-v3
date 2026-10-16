@@ -33,6 +33,13 @@ INSTANCE_TYPE_RAM_GIB: dict[str, float] = {
     "r5.large": 16.0,
     "r5.xlarge": 32.0,
     "r5.2xlarge": 64.0,
+    # Tipos ofrecidos por la Local Zone de Buenos Aires (us-east-1-bue-1a).
+    "t3.medium": 4.0,
+    "t3.xlarge": 16.0,
+    "c5.2xlarge": 16.0,
+    "c5.4xlarge": 32.0,
+    "m5.2xlarge": 32.0,
+    "r5.4xlarge": 128.0,
 }
 
 
@@ -48,6 +55,8 @@ class Ec2Settings:
     region: str = "sa-east-1"
     instance_type: str = "c6i.xlarge"
     volume_gb: int = 30
+    # gp3 salvo en Local Zones (p. ej. Buenos Aires), que solo admiten gp2.
+    volume_type: str = "gp3"
     subnet_ids: tuple[str, ...] = ()
     project_tag: str = "mrbot-v3-autoscale"
     worker_image: str = ""
@@ -108,6 +117,7 @@ class Ec2Settings:
             region=value("REGION") or os.environ.get("AWS_DEFAULT_REGION", "sa-east-1"),
             instance_type=value("INSTANCE_TYPE", "c6i.xlarge"),
             volume_gb=int(value("VOLUME_GB", "30")),
+            volume_type=value("VOLUME_TYPE", "gp3"),
             subnet_ids=csv("SUBNET_IDS"),
             project_tag=value("PROJECT_TAG", "mrbot-v3-autoscale"),
             worker_image=value("WORKER_IMAGE"),
@@ -276,7 +286,7 @@ class Ec2Fleet:
                                 "DeviceName": "/dev/xvda",
                                 "Ebs": {
                                     "VolumeSize": self.settings.volume_gb,
-                                    "VolumeType": "gp3",
+                                    "VolumeType": self.settings.volume_type,
                                     "DeleteOnTermination": True,
                                 },
                             }

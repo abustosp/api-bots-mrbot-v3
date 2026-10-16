@@ -489,3 +489,13 @@ def test_controller_cleanup_failure_does_not_break_termination():
 
     asyncio.run(controller._cleanup_resources(Boom(), ["i-1"]))
     assert any(e["action"] == "cleanup_failed" for e in controller.event_list())
+
+
+def test_volume_type_is_configurable_for_local_zones(monkeypatch):
+    monkeypatch.setenv("AUTOSCALE_VOLUME_TYPE", "gp2")
+    assert Ec2Settings.from_env().volume_type == "gp2"
+    monkeypatch.delenv("AUTOSCALE_VOLUME_TYPE")
+    assert Ec2Settings.from_env().volume_type == "gp3"
+    from central_api.autoscaler.ec2 import INSTANCE_TYPE_RAM_GIB
+
+    assert INSTANCE_TYPE_RAM_GIB["t3.xlarge"] == 16.0
