@@ -6,8 +6,12 @@ rango solicitado. Si un período tiene varias liquidaciones, descarga todas.
 Flujo:
 1. Login en ARCA (auth.afip.gob.ar) con CUIT + clave del representante.
 2. Abrir el servicio "LIBRO DE SUELDOS DIGITAL" (popup).
-3. Ir a "Liquidaciones y DDJJ" (Periodos.aspx, paginado de a 5 períodos).
-4. Por cada período dentro del rango: por cada liquidación, click en Ver LS,
+3. Si el servicio pide elegir representado (la cuenta representa a varios
+   CUITs), seleccionarlo en ``IndexContribuyente`` y confirmar con Aceptar.
+   Siempre se verifica que el empleador de la sesión sea el representado
+   esperado antes de descargar (ver ``_verificar_representado``).
+4. Ir a "Liquidaciones y DDJJ" (Periodos.aspx, paginado de a 5 períodos).
+5. Por cada período dentro del rango: por cada liquidación, click en Ver LS,
    generar el Libro de Sueldos si hiciera falta, descargar el PDF y Salir.
 
 Estructura de evidencias (ver bots_dev/AGENTS.md):
@@ -68,6 +72,13 @@ GENERAR_BTN_SELECTOR = (
 )
 SALIR_BTN_SELECTOR = "input#ctl00_ContentPlaceHolder1_btnSalir"
 
+# Selector de representado: cuando la cuenta representa a más de un CUIT, el
+# servicio abre en IndexContribuyente.aspx con este combo y el botón Aceptar.
+REPRESENTADO_SELECT_SELECTOR = "select#ddlCUIT, select[name='ddlCUIT']"
+REPRESENTADO_ACEPTAR_SELECTOR = "input#btnAceptar, input[name='btnAceptar']"
+EMPLEADOR_CUIT_SELECTOR = "#ctl00_lblCuit"
+EMPLEADOR_DENOMINACION_SELECTOR = "#ctl00_lblEmpleador"
+
 INVALID_FILENAME_RE = re.compile(r'[\\/:*?"<>|]+')
 PERIODO_YYYYMM_RE = re.compile(r"^(\d{4})(\d{2})$")
 PERIODO_LABEL_RE = re.compile(r"^(\d{2})/(\d{4})$")
@@ -120,6 +131,10 @@ def _safe_step_name(step: str) -> str:
 def _safe_filename(name: str) -> str:
     safe = INVALID_FILENAME_RE.sub("_", (name or "").strip()).strip(" .")
     return safe or "libro_sueldos_digital.pdf"
+
+
+def _solo_digitos(valor: Any) -> str:
+    return re.sub(r"\D", "", str(valor or ""))
 
 
 def _parse_periodo(value: str) -> Optional[tuple[int, int]]:
@@ -334,8 +349,8 @@ async def _ir_a_liquidaciones(page: Page, debug: DebugCapture) -> None:
 async def _leer_empleador(page: Page) -> dict[str, str]:
     empleador = {"cuit": "", "denominacion": ""}
     for clave, selector in (
-        ("cuit", "#ctl00_lblCuit"),
-        ("denominacion", "#ctl00_lblEmpleador"),
+        ("cuit", EMPLEADOR_CUIT_SELECTOR),
+        ("denominacion", EMPLEADOR_DENOMINACION_SELECTOR),
     ):
         try:
             locator = page.locator(selector)
@@ -344,6 +359,135 @@ async def _leer_empleador(page: Page) -> dict[str, str]:
         except Exception:
             continue
     return empleador
+
+
+async def _seleccionar_representado(
+    page: Page,
+    debug: DebugCapture,
+    cuit_representado: str,
+    error_logs: list[str],
+) -> Optional[str]:
+    """Elige el representado cuando el servicio muestra el selector.
+
+    El servicio abre en ``IndexContribuyente.aspx`` (combo ``ddlCUIT`` +
+    botón ``Aceptar``) cuando la cuenta representa a más de un contribuyente.
+    Con un solo representado el sitio abre directo en el empleador y esta
+    función no interviene.
+
+    Devuelve el CUIT elegido (11 dígitos) o ``None`` si no hubo selector.
+    """
+    selector = page.locator(REPRESENTADO_SELECT_SELECTOR)
+    if await selector.count() == 0:
+        debug.log("sin selector de representados: el servicio abrió en el empleador de la sesión")
+        return None
+    await debug.capture(page, "index_contribuyente")
+
+    opciones = await selector.first.evaluate(
+        "el => Array.from(el.options).map(o => ({"
+        "value: (o.value || '').trim(), "
+        "label: (o.textContent || '').trim()"
+        "}))"
+    ) or []
+    esperado = _solo_digitos(cuit_representado)
+    elegido = ""
+    if esperado:
+        for opcion in opciones:
+            valor = str(opcion.get("value") or "").strip()
+            etiqueta = str(opcion.get("label") or "").strip()
+            if _solo_digitos(valor) == esperado or _solo_digitos(etiqueta).startswith(esperado):
+                elegido = valor or esperado
+                break
+        if not elegido:
+            disponibles = ", ".join(
+                f"{_solo_digitos(opcion.get('value'))} ({str(opcion.get('label') or '').strip()})"
+                for opcion in opciones
+            )
+            mensaje = (
+                f"No se encontró el CUIT representado {esperado} en el selector de representados. "
+                f"Opciones disponibles: {disponibles or 'sin opciones'}"
+            )
+            error_logs.append(mensaje)
+            debug.log_error(mensaje)
+            await debug.capture(page, "representado_no_encontrado")
+            return ""
+    else:
+        # Sin representado explícito se respeta la preselección del sitio.
+        elegido = str((opciones[0] if opciones else {}).get("value") or "").strip()
+        if not elegido:
+            mensaje = "El selector de representados no tiene opciones"
+            error_logs.append(mensaje)
+            debug.log_error(mensaje)
+            await debug.capture(page, "representado_sin_opciones")
+            return ""
+        debug.log(
+            "representado sin solicitud explícita: se elige la primera opción cuit=%s",
+            elegido,
+        )
+
+    debug.log("seleccionando representado cuit=%s", elegido)
+    await selector.first.select_option(value=elegido)
+    aceptar = page.locator(REPRESENTADO_ACEPTAR_SELECTOR)
+    await aceptar.first.wait_for(state="visible", timeout=20_000)
+    await aceptar.first.click(timeout=30_000)
+    # Aceptar deja la sesión en el empleador (Index.aspx): el CUIT del
+    # encabezado es la señal de que la selección se aplicó.
+    try:
+        await page.locator(EMPLEADOR_CUIT_SELECTOR).first.wait_for(
+            state="visible", timeout=NAV_TIMEOUT_MS
+        )
+    except PlaywrightTimeoutError:
+        pass
+    await wait_page_ready(page)
+    debug.log("representado seleccionado cuit=%s url=%s", elegido, page.url)
+    await debug.capture(page, "representado_seleccionado")
+    return _solo_digitos(elegido)
+
+
+async def _verificar_representado(
+    page: Page,
+    debug: DebugCapture,
+    empleador: dict[str, str],
+    cuit_solicitado: str,
+    cuit_seleccionado: Optional[str],
+    error_logs: list[str],
+) -> bool:
+    """Confirma que la sesión quedó posicionada en el representado esperado.
+
+    - Con selector: compara con el CUIT confirmado en ``_seleccionar_representado``.
+    - Sin selector: compara con el representado solicitado por parámetro.
+    - Siempre exige que la cabecera del empleador (``#ctl00_lblCuit``) informe
+      un CUIT válido de 11 dígitos; sin eso no se descarga.
+    Sin expectativa (sin selector y sin representado) solo deja registrado el
+    empleador que informa el sitio.
+    """
+    actual = _solo_digitos(empleador.get("cuit"))
+    if len(actual) != 11:
+        mensaje = (
+            "No se pudo confirmar el representado en Libro de Sueldos Digital: "
+            "la cabecera del empleador no informó un CUIT válido"
+        )
+        error_logs.append(mensaje)
+        debug.log_error(mensaje)
+        await debug.capture(page, "representado_no_confirmado")
+        return False
+    esperado = _solo_digitos(cuit_seleccionado or cuit_solicitado)
+    if not esperado:
+        debug.log(
+            "representado sin solicitud explícita; empleador de sesión cuit=%s",
+            actual,
+        )
+        return True
+    if actual != esperado:
+        mensaje = (
+            f"El empleador de Libro de Sueldos Digital ({actual}) no coincide "
+            f"con el representado solicitado ({esperado})"
+        )
+        error_logs.append(mensaje)
+        debug.log_error(mensaje)
+        await debug.capture(page, "representado_no_confirmado")
+        return False
+    debug.log("verificación de representado OK cuit=%s", actual)
+    return True
 
 
 async def _leer_periodos(page: Page) -> list[dict[str, Any]]:
@@ -610,35 +754,56 @@ async def bot_libro_sueldos_digital_logger(
 
             servicio_page.set_default_timeout(NAV_TIMEOUT_MS)
 
+            # Selección de representado (si el servicio la pide) antes de
+            # navegar: con una sola relación el sitio abre directo en el
+            # empleador y esta interacción no se ejecuta.
+            cuit_seleccionado = await execute_step(
+                debug,
+                servicio_page,
+                "seleccionar_representado",
+                lambda: _seleccionar_representado(
+                    servicio_page, debug, cuit_representado, error_logs
+                ),
+            )
+            if cuit_seleccionado == "":
+                debug.log("Fin por representado no disponible errores=%s", error_logs)
+                await context.close()
+                await browser.close()
+                return results, error_logs, False
+
+            empleador = await _leer_empleador(servicio_page)
+            results["empleador"] = empleador
+            results["representado"] = {
+                "cuit_solicitado": _solo_digitos(cuit_representado),
+                "cuit_seleccionado": cuit_seleccionado or "",
+                "cuit_empleador": _solo_digitos(empleador.get("cuit")),
+                "denominacion": empleador.get("denominacion") or "",
+            }
+            debug.log(
+                "empleador cuit=%s denominacion=%s seleccionado=%s",
+                empleador.get("cuit"),
+                empleador.get("denominacion"),
+                cuit_seleccionado or "(sin selector)",
+            )
+
+            if not await _verificar_representado(
+                servicio_page,
+                debug,
+                empleador,
+                cuit_representado,
+                cuit_seleccionado,
+                error_logs,
+            ):
+                await context.close()
+                await browser.close()
+                return results, error_logs, False
+
             await execute_step(
                 debug,
                 servicio_page,
                 "liquidaciones_ddjj",
                 lambda: _ir_a_liquidaciones(servicio_page, debug),
             )
-
-            empleador = await _leer_empleador(servicio_page)
-            results["empleador"] = empleador
-            debug.log(
-                "empleador cuit=%s denominacion=%s",
-                empleador.get("cuit"),
-                empleador.get("denominacion"),
-            )
-
-            if cuit_representado:
-                esperado = re.sub(r"\D", "", cuit_representado or "")
-                actual = re.sub(r"\D", "", empleador.get("cuit") or "")
-                if esperado and actual and esperado != actual:
-                    mensaje = (
-                        f"El empleador de Libro de Sueldos Digital ({actual}) no coincide "
-                        f"con el representado solicitado ({esperado})"
-                    )
-                    error_logs.append(mensaje)
-                    debug.log_error(mensaje)
-                    await debug.capture(servicio_page, "empleador_no_coincide")
-                    await context.close()
-                    await browser.close()
-                    return results, error_logs, False
 
             objetivos = await execute_step(
                 debug,
@@ -744,6 +909,16 @@ async def main() -> None:
         headless=headless,
     )
     print("OK" if success else "ERROR")
+    representado = results.get("representado") or {}
+    if representado:
+        print(
+            "representado:",
+            representado.get("cuit_empleador") or "(sin informar)",
+            "-",
+            representado.get("denominacion") or "(sin denominación)",
+            f"(solicitado={representado.get('cuit_solicitado') or '-'}"
+            f", seleccionado={representado.get('cuit_seleccionado') or '-'})",
+        )
     print("descargas:", len(results.get("descargas", [])))
     for descarga in results.get("descargas", []):
         print(" -", descarga["archivo"])

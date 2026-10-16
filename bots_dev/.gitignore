@@ -12,3 +12,7 @@ temp
 !requirements.txt
 *.json
 *.csv
+*.log
+*.db
+*.pdf
+
