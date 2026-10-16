@@ -715,3 +715,23 @@ class _SinAws:
 
     def list_instance_types(self):
         raise RuntimeError("AWS no disponible")
+
+
+def test_catalogo_descarta_tipos_que_no_corren_un_worker():
+    """t2.nano/t1.micro no pueden con Chromium: el catálogo los deja afuera."""
+    from unittest.mock import Mock
+
+    from central_api.autoscaler.ec2 import Ec2Fleet, Ec2Settings
+
+    client = Mock()
+    client.describe_subnets.return_value = {"Subnets": [{"SubnetId": "s-1", "AvailabilityZone": "sa-east-1a"}]}
+    client.describe_instance_type_offerings.return_value = {"InstanceTypeOfferings": [
+        {"InstanceType": "t2.nano"}, {"InstanceType": "c5.large"}, {"InstanceType": "c5.xlarge"}]}
+    client.describe_instance_types.return_value = {"InstanceTypes": [
+        {"InstanceType": "t2.nano", "VCpuInfo": {"DefaultVCpus": 1}, "MemoryInfo": {"SizeInMiB": 512}},
+        {"InstanceType": "c5.large", "VCpuInfo": {"DefaultVCpus": 2}, "MemoryInfo": {"SizeInMiB": 4096}},
+        {"InstanceType": "c5.xlarge", "VCpuInfo": {"DefaultVCpus": 4}, "MemoryInfo": {"SizeInMiB": 8192}},
+    ]}
+    rows = Ec2Fleet(Ec2Settings(subnet_ids=("s-1",)), client=client).list_instance_types()
+    assert [r["instance_type"] for r in rows] == ["c5.large", "c5.xlarge"]
+    assert rows[0]["max_concurrency"] == 4 and rows[1]["recommended_max"] == 5

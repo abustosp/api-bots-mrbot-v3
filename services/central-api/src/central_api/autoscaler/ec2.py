@@ -49,6 +49,11 @@ GB_PER_WORKER_MAX = 2.0
 # Tope duro del worker (invariante W-2): nunca mas de 10 jobs simultaneos.
 MAX_WORKER_SEMAPHORE = 10
 
+# Un worker real (Chromium + bot) no corre por debajo de esto: por eso el
+# catálogo descarta los tipos diminutos (t2.nano, t1.micro, etc.).
+MIN_VCPU_BROWSER = 2
+MIN_RAM_GIB_BROWSER = 4.0
+
 # Zonas de lanzamiento seleccionables desde el panel.
 ZONES: dict[str, dict[str, Any]] = {
     "bue": {
@@ -937,6 +942,10 @@ public_ip=$(curl -fsS -H \"X-aws-ec2-metadata-token: $token\" \\
                 specs = {k: v for k, v in specs.items() if k in names} or specs
         rows = []
         for name, (vcpu, ram) in sorted(specs.items(), key=lambda kv: (kv[1][0], kv[1][1], kv[0])):
+            # Un worker de navegador no corre en un tipo diminuto: necesita al
+            # menos ~3 GiB para imagen, Chromium y shm, y 2 vCPU para no ahogarse.
+            if vcpu < MIN_VCPU_BROWSER or ram < MIN_RAM_GIB_BROWSER:
+                continue
             rows.append({
                 "instance_type": name, "vcpu": vcpu, "ram_gib": ram,
                 "suggested_concurrency": self.settings.concurrency_for_type(name, ram),

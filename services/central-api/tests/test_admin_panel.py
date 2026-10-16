@@ -403,3 +403,23 @@ def test_panel_altas_efimeras_muestran_regla_de_ram_y_maximo_por_tipo() -> None:
     confirmacion = html.split("¿Levantar ${count} instancia(s)")[1].split("Generan costo")[0]
     for marca in ("${instance_type}", "en la zona", "semaphore", "sugerido:", "máximo por RAM:"):
         assert marca in confirmacion, marca
+
+
+def test_grupos_de_botones_no_se_pegan_ni_se_solapan() -> None:
+    """Los grupos de botones mantienen separación y envuelven en pantallas chicas."""
+    import re
+
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    css = re.search(r"<style>(.*?)</style>", html, re.S).group(1)
+    reglas = {
+        ".nav": r"\.nav\s*\{[^}]*gap:\s*\d+px[^}]*flex-wrap:\s*wrap",
+        ".form-actions": r"\.form-actions\s*\{[^}]*gap:\s*\d+px[^}]*flex-wrap:\s*wrap",
+        ".toolbar": r"\.toolbar\s*\{[^}]*gap:\s*\d+px[^}]*flex-wrap:\s*wrap",
+        ".actions": r"\.actions\s*\{[^}]*gap:\s*\d+px[^}]*flex-wrap:\s*wrap",
+        ".actions-inner": r"\.actions-inner\s*\{[^}]*gap:\s*\d+px[^}]*flex-wrap:\s*wrap",
+    }
+    for nombre, patron in reglas.items():
+        assert re.search(patron, css), f"{nombre} debe declarar gap y flex-wrap"
+    # Las tablas anchas hacen scroll en vez de comprimir los botones de acciones.
+    assert "overflow-x: auto" in css and "min-width: 760px" in css
