@@ -391,11 +391,10 @@ def _validar_semaphore(concurrency: int | None, row: dict, instance_type: str, z
     raise HTTPException(status_code=400, detail=detalle)
 
 
-def _tipos_de_zona(zone: str) -> tuple[list[dict], str | None]:
-    """Catálogo de una zona, tolerante a fallos de AWS (error por zona)."""
+async def _tipos_de_zona(zone: str) -> tuple[list[dict], str | None]:
+    """Catálogo de una zona (cacheado), tolerante a fallos de AWS (error por zona)."""
     try:
-        fleet = controller._make_fleet(zone)
-        return list(fleet.list_instance_types()), None
+        return list(await controller.catalog_for(zone)), None
     except Exception as exc:  # noqa: BLE001 - el listado debe seguir disponible
         return [], type(exc).__name__
 
@@ -899,7 +898,7 @@ async def get_instance_types(
 ) -> dict:
     require_admin(authorization)
     zone_key = _resolver_zona(zone)
-    rows, error = _tipos_de_zona(zone_key)
+    rows, error = await _tipos_de_zona(zone_key)
     return {
         "success": error is None,
         "default": "c5.xlarge",
@@ -917,17 +916,24 @@ async def get_instance_types(
     description=(
         "Devuelve la zona activa y, por cada zona, su región, tipo de volumen, "
         "zonas de disponibilidad, cuántas instancias efímeras tiene registradas y "
-        "el catálogo de tipos con su sizing. Si el catálogo de una zona no se "
-        "puede consultar, esa zona informa su error y las demás siguen "
-        "disponibles. Requiere autorización administrativa."
+        "el catálogo de tipos con su sizing. Responde rápido: el catálogo solo se "
+        "incluye con ?with_types=true (usar GET /admin/autoscale/instance-types). "
+        "Si el catálogo de una zona no se puede consultar, esa zona informa su "
+        "error y las demás siguen disponibles. Requiere autorización "
+        "administrativa."
     ),
     responses={**_errores_admin()},
 )
-async def get_zones(authorization: str | None = Header(default=None)) -> dict:
+async def get_zones(
+    with_types: bool = False, authorization: str | None = Header(default=None)
+) -> dict:
     require_admin(authorization)
     zones = []
     for key in controller.known_zones():
-        rows, error = await asyncio.to_thread(_tipos_de_zona, key)
+        if with_types:
+            rows, error = await _tipos_de_zona(key)
+        else:
+            rows, error = [], None
         zones.append({
             **_zone_meta(key),
             "instances": controller.instances_in_zone(key),
@@ -939,6 +945,7 @@ async def get_zones(authorization: str | None = Header(default=None)) -> dict:
         "active": controller.resolve_zone(),
         "zones": zones,
         "max_concurrency": 10,
+        "with_types": with_types,
     }
 
 

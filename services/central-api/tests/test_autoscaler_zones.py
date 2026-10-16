@@ -137,7 +137,7 @@ def _catalogo(*rows: dict) -> list[dict]:
 
 @pytest.fixture(autouse=True)
 def estado_aislado(monkeypatch):
-    """Aísla registros, zona activa y flota inyectada entre tests."""
+    """Aísla registros, zona activa, catálogo cacheado y flota inyectada."""
     guardado = {
         "ephemeral": dict(EPHEMERAL_WORKERS),
         "admin": set(ADMIN_NODES),
@@ -153,6 +153,7 @@ def estado_aislado(monkeypatch):
     controller.set_fleet_for_testing(None)
     controller.EVENTS.clear()
     controller.DRAIN_TASK = None
+    controller.clear_catalog_cache()
     zone_state.ACTIVE_ZONE = zone_state.DEFAULT_ZONE
     zone_state.MANUAL_IDS.clear()
     for nombre, valor in {
@@ -630,8 +631,13 @@ def test_endpoint_zones_lista_zonas_y_el_put_cambia_la_activa(monkeypatch, admin
     assert por_clave["bue"]["volume_type"] == "gp2"
     assert por_clave["bue"]["availability_zones"] == ["us-east-1-bue-1a"]
     assert por_clave["bue"]["instances"] == 1 and por_clave["sp"]["instances"] == 0
-    assert por_clave["sp"]["types"][0]["instance_type"] == "t3.xlarge"
     assert all(zona["error"] is None for zona in listado["zones"])
+    # Sin with_types el listado responde rápido (el catálogo se pide aparte).
+    assert all(zona["types"] == [] for zona in listado["zones"])
+
+    con_tipos = asyncio.run(admin_autoscale.get_zones(with_types=True))
+    por_clave = {zona["key"]: zona for zona in con_tipos["zones"]}
+    assert por_clave["sp"]["types"][0]["instance_type"] == "t3.xlarge"
 
     cuerpo = admin_autoscale.ZoneBody(zone="sp", motivo="cambio de zona de lanzamiento")
     cambiado = asyncio.run(admin_autoscale.put_autoscale_zone(cuerpo))
@@ -652,12 +658,32 @@ def test_endpoint_zones_informa_el_error_de_la_zona_que_falla(monkeypatch, admin
     flotas["sp"].list_instance_types = explota
     _flota_por_zona(monkeypatch, flotas)
 
-    listado = asyncio.run(admin_autoscale.get_zones())
+    listado = asyncio.run(admin_autoscale.get_zones(with_types=True))
 
     por_clave = {zona["key"]: zona for zona in listado["zones"]}
     assert por_clave["sp"]["error"] == "RuntimeError" and por_clave["sp"]["types"] == []
     assert por_clave["bue"]["error"] is None
     assert [t["instance_type"] for t in por_clave["bue"]["types"]] == ["c5.xlarge"]
+
+
+def test_catalogo_por_zona_se_cachea_y_se_puede_forzar(monkeypatch, admin_sin_efectos):
+    admin_autoscale = admin_sin_efectos
+    flotas = {"bue": FakeFleet(_catalogo((8.0, 4, "c5.xlarge")))}
+    _flota_por_zona(monkeypatch, flotas)
+    llamadas = []
+    original = flotas["bue"].list_instance_types
+
+    def contando():
+        llamadas.append(1)
+        return original()
+
+    flotas["bue"].list_instance_types = contando
+
+    asyncio.run(controller.catalog_for("bue"))
+    asyncio.run(controller.catalog_for("bue"))
+    assert len(llamadas) == 1  # la segunda sale de la caché
+    asyncio.run(controller.catalog_for("bue", force=True))
+    assert len(llamadas) == 2
 
 
 def test_instance_types_acepta_zone_y_rechaza_zonas_invalidas(monkeypatch, admin_sin_efectos):

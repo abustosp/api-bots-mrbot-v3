@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
 from collections import deque
 from datetime import datetime, timezone
 from statistics import fmean
@@ -41,6 +43,28 @@ LAST_SCALE_UP_PENDING: int | None = None
 QUEUE_PRESSURE_SINCE: datetime | None = None
 AUTOSCALER_TASK: asyncio.Task | None = None
 DRAIN_TASK: asyncio.Task | None = None
+# Catálogo de tipos por zona con TTL: describe_instance_types es lento y
+# paginado (São Paulo tiene cientos de tipos) y no cambia entre consultas.
+CATALOG_TTL_SECONDS = int(os.environ.get("AUTOSCALE_CATALOG_TTL_SECONDS", "300"))
+_CATALOG: dict[str, tuple[float, list[dict]]] = {}
+
+
+async def catalog_for(zone: str | None = None, *, force: bool = False) -> list[dict]:
+    """Tipos lanzables de la zona (cacheado por TTL), para el panel."""
+    key = resolve_zone(zone)
+    now = time.monotonic()
+    cached = _CATALOG.get(key)
+    if not force and cached is not None and now - cached[0] < CATALOG_TTL_SECONDS:
+        return list(cached[1])
+    fleet = _make_fleet(key)
+    rows = list(await asyncio.to_thread(fleet.list_instance_types))
+    _CATALOG[key] = (now, rows)
+    return list(rows)
+
+
+def clear_catalog_cache() -> None:
+    """Invalida la caché de catálogos (pruebas y cambios de configuración)."""
+    _CATALOG.clear()
 
 
 def _settings() -> Any:
