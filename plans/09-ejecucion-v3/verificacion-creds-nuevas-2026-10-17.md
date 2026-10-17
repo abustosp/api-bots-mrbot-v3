@@ -141,7 +141,7 @@ tres módulos con cuentas nuevas. Sus cuerpos también se validaron **offline**
 contra el esquema estricto del worker (`sct`, `mis_facilidades`,
 `mis_comprobantes` OK).
 
-## Hallazgo: corte por deadline en cuentas grandes
+## Corte por deadline en cuentas grandes (corregido)
 
 El agente del cliente corrió `mis_facilidades` con una cuenta de **80 planes
 históricos** y el job terminó `COMPLETO`/`ERROR` con `error_code=deadline_exceeded`
@@ -152,7 +152,7 @@ sí terminaron tardaron ~19 min (68 artefactos) y ~27 min (144 artefactos), así
 una cuenta con muchos planes queda justo en el borde y, al pasarse, **no entrega
 nada** (el camino de excepción reporta `artifacts=[]`).
 
-Recomendaciones (no implementadas, son decisión de producto):
+Alternativas evaluadas:
 1. Subir `--job-timeout` del worker para estos bots/cuentas (solo mueve la pared).
 2. Devolver lo ya recolectado como `PARCIAL` cuando se agota el deadline dentro
 del bucle por plan: en `bots/mis_facilidades/plugin.py` el corte por deadline
@@ -160,6 +160,30 @@ del bucle por plan: en `bots/mis_facilidades/plugin.py` el corte por deadline
    terminar el bucle, en vez de propagar y perder los planes y artefactos
    anteriores. Es el fix real, ~6 líneas, y aplica el mismo criterio que ya
    usamos para las secciones vacías.
+
+### Corregido y verificado (`f332995`, `testing-fixes8`)
+
+La opción 2 quedó implementada: el bucle por plan mide lo que tardó cada plan y,
+antes de empezar el siguiente, corta si el tiempo restante no alcanza para otro
+plan como el más lento visto. La corrida termina `PARCIAL` con los planes y
+artefactos ya producidos más un error `DEADLINE_EXCEEDED` con el detalle, en vez
+de perderse todo.
+
+| Cuenta | Deadline del worker | Antes del fix | Después del fix |
+|---|---:|---|---|
+| 80 planes históricos | 300 s (bajado a propósito para forzar el corte en minutos) | `FALLIDO`/`ERROR` `deadline_exceeded`, **0** artefactos a los 1.808 s | **`COMPLETO`/`PARCIAL`, 29 artefactos a los 284 s** |
+| Cuenta de tamaño medio (misma que la corrida de 144 artefactos) | 1.800 s (el normal) | `PARCIAL` con 144 artefactos, ~27 min | **`PARCIAL` con 119 artefactos, 1.570 s**, sin corte |
+
+La segunda fila es la verificación de no-regresión: con presupuesto normal el
+job no se corta, entrega los mismos PDF por vista y XLSX por plan y sigue
+cerrando `PARCIAL` (la diferencia 144 → 119 en el conteo es de la cartera de
+planes de la cuenta entre corridas, no del corte). El `--job-timeout 300` fue
+temporal y ya quedó restaurado en el worker de testing (sin el flag, usa el
+default de 1800 s).
+
+Tests: `tests/test_portal_mis_facilidades.py` cubre el corte (procesa el plan en
+curso, deja el PDF y el XLSX en disco y devuelve el error de deadline) y el
+camino normal (cinco planes sin errores). Worker: **777 passed**.
 
 ## Límites de esta ronda
 
