@@ -78,6 +78,39 @@ de punta a punta contra `https://testing-central.mrbot.com.ar` con las imágenes
   `carga_b64: false` → **202**; el mismo cuerpo con `archivo_b64: "QQ=="` → **422
   `file_not_uploaded`** (la protección sigue activa cuando hay contenido).
 
+## Hallazgo principal sobre el diagnóstico reportado
+
+El síntoma "casi todos los bots dan `FALLIDO target_unavailable`" se descompone en
+tres causas distintas, todas verificadas en esta corrida:
+
+1. **Errores transitorios del portal que hoy terminan el job en el primer
+   intento.** Dos ejemplos medidos con credenciales válidas contra la central de
+   testing: `sifere/consultar` falló con `target_unavailable` a los 287 s y el
+   intento siguiente terminó `OK` con el mismo cuerpo y la misma cuenta (455 s,
+   consolidados y jurisdicciones descargados); `sct/consultar` mostró lo mismo
+   antes del defecto 4 (un intento `sct_section_open_failed`, el siguiente OK).
+   El protocolo marca `TargetUnavailableError.reintentable = True`, pero **nadie
+   lo consume**: ni el worker reintenta el job ni la central lo reencola
+   (`central_api/internal/job_results.py` pasa el job a `FALLIDO` apenas el
+   worker reporta el error). En producción los `FALLIDO` por estos diagnósticos
+   tienen `attempts = 1` con `max_attempts = 3`.
+   Recomendación: reencolar en la central cuando la categoría sea
+   `TARGET_UNAVAILABLE`/`DEADLINE_EXCEEDED` y `attempts < max_attempts`,
+   cuidando que el reintento no consuma cuota dos veces (la reserva ya existe por
+   job).
+2. **Cuenta sin el servicio habilitado** (`arca_service_not_visible`): la causa
+   es la cuenta, no el bot. El catálogo de la cuenta no lista la tarjeta y V1
+   también fallaba (`No se encuentra habilitado el servicio de SCT`, log del
+   2026-03-15 de la cuenta de prueba).
+3. **Representado o período inexistente** (`represented_cuit_not_selectable`,
+   `represented_name_not_selectable`, `*_period_not_found`,
+   `portal_iva_period_not_available`): también son datos; el mismo caso corre OK
+   con una cuenta/relación/período válidos (verificado por módulo).
+
+Los defectos 3, 4, 8 y 9 eran lo único atribuible al código y ya están
+corregidos; con ellos los quince módulos de la lista cierran `OK` contra la
+central de testing.
+
 ## Observaciones abiertas
 
 1. **Contrato público de `arca_service_not_visible`** (pendiente de decisión de
