@@ -320,16 +320,6 @@ class CargaPortalIvaPlugin:
                 await runtime.event_sink.progress(
                     phase="PROCESANDO", percent=65, message="Cargando aperturas"
                 )
-                if entrada.prorrateo_global and total_cf is not None and rutas_abs.get("csv_cf_path"):
-                    # Precondicion del portal (igual que el V1): el CF Computable Global
-                    # debe estar cargado antes de abrir Informacion Adicional.
-                    await self._seccion(
-                        resultados["secciones"], "credito_fiscal_compras",
-                        self._credito_fiscal_compras(pagina, total_cf, runtime),
-                        pagina,
-                    )
-                    with contextlib.suppress(Exception):
-                        await pagina.volver_al_inicio()
                 for seccion, campo in (
                     ("CF", "csv_cf_path"),
                     ("CF Restitucion", "csv_cf_restitucion_path"),
@@ -343,6 +333,22 @@ class CargaPortalIvaPlugin:
                         self._cargar_apertura_csv(pagina, seccion, rutas_abs[campo], runtime),
                         pagina,
                     )
+                    # Precondicion del portal (igual que el V1): el CF Computable
+                    # Global se edita recien despues de que la apertura CF quedo
+                    # cargada (``status == "ok"``) y con el mismo CSV.
+                    if (
+                        seccion == "CF"
+                        and entrada.prorrateo_global
+                        and total_cf is not None
+                        and resultados["secciones"].get("CF") == f"{seccion}: cargado"
+                    ):
+                        await self._seccion(
+                            resultados["secciones"], "credito_fiscal_compras",
+                            self._credito_fiscal_compras(pagina, total_cf, runtime),
+                            pagina,
+                        )
+                        with contextlib.suppress(Exception):
+                            await pagina.volver_al_inicio()
         except ErrorDeBot:
             raise
         except Exception as exc:
