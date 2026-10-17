@@ -83,12 +83,19 @@ producción los `FALLIDO` de estos diagnósticos tienen `attempts = 1` de
 | 4 | Revisión por módulo (ver `verificacion-modulos-2026-10-17.md` y los informes `report_div_*`). |
 | Retransmisión | Recomendación pendiente de decisión de producto: reencolar `TARGET_UNAVAILABLE`/`DEADLINE_EXCEEDED` mientras `attempts < max_attempts`. |
 
-## 6. Pruebas de contraste (V1/V2 vs V3)
+## 7. Hallazgos por módulo (V1/V2 vs V3, con evidencia)
 
-- **Por módulo, local**: los agentes de divergencia corren el logger V1/V2 y el
-  plugin V3 con los mismos 3 juegos de credenciales (ver `report_div_*.md`).
-- **V2 en el datacenter**: se levanta la V2 en api2 (`~/v2-api-bots-mrbot`, puerto
-  5011) y se repiten los mismos casos desde el mismo host donde la V3 falló
-  (ver `report_v1v2_api2.md`).
-- **3 casos por endpoint modificado** contra la central de testing
-  (`tools/local_run/e2e_testing.py`, cuerpos en `/tmp/e2e3/`).
+| Módulo | Divergencia encontrada | Veredicto |
+|---|---|---|
+| `sct` | ARCA a veces redirige el **popup** de SCT a su login. V1/V2 lo detectan (`bots_dev/sct/sct_bot_logger.py:159-194`), vuelven a autenticar en el mismo popup y reabren el servicio; el V3 lo pasaba a la preparación del iframe y moría con `sct_frame_missing`. | BUG corregido: `sct/plugin.py` + `runtime/portals/sct.py` (reautenticación en el popup y reapertura). Medido: V1 3/3, V2 3/3, V3 8/9 antes y 9/9 después. |
+| `declaracion_en_linea` | Sin divergencia funcional: V1, V2 y V3 consultan mes a mes, toleran períodos sin DDJJ si hay al menos uno con datos y fallan sólo con el rango vacío. `representado_nombre` es etiqueta de salida en los tres, no clave de selección. | OK / DATOS. Los 1.376 fallos de producción se explican por el build de worker previo al port (`plugin_service_api_mismatch`) y por la capa ARCA de sincronización ya corregida. Medido con rango parcial 202606-202612: V1 4/7OK, V2 4/7OK, V3 4/7OK. |
+| `mis_retenciones` | V1/V2 (`app/bot/mis_retenciones_bot.py::_ensure_relation`) devuelven un booleano y agregan "No se pudo seleccionar el representado … en Mis Retenciones" a `error_logs` y **continúan**; el portal V3 lanzaba `represented_cuit_not_selectable` (10 fallos recientes). | BUG corregido (paridad V1/V2): el portal devuelve `False` y el plugin deja el aviso. |
+
+## 8. Estado de las pruebas de contraste
+
+- `sct`: 3 filas × 3 corridas V3 + V1 + V2 (ver `report_div_sct.md`).
+- `declaracion_en_linea`: 3 filas + rango parcial, V1/V2/V3 (ver `report_div_declaracion_en_linea.md`).
+- `sifere`, `mis_facilidades`: en curso (`report_div_sifere.md`, `report_div_mis_facilidades.md`).
+- V2 en api2: servicio levantado y verificado; la comparación V1/V2 en vivo depende de una API key de V2 (ver `report_v1v2_api2.md`).
+- 3 casos por endpoint modificado contra la central de testing: `report_3casos_central.md`, `report_3casos_misret_rcel.md`, `report_3casos_libros_piva.md`.
+
