@@ -141,6 +141,26 @@ tres módulos con cuentas nuevas. Sus cuerpos también se validaron **offline**
 contra el esquema estricto del worker (`sct`, `mis_facilidades`,
 `mis_comprobantes` OK).
 
+## Hallazgo: corte por deadline en cuentas grandes
+
+El agente del cliente corrió `mis_facilidades` con una cuenta de **80 planes
+históricos** y el job terminó `COMPLETO`/`ERROR` con `error_code=deadline_exceeded`
+a los **1.808 s** y **0 artefactos**. El tope es del worker
+(`job_default_timeout_seconds = 1800`, `bot_worker/config.py:108`), no del
+cliente ni de la cuenta. Para calibrar: las dos corridas de `mis_facilidades` que
+sí terminaron tardaron ~19 min (68 artefactos) y ~27 min (144 artefactos), así que
+una cuenta con muchos planes queda justo en el borde y, al pasarse, **no entrega
+nada** (el camino de excepción reporta `artifacts=[]`).
+
+Recomendaciones (no implementadas, son decisión de producto):
+1. Subir `--job-timeout` del worker para estos bots/cuentas (solo mueve la pared).
+2. Devolver lo ya recolectado como `PARCIAL` cuando se agota el deadline dentro
+del bucle por plan: en `bots/mis_facilidades/plugin.py` el corte por deadline
+   puede atraparse en el mismo `except` que ya registra el error por plan y
+   terminar el bucle, en vez de propagar y perder los planes y artefactos
+   anteriores. Es el fix real, ~6 líneas, y aplica el mismo criterio que ya
+   usamos para las secciones vacías.
+
 ## Límites de esta ronda
 
 1. `rcel` y `liquidacion_granos` corrieron sin el flag de subida en la primera
