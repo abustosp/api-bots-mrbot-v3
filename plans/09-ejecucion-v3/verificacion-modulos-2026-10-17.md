@@ -78,6 +78,58 @@ de punta a punta contra `https://testing-central.mrbot.com.ar` con las imágenes
   `carga_b64: false` → **202**; el mismo cuerpo con `archivo_b64: "QQ=="` → **422
   `file_not_uploaded`** (la protección sigue activa cuando hay contenido).
 
+## Matriz de 3 casos por endpoint modificado
+
+Segunda vuelta de verificación (17-10-2026, tarde), contra la central de testing
+con las imágenes `testing-fixes5` (`7958781` + los fixes de `sct` tolerante,
+`mis_retenciones` sin cortar el job, `mis_facilidades` por sección y el ciclo de
+imports). Cada caso es un job real con credenciales del corpus V1/V2
+(`sql_app_mrbot1.db`), enviado con los nombres de campo legados que la central
+acepta (`cuit_login`, `clave`, `cuit_representado`).
+
+### `POST /sct/consulta`
+
+| Caso | Cuerpo | HTTP | Estado / result | Archivos | Tiempo |
+|---|---|---:|---|---:|---:|
+| 1 | credenciales A, `deudas_pdf_minio` | 202 | `COMPLETO` / `OK` | 1 PDF | 32,6 s |
+| 2 | credenciales B | 202 | `COMPLETO` / `OK` | 1 PDF | 27,2 s |
+| 3 | credenciales C | 202 | `COMPLETO` / `OK` | 1 PDF | 27,1 s |
+| 4 | A + `b64:null`, `carga_b64:false`, `archivo_b64:""`, `incluir_base64:false`, `carga_s3:false` | 202 | `COMPLETO` / `OK` | 1 PDF | 29,1 s |
+| 5 | A + los mismos campos vacíos con `carga_s3:true` | 202 | `COMPLETO` / `OK` | 1 PDF | 27,5 s |
+| 6 | A + `archivo_b64:"QQ=="` | 422 | — | — | 0,3 s |
+
+Los casos 4 y 5 confirman que los campos legados vacíos ya no se confunden con
+"archivo no subido" y que el job corre el flujo completo (antes quedaban
+`PENDIENTE` en la matriz acotada a 120 s de polling y se cancelaban). El caso 6
+confirma que la protección sigue viva cuando hay contenido real: 422 con
+`file_not_uploaded`.
+
+### `POST /mis_facilidades/consulta`
+
+| Caso | HTTP | Estado / result | Planes | Artefactos | Tiempo |
+|---:|---:|---|---:|---:|---:|
+| 1 | 202 | `COMPLETO` / `OK` | 11 | 50 | 374,7 s |
+| 2 | 202 | `COMPLETO` / `OK` | 11 | 50 | 349,3 s |
+| 3 | 202 | `COMPLETO` / `PARCIAL` | 11 | 42 | 352,7 s |
+
+El caso 3 es la prueba directa del fix: una sección de ese plan no se pudo
+capturar y la corrida igual entregó 42 artefactos como `PARCIAL`. Antes ese mismo
+error salía como `FALLIDO` (`target_unavailable` / `target_unavailable_unclassified`)
+y el cliente no recibía nada.
+
+### Endpoints de `central-api`
+
+| Endpoint | Casos | Resultado |
+|---|---|---|
+| `GET /utilidades/apoc/{cuit}` | 3 CUIT presentes en la tabla de AFIP + 1 CUIT válido fuera de la tabla | 200 con `apoc=true` en los tres primeros y `apoc=false` en el cuarto; sin copia provisionada. |
+| `POST /uploads` + campos `*_b64`/`carga_s3` vacíos | 6 (4 de ellos por `sct`) | Ver matriz de `sct` arriba; el flag `file_not_uploaded` sólo aparece con contenido. |
+
+Límite declarado: `POST /portal_iva/carga` **no** se ejecutó contra la central.
+El flujo V1/V2/V3 del bot borra el contenido previo del libro antes de importar
+(`eliminar_todo()`), y no hay confirmación de que los representados del corpus
+sean descartables ni de que el worker apunte a un sandbox de ARCA. Queda como
+verificación pendiente con datos y entorno de prueba explícitos.
+
 ## Hallazgo principal sobre el diagnóstico reportado
 
 El síntoma "casi todos los bots dan `FALLIDO target_unavailable`" se descompone en
@@ -173,14 +225,16 @@ clave pública de la central, POST, polling y descarga de artefactos).
 
 ## Estado de la infraestructura de prueba
 
-- `central-testing` (api2) corre las imágenes `mrbot-central-api:testing-fixes2`
-  y `mrbot-bot-worker:testing-fixes2` (build local con `./build-and-push.sh`
+- `central-testing` (api2) corre las imágenes `mrbot-central-api:testing-fixes5`
+  y `mrbot-bot-worker:testing-fixes5` (build local con `./build-and-push.sh`
   + `docker compose pull/up`), con migraciones aplicadas y un worker propio
-  (`mrbot-central-testing-worker`) registrado en el inventario.
+  (`mrbot-central-testing-worker`) registrado en el inventario. El tag se
+  actualizó tres veces durante la jornada (`testing-fixes3` → `fixes4` →
+  `fixes5`): cada tag sólo agrega fixes ya commiteados y verificados localmente.
 - Cambios locales en `~/central-testing` (no versionados, respaldo en
   `compose.yaml.bak-*`):
   - `compose.yaml`: `image:` de central y migrate pasa a la imagen del registry
-    con tag `testing-fixes2`, y se agrega el servicio `bot-worker`
+    con tag `testing-fixes5`, y se agrega el servicio `bot-worker`
     (`--central-url http://central-api:8000`,
     `--advertised-url http://bot-worker:8080`, `--concurrency 5`, `shm_size 2gb`,
     red `control`, `depends_on: central-api healthy`).
