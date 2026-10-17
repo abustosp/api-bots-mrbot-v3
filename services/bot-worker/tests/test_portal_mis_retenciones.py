@@ -85,6 +85,17 @@ def test_cuit_invalido_no_intenta_navegar() -> None:
     assert error.value.diagnostic_code == "represented_cuit_invalid"
 
 
+def test_representado_sin_confirmar_no_corta_el_job() -> None:
+    """V1/V2 no cortaban: `_ensure_relation` devolvía bool y el bot seguía."""
+    class _PageSinRelacion(_Page):
+        def locator(self, selector: str, **_: Any) -> _Loc:
+            return _Loc(visible=False)
+
+    portal = MisRetencionesPortal(_PageSinRelacion())
+
+    assert asyncio.run(portal.seleccionar_representado(CUIT_FICTICIO)) is False
+
+
 def test_nombre_impuesto_v2_se_resuelve_por_codigo() -> None:
     assert _IMPUESTOS["217"] == "217 - SICORE-IMPTO.A LAS GANANCIAS"
 

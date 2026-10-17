@@ -196,8 +196,15 @@ class MisRetencionesPlugin:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
                 servicio = await sesion.open_service(SERVICIO_ARCA, portal="mis_retenciones")
-                await servicio.seleccionar_representado(entrada.representado_cuit)
+                confirmado = await servicio.seleccionar_representado(entrada.representado_cuit)
                 datos, artefactos = await self._consultar(servicio, entrada, runtime)
+                if not confirmado:
+                    # V1/V2: "No se pudo seleccionar el representado ... en Mis
+                    # Retenciones" iba a error_logs y la corrida seguía.
+                    datos.setdefault("avisos", []).append(
+                        "No se pudo confirmar el representado en Mis Retenciones; "
+                        "se consultó la relación activa."
+                    )
         except ErrorDeBot:
             raise
         except Exception as exc:

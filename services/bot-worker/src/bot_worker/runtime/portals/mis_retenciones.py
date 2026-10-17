@@ -83,8 +83,16 @@ class MisRetencionesPortal(PortalArca):
         super().__init__(page, **kwargs)
         self._representado_cuit = ""
 
-    async def seleccionar_representado(self, cuit: str) -> None:
-        """Selecciona la tarjeta de relación propia de Mis Retenciones."""
+    async def seleccionar_representado(self, cuit: str) -> bool:
+        """Selecciona la tarjeta de relación propia de Mis Retenciones.
+
+        Devuelve ``True`` si el representado quedó confirmado en la barra del
+        portal. Como V1/V2 (``app/bot/mis_retenciones_bot.py``:
+        ``_ensure_relation`` devuelve un booleano y el bot agrega el texto
+        "No se pudo seleccionar el representado ... en Mis Retenciones" a
+        ``error_logs`` y **continúa**), la falta de confirmación no corta el
+        job: se consulta la relación activa y el plugin deja el aviso.
+        """
         digits = solo_digitos(cuit)
         if len(digits) != 11:
             raise TargetUnavailableError(
@@ -93,6 +101,7 @@ class MisRetencionesPortal(PortalArca):
             )
         await self.paso("seleccionar_representado", self._seleccionar_representado(digits))
         self._representado_cuit = digits
+        return await self._representado_activo(digits)
 
     async def _seleccionar_representado(self, digits: str) -> None:
         if await self._representado_activo(digits):
@@ -116,10 +125,8 @@ class MisRetencionesPortal(PortalArca):
                         return
             except Exception:
                 continue
-        raise TargetUnavailableError(
-            "no se pudo seleccionar el CUIT representado en Mis Retenciones",
-            diagnostic_code="represented_cuit_not_selectable",
-        )
+        # V1/V2 no cortaban acá: el representado sin confirmar es un aviso de la
+        # corrida (el portal puede mostrar la relación activa sin selector).
 
     async def _representado_activo(self, digits: str) -> bool:
         nav = self.page.locator("#navBarMisRetenciones")
