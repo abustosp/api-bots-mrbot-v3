@@ -34,6 +34,26 @@ def test_payload_desde_fila_mapea_campos_legacy_al_esquema_v3() -> None:
     assert payload["fecha_hasta"] == "30/09/2026"
 
 
+def test_payload_desde_fila_mapea_periodo_desde_de_mis_retenciones() -> None:
+    """La tabla V1 de Mis Retenciones llama periodo_* a fechas DD/MM/AAAA."""
+    propiedades = {"representado_cuit", "representado_nombre", "fecha_desde", "fecha_hasta"}
+
+    payload = _payload_desde_fila(
+        {
+            "denominacion": "ENTIDAD DE PRUEBA",
+            "periodo_desde": "01/09/2026",
+            "periodo_hasta": "30/09/2026",
+        },
+        propiedades,
+        representado="20123456786",
+    )
+
+    assert payload["representado_cuit"] == "20123456786"
+    assert payload["representado_nombre"] == "ENTIDAD DE PRUEBA"
+    assert payload["fecha_desde"] == "01/09/2026"
+    assert payload["fecha_hasta"] == "30/09/2026"
+
+
 def test_payload_desde_fila_deriva_cuits_consulta_y_formatos() -> None:
     propiedades = {"cuits_consulta", "excel", "pdf"}
 

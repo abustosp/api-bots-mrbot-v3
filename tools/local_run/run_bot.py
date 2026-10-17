@@ -466,10 +466,14 @@ def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "
     if "representado_cuit" in propiedades and representado:
         cuerpo["representado_cuit"] = representado
     # El plugin usa nombres distintos de la tabla V1 en dos casos.
-    if "fecha_desde" in propiedades and "desde" in fila and "fecha_desde" not in fila:
-        fila = {**fila, "fecha_desde": _fecha_v1(fila["desde"])}
-    if "fecha_hasta" in propiedades and "hasta" in fila and "fecha_hasta" not in fila:
-        fila = {**fila, "fecha_hasta": _fecha_v1(fila["hasta"])}
+    if "fecha_desde" in propiedades and "fecha_desde" not in fila:
+        valor_desde = fila.get("desde", fila.get("periodo_desde"))
+        if valor_desde not in (None, "", "null"):
+            fila = {**fila, "fecha_desde": _fecha_v1(valor_desde)}
+    if "fecha_hasta" in propiedades and "fecha_hasta" not in fila:
+        valor_hasta = fila.get("hasta", fila.get("periodo_hasta"))
+        if valor_hasta not in (None, "", "null"):
+            fila = {**fila, "fecha_hasta": _fecha_v1(valor_hasta)}
     if "representado_nombre" in propiedades and not fila.get("representado_nombre"):
         for campo_nombre in ("denominacion", "nombre_representado"):
             valor_nombre = fila.get(campo_nombre)
