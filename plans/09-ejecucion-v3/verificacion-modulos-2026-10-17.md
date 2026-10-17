@@ -108,9 +108,24 @@ de punta a punta contra `https://testing-central.mrbot.com.ar` con las imágenes
 
 ## Estado de la infraestructura de prueba
 
-- `central-testing` (api2) corre las imágenes `mrbot-central-api:testing-fixes`
-  y `mrbot-bot-worker:testing-fixes` con migraciones aplicadas y un worker
-  (`mrbot-central-testing-worker`) registrado en el inventario
-  (`WORKER_NODES=bot-worker:8080`).
-- Usuario de prueba creado en esa central (`agente-test@mrbot.com.ar`), con
-  clave `mbk_...` fuera del repositorio.
+- `central-testing` (api2) corre las imágenes `mrbot-central-api:testing-fixes2`
+  y `mrbot-bot-worker:testing-fixes2` (build local con `./build-and-push.sh`
+  + `docker compose pull/up`), con migraciones aplicadas y un worker propio
+  (`mrbot-central-testing-worker`) registrado en el inventario.
+- Cambios locales en `~/central-testing` (no versionados, respaldo en
+  `compose.yaml.bak-*`):
+  - `compose.yaml`: `image:` de central y migrate pasa a la imagen del registry
+    con tag `testing-fixes2`, y se agrega el servicio `bot-worker`
+    (`--central-url http://central-api:8000`,
+    `--advertised-url http://bot-worker:8080`, `--concurrency 5`, `shm_size 2gb`,
+    red `control`, `depends_on: central-api healthy`).
+  - `central.env`: `WORKER_NODES=bot-worker:8080` (el registro exige que el nodo
+    esté inventariado) y `PROXY_BOTS=certificado_mipyme` con
+    `PROXY_BOTS_HOST/USERNAME/PASSWORD/COUNTRY/PORT_MIN/PORT_MAX` igual que
+    producción (sin eso, `certificado_mipyme` falla con timeout en el paso de
+    selección de representado).
+- Usuario de prueba creado en esa central (`agente-test@mrbot.com.ar`, tipo
+  `PRUEBA`) con clave `mbk_...` guardada fuera del repositorio.
+- Verificación live de las dos correcciones de central-api: `/utilidades/apoc`
+  descarga/refresca la tabla real de AFIP (ver arriba) y el cuerpo con campos
+  `b64`/`carga_s3` vacíos se acepta con 202.
