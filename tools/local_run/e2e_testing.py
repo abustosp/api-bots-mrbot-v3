@@ -170,7 +170,7 @@ def main() -> int:
         resultados.append(resultado)
     if args.out:
         json.dump(resultados, open(args.out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    return 0 if all(r.get("result") in {"OK", "PARCIAL"} or r.get("status") == "COMPLETO" for r in resultados) else 1
+    return 0 if all(r.get("status") == "COMPLETO" and r.get("result") in {"OK", "PARCIAL"} for r in resultados) else 1
 
 
 if __name__ == "__main__":
