@@ -13,7 +13,9 @@ stubs en linea ni entradas duplicadas).
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
+from types import ModuleType
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Protocol
 
 from mrbot_contracts.version import PROTOCOL_VERSION as CONTRACT_PROTOCOL_VERSION
@@ -91,121 +93,6 @@ class BotPlugin(Protocol):
     async def execute(self, payload: Any, runtime: BotRuntime) -> BotResult: ...
 
 
-from bot_worker.bots.apoc.plugin import ApocPlugin  # noqa: E402
-from bot_worker.bots.aportes_en_linea.plugin import (  # noqa: E402
-    AportesEnLineaPlugin,
-)
-from bot_worker.bots.arba.plugin import ArbaPlugin  # noqa: E402
-from bot_worker.bots.carga_portal_iva.plugin import (  # noqa: E402
-    CargaPortalIvaPlugin,
-)
-from bot_worker.bots.ccma.plugin import CcmaPlugin  # noqa: E402
-from bot_worker.bots.ccma_compensacion.plugin import (  # noqa: E402
-    CcmaCompensacionPlugin,
-)
-from bot_worker.bots.certificado_mipyme.plugin import (  # noqa: E402
-    CertificadoMipymePlugin,
-)
-from bot_worker.bots.compensaciones.plugin import (  # noqa: E402
-    CompensacionesPlugin,
-)
-from bot_worker.bots.comprobantes.plugin import ComprobantesPlugin  # noqa: E402
-from bot_worker.bots.consulta_cuit.plugin import (  # noqa: E402
-    ConsultaCuitPlugin,
-)
-from bot_worker.bots.consulta_pagos_vep.plugin import (  # noqa: E402
-    ConsultaPagosVepPlugin,
-)
-from bot_worker.bots.controladores_fiscales.plugin import (  # noqa: E402
-    ControladoresFiscalesPlugin,
-)
-from bot_worker.bots.declaracion_en_linea.plugin import (  # noqa: E402
-    DeclaracionEnLineaPlugin,
-)
-from bot_worker.bots.facturometro.plugin import FacturometroPlugin  # noqa: E402
-from bot_worker.bots.hacienda.plugin import HaciendaPlugin  # noqa: E402
-from bot_worker.bots.libros_portal_iva.plugin import (  # noqa: E402
-    LibrosPortalIvaPlugin,
-)
-from bot_worker.bots.libro_sueldos_digital.plugin import (  # noqa: E402
-    LibroSueldosDigitalPlugin,
-)
-from bot_worker.bots.liquidacion_granos.plugin import (  # noqa: E402
-    LiquidacionGranosPlugin,
-)
-from bot_worker.bots.mis_comprobantes.plugin import (  # noqa: E402
-    MisComprobantesPlugin,
-)
-from bot_worker.bots.mis_facilidades.plugin import (  # noqa: E402
-    MisFacilidadesPlugin,
-)
-from bot_worker.bots.mis_retenciones.plugin import (  # noqa: E402
-    MisRetencionesPlugin,
-)
-from bot_worker.bots.mis_retenciones_iva_simple.plugin import (  # noqa: E402
-    MisRetencionesIvaSimplePlugin,
-)
-from bot_worker.bots.moa.plugin import MoaPlugin  # noqa: E402
-from bot_worker.bots.pago_devoluciones.plugin import (  # noqa: E402
-    PagoDevolucionesPlugin,
-)
-from bot_worker.bots.portal_iva.plugin import PortalIvaPlugin  # noqa: E402
-from bot_worker.bots.rcel.plugin import RcelPlugin  # noqa: E402
-from bot_worker.bots.retper_iibb_agip.plugin import (  # noqa: E402
-    RetperIibbAgipPlugin,
-)
-from bot_worker.bots.retper_iibb_agip.retper_iibb_agip_bot_xvfb import (  # noqa: E402
-    RetperIibbAgipXvfePlugin,
-)
-from bot_worker.bots.retper_iibb_misiones.plugin import (  # noqa: E402
-    RetperIibbMisionesPlugin,
-)
-from bot_worker.bots.sct.plugin import SctPlugin  # noqa: E402
-from bot_worker.bots.sifere.plugin import SiferePlugin  # noqa: E402
-from bot_worker.bots.siper.plugin import SiperRealPlugin  # noqa: E402
-from bot_worker.bots.srt.plugin import SrtPlugin  # noqa: E402
-from bot_worker.bots.vep_archivo.plugin import VepArchivoPlugin  # noqa: E402
-from bot_worker.bots.vep_ccma.plugin import VepCcmaPlugin  # noqa: E402
-
-#: Instancias declarativas, una por bot (sin duplicados por nombre).
-_PLUGINS: tuple[BotPlugin, ...] = (
-    ApocPlugin(),  # type: ignore[arg-type]
-    AportesEnLineaPlugin(),  # type: ignore[arg-type]
-    ArbaPlugin(),  # type: ignore[arg-type]
-    CargaPortalIvaPlugin(),  # type: ignore[arg-type]
-    CcmaPlugin(),  # type: ignore[arg-type]
-    CcmaCompensacionPlugin(),  # type: ignore[arg-type]
-    CertificadoMipymePlugin(),  # type: ignore[arg-type]
-    CompensacionesPlugin(),  # type: ignore[arg-type]
-    ComprobantesPlugin(),  # type: ignore[arg-type]
-    ConsultaCuitPlugin(),  # type: ignore[arg-type]
-    ConsultaPagosVepPlugin(),  # type: ignore[arg-type]
-    ControladoresFiscalesPlugin(),  # type: ignore[arg-type]
-    DeclaracionEnLineaPlugin(),  # type: ignore[arg-type]
-    FacturometroPlugin(),  # type: ignore[arg-type]
-    HaciendaPlugin(),  # type: ignore[arg-type]
-    LibrosPortalIvaPlugin(),  # type: ignore[arg-type]
-    LibroSueldosDigitalPlugin(),  # type: ignore[arg-type]
-    LiquidacionGranosPlugin(),  # type: ignore[arg-type]
-    MisComprobantesPlugin(),  # type: ignore[arg-type]
-    MisFacilidadesPlugin(),  # type: ignore[arg-type]
-    MisRetencionesPlugin(),  # type: ignore[arg-type]
-    MisRetencionesIvaSimplePlugin(),  # type: ignore[arg-type]
-    MoaPlugin(),  # type: ignore[arg-type]
-    PagoDevolucionesPlugin(),  # type: ignore[arg-type]
-    PortalIvaPlugin(),  # type: ignore[arg-type]
-    RcelPlugin(),  # type: ignore[arg-type]
-    RetperIibbAgipPlugin(),  # type: ignore[arg-type]
-    RetperIibbMisionesPlugin(),  # type: ignore[arg-type]
-    SctPlugin(),  # type: ignore[arg-type]
-    SiferePlugin(),  # type: ignore[arg-type]
-    SiperRealPlugin(),  # type: ignore[arg-type]
-    SrtPlugin(),  # type: ignore[arg-type]
-    VepArchivoPlugin(),  # type: ignore[arg-type]
-    VepCcmaPlugin(),  # type: ignore[arg-type]
-)
-
-
 def _build_registry(plugins: tuple[BotPlugin, ...]) -> dict[str, BotPlugin]:
     """Indexa por nombre canonico; un duplicado es error, no fusion."""
     registry: dict[str, BotPlugin] = {}
@@ -217,18 +104,50 @@ def _build_registry(plugins: tuple[BotPlugin, ...]) -> dict[str, BotPlugin]:
     return registry
 
 
-REGISTRY: dict[str, BotPlugin] = _build_registry(_PLUGINS)
+def _cargar_plugins() -> ModuleType:
+    """Importa ``bots/_plugins`` en el primer uso (evita el ciclo con portales).
 
-#: Variantes por modo de un bot del catálogo (por ejemplo ``<bot>_xvfb``). No son
-#: bots nuevos: no entran en ``list_manifests`` ni en la paridad con el catálogo
-#: público, y solo se eligen desde ``get_plugin_para_payload``.
-_VARIANTES: tuple[BotPlugin, ...] = (RetperIibbAgipXvfePlugin(),)  # type: ignore[arg-type]
-VARIANTES: dict[str, BotPlugin] = _build_registry(_VARIANTES)
+    El modulo de instancias importa todos los plugins y los plugins importan
+    la capa de portales. Hacerlo al importar este archivo cerraba el ciclo
+    ``portals.base`` -> ``bots`` -> ``registry`` -> plugins -> ``portals``, asi
+    que cualquier import que empezara por ``bot_worker.runtime.portals``
+    fallaba con un ImportError de importacion parcial.
+    """
+    return importlib.import_module("bot_worker.bots._plugins")
+
+
+_REGISTRY: dict[str, BotPlugin] | None = None
+_VARIANTES: dict[str, BotPlugin] | None = None
+
+
+def registro() -> dict[str, BotPlugin]:
+    """Registro de bots de la imagen, construido en el primer acceso."""
+    global _REGISTRY
+    if _REGISTRY is None:
+        _REGISTRY = _build_registry(_cargar_plugins().PLUGINS)
+    return _REGISTRY
+
+
+def variantes() -> dict[str, BotPlugin]:
+    """Variantes por modo (por ejemplo ``<bot>_xvfb``), en el primer acceso."""
+    global _VARIANTES
+    if _VARIANTES is None:
+        _VARIANTES = _build_registry(_cargar_plugins().VARIANTES)
+    return _VARIANTES
+
+
+def __getattr__(name: str) -> Any:
+    """Mantiene ``REGISTRY``/``VARIANTES`` como atributos del modulo."""
+    if name == "REGISTRY":
+        return registro()
+    if name == "VARIANTES":
+        return variantes()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_plugin(nombre: str) -> BotPlugin | None:
     """Devuelve el plugin por nombre canónico, o la variante si es su nombre."""
-    return REGISTRY.get(nombre) or VARIANTES.get(nombre)
+    return registro().get(nombre) or variantes().get(nombre)
 
 
 def pide_pantalla_virtual(payload: Any) -> bool:
@@ -255,15 +174,15 @@ def get_plugin_para_payload(nombre: str, payload: Any) -> BotPlugin | None:
     normal y nada cambia.
     """
     if pide_pantalla_virtual(payload):
-        variante = VARIANTES.get(f"{nombre}_xvfb")
+        variante = variantes().get(f"{nombre}_xvfb")
         if variante is not None:
             return variante
-    return REGISTRY.get(nombre)
+    return registro().get(nombre)
 
 
 def list_manifests() -> list[BotManifest]:
     """Manifiestos de la imagen para /internal/v1/bots y el registro."""
-    return [plugin.manifest for plugin in REGISTRY.values()]  # type: ignore[union-attr]
+    return [p.manifest for p in registro().values()]  # type: ignore[union-attr]
 
 
 def manifest_hash() -> str:
@@ -272,7 +191,7 @@ def manifest_hash() -> str:
     import json
 
     manifests = [
-        p.manifest.to_status_dict() for p in REGISTRY.values()  # type: ignore[union-attr]
+        p.manifest.to_status_dict() for p in registro().values()  # type: ignore[union-attr]
     ]
     return "sha256:" + hashlib.sha256(
         json.dumps(manifests, sort_keys=True).encode()
