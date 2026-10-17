@@ -359,8 +359,24 @@ class ArcaSession:
         return ""
 
     async def _wait_ready(self) -> None:
+        """Espera el documento y, acotado, la red quieta (port de V1).
+
+        V1 (``app/utils/arca_login.py::wait_page_ready``) esperaba
+        ``domcontentloaded`` *y* ``networkidle``, cada uno con su propio tope de
+        12 s. El portal de Clave Fiscal y los servicios son SPA: con sólo
+        ``domcontentloaded`` se busca la tarjeta del servicio o el selector de
+        representado antes de que el catálogo se hidrate, y en un enlace lento
+        (datacenter sin proxy) eso se veía como ``arca_service_not_visible``,
+        ``represented_cuit_not_selectable`` o ``sct_frame_missing``
+        intermitentes. ARCA mantiene conexiones de telemetría abiertas, así que
+        el tope se respeta y el timeout se ignora.
+        """
         try:
             await self.page.wait_for_load_state("domcontentloaded", timeout=12_000)
+        except Exception:
+            pass
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=12_000)
         except Exception:
             pass
 
@@ -753,9 +769,24 @@ class ArcaSession:
                 await service_locator.click(timeout=8_000)
             service_page = await popup.value
         except Exception as exc:
+            # V1 (``open_arca_service``): si el popup no abre, reintenta el clic
+            # y, si tampoco, lo dispara por JavaScript en la misma pestaña. Sin
+            # ese reintento el clic puede perderse en una SPA lenta y el flujo
+            # sigue sobre el portal de Clave Fiscal (se veía como
+            # ``arca_service_not_visible``/``sct_frame_missing`` intermitentes).
             service_page = self.page
+            reintentado = False
+            try:
+                await service_locator.click(timeout=3_000)
+                reintentado = True
+            except Exception:
+                with suppress(Exception):
+                    handle = await service_locator.element_handle()
+                    if handle is not None:
+                        await handle.evaluate("el => el.click()")
+                        reintentado = True
             after_url = getattr(self.page, "url", "")
-            if before_url == after_url and type(exc).__name__ not in {
+            if not reintentado and before_url == after_url and type(exc).__name__ not in {
                 "TimeoutError",
                 "PlaywrightTimeoutError",
             }:
@@ -763,11 +794,16 @@ class ArcaSession:
                     "no se pudo abrir el servicio ARCA",
                     diagnostic_code="arca_service_open_failed",
                 ) from exc
-        try:
-            await service_page.wait_for_load_state("domcontentloaded", timeout=12_000)
-        except Exception:
-            pass
+        await self._esperar_pagina(service_page)
         return self._servicio_para(service_page, portal)
+
+    async def _esperar_pagina(self, page: Any) -> None:
+        """Espera documento y red quieta en ``page`` (port de V1 ``wait_page_ready``)."""
+        for estado in ("domcontentloaded", "networkidle"):
+            try:
+                await page.wait_for_load_state(estado, timeout=12_000)
+            except Exception:
+                continue
 
     async def close(self) -> None:
         # BrowserFactory cierra el contexto. Reducir referencias a secretos aquí.

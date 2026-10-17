@@ -292,7 +292,9 @@ def test_busca_servicio_en_iframes_del_portal_arca() -> None:
 
     assert isinstance(service, ArcaServicePage)
     frame = page.frames[0]
-    assert len(frame.clicked) == 1
+    # V1 reintenta el clic cuando el popup no abre (el página falsa nunca abre
+    # popup), así que el mismo enlace se clickea más de una vez.
+    assert 1 <= len(frame.clicked) <= 2
     assert frame.clicked[0].startswith("role:link:")
 
 
