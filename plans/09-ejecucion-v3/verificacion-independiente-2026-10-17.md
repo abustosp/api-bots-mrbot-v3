@@ -32,8 +32,9 @@ Se compararon SHA-256 de los archivos instalados, no solamente los tags:
 | `bots/mis_facilidades/plugin.py` | `58e8ecea8041fdb5` | `02c0c79368b079b7` |
 
 Son prefijos de hash para lectura. **Testing valida esos fixes, no el worker
-viejo de producción.** El nuevo cambio de `runtime/context.py` de esta ronda
-tampoco está desplegado en testing ni producción.
+viejo de producción.** Los cambios nuevos de `runtime/context.py` y del diagnóstico
+`portal_iva_period_save_failed` de esta ronda tampoco están desplegados en
+testing ni producción.
 
 ## Matriz de nuevas ejecuciones locales
 
@@ -121,12 +122,21 @@ el mismo archivo**, no solamente la misma cantidad de bytes.
    ya bien traducida, el período 202609 supera la selección pero queda en
    `verDatosInicialesPresentacion.do`, con formulario de Datos Iniciales y
    `#btnGuardar` deshabilitado. No existen todavía enlaces al libro de ventas.
-   V3 captura el fallo de guardar en `preparar_periodo` y continúa, por lo que
-   acaba mostrando `portal_iva_book_not_visible`. El V2, en cambio, espera que
+   Antes del ajuste de esta auditoría, V3 capturaba el fallo de guardar en
+   `preparar_periodo` y continuaba, por lo que acababa mostrando
+   `portal_iva_book_not_visible`. El V2, en cambio, espera que
    `#btnGuardar` se habilite antes de avanzar (`app/bot/portal_iva_bot.py`,
-   `prepare_period`). No se forzó Registrar ni se eligieron opciones fiscales
-   nuevas para obtener una prueba verde. Este caso no puede darse por resuelto
-   por los éxitos anteriores de otras cuentas/períodos.
+   `prepare_period`). Se reprodujo el error silenciado con una prueba aislada:
+   un timeout del guardado no interrumpía el flujo. El cambio mínimo ahora
+   devuelve `portal_iva_period_save_failed`, sin exponer detalles de la excepción
+   ni continuar hacia descargas/importaciones. Se conserva la rama sin botón
+   de guardado para libros existentes. Afecta también a `carga_portal_iva`, que
+   delega en este método compartido. Pasaron los tres casos nuevos (guardado
+   correcto, guardado fallido y libro sin botón) y las 41 pruebas de ambos flujos.
+   Esto corrige el diagnóstico, no habilita el formulario fiscal ni demuestra
+   una descarga real de ese período. No se forzó Registrar ni se eligieron
+   opciones fiscales nuevas para obtener una prueba verde. Este caso no puede
+   darse por resuelto por los éxitos anteriores de otras cuentas/períodos.
 
 La revisión independiente contrastó el código común, VEP/Aportes y los flujos
 legacy de subida de Facturómetro, Pago de Devoluciones, Compensaciones,
@@ -168,6 +178,9 @@ se usó también el corpus legacy ya configurado en `creds.py`, bajo
 ## Pruebas y límites
 
 - Suite completa del worker después del fix de subida: **781 passed**.
+- Suite completa del worker repetida tras el diagnóstico de guardado Portal IVA:
+  **784 passed**, 6 warnings. Esta última corrección solo se verificó en pruebas,
+  sin repetir el flujo fiscal real ni desplegarla.
 - Central + raíz + compat runner, al inicio: **733 passed, 28 skipped**.
 - Raíz + compat runner, repetida después de todos los cambios: **130 passed**.
 - Pruebas específicas de los tres archivos de tooling tras el último cambio:

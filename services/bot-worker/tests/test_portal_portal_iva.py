@@ -188,6 +188,40 @@ def test_seleccionar_periodo_valida_opcion_y_no_guarda() -> None:
     assert pagina.actions["liva"].clicked
 
 
+@pytest.mark.parametrize("fallo", [False, True])
+def test_preparar_periodo_no_oculta_fallo_al_guardar(fallo: bool) -> None:
+    pagina = _Page()
+    guardar = SimpleNamespace(count=AsyncMock(return_value=1))
+    guardar.first = SimpleNamespace(
+        click=AsyncMock(side_effect=TimeoutError("detalle privado") if fallo else None)
+    )
+    locator = pagina.locator
+    pagina.locator = lambda selector: guardar if selector == "#btnGuardar" else locator(selector)
+    portal = PortalIvaPortal(pagina)
+    portal.seleccionar_periodo = AsyncMock()
+    portal._esperar = AsyncMock()
+
+    if fallo:
+        with pytest.raises(TargetUnavailableError) as error:
+            asyncio.run(portal.preparar_periodo("202609"))
+        assert error.value.diagnostic_code == "portal_iva_period_save_failed"
+        assert "detalle privado" not in str(error.value)
+        portal._esperar.assert_not_awaited()
+    else:
+        assert asyncio.run(portal.preparar_periodo("202609")) == []
+        portal._esperar.assert_awaited_once_with(2_000)
+    guardar.first.click.assert_awaited_once_with(timeout=10_000)
+
+
+def test_preparar_periodo_sin_guardar_permite_libro_existente() -> None:
+    portal = PortalIvaPortal(_Page())
+    portal.seleccionar_periodo = AsyncMock()
+    portal._esperar = AsyncMock()
+
+    assert asyncio.run(portal.preparar_periodo("202609")) == []
+    portal._esperar.assert_not_awaited()
+
+
 def test_descargar_libro_rechaza_tipo_desconocido_antes_de_interactuar() -> None:
     portal = PortalIvaPortal(_Page())
     with pytest.raises(TargetUnavailableError) as error:

@@ -316,7 +316,10 @@ class PortalIvaPortal(PortalArca):
                 await guardar.first.click(timeout=10_000)
                 await self._esperar(2_000)
         except Exception:
-            pass
+            raise TargetUnavailableError(
+                "no se pudo guardar la preparación del período de Portal IVA",
+                diagnostic_code="portal_iva_period_save_failed",
+            ) from None
         return disponibles
 
     async def descargar_libro(
