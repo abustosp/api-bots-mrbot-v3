@@ -175,6 +175,55 @@ def test_portal_iva_conserva_descartar_borrador_falso(
     assert submitted[0]["payload"].get("descartar_borrador") is False
 
 
+def test_portal_iva_accepts_canonical_sales_and_purchases_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from central_api.security.credentials import normalize_v2_payload
+
+    body = {
+        "cuit_representante": "20123456786",
+        "clave_representante": "clave-de-prueba",
+        "cuit_representado": "20123456786",
+        "denominacion": "Empresa de prueba",
+        "periodo": "202610",
+        "descarga_ventas": True,
+        "descarga_compras": True,
+        "incluir_json": True,
+        "subir_csv": True,
+    }
+    response, submitted = _post_alias(
+        monkeypatch, "/portal_iva/consulta", body, "portal-iva-canonical-download-flags"
+    )
+    assert response.status_code == 202, response.text
+    payload = normalize_v2_payload("portal_iva", "descargar", submitted[0]["payload"])
+    assert payload["descarga_ventas"] is True
+    assert payload["descarga_compras"] is True
+
+
+def test_portal_iva_historical_csv_flags_remain_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from central_api.security.credentials import normalize_v2_payload
+
+    body = {
+        "cuit_representante": "20123456786",
+        "clave_representante": "clave-de-prueba",
+        "cuit_representado": "20123456786",
+        "denominacion": "Empresa de prueba",
+        "periodo": "202610",
+        "descarga_csv_ventas": True,
+        "descarga_csv_compras": True,
+        "subir_csv": True,
+    }
+    response, submitted = _post_alias(
+        monkeypatch, "/portal_iva/consulta", body, "portal-iva-historical-download-flags"
+    )
+    assert response.status_code == 202, response.text
+    payload = normalize_v2_payload("portal_iva", "descargar", submitted[0]["payload"])
+    assert payload["descarga_ventas"] is True
+    assert payload["descarga_compras"] is True
+
+
 def test_portal_iva_carga_deriva_cuit_representado(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
