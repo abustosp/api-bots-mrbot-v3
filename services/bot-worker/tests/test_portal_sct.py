@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +16,7 @@ import pytest
 from bot_worker.bots.errors import TargetUnavailableError
 from bot_worker.bots.sct.plugin import SctPlugin
 from bot_worker.runtime.portals.sct import PESTANAS, SctPortal
+from bot_worker.runtime.context import FiscalCredentials
 
 
 class _Nodo:
@@ -237,6 +239,168 @@ def test_plugin_sin_omitir_vacias_descarga_todo(tmp_path: Path) -> None:
     _ejecutar(servicio, tmp_path, omitir_vacias=False)
 
     assert sorted(servicio.descargas) == [("deudas", "csv"), ("vencimientos", "csv")]
+
+
+def test_plugin_reabre_sct_si_popup_redirige_a_login_arca(tmp_path: Path) -> None:
+    eventos: list[str] = []
+
+    class _Servicio:
+        def __init__(self, url: str) -> None:
+            self.page = SimpleNamespace(url=url)
+
+        async def relogin_y_reabrir(self, _: Any, service_name: str) -> _Servicio:
+            eventos.append(f"relogin_popup:{service_name}")
+            return _Servicio("https://ctacte.cloud.afip.gob.ar/contribuyente/externo")
+
+        async def seleccionar_representado(self, _: str) -> None:
+            eventos.append("representado")
+
+        async def contar_pestana(self, _: str) -> int:
+            return 0
+
+    class _Sesion:
+        def __init__(self, index: int) -> None:
+            self.index = index
+
+        async def login(self) -> None:
+            eventos.append(f"login:{self.index}")
+
+        async def open_service(self, *_: Any, **__: Any) -> _Servicio:
+            eventos.append(f"service:{self.index}")
+            url = (
+                "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
+                if self.index == 0
+                else "https://ctacte.cloud.afip.gob.ar/contribuyente/externo"
+            )
+            return _Servicio(url)
+
+    class _Factory:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def arca_session(self, *_: Any, **__: Any) -> Any:
+            index = self.calls
+            self.calls += 1
+
+            @asynccontextmanager
+            async def _context():
+                eventos.append(f"enter:{index}")
+                try:
+                    yield _Sesion(index)
+                finally:
+                    eventos.append(f"close:{index}")
+
+            return _context()
+
+    async def _correr() -> Any:
+        plugin = SctPlugin()
+        _, entrada = await plugin.validate(
+            {
+                "operacion": "consultar",
+                "representado_cuit": "20123456789",
+                "secciones": ["vencimientos"],
+                "formatos": ["csv"],
+                "subir": False,
+            }
+        )
+        factory = _Factory()
+        runtime = SimpleNamespace(
+            credentials=FiscalCredentials("20123456789", "clave-ficticia"),
+            cancellation=_Cancelacion(),
+            event_sink=_Eventos(),
+            deadline=SimpleNamespace(remaining_seconds=lambda: 600),
+            proxy=None,
+            browser_factory=factory,
+            artifact_store=SimpleNamespace(resolve=lambda nombre: tmp_path / nombre),
+        )
+        resultado = await plugin.execute(("consultar", entrada), runtime)
+        return resultado, factory
+
+    resultado, factory = asyncio.run(_correr())
+
+    assert resultado.result == "OK"
+    assert factory.calls == 1
+    assert "relogin_popup:SISTEMA DE CUENTAS" in eventos
+    assert eventos.count("representado") == 1
+
+
+def test_portal_sct_relogin_reutiliza_popup_si_login_llega_al_sct(monkeypatch: Any) -> None:
+    from bot_worker.runtime.arca_login import ArcaSession
+
+    pagina = _PaginaServicio(
+        "https://auth.afip.gob.ar/contribuyente_/login.xhtml?action=SYSTEM",
+        iframe_visible=False,
+    )
+    contexto = object()
+    portal = SctPortal(pagina, context=contexto)
+    vistos: dict[str, Any] = {}
+
+    async def _login(sesion: ArcaSession) -> None:
+        vistos["pagina"] = sesion.page
+        vistos["contexto"] = sesion._context
+        sesion.page.url = "https://ctacte.cloud.afip.gob.ar/contribuyente/externo"
+        sesion.page.iframe.visible = True
+
+    monkeypatch.setattr(ArcaSession, "login", _login)
+
+    resultado = asyncio.run(
+        portal.relogin_y_reabrir(
+            FiscalCredentials("20123456789", "clave-ficticia"),
+            "SISTEMA DE CUENTAS",
+        )
+    )
+
+    assert resultado is portal
+    assert vistos == {"pagina": pagina, "contexto": contexto}
+
+
+def test_portal_sct_relogin_reabre_servicio_en_popup_existente(monkeypatch: Any) -> None:
+    from bot_worker.runtime.arca_login import ArcaSession
+
+    pagina = _PaginaServicio(
+        "https://auth.afip.gob.ar/contribuyente_/login.xhtml?action=SYSTEM",
+        iframe_visible=False,
+    )
+    contexto = object()
+    portal = SctPortal(pagina, context=contexto)
+    apertura: dict[str, Any] = {}
+    resultado_esperado = SctPortal(
+        _PaginaServicio(
+            "https://ctacte.cloud.afip.gob.ar/contribuyente/externo",
+            iframe_visible=True,
+        ),
+        context=contexto,
+    )
+
+    async def _login(sesion: ArcaSession) -> None:
+        pagina.url = "https://portalcf.cloud.afip.gob.ar/"
+
+    async def _open_service(
+        sesion: ArcaSession, service_name: str, *, portal: str | None = None,
+        url: str | None = None, hosts_permitidos: tuple[str, ...] = (),
+    ) -> SctPortal:
+        apertura.update(
+            {"pagina": sesion.page, "contexto": sesion._context, "servicio": service_name, "portal": portal}
+        )
+        return resultado_esperado
+
+    monkeypatch.setattr(ArcaSession, "login", _login)
+    monkeypatch.setattr(ArcaSession, "open_service", _open_service)
+
+    resultado = asyncio.run(
+        portal.relogin_y_reabrir(
+            FiscalCredentials("20123456789", "clave-ficticia"),
+            "SISTEMA DE CUENTAS",
+        )
+    )
+
+    assert resultado is resultado_esperado
+    assert apertura == {
+        "pagina": pagina,
+        "contexto": contexto,
+        "servicio": "SISTEMA DE CUENTAS",
+        "portal": "sct",
+    }
 
 
 def test_nombre_de_reporte_sigue_el_patron_de_v1() -> None:

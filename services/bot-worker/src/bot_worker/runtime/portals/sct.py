@@ -59,6 +59,31 @@ class SctPortal(PortalArca):
                 # La SPA puede tardar en dibujar el combo del representado.
                 await self._esperar(3_000)
 
+    async def relogin_y_reabrir(self, credentials: Any, service_name: str) -> SctPortal:
+        """Reautentica en el popup que redirigió al login y reabre SCT.
+
+        V1/V2 ejecutan ``login_arca`` sobre esa misma página. Mantener la página
+        y el contexto del popup conserva el flujo SSO de ARCA; crear otro
+        contexto y volver a abrir el servicio puede redirigir otra vez al login.
+        """
+        from bot_worker.runtime.arca_login import ArcaSession
+
+        sesion = ArcaSession(
+            credentials,
+            self._captcha,
+            page=self.page,
+            context=self._context,
+        )
+        try:
+            await sesion.login()
+            host = (urlsplit(await self._url()).hostname or "").lower().rstrip(".")
+            if host == _HOST_SCT:
+                await self.preparar()
+                return self
+            return await sesion.open_service(service_name, portal="sct")
+        finally:
+            await sesion.close()
+
     async def preparar(self) -> None:
         """Espera el iframe del SCT (port del bloque previo de V2)."""
         marco = self.page.locator(_IFRAME)

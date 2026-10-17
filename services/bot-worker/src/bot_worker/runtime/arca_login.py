@@ -422,6 +422,34 @@ class ArcaSession:
                 return True
         return False
 
+    async def _click_first_visible_in_contexts(
+        self, selectors: tuple[str, ...], *, timeout_ms: int
+    ) -> bool:
+        """Wait briefly for a visible control across the page and its frames."""
+        attempts = max(1, (timeout_ms + 499) // 500)
+        for intento in range(attempts):
+            for context in self._page_contexts():
+                for selector in selectors:
+                    try:
+                        locator = context.locator(selector)
+                        count = await locator.count()
+                    except Exception:
+                        continue
+                    for indice in range(min(count, 10)):
+                        candidate = locator.nth(indice)
+                        try:
+                            if await candidate.is_visible():
+                                await candidate.click(timeout=8_000)
+                                return True
+                        except Exception:
+                            continue
+            if intento + 1 < attempts:
+                try:
+                    await self.page.wait_for_timeout(500)
+                except Exception:
+                    return False
+        return False
+
     async def _asegurar_route_https_comarb(self) -> None:
         """Fuerza ``https://`` en las navegaciones a COMARB del contexto.
 
@@ -724,24 +752,33 @@ class ArcaSession:
         # ``arca_service_not_visible`` de forma intermitente.
         service_locator = None
         patron_servicio = self._PATRONES_SERVICIO_RECORTADO.get(str(portal or ""))
-        for _ in range(30):
+        ver_todos = (
+            "a:has-text('Ver todos')",
+            "button:has-text('Ver todos')",
+            "[role='link']:has-text('Ver todos')",
+            r"text=/Ver\s+todos/i",
+        )
+        if portal == "sifere":
+            # V1/V2 expandían el catálogo antes de esperar la tarjeta SIFERE.
+            # Probar primero la tarjeta evita demorar cuentas que ya la muestran.
             service_locator = await self._find_service(value, patron_servicio)
-            if service_locator is not None:
-                break
-            try:
-                await self.page.wait_for_timeout(500)
-            except Exception:
-                break
+        else:
+            for _ in range(30):
+                service_locator = await self._find_service(value, patron_servicio)
+                if service_locator is not None:
+                    break
+                try:
+                    await self.page.wait_for_timeout(500)
+                except Exception:
+                    break
         if service_locator is None:
             # El portal oculta el catálogo completo tras "Ver todos".
-            await self._click_first_in_contexts(
-                (
-                    "a:has-text('Ver todos')",
-                    "button:has-text('Ver todos')",
-                    "[role='link']:has-text('Ver todos')",
-                    r"text=/Ver\s+todos/i",
-                ),
-            )
+            if portal == "sifere":
+                await self._click_first_visible_in_contexts(
+                    ver_todos, timeout_ms=10_000
+                )
+            else:
+                await self._click_first_in_contexts(ver_todos)
             await self._wait_ready()
             for _ in range(30):
                 service_locator = await self._find_service(value, patron_servicio)

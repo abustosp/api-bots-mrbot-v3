@@ -76,6 +76,87 @@ def test_find_service_con_patron_ubica_la_tarjeta_recortada() -> None:
     assert sin_patron is None  # el nombre completo no coincide con el titulo recortado
 
 
+def test_open_service_sifere_expande_catalogo_antes_de_esperar_tarjeta() -> None:
+    eventos: list[str] = []
+    servicio = object()
+    pagina_servicio = object()
+
+    class _ServiceLocator:
+        async def click(self, **_kwargs: object) -> None:
+            eventos.append("click_servicio")
+
+    class _Popup:
+        async def __aenter__(self) -> "_Popup":
+            return self
+
+        async def __aexit__(self, *_args: object) -> bool:
+            return False
+
+        @property
+        def value(self):
+            async def _valor() -> object:
+                return pagina_servicio
+
+            return _valor()
+
+    class _Page:
+        url = "https://auth.afip.gob.ar/contribuyente_/"
+
+        def expect_popup(self, **_kwargs: object) -> _Popup:
+            return _Popup()
+
+    sesion = ArcaSession.__new__(ArcaSession)
+    sesion._page = _Page()
+    sesion._context = object()
+    sesion._credentials = None
+    sesion._captcha = None
+    sesion._logged_in = True
+    locator = _ServiceLocator()
+    llamadas_busqueda = 0
+
+    async def _buscar(_value: str, _patron: re.Pattern[str] | None = None):
+        nonlocal llamadas_busqueda
+        llamadas_busqueda += 1
+        eventos.append("buscar_tarjeta")
+        return locator if llamadas_busqueda == 2 else None
+
+    async def _ver_todos(
+        _selectores: tuple[str, ...], *, timeout_ms: int
+    ) -> bool:
+        assert timeout_ms == 10_000
+        eventos.append("click_ver_todos")
+        return True
+
+    async def _esperar_ready() -> None:
+        eventos.append("esperar_catalogo")
+
+    async def _asegurar_https() -> None:
+        eventos.append("route_https")
+
+    async def _esperar_pagina(_pagina: object) -> None:
+        eventos.append("esperar_servicio")
+
+    sesion._find_service = _buscar  # type: ignore[method-assign]
+    sesion._click_first_visible_in_contexts = _ver_todos  # type: ignore[method-assign]
+    sesion._wait_ready = _esperar_ready  # type: ignore[method-assign]
+    sesion._asegurar_route_https_comarb = _asegurar_https  # type: ignore[method-assign]
+    sesion._esperar_pagina = _esperar_pagina  # type: ignore[method-assign]
+    sesion._servicio_para = lambda _pagina, _portal: servicio  # type: ignore[method-assign]
+
+    resultado = asyncio.run(
+        sesion.open_service("CONVENIO MULTILATERAL – SIFERE WEB - CONSULTAS", portal="sifere")
+    )
+
+    assert resultado is servicio
+    assert eventos[:4] == [
+        "buscar_tarjeta",
+        "click_ver_todos",
+        "esperar_catalogo",
+        "buscar_tarjeta",
+    ]
+    assert eventos.index("click_ver_todos") < eventos.index("click_servicio")
+
+
 def test_route_https_comarb_no_se_instala_antes_de_ubicar_la_tarjeta() -> None:
     import inspect
 

@@ -32,6 +32,7 @@ import asyncio
 import re
 from datetime import datetime
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from bot_worker.bots.errors import (
     ArtifactUploadError,
@@ -160,7 +161,9 @@ class SctPlugin:
         )
         if runtime.deadline.remaining_seconds() <= 0:
             raise DeadlineExceededError("deadline agotado antes de navegar")
-        try:
+
+        async def _consultar_en_sesion():
+            """Abre SCT y descarga; recupera redirects de login en el popup."""
             async with runtime.browser_factory.arca_session(
                 credentials=runtime.credentials,
                 proxy=runtime.proxy,
@@ -170,10 +173,26 @@ class SctPlugin:
                 await sesion.login()
                 await runtime.cancellation.raise_if_cancelled()
                 servicio = await sesion.open_service(self._servicio_nombre, portal="sct")
-                await servicio.seleccionar_representado(entrada.representado_cuit)
-                datos, artefactos = await self._descargar(
-                    servicio, entrada, runtime
+                pagina = getattr(servicio, "page", None)
+                url = str(getattr(pagina, "url", "") or "")
+                destino = urlsplit(url)
+                en_login_arca = (
+                    (destino.hostname or "").lower() == "auth.afip.gob.ar"
+                    and destino.path.rstrip("/").endswith("/contribuyente_/login.xhtml")
                 )
+                if en_login_arca:
+                    reabrir = getattr(servicio, "relogin_y_reabrir", None)
+                    if not callable(reabrir):
+                        raise TargetUnavailableError(
+                            "el popup de SCT redirigió al login de ARCA",
+                            diagnostic_code="sct_login_redirect",
+                        )
+                    servicio = await reabrir(runtime.credentials, self._servicio_nombre)
+                await servicio.seleccionar_representado(entrada.representado_cuit)
+                return await self._descargar(servicio, entrada, runtime)
+
+        try:
+            datos, artefactos = await _consultar_en_sesion()
         except ErrorDeBot:
             raise
         except Exception as exc:
