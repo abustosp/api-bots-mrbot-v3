@@ -503,6 +503,12 @@ def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "
     for campo in ("fecha_desde", "fecha_hasta"):
         if campo in propiedades and campo in fila and campo not in cuerpo:
             cuerpo[campo] = fila[campo]
+    for lado in ("ventas", "compras"):
+        campo = f"descarga_{lado}"
+        if campo in propiedades:
+            valor = fila.get(campo, fila.get(f"descarga_csv_{lado}"))
+            if valor is not None:
+                cuerpo[campo] = valor
     # V1 registraba los formatos pedidos como request_excel/request_csv/request_pdf.
     for formato in ("excel", "csv", "pdf"):
         if formato in propiedades and formato not in cuerpo and f"request_{formato}" in fila:

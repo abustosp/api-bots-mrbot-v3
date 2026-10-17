@@ -80,3 +80,14 @@ def test_payload_hacienda_deriva_denominacion_sin_pisar_el_canonico() -> None:
     assert _payload_desde_fila(fila, {"denominacion"}) == {
         "denominacion": "ENTIDAD CANONICA"
     }
+
+
+def test_payload_portal_iva_conserva_flags_y_prioriza_canonicos() -> None:
+    propiedades = {"descarga_ventas", "descarga_compras"}
+    fila = {"descarga_csv_ventas": 1, "descarga_csv_compras": 0}
+    assert _payload_desde_fila(fila, propiedades) == {
+        "descarga_ventas": 1, "descarga_compras": 0
+    }
+    fila["descarga_ventas"] = False
+    assert _payload_desde_fila(fila, propiedades)["descarga_ventas"] is False
+    assert _payload_desde_fila({}, propiedades) == {}
