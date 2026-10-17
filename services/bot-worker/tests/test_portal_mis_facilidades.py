@@ -716,3 +716,73 @@ def test_error_de_seccion_del_portal_llega_al_resultado_parcial(tmp_path: Path) 
     assert errores[0].internal_diagnostic == (
         "plan P-001: sección Pagos: PlaywrightTimeoutError"
     )
+
+
+def _runtime_con_deadline(tmp_path: Path, segundos: float):
+    """Runtime como el de produccion, con un presupuesto de deadline acotado."""
+    from bot_worker.runtime.context import DeadlineBudget
+
+    import time as _time
+
+    base = _runtime_mf(tmp_path)
+    base.deadline = DeadlineBudget(deadline_epoch=_time.time() + segundos)
+    return base
+
+
+def test_consultar_corta_por_deadline_y_devuelve_el_parcial(tmp_path: Path) -> None:
+    """Con cuentas grandes el job se corta: el parcial ya producido no se pierde."""
+    from bot_worker.bots.mis_facilidades.plugin import MisFacilidadesPlugin
+    from bot_worker.bots.errors import Categoria
+
+    plugin = MisFacilidadesPlugin()
+    _, entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "incluir_pdf": True,
+        "incluir_xlsx": True,
+        "subir_archivos": False,
+    }))
+    planes = [
+        {"numero": f"P-{i:03d}", "situacion": "Vigente", "denominacion": "A"}
+        for i in range(1, 6)
+    ]
+
+    datos, _, errores = asyncio.run(
+        plugin._consultar(
+            _ServicioMF(planes), entrada, _runtime_con_deadline(tmp_path, 0), "20123456789"
+        )
+    )
+
+    # Se procesa el plan en curso y el guardia corta antes de empezar el
+    # siguiente: la corrida queda PARCIAL con lo ya producido en disco.
+    assert datos["planes_procesados"] == 1
+    assert len(datos["planes"][0]["pdf_vistas"]) == 2
+    assert (tmp_path / datos["planes"][0]["xlsx"]["archivo"]).is_file()
+    assert [e.category for e in errores] == [Categoria.DEADLINE_EXCEEDED]
+    assert "deadline" in errores[0].internal_diagnostic
+
+
+def test_consultar_procesa_todos_los_planes_con_presupuesto_holgado(tmp_path: Path) -> None:
+    from bot_worker.bots.mis_facilidades.plugin import MisFacilidadesPlugin
+
+    plugin = MisFacilidadesPlugin()
+    _, entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "incluir_pdf": True,
+        "incluir_xlsx": True,
+        "subir_archivos": False,
+    }))
+    planes = [
+        {"numero": f"P-{i:03d}", "situacion": "Vigente", "denominacion": "A"}
+        for i in range(1, 6)
+    ]
+
+    datos, _, errores = asyncio.run(
+        plugin._consultar(
+            _ServicioMF(planes), entrada, _runtime_con_deadline(tmp_path, 600), "20123456789"
+        )
+    )
+
+    assert datos["planes_procesados"] == 5
+    assert errores == []

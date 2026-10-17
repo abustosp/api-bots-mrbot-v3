@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -261,6 +262,11 @@ class MisFacilidadesPlugin:
         }
         artefactos: list[dict[str, Any]] = []
         errores: list[Any] = []
+        # El supervisor corta el job con ``asyncio.wait_for`` al agotarse el
+        # deadline y en ese camino descarta todo lo producido. Para que el
+        # parcial sobreviva, el bucle se detiene solo cuando el tiempo que queda
+        # ya no alcanza para un plan como el mas lento visto hasta ahora.
+        plan_mas_lento = 0.0
         for plan in planes or []:
             situacion = str((plan or {}).get("situacion", "") or "")
             if "plan cancelado" in situacion.lower():
@@ -268,6 +274,21 @@ class MisFacilidadesPlugin:
             if excluyentes and any(e in situacion.lower() for e in excluyentes):
                 continue
             await runtime.cancellation.raise_if_cancelled()
+            reloj = getattr(runtime, "deadline", None)
+            restante = reloj.remaining_seconds() if reloj is not None else None
+            if plan_mas_lento and restante is not None and restante <= plan_mas_lento:
+                errores.append(
+                    BotError(
+                        category=Categoria.DEADLINE_EXCEEDED,
+                        internal_diagnostic=(
+                            f"deadline: quedan {int(restante)} s y el ultimo plan "
+                            f"tardo {int(plan_mas_lento)} s"
+                        ),
+                        retryable=False,
+                    )
+                )
+                break
+            inicio_plan = time.monotonic()
             numero = str((plan or {}).get("numero", "") or "s-n")
             # Como V1: la denominacion del request gana; si no llega, la del listado.
             denominacion_plan = (
@@ -335,6 +356,7 @@ class MisFacilidadesPlugin:
                         )
                     )
             datos["planes"].append(resumen)
+            plan_mas_lento = max(plan_mas_lento, time.monotonic() - inicio_plan)
         datos["planes_procesados"] = len(datos["planes"])
         return datos, artefactos, errores
 
