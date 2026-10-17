@@ -58,7 +58,7 @@ de punta a punta contra `https://testing-central.mrbot.com.ar` con las imágenes
 | `srt` | OK (alícuotas; `SIN_AFILIACION_VIGENTE` es dato) | PARCIAL (una consulta sin afiliación vigente) | El código funciona; `srt_cuit_input_failed`/`arca_service_not_visible` dependen de la cuenta. |
 | `libros_portal_iva` | OK | OK (tras el fix de confirmación del representado; antes fallaba con `libros_period_not_found`) | Defecto 8. |
 | `mis_facilidades` | OK (11 planes, 49 artefactos) | OK | 1.951 fallos históricos: no reproducidos con el build actual; `arca_service_not_visible` = DATOS. |
-| `sifere` | OK (102 artefactos, 403 s) | credencial rechazada (clave vencida en la base) → se reintenta con otra fila | `arca_service_not_visible` = DATOS; sin bug de matcher. |
+| `sifere` | OK (102 artefactos, 403 s) | 1.º intento `target_unavailable` (287 s), 2.º `OK` (455 s) con el mismo cuerpo y cuenta | `arca_service_not_visible` = DATOS; la intermitencia la cubre el hallazgo principal. |
 | `declaracion_en_linea` | OK | OK | `plugin_service_api_mismatch` pertenecía a builds viejos del worker. |
 | `portal_iva` | OK con periodo vigente (202610); `portal_iva_period_not_available` con 202608 | OK (202610) | El diagnóstico de período es DATOS: el portal sólo ofrece 202610 para la cuenta. |
 | `sct` | OK (3 juegos de credenciales) | OK (2/2) | `arca_service_not_visible` = DATOS; el resto lo cubren los defectos 3 y 4. |
@@ -110,6 +110,38 @@ tres causas distintas, todas verificadas en esta corrida:
 Los defectos 3, 4, 8 y 9 eran lo único atribuible al código y ya están
 corregidos; con ellos los quince módulos de la lista cierran `OK` contra la
 central de testing.
+
+## Verificación desde el cliente de escritorio V3
+
+Se ejecutó el cliente de escritorio (`mrbot-cliente-escritorio-v3`) contra
+`https://testing-central.mrbot.com.ar` usando su propia UI y su `JobClient`
+(payload construido por las entradas del cliente, clave fiscal cifrada con la
+clave pública de la central, POST, polling y descarga de artefactos).
+
+- **Contrato**: OpenAPI remoto con 179 rutas `/api/v3`; registro de endpoints del
+  cliente sin rutas/métodos inexistentes; 38/38 alias alineados; QA de contrato
+  162/163 (el único fallo es un falso positivo del verificador: busca `*_key` en
+  el esquema de la ruta alias, mientras el cliente resuelve el alias a la ruta
+  canónica y ahí el `payload` es `dict` genérico).
+- **Cinco flujos reales**: `sct` → 202 y `COMPLETO/OK` con 2/2 archivos
+  descargados por el cliente (URL directa y fallback autenticado);
+  `liquidacion_granos` → 202 y `COMPLETO/OK`; `facturometro` → 202 y
+  `COMPLETO/OK` con 1/1 archivo; el cliente interpretó correctamente el estado y
+  el `result` en los cinco casos (UI incluida).
+- **Errores observados (no del cliente)**:
+  - `mis_facilidades` → `TARGET_UNAVAILABLE` con causa `ConnectTimeout`
+    (`target_unavailable_unclassified`): error transitorio de red, el mismo
+    patrón del hallazgo principal (sin reintento automático).
+  - `sct_compensaciones` → `ENVELOPE_INVALID` (`ValidationError`): el formulario
+    permite enviar sin marcar Excel/CSV/PDF y el worker exige al menos un
+    formato. Recomendación para el cliente: validar en el formulario que haya al
+    menos un formato de salida para esa entrada.
+- **Probes sin job**: `GET /utilidades/apoc/{cuit}` devuelve 200 con la forma
+  esperada y un `legacy_b64=""` no dispara el rechazo de contenido inline (el 422
+  que aparece es el ordinario por falta de `object_key` cuando el bot necesita un
+  archivo).
+- El cliente no requirió ningún cambio de código para operar contra la central de
+  testing.
 
 ## Observaciones abiertas
 
