@@ -342,7 +342,7 @@
       "confirmar"
     ],
     "schema": {
-      "description": "Modelo de entrada para la compensación de saldos a favor de CCMA.\n\n- ``cuit_representante``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``clave_representante``: clave fiscal del representante (o ``clave_encriptada``).\n- ``cuit_representado``: CUIT/CUIL del contribuyente cuya cuenta corriente se compensa.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.\n- ``movimientos``: incluir los movimientos de la cuenta corriente en la respuesta.\n- ``pdf``: generar el PDF de la cuenta corriente y devolver la URL de MinIO.\n- ``compensar``: reafectar los pagos con saldo a favor contra las obligaciones deudoras.\n- ``confirmar``: confirmar (ejecutar) las reafectaciones. Con ``False`` sólo se\n  agregan al detalle y quedan pendientes de confirmación en ARCA.",
+      "description": "Modelo de entrada para la compensación de saldos a favor de CCMA.\n\n- ``cuit_representante``: CUIT/CUIL del representante que se autentica en ARCA.\n- ``clave_representante``: clave fiscal del representante (o ``clave_encriptada``).\n- ``cuit_representado``: CUIT/CUIL del contribuyente cuya cuenta corriente se compensa.\n- ``proxy_request``: indica si se debe usar un proxy para la solicitud.\n- ``movimientos``: incluir los movimientos de la cuenta corriente en la respuesta.\n- ``pdf``: generar el PDF de la cuenta corriente y devolver la URL de MinIO.\n- ``compensar``: reafectar los pagos con saldo a favor contra las obligaciones deudoras.\n- ``confirmar``: confirmar (ejecutar) las reafectaciones. Con ``False`` sólo se\n  devuelve la propuesta y cancela el formulario sin modificar ARCA.",
       "properties": {
         "clave_encriptada": {
           "anyOf": [
@@ -441,7 +441,7 @@
             }
           ],
           "default": false,
-          "description": "Confirma (ejecuta) las reafectaciones. Con False quedan pendientes de confirmación",
+          "description": "Confirma (ejecuta) las reafectaciones. Con False sólo devuelve la propuesta y cancela el formulario sin modificar ARCA",
           "example": false,
           "title": "Confirmar"
         }

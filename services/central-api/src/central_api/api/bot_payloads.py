@@ -846,7 +846,7 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "minio_upload": "Solicita guardar en el almacenamiento de la API los archivos de resultado de esta operación; los archivos disponibles se informan en `files[]`.",
     "movimientos": "Solicita incluir los movimientos de cuenta en el resultado.",
     "compensar": "Reafecta los pagos con saldo a favor de CCMA contra las obligaciones con saldo deudor (mismo impuesto primero, luego otros en orden cronológico).",
-    "confirmar": "Confirma las reafectaciones en ARCA. Con `false` quedan agregadas al detalle, pendientes de confirmación.",
+    "confirmar": "Confirma (ejecuta) las reafectaciones en ARCA. Con `false` sólo devuelve la propuesta y cancela el formulario sin modificar ARCA.",
     "ninguna_anteriores": "Indica que no corresponde ninguna de las opciones de actividad declaradas en los campos relacionados.",
     "nombre_rcel": "Nombre o razón social del contribuyente para identificar la consulta de comprobantes en línea.",
     "operaciones_ng_o_e": "Indica si se realizaron operaciones no gravadas o exentas en el período declarado.",

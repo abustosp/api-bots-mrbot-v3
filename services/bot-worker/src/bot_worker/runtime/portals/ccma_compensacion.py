@@ -5,8 +5,10 @@ Port de ``bots_dev/ccma_compenscion/ccma_compensacion_bot.py`` (V1/V2
 de CUIT, cálculo de deuda, resumen y movimientos) con el recorrido de la
 sabana que detecta los pagos con botón *Reafectar* y los imputa contra las
 obligaciones con saldo deudor: primero el mismo impuesto/concepto/subconcepto
-y luego otros impuestos, en orden cronológico. Con ``confirmar=False`` las
-reafectaciones quedan agregadas al detalle sin confirmar.
+y luego otros impuestos, en orden cronológico. Con ``confirmar=True`` cada
+reafectación se confirma en ARCA; con ``confirmar=False`` sólo se devuelve la
+propuesta: los saldos se simulan con ``montos_simulados`` y cada formulario se
+cancela al terminar, sin confirmar ni modificar ARCA.
 
 El módulo no importa Playwright: los timeouts se capturan como ``Exception``.
 """
