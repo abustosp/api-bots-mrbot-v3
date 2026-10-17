@@ -38,60 +38,73 @@ problema de datos/cuenta.
 | 5 | `central-api` | `GET /utilidades/apoc/{cuit}` devolvía 503 si no había copia local; no descargaba ni actualizaba la tabla. | `services/apoc_base.py` + `api/utilities.py`: descarga si falta, actualiza si tiene más de una semana y usa la copia provisionada como respaldo. Tests en `tests/test_apoc_base.py`. |
 | 6 | `central-api` | Los campos viejos `b64`, `*_b64` y `carga_s3` vacíos (`null`/`""`/`false`) disparaban `422 file_not_uploaded`. | `api/file_inputs.py` + `api/bot_compat.py`: sólo se rechaza contenido real. Tests en `tests/test_file_input_pipeline.py`. |
 | 7 | `tools/local_run` | El runner local no creaba el `work_dir` por job, no delegaba la fábrica al portal (captcha SRT), no capturaba la página del servicio y no derivaba campos V1→V3. | `tools/local_run/run_bot.py` + `creds.py`: `--from-db`/`--creds-file`, `--db-name`, `--db-cuit`, derivaciones (`fecha_desde/hasta`, `cuits_consulta`, `request_excel/csv/pdf`, `representado_nombre`), evidencia del popup. |
+| 8 | `libros_portal_iva` | El portal no confirmaba que el CUIT representado quedara **activo**: leído el HTML real del popup, el rótulo "Representando a" seguía mostrando al representante, y el flujo consultaba como esa cuenta (`libros_period_not_found` para un período que V1/V3 descargan bien). | `runtime/portals/libros_portal_iva.py`: confirma el CUIT en el rótulo activo tras el selector común y tras el switcher; sin confirmación no consulta. Tests en `tests/test_portal_libros_portal_iva.py`. |
+| 9 | `consulta_pagos_vep` | El multiselect es una SPA: el portal daba por seleccionado el representado tras despachar un click sintético, sin comprobar que el `fake-input` lo reflejara; el filtro quedaba sin resultados y la descarga fallaba con `portal_download_missing`. | `runtime/portals/consulta_pagos_vep.py`: verifica el valor del fake-input (normalizado a dígitos) y reintenta el click. Tests en `tests/test_consulta_pagos_vep_plugin.py`. |
 
 ## Resultado por módulo
 
-Verificación local con credenciales reales (`OK` = flujo completo, con archivos).
+Verificación local con credenciales reales (`OK` = flujo completo, con archivos) y
+de punta a punta contra `https://testing-central.mrbot.com.ar` con las imágenes
+`testing-fixes2` (worker propio registrado).
 
 | Módulo | Local (real) | E2E testing-central | Clasificación del fallo reportado |
 |---|---|---|---|
 | `facturometro` | OK | OK | El diagnóstico `represented_cuit_not_selectable` de la cuenta de prueba no se reprodujo con una credencial válida; sí se corrigió la causa genérica (defecto 3). |
-| `certificado_mipyme` | OK | reintento (ver corridas) | `portal_step_seleccionar_representado` (timeout del paso) en testing; local OK. |
+| `certificado_mipyme` | OK | OK (tras configurar `PROXY_BOTS`, como producción) | `portal_step_seleccionar_representado` era falta de proxy en la central de testing, no un bug. |
 | `pago_devoluciones` | OK (clave reciente) | OK | El diagnóstico `arca_service_not_visible` es DATOS cuando la cuenta no tiene el servicio (catálogo). |
 | `hacienda` | OK (caso con relación válida); el caso del corpus sin relación falla también en V1 ("No se encontró botón Hacienda") | `represented_name_not_selectable` (DATOS, mismo caso que V1) | Defecto 2 corregido; el resto es DATOS. |
 | `liquidacion_granos` | OK (5 XLSX) | OK | `arca_service_not_visible` = DATOS. |
 | `compensaciones` | OK ("no se encontraron resultados") | OK | DATOS/build viejo. |
 | `srt` | OK (alícuotas; `SIN_AFILIACION_VIGENTE` es dato) | PARCIAL (una consulta sin afiliación vigente) | El código funciona; `srt_cuit_input_failed`/`arca_service_not_visible` dependen de la cuenta. |
-| `libros_portal_iva` | OK (periodo 202608, con reintento interno) | `libros_period_not_found` (DC) | Ver observación abajo. |
+| `libros_portal_iva` | OK | OK (tras el fix de confirmación del representado; antes fallaba con `libros_period_not_found`) | Defecto 8. |
 | `mis_facilidades` | OK (11 planes, 49 artefactos) | OK | 1.951 fallos históricos: no reproducidos con el build actual; `arca_service_not_visible` = DATOS. |
-| `sifere` | OK (102 artefactos, 403 s) | credencial rechazada (clave vencida en la base) | `arca_service_not_visible` = DATOS; sin bug de matcher. |
+| `sifere` | OK (102 artefactos, 403 s) | credencial rechazada (clave vencida en la base) → se reintenta con otra fila | `arca_service_not_visible` = DATOS; sin bug de matcher. |
 | `declaracion_en_linea` | OK | OK | `plugin_service_api_mismatch` pertenecía a builds viejos del worker. |
 | `portal_iva` | OK con periodo vigente (202610); `portal_iva_period_not_available` con 202608 | OK (202610) | El diagnóstico de período es DATOS: el portal sólo ofrece 202610 para la cuenta. |
-| `sct` | OK (3 juegos de credenciales) | OK | `arca_service_not_visible` = DATOS (la cuenta de prueba no tiene SCT; el log V1 del 2026-03-15 lo confirma). |
-| `vep/consulta-pagos` | `portal_download_missing` | `portal_download_missing` | BUG candidato (selección del período/representado en la SPA): ver más abajo. |
-| `aportes_en_linea` | OK con `archivo_historico_minio=false` (genera `AEL - <cuit> - <fecha>.xls`) | reintento | El `ENVELOPE_INVALID` del corpus V1 (`archivo_historico_minio=false`) ya no ocurre: el job llega al worker y devuelve un error tipado. |
+| `sct` | OK (3 juegos de credenciales) | OK (2/2) | `arca_service_not_visible` = DATOS; el resto lo cubren los defectos 3 y 4. |
+| `vep/consulta-pagos` | OK tras el fix (84 filas, CSV 6.803 B) | OK (27 s) | Defecto 9: era `portal_download_missing` por no confirmar el representado. |
+| `aportes_en_linea` | OK con `archivo_historico_minio=false` (genera `AEL - <cuit> - <fecha>.xls`) | OK | El `ENVELOPE_INVALID` del corpus V1 (`archivo_historico_minio=false`) ya no ocurre. |
+
+### Verificaciones puntuales en la central de testing
+
+- **`GET /utilidades/apoc/{cuit}`** (defecto 5): devuelve 200 con `apoc=true` y
+  las fechas reales de la tabla de AFIP (`30707577963` → `08/11/2005`,
+  `30707966773` → `26/06/2007 – 09/02/2010`), sin ninguna copia provisionada.
+  Con el archivo de caché envejecido 8 días, la consulta lo volvió a descargar
+  (mtime 2026-10-09 06:21 → 2026-10-17 06:21). Antes devolvía
+  `503 Base de apócrifos no configurada en central-api`.
+- **Campos legados vacíos** (defecto 6): `POST /api/v3/sct/consulta` con
+  `b64: null`, `carga_s3: false`, `archivo_b64: ""`, `incluir_base64: false` y
+  `carga_b64: false` → **202**; el mismo cuerpo con `archivo_b64: "QQ=="` → **422
+  `file_not_uploaded`** (la protección sigue activa cuando hay contenido).
 
 ## Observaciones abiertas
 
-1. **`vep/consulta-pagos` — `portal_download_missing`.** Reproducido localmente y
-   en testing-central: el flujo llega a la exportación y no encuentra el botón de
-   descarga. Hipótesis con evidencia estática: V1 usaba el primer combobox
-   numérico como fallback y V3 usaba `.last`, de modo que podía quedar
-   seleccionado el representado equivocado. El portal ahora verifica que el
-   CUIT quede reflejado en el selector antes de dar por elegida la opción
-   (`runtime/portals/consulta_pagos_vep.py`).
-2. **`libros_portal_iva` en el worker del datacenter.** El mismo caso (misma
-   cuenta, mismo periodo) termina OK desde la máquina del operador (incluso por
-   proxy) y falla en `central-testing` con `libros_period_not_found` ("no hay
-   libros IVA para el periodo solicitado"). La corrida local muestra que el
-   primer intento falla y el reintento interno acierta: en el datacenter fallan
-   los dos intentos. El portal ahora confirma el representado activo y reintenta
-   el switcher; queda por validar en el datacenter.
-3. **Clasificación pública de `arca_service_not_visible`.** Cuando la cuenta no
-   tiene el servicio, el cliente recibe `target_unavailable`
-   ("El portal no respondió como se esperaba…"), que sugiere reintentar. V1
-   decía "No se encuentra habilitado el servicio de X". El worker ya tiene un
-   código de diagnóstico distinto; un cambio de contrato público (nuevo
-   `error_code` no reintentable) es una decisión de producto que quedó fuera de
-   esta corrida.
-4. **Cuenta de prueba `20370074829`.** No tiene clave válida en las bases, así que
+1. **Contrato público de `arca_service_not_visible`** (pendiente de decisión de
+   producto). Cuando la cuenta no tiene el servicio, el cliente recibe
+   `target_unavailable` ("El portal no respondió como se esperaba…"), que sugiere
+   reintentar. V1 decía "No se encuentra habilitado el servicio de X". El worker
+   ya distingue el diagnóstico interno; publicar un `error_code` propio y **no
+   reintentable** cambia el contrato de la API y no se hizo en esta corrida.
+2. **Cuenta de prueba `20370074829`.** No tiene clave válida en las bases, así que
    su catálogo no se pudo verificar en fresco. Los diagnósticos de producción
    (`arca_service_not_visible` en sct/sifere/mis_facilidades/liquidacion_granos/
    pago_devoluciones/compensaciones/certificado_mipyme/declaracion_en_linea,
    `represented_cuit_not_selectable` en facturometro/libros_portal_iva) son
    consistentes con una cuenta sin esos servicios y con representados no
-   relacionados; el código actual no reproduce esos diagnósticos con cuentas
+   relacionados; el build actual no reproduce esos diagnósticos con cuentas
    válidas.
+3. **Tolerancia del selector de representado (defecto 3).** La paridad con V1
+   hace que, sin selector visible, el flujo continúe. Los portales que dependen
+   de esa selección ahora la **confirman** (libros, vep) o validan antes la
+   página del servicio (sct); conviene mantener ese patrón en los portales que
+   se agreguen y, si el portal no expone forma de confirmar, seguir el mismo
+   criterio que V1 (consultar y dejar que la sección falle con su diagnóstico).
+4. **Credenciales de las bases.** Varias claves de las tablas `success` ya no
+   sirven (ARCA las rechaza): `sifere` (2026-10-13), `pago_devoluciones` (id 3) y
+   `srt` (id 2) se resolvieron usando una clave más reciente del mismo CUIT en
+   otra tabla. Para reproducir, hay que iterar filas (`--db-index`) en lugar de
+   asumir que el último `success` sigue vigente.
 
 ## Estado de la infraestructura de prueba
 
