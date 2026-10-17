@@ -150,6 +150,12 @@ class _CapturingFactory:
         self.paginas: list[dict] = []
         self._paginas_interes: dict[str, Any] = {}
 
+    def __getattr__(self, nombre: str) -> Any:
+        """Delega en la fábrica real (los portales leen ``_solvers``, etc.)."""
+        if nombre == "_base":
+            raise AttributeError(nombre)
+        return getattr(self._base, nombre)
+
     @property
     def proxy(self):
         return self._base.proxy
@@ -379,6 +385,8 @@ async def _modo_bot(args, out: Path, credentials, proxy, factory) -> dict:
     }
     sink = _Sink(out)
     cancellation = CancellationToken()
+    # El worker crea el work_dir por job (workdir.new_workdir); replicarlo.
+    (out / "work").mkdir(parents=True, exist_ok=True)
     runtime = BotRuntime(
         job_id="00000000-0000-4000-8000-000000000001",
         work_dir=out / "work",
@@ -441,6 +449,14 @@ _SECCIONES_DESDE_LOGS: dict[str, tuple[str, str]] = {
 }
 
 
+def _fecha_v1(valor: Any) -> Any:
+    """``AAAAMMDD`` (V1) a ``DD/MM/AAAA`` como valida el plugin."""
+    texto = str(valor or "").strip()
+    if len(texto) == 8 and texto.isdigit():
+        return f"{texto[6:8]}/{texto[4:6]}/{texto[:4]}"
+    return valor
+
+
 def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "") -> dict:
     """Campos de negocio de la fila que el esquema del plugin acepta."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -449,6 +465,17 @@ def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "
     cuerpo: dict = {}
     if "representado_cuit" in propiedades and representado:
         cuerpo["representado_cuit"] = representado
+    # El plugin usa nombres distintos de la tabla V1 en dos casos.
+    if "fecha_desde" in propiedades and "desde" in fila and "fecha_desde" not in fila:
+        fila = {**fila, "fecha_desde": _fecha_v1(fila["desde"])}
+    if "fecha_hasta" in propiedades and "hasta" in fila and "fecha_hasta" not in fila:
+        fila = {**fila, "fecha_hasta": _fecha_v1(fila["hasta"])}
+    if "cuits_consulta" in propiedades and not fila.get("cuits_consulta"):
+        crudo = fila.get("cuits_consultados") or fila.get("cuits")
+        if isinstance(crudo, str) and crudo.strip():
+            fila = {**fila, "cuits_consulta": [c.strip() for c in crudo.split(",") if c.strip()]}
+        elif isinstance(crudo, list):
+            fila = {**fila, "cuits_consulta": crudo}
     for campo in CAMPOS_PAYLOAD:
         if campo not in propiedades or campo not in fila:
             continue
@@ -459,6 +486,16 @@ def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "
             with contextlib.suppress(ValueError, json.JSONDecodeError):
                 valor = json.loads(valor)
         cuerpo[campo] = valor
+    for campo in ("fecha_desde", "fecha_hasta"):
+        if campo in propiedades and campo in fila and campo not in cuerpo:
+            cuerpo[campo] = fila[campo]
+    # V1 registraba los formatos pedidos como request_excel/request_csv/request_pdf.
+    for formato in ("excel", "csv", "pdf"):
+        if formato in propiedades and formato not in cuerpo and f"request_{formato}" in fila:
+            if bool(fila[f"request_{formato}"]):
+                cuerpo[formato] = True
+    if "cuits_consulta" in propiedades and "cuits_consulta" in fila and "cuits_consulta" not in cuerpo:
+        cuerpo["cuits_consulta"] = fila["cuits_consulta"]
     # SCT: V1 pedia salidas por seccion y formato con nueve banderas; el log
     # deja la URL de cada archivo entregado, que revela seccion y formato.
     if "secciones" in propiedades and "secciones" not in cuerpo:
@@ -490,7 +527,7 @@ def _resolver_desde_db(args) -> dict:
     status = None if str(args.db_status).lower() in {"any", "all"} else args.db_status
     candidatas = filas(
         modulo=args.from_db, tabla=args.from_table, status=status,
-        limit=max(1, args.db_index + 1), cuit=args.db_cuit,
+        limit=max(1, args.db_index + 1), cuit=args.db_cuit, db_name=args.db_name,
     )
     if not candidatas:
         raise SystemExit("--from-db: sin registros para ese modulo/tabla")
@@ -523,6 +560,9 @@ async def _run(args) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     proxy = _proxy_config(args.proxy)
     desde_db: dict = {}
+    desde_archivo: dict = {}
+    if args.creds_file:
+        desde_archivo = json.loads(Path(args.creds_file).read_text(encoding="utf-8"))
     if args.from_db or args.from_table:
         desde_db = _resolver_desde_db(args)
         args.cuit_representante = args.cuit_representante or desde_db["cuit_representante"]
@@ -531,6 +571,13 @@ async def _run(args) -> dict:
         if desde_db["payload"]:
             previo = json.loads(args.payload_json) if args.payload_json else {}
             args.payload_json = json.dumps({**desde_db["payload"], **previo})
+    if desde_archivo:
+        args.cuit_representante = args.cuit_representante or str(desde_archivo.get("cuit_representante") or "")
+        args.clave = args.clave or str(desde_archivo.get("clave") or "")
+        args.representado = args.representado or str(desde_archivo.get("representado") or "")
+        if isinstance(desde_archivo.get("payload"), dict):
+            previo = json.loads(args.payload_json) if args.payload_json else {}
+            args.payload_json = json.dumps({**desde_archivo["payload"], **previo})
     credentials = FiscalCredentials(
         cuit_representante=args.cuit_representante, clave=args.clave
     )
@@ -606,6 +653,14 @@ def main() -> int:
     parser.add_argument("--db-index", type=int, default=0, help="0 = registro mas reciente.")
     parser.add_argument("--db-status", default="success", help="success|any.")
     parser.add_argument("--db-cuit", help="Filtra los registros por CUIT.")
+    parser.add_argument("--db-name", help="Limita la busqueda a una base (p. ej. sql_app_mrbot1.db).")
+    parser.add_argument(
+        "--creds-file",
+        help=(
+            'JSON {"cuit_representante","clave","representado","payload"?} con las '
+            "credenciales; evita exponerlas en la linea de comandos o en la base."
+        ),
+    )
     parser.add_argument("--payload", help="Archivo JSON con el payload del bot.")
     parser.add_argument("--payload-json", help="Payload JSON inline (se fusiona).")
     parser.add_argument("--service-json", help="Extras para la seccion service del sobre.")
@@ -621,8 +676,8 @@ def main() -> int:
 
     if args.mode in {"bot", "portal"} and not args.bot:
         parser.error("--bot es obligatorio en modo bot/portal")
-    if not (args.from_db or args.from_table) and not (args.cuit_representante and args.clave):
-        parser.error("indique --cuit-representante y --clave, o bien --from-db/--from-table")
+    if not (args.from_db or args.from_table or args.creds_file) and not (args.cuit_representante and args.clave):
+        parser.error("indique --cuit-representante y --clave, o bien --from-db/--from-table/--creds-file")
 
     _cargar_dotenv()
     reporte = asyncio.run(_run(args))

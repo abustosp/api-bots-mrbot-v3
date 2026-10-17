@@ -179,6 +179,7 @@ def filas(
     limit: int = 25,
     where: str | None = None,
     cuit: str | None = None,
+    db_name: str | None = None,
 ) -> list[dict]:
     """Filas candidatas ordenadas de la base más reciente a la más vieja.
 
@@ -192,6 +193,8 @@ def filas(
         where = MODULE_WHERE.get(modulo)
     salida: list[dict] = []
     for db in find_dbs():
+        if db_name and db.name != db_name:
+            continue
         if table not in tables_of(db):
             continue
         cols, rows = rows_for(db, table, status=status, limit=limit, where=where)
