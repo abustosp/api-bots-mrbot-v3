@@ -27,6 +27,7 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_DB_DIRS = [
@@ -121,13 +122,71 @@ def rows_for(db: Path, table: str, *, status: str | None, limit: int, where: str
         if where:
             filtros.append(f"({where})")
         clause = f" where {' and '.join(filtros)}" if filtros else ""
-        orden = " order by id desc" if "id" in cols else ""
+        orden_cols = []
+        if "timestamp" in cols:
+            orden_cols.append("timestamp desc")
+        if "id" in cols:
+            orden_cols.append("id desc")
+        orden = f" order by {', '.join(orden_cols)}" if orden_cols else ""
         sql = f"select * from {table}{clause}{orden} limit {int(limit)}"
         return cols, [dict(r) for r in con.execute(sql)]
     except sqlite3.Error:
         return [], []
     finally:
         con.close()
+
+
+def _timestamp_orden(value) -> float | None:
+    """Normaliza timestamps habituales de SQLite para compararlos entre bases."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    texto = str(value).strip()
+    if not texto:
+        return None
+    try:
+        return float(texto)
+    except ValueError:
+        pass
+
+    try:
+        fecha = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+    except ValueError:
+        for formato in ("%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S"):
+            try:
+                fecha = datetime.strptime(texto, formato)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+
+    if fecha.tzinfo is None:
+        fecha = fecha.replace(tzinfo=timezone.utc)
+    return fecha.timestamp()
+
+
+def _id_orden(value) -> tuple[int, float | str]:
+    """Usa el id como desempate y como fallback si no hay timestamp utilizable."""
+    if value is None:
+        return 0, ""
+    try:
+        return 1, float(value)
+    except (TypeError, ValueError):
+        return 0, str(value)
+
+
+def _orden_fila(item: dict) -> tuple:
+    row = item["row"]
+    timestamp = _timestamp_orden(row.get("timestamp"))
+    return (
+        timestamp is not None,
+        timestamp if timestamp is not None else 0,
+        _id_orden(row.get("id")),
+        item["db"],
+    )
 
 
 def mask(row: dict, show_secrets: bool) -> dict:
@@ -207,6 +266,7 @@ def filas(
             ]
         for row in rows:
             salida.append({"db": db.name, "table": table, "row": row})
+    salida.sort(key=_orden_fila, reverse=True)
     return salida
 
 
