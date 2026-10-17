@@ -240,12 +240,22 @@ class ArtifactStore:
         http = client if client is not None else self._http_client
         if http is not None and getattr(slot, "put_url", ""):
             # PUT a la URL prefirmada, sin firmas propias ni claves de bucket.
+            import httpx
+            from bot_worker.bots.errors import ArtifactUploadError
+
             with open(path, "rb") as fh:
-                await http.put(
-                    slot.put_url,
-                    content=fh.read(),
-                    headers={"Content-Type": content_type},
-                )
+                try:
+                    response = await http.put(
+                        slot.put_url,
+                        content=fh.read(),
+                        headers={"Content-Type": content_type},
+                    )
+                    response.raise_for_status()
+                except httpx.HTTPError:
+                    raise ArtifactUploadError(
+                        "falló la subida del artefacto",
+                        diagnostic_code="artifact_upload_http_failed",
+                    ) from None
         return {
             "artifact_id": artifact_id,
             "object_key": slot.object_key,

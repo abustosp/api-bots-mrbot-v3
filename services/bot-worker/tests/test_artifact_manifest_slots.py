@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import httpx
 import pytest
 
+from bot_worker.bots.errors import ArtifactUploadError
 from bot_worker.runtime.context import ArtifactSlot, ArtifactStore
 
 DECLARADOS = {
@@ -155,3 +157,35 @@ def test_mismo_artifact_id_dos_archivos_pide_url_nueva(tmp_path) -> None:
     r2 = asyncio.run(store.upload("libros_iva_bin", "b.bin"))
     assert len(pedidos) == 2
     assert r1["object_key"] != r2["object_key"]
+
+
+@pytest.mark.parametrize("fallo", [None, 403, 500, "transporte"])
+def test_upload_confirma_http_y_normaliza_error_sin_url_firmada(tmp_path, fallo) -> None:
+    (tmp_path / "historico.xls").write_bytes(b"contenido")
+
+    def responder(request):
+        if fallo == "transporte":
+            raise httpx.ConnectError("URL firmada secreta", request=request)
+        return httpx.Response(fallo or 200)
+
+    async def ejecutar():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
+            store = ArtifactStore(
+                tmp_path,
+                {"historico.xls": ArtifactSlot(
+                    artifact_id="historico.xls",
+                    put_url="https://bucket.invalid/put?firma=secreta",
+                    object_key="jobs/j/1/historico.xls",
+                )},
+                http_client=client,
+            )
+            if fallo is None:
+                assert (await store.upload("historico.xls", "historico.xls"))["size_bytes"] == 9
+            else:
+                with pytest.raises(ArtifactUploadError) as exc:
+                    await store.upload("historico.xls", "historico.xls")
+                assert exc.value.categoria == "ARTIFACT_UPLOAD_FAILED"
+                assert "secreta" not in str(exc.value)
+                assert "bucket.invalid" not in str(exc.value)
+
+    asyncio.run(ejecutar())
