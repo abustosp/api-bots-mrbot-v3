@@ -40,6 +40,10 @@ problema de datos/cuenta.
 | 7 | `tools/local_run` | El runner local no creaba el `work_dir` por job, no delegaba la fábrica al portal (captcha SRT), no capturaba la página del servicio y no derivaba campos V1→V3. | `tools/local_run/run_bot.py` + `creds.py`: `--from-db`/`--creds-file`, `--db-name`, `--db-cuit`, derivaciones (`fecha_desde/hasta`, `cuits_consulta`, `request_excel/csv/pdf`, `representado_nombre`), evidencia del popup. |
 | 8 | `libros_portal_iva` | El portal no confirmaba que el CUIT representado quedara **activo**: leído el HTML real del popup, el rótulo "Representando a" seguía mostrando al representante, y el flujo consultaba como esa cuenta (`libros_period_not_found` para un período que V1/V3 descargan bien). | `runtime/portals/libros_portal_iva.py`: confirma el CUIT en el rótulo activo tras el selector común y tras el switcher; sin confirmación no consulta. Tests en `tests/test_portal_libros_portal_iva.py`. |
 | 9 | `consulta_pagos_vep` | El multiselect es una SPA: el portal daba por seleccionado el representado tras despachar un click sintético, sin comprobar que el `fake-input` lo reflejara; el filtro quedaba sin resultados y la descarga fallaba con `portal_download_missing`. | `runtime/portals/consulta_pagos_vep.py`: verifica el valor del fake-input (normalizado a dígitos) y reintenta el click. Tests en `tests/test_consulta_pagos_vep_plugin.py`. |
+| 10 | `sct` | El primer fallo de descarga de una sección/formato abortaba la corrida entera, aunque hubiera reportes entregables (V1/V2 registraban el error y seguían, con el job en `success`). | `bots/sct/plugin.py`: acumula el error por sección/formato en `data.errores`, sigue con el resto y devuelve `PARCIAL`; sin ningún reporte propaga el error. Tests en `tests/test_portal_sct.py`. |
+| 11 | `mis_facilidades` | Una tabla obligatoria ausente o vacía cortaba la lectura del plan (`mis_facilidades_table_missing`/`_table_empty`) y una excepción de Playwright escapaba como `target_unavailable_unclassified`, perdiendo los planes y artefactos ya obtenidos. | `runtime/portals/mis_facilidades.py` + `bots/mis_facilidades/plugin.py`: cada vista se captura por separado, la tabla faltante queda como sección vacía con su error y la corrida se reporta `PARCIAL`. Tests en `tests/test_portal_mis_facilidades.py`. |
+| 12 | `central-api` | La ruta alias de Portal IVA armaba el modelo de compatibilidad sólo con los nombres legacy `descarga_csv_ventas`/`descarga_csv_compras` y `extra=ignore`: los nombres canónicos `descarga_ventas`/`descarga_compras` se descartaban y el worker respondía `envelope_invalid` sin consultar el portal (3/3 casos medidos). | `api/bot_payloads.py`: los campos canónicos se declaran con `AliasChoices`, de modo que acepta los dos vocabularios y serializa uno solo. Tests en `tests/test_v2_request_alias_parity.py`. |
+| 13 | `worker` | Importar `bot_worker.runtime.portals` antes que `bot_worker.bots` fallaba por el ciclo `portals.base` → `bots` → `registry` → plugins → `portals` (afectaba a los tests de portal corridos por archivo). | `bots/_plugins.py` + `bots/registry.py` + `bots/__init__.py`: el registro resuelve las instancias de forma diferida (PEP 562) sin cambiar la API pública (hash de manifiestos idéntico). |
 
 ## Resultado por módulo
 
@@ -60,7 +64,7 @@ de punta a punta contra `https://testing-central.mrbot.com.ar` con las imágenes
 | `mis_facilidades` | OK (11 planes, 49 artefactos) | OK | 1.951 fallos históricos: no reproducidos con el build actual; `arca_service_not_visible` = DATOS. |
 | `sifere` | OK (102 artefactos, 403 s) | 1.º intento `target_unavailable` (287 s), 2.º `OK` (455 s) con el mismo cuerpo y cuenta | `arca_service_not_visible` = DATOS; la intermitencia la cubre el hallazgo principal. |
 | `declaracion_en_linea` | OK | OK | `plugin_service_api_mismatch` pertenecía a builds viejos del worker. |
-| `portal_iva` | OK con periodo vigente (202610); `portal_iva_period_not_available` con 202608 | OK (202610) | El diagnóstico de período es DATOS: el portal sólo ofrece 202610 para la cuenta. |
+| `portal_iva` | OK con periodo vigente (202610); `portal_iva_period_not_available` con 202608 | OK (202610) tras el defecto 12: la ruta alias descartaba los flags canónicos y 3/3 casos fallaban con `envelope_invalid` | El diagnóstico de período es DATOS: el portal sólo ofrece 202610 para la cuenta. Falta reejecutar los 3 casos contra `testing-fixes6`. |
 | `sct` | OK (3 juegos de credenciales) | OK (2/2) | `arca_service_not_visible` = DATOS; el resto lo cubren los defectos 3 y 4. |
 | `vep/consulta-pagos` | OK tras el fix (84 filas, CSV 6.803 B) | OK (27 s) | Defecto 9: era `portal_download_missing` por no confirmar el representado. |
 | `aportes_en_linea` | OK con `archivo_historico_minio=false` (genera `AEL - <cuit> - <fecha>.xls`) | OK | El `ENVELOPE_INVALID` del corpus V1 (`archivo_historico_minio=false`) ya no ocurre. |
@@ -248,6 +252,22 @@ estado de la central en todos los casos.
   testing.
 
 ## Observaciones abiertas
+
+0. **Campos canónicos en las rutas alias (clase del defecto 12).** El modelo de
+   compatibilidad V2 se arma con el vocabulario V1/V2 y descarta en silencio los
+   nombres canónicos que no declara. Comprobado en frío contra los modelos
+   publicados (`get_request_model` + `normalize_v2_payload`):
+   - `sct/consultar`: `secciones` y `formatos` se pierden y el worker aplica sus
+     defaults (`vencimientos+deudas+ddjj_pendientes`, `xlsx`);
+   - `siper/consultar`: `subir` se pierde y viaja `false` (no se suben capturas);
+   - `mis_comprobantes/consultar`: el modelo alias **exige**
+     `representado_nombre`, que el esquema canónico del worker no requiere
+     (`operacion`, `representado_cuit`, `fecha_desde`, `fecha_hasta`), así que un
+     cuerpo canónico sin `denominacion` responde 422.
+   Solo `portal_iva` está corregido. El fix general necesita una tabla de campos
+   canónicos por operación del lado de la central (hoy `mrbot-contracts` solo
+   publica el vocabulario V1/V2 en `request_fields.py`): es una decisión de
+   diseño, no un parche, y por eso quedó documentada y no aplicada.
 
 1. **Contrato público de `arca_service_not_visible`** (pendiente de decisión de
    producto). Cuando la cuenta no tiene el servicio, el cliente recibe
