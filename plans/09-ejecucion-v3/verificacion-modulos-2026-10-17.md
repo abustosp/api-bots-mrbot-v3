@@ -163,6 +163,26 @@ Los defectos 3, 4, 8 y 9 eran lo único atribuible al código y ya están
 corregidos; con ellos los quince módulos de la lista cierran `OK` contra la
 central de testing.
 
+### Distribución real de los fallos (dump de la central, jobs desde 2026-08-18)
+
+Sobre 353 jobs `FALLIDO` del dump de la central de producción:
+
+| `error_code` | Fallos | Lectura |
+|---|---:|---|
+| `TARGET_UNAVAILABLE` | 239 | Se descompone en las tres causas de arriba: pasos tolerantes en V1/V2 que pasaron a fatales (corregidos), fallos transitorios sin reintento (recomendación 1) y DATOS de la cuenta. |
+| `CREDENTIALS_REJECTED` | 48 | Dato del usuario: CUIT/clave incorrectos o cuenta deshabilitada. |
+| `ENVELOPE_INVALID` | 33 | Contrato del pedido; incluye los campos `*_b64`/`carga_s3` vacíos que se corrigieron (defecto 6) y builds viejos del worker. |
+| `INTERNAL` | 18 | Defectos del port ya corregidos (por ejemplo el `FileNotFoundError` de `hacienda`) o cortes de infraestructura. |
+| `ARTIFACT_UPLOAD_FAILED` | 9 | Clase "el artefacto ya producido se pierde por un fallo de subida" (4 en `aportes_en_linea`, 4 en `arba`, 1 en `siper`). Ver `auditoria-tolerancia-v1v2-v3.md`: queda como deuda priorizada, no como la causa principal. |
+| `CAPTCHA_UNSOLVABLE` | 4 | Resolución de captcha agotada (`retper_iibb_misiones`). |
+| `CANCELLATION_REQUESTED` | 2 | Cancelación del usuario. |
+
+Por bot, los mayores volúmenes de `TARGET_UNAVAILABLE` en esa ventana fueron
+`carga_portal_iva` (66), `libros_portal_iva` (24), `consulta_cuit` (17),
+`certificado_mipyme` (17), `consulta_pagos_vep` (14), `mis_retenciones` (10) y
+`sct` (5, más 10 `ENVELOPE_INVALID`). Las causas medidas para esos módulos están
+en la tabla de resultados por módulo y en los informes `report_div_*`.
+
 ## Verificación desde el cliente de escritorio V3
 
 Se ejecutó el cliente de escritorio (`mrbot-cliente-escritorio-v3`) contra
