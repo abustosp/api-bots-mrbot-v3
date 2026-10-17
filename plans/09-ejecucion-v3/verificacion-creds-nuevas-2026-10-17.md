@@ -120,19 +120,26 @@ declarado vuelve a ser el histórico y **acepta el canónico** por `AliasChoices
 el normalizador lo traduce al vocabulario del worker. Verificado:
 - los dos vocabularios de entrada normalizan a `descarga_ventas`/`descarga_compras`;
 - `tests/test_v2_request_alias_parity.py` 81 passed, suite central-api 613 passed;
+- el OpenAPI de la central con `testing-fixes7` vuelve a declarar
+  `descarga_csv_ventas`/`descarga_csv_compras` en `/api/v3/portal_iva/consulta`
+  (179 rutas `/api/v3`), así que el QA del cliente no ve el fallo nuevo;
 - E2E en `fixes7`: `portal_iva` 3/3 casos con credenciales nuevas y 2 CSV cada uno
   (los 3 fallos restantes son `portal_iva_period_not_available` = DATOS).
 
-## Desde el cliente de escritorio V3 (agente independiente)
+## Desde el cliente de escritorio V3 (agente independiente, tras re-habilitar la cuenta)
 
-| Flujo | Credencial | Creación | Estado / result | Descargas | Motivo |
-|---|---|---:|---|---|---|
-| `sct` | nueva | 202 | `COMPLETO`/`OK` | 1/1 directa y 1/1 autenticada | — |
-| `mis_facilidades` (2 casos) | nuevas | 429 y luego 401 | sin job | 0 | Cuota agotada / cuenta deshabilitada (**INFRA**, ver arriba) |
-| `mis_comprobantes` | nueva | 429 y luego 401 | sin job | 0 | Ídem |
+| Flujo | Casos | Creación | Estado / result | Descargas del cliente | Motivo |
+|---|---:|---:|---|---|---|
+| `mis_facilidades` | 2 (cuentas nuevas distintas) | 202 | `COMPLETO`/**`PARCIAL`** | 68/68 y 12/12 (directa y autenticada) | `PARCIAL` por datos faltantes de la cuenta, no por fallos de descarga |
+| `sct` | 1 (cuenta nueva) | 202 | `COMPLETO`/`OK` | 1/1 directa y 1/1 autenticada | Ofreció 1 de 3 categorías Excel pedidas (las otras sin datos) |
+| `mis_comprobantes` | 1 (cuenta nueva, tras 6 rechazadas) | 202 | `COMPLETO`/`OK` | 2/2 directas y 2/2 autenticadas | 6 filas con claves vencidas, resueltas con la siguiente |
+| `mis_facilidades` / `mis_comprobantes` (intentos previos) | 3 | 429 y luego 401 | sin job | 0 | Cuota agotada / cuenta deshabilitada (**INFRA**, ver arriba) |
 
-El agente validó además los cuerpos de esos tres flujos **offline** contra el
-esquema estricto del worker: `sct`, `mis_facilidades` y `mis_comprobantes` OK.
+En total, el cliente reintentó con otra credencial **7 filas rechazadas** por el
+portal (1 de `mis_facilidades`, 6 de `mis_comprobantes`) y terminó `OK` en los
+tres módulos con cuentas nuevas. Sus cuerpos también se validaron **offline**
+contra el esquema estricto del worker (`sct`, `mis_facilidades`,
+`mis_comprobantes` OK).
 
 ## Límites de esta ronda
 
