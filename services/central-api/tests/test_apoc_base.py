@@ -293,3 +293,114 @@ def test_proxy_datacenter_elige_un_puerto_del_rango_y_usa_prefijo_user(monkeypat
         assert p["host"].startswith("http://dc.oxylabs.io:")
         vistos.add(puerto)
     assert len(vistos) > 1
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v3/utilidades/apoc/{cuit}: descarga/actualización automática de la
+# tabla cuando no hay copia local o quedó vencida (petición del operador).
+
+# La ruta valida el dígito verificador: la tabla de estos casos usa CUITs
+# módulo 11 válidos para poder ejercitar la descarga real.
+TABLA_UTIL = (
+    "# AFIP - Facturas Apocrifas\n"
+    "20123456786, 2024-01-01, 2024-12-31\n"
+)
+CUIT_EN_TABLA = "20123456786"
+CUIT_AUSENTE = "20222222223"
+
+
+def _apoc_test_client(monkeypatch, path, *, provisioned=None):
+    from fastapi.testclient import TestClient
+
+    from central_api.main import create_app
+
+    settings = SimpleNamespace(
+        apoc_base_url="https://fake.invalid/data",
+        apoc_base_path=str(path),
+        apoc_refresh_interval_days=7,
+    )
+    monkeypatch.setattr(apoc_base, "get_settings", lambda: settings)
+    monkeypatch.setattr(apoc_base, "_cached_text", None)
+    monkeypatch.setattr(
+        apoc_base, "_provisioned_paths", lambda: list(provisioned or [])
+    )
+    return TestClient(create_app())
+
+
+def _descarga_en(path, descargas):
+    async def descargar():
+        descargas.append("download")
+        path.write_text(TABLA_UTIL, encoding="utf-8")
+        apoc_base._cached_text = TABLA_UTIL
+        return TABLA_UTIL
+
+    return descargar
+
+
+def test_utilidad_apoc_descarga_si_falta(tmp_path, monkeypatch):
+    path = tmp_path / "apoc.txt"
+    client = _apoc_test_client(monkeypatch, path)
+    descargas: list[str] = []
+    monkeypatch.setattr(apoc_base, "download_and_cache", _descarga_en(path, descargas))
+
+    encontrado = client.get(f"/api/v3/utilidades/apoc/{CUIT_EN_TABLA}")
+    assert encontrado.status_code == 200
+    assert encontrado.json() == {
+        "cuit": CUIT_EN_TABLA,
+        "fecha_condicion": "2024-01-01",
+        "fecha_publicacion": "2024-12-31",
+        "apoc": True,
+    }
+    ausente = client.get(f"/api/v3/utilidades/apoc/{CUIT_AUSENTE}")
+    assert ausente.status_code == 200
+    assert ausente.json()["apoc"] is False
+    assert descargas == ["download"]
+
+
+def test_utilidad_apoc_actualiza_si_esta_vencida(tmp_path, monkeypatch):
+    path = tmp_path / "apoc.txt"
+    path.write_text("# AFIP\n", encoding="utf-8")
+    viejo = time.time() - 8 * 86400
+    os.utime(path, (viejo, viejo))
+    client = _apoc_test_client(monkeypatch, path)
+    descargas: list[str] = []
+    monkeypatch.setattr(apoc_base, "download_and_cache", _descarga_en(path, descargas))
+
+    assert client.get(f"/api/v3/utilidades/apoc/{CUIT_EN_TABLA}").json()["apoc"] is True
+    assert descargas == ["download"]
+
+
+def test_utilidad_apoc_no_descarga_si_esta_al_dia(tmp_path, monkeypatch):
+    path = tmp_path / "apoc.txt"
+    path.write_text(TABLA_UTIL, encoding="utf-8")
+    client = _apoc_test_client(monkeypatch, path)
+
+    async def fallar():
+        pytest.fail("no debe descargar una caché al día")
+
+    monkeypatch.setattr(apoc_base, "download_and_cache", fallar)
+    assert client.get(f"/api/v3/utilidades/apoc/{CUIT_EN_TABLA}").json()["apoc"] is True
+
+
+def test_utilidad_apoc_usa_copia_provisionada_si_no_puede_descargar(tmp_path, monkeypatch):
+    provisionada = tmp_path / "provisionada.txt"
+    provisionada.write_text(TABLA_UTIL, encoding="utf-8")
+    client = _apoc_test_client(monkeypatch, tmp_path / "apoc.txt", provisioned=[provisionada])
+
+    async def fallar():
+        raise ValueError("AFIP no responde")
+
+    monkeypatch.setattr(apoc_base, "download_and_cache", fallar)
+    assert client.get(f"/api/v3/utilidades/apoc/{CUIT_EN_TABLA}").json()["apoc"] is True
+
+
+def test_utilidad_apoc_503_sin_base_ni_copia_local(tmp_path, monkeypatch):
+    client = _apoc_test_client(monkeypatch, tmp_path / "apoc.txt")
+
+    async def fallar():
+        raise ValueError("AFIP no responde")
+
+    monkeypatch.setattr(apoc_base, "download_and_cache", fallar)
+    respuesta = client.get(f"/api/v3/utilidades/apoc/{CUIT_EN_TABLA}")
+    assert respuesta.status_code == 503
+    assert "apócrifos" in respuesta.json()["detail"]

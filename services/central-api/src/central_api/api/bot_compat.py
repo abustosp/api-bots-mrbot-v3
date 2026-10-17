@@ -131,7 +131,7 @@ async def _decode_payload(
     operation: str | None = None,
 ) -> tuple[dict, dict] | JSONResponse:
     """Lee JSON plano y rechaza adjuntos o campos de archivo inline."""
-    from central_api.api.file_inputs import file_not_uploaded
+    from central_api.api.file_inputs import file_not_uploaded, tiene_contenido
     from central_api.input_files import INPUT_FILE_FIELDS, KEY_FIELDS
 
     def reject(expected_field: str) -> JSONResponse:
@@ -140,32 +140,38 @@ async def _decode_payload(
         )
         return JSONResponse(status_code=422, content={"detail": error.detail})
 
+    def fallback_key_field() -> str:
+        if bot and operation:
+            return (
+                next(iter(KEY_FIELDS.get((bot, operation), {})), None)
+                or INPUT_FILE_FIELDS.get((bot, operation))
+                or "object_key"
+            )
+        return "object_key"
+
     def inline_field(value: Any) -> str | None:
         if isinstance(value, dict):
             for name, item in value.items():
                 lowered = str(name).lower()
                 if "b64" in lowered or "base64" in lowered:
-                    if lowered in {
-                        "carga_b64",
-                        "incluir_base64",
-                        "incluir_b64",
-                        "archivo_historico_b64",
-                    } and isinstance(item, bool):
-                        continue
-                    if name == "archivos_base64":
-                        return "archivos"
-                    if bot and operation:
-                        for field_key in KEY_FIELDS.get((bot, operation), {}):
-                            base = field_key.removesuffix("_key")
-                            if name in {f"{base}_b64", f"{base}_base64"}:
-                                return field_key
-                    if bot and operation:
-                        return (
-                            next(iter(KEY_FIELDS.get((bot, operation), {})), None)
-                            or INPUT_FILE_FIELDS.get((bot, operation))
-                            or "object_key"
-                        )
-                    return "object_key"
+                    # Los campos viejos vacíos ("b64": null/""/false) no son
+                    # adjuntos: el archivo viaja por object_key.
+                    if tiene_contenido(item):
+                        known_flag = name in {
+                            "carga_b64",
+                            "incluir_base64",
+                            "incluir_b64",
+                            "archivo_historico_b64",
+                        } and isinstance(item, bool)
+                        if not known_flag:
+                            if name == "archivos_base64":
+                                return "archivos"
+                            if bot and operation:
+                                for field_key in KEY_FIELDS.get((bot, operation), {}):
+                                    base = field_key.removesuffix("_key")
+                                    if name in {f"{base}_b64", f"{base}_base64"}:
+                                        return field_key
+                            return fallback_key_field()
                 nested = inline_field(item)
                 if nested:
                     return nested

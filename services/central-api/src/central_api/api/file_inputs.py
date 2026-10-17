@@ -316,10 +316,34 @@ def _expected_key_field(bot: str, operation: str, payload: dict[str, Any], files
     )
 
 
+def tiene_contenido(value: Any) -> bool:
+    """True solo si el valor transporta contenido real.
+
+    Los clientes V1/V2 siguen mandando los campos viejos (``b64``, ``*_b64``,
+    ``carga_s3``) vacíos o en ``null`` aunque el archivo viaje por
+    ``object_key``. Un valor ausente, cadena vacía, ``false`` o colección sin
+    elementos no es un adjunto y no debe disparar ``file_not_uploaded``.
+    """
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return any(tiene_contenido(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(tiene_contenido(item) for item in value)
+    if isinstance(value, (int, float)):
+        return value != 0
+    return True
+
+
 def _has_inline_file_content(value: Any) -> bool:
     if isinstance(value, dict):
         return any(
-            ("b64" in str(key).lower() or "base64" in str(key).lower())
+            (
+                ("b64" in str(key).lower() or "base64" in str(key).lower())
+                and tiene_contenido(item)
+            )
             or _has_inline_file_content(item)
             for key, item in value.items()
         )
@@ -438,5 +462,5 @@ async def uploaded_file_from_request(
 __all__ = [
     "INPUT_FILE_FIELDS", "KEY_FIELDS", "MAX_UPLOAD_BYTES", "MULTIPART_FIELDS",
     "MultipartFile", "UploadedFile", "externalizar_archivos", "file_not_uploaded",
-    "multipart_job_request", "uploaded_file_from_request",
+    "multipart_job_request", "tiene_contenido", "uploaded_file_from_request",
 ]

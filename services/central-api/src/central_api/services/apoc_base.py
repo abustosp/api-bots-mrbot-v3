@@ -50,6 +50,37 @@ def read_cached_text() -> str | None:
     return _cached_text
 
 
+def _provisioned_paths() -> list[Path]:
+    """Copias locales de la tabla provisionadas fuera de la caché administrada.
+
+    Se conservan como respaldo para instalaciones que ya montan la tabla en el
+    repo o por ``MRBOT_APOC_BASE``: si la descarga automática no está disponible,
+    la consulta sigue funcionando sin pedir configuración manual.
+    """
+    candidates: list[Path] = []
+    configured = os.getenv("MRBOT_APOC_BASE")
+    if configured:
+        candidates.append(Path(configured))
+    candidates.extend((
+        Path(__file__).resolve().parents[5] / "data" / "FacturasApocrifas.txt",
+        Path.cwd() / "data" / "FacturasApocrifas.txt",
+    ))
+    return candidates
+
+
+def read_provisioned_text() -> str | None:
+    """Primera copia local provisionada legible, o ``None`` si no hay ninguna."""
+    for path in _provisioned_paths():
+        try:
+            if path.is_file():
+                texto = path.read_text(encoding="utf-8-sig")
+                if texto:
+                    return texto
+        except (OSError, UnicodeError):
+            continue
+    return None
+
+
 def _extract(data: bytes) -> str:
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise ValueError("AFIP apoc response is not a ZIP")
@@ -124,6 +155,20 @@ async def refresh_if_needed() -> bool:
         read_cached_text()
         log.warning("AFIP apoc refresh failed (%s); retaining existing cache if available", type(exc).__name__)
         return False
+
+
+async def obtener_texto() -> str | None:
+    """Tabla apócrifa lista para servir.
+
+    Descarga la tabla si la caché falta o quedó vencida (una semana por
+    defecto), reintentando en cada llamada cuando AFIP no responde. Si la
+    descarga no es posible y hay una copia local provisionada, se usa esa.
+    """
+    await refresh_if_needed()
+    texto = read_cached_text()
+    if texto is not None:
+        return texto
+    return read_provisioned_text()
 
 
 async def refresh_loop() -> None:

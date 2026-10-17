@@ -671,3 +671,51 @@ def test_openapi_documents_only_uploaded_file_references() -> None:
             assert "no se aceptan" in lowered and "archivo" in lowered, (context, value)
 
     check_documentation_strings(schema)
+
+
+def test_legacy_empty_b64_fields_do_not_trigger_file_not_uploaded(monkeypatch) -> None:
+    """Los clientes V1 mandan `b64`/`*_b64`/`carga_s3` vacíos junto al object_key."""
+    client, _stored, submitted, _tickets, app = _route_test(monkeypatch)
+    try:
+        response = client.post(
+            "/api/v3/vep/carga",
+            json={
+                "cuit_inicio_sesion": "20123456786",
+                "contrasena": "secret",
+                "medio_pago": "link",
+                "archivo_b64": "",
+                "b64": None,
+                "carga_s3": False,
+                "incluir_base64": False,
+                "carga_b64": False,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202, response.text
+    assert len(submitted) == 1
+    payload = submitted[0]["payload"]
+    assert "archivo_key" not in payload
+
+
+def test_legacy_non_empty_b64_field_is_still_rejected(monkeypatch) -> None:
+    client, _stored, submitted, _tickets, app = _route_test(monkeypatch)
+    try:
+        response = client.post(
+            "/api/v3/vep/carga",
+            json={
+                "cuit_inicio_sesion": "20123456786",
+                "contrasena": "secret",
+                "medio_pago": "link",
+                "archivo_b64": "QQ==",
+                "b64": None,
+                "carga_s3": False,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "file_not_uploaded"
+    assert submitted == []

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
-import os
 import re
 import subprocess
 import xml.etree.ElementTree as ET
@@ -129,16 +127,23 @@ def _rcel_fields(text: str, content: bytes | None = None) -> dict[str, Any]:
     return fields
 
 
-def _apoc_base_paths() -> list[Path]:
-    candidates = []
-    configured = os.getenv("MRBOT_APOC_BASE")
-    if configured:
-        candidates.append(Path(configured))
-    candidates.extend((
-        Path(__file__).resolve().parents[4] / "data" / "FacturasApocrifas.txt",
-        Path.cwd() / "data" / "FacturasApocrifas.txt",
-    ))
-    return candidates
+def _buscar_en_base_apoc(texto: str, digits: str) -> dict[str, Any]:
+    """Busca el CUIT en la tabla apócrifa (filas ``CUIT, condición, publicación``)."""
+    for line in texto.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) >= 3 and parts[0] == digits:
+            return {
+                "cuit": digits,
+                "fecha_condicion": parts[1],
+                "fecha_publicacion": parts[2],
+                "apoc": True,
+            }
+    return {
+        "cuit": digits,
+        "fecha_condicion": None,
+        "fecha_publicacion": None,
+        "apoc": False,
+    }
 
 
 def _utility_file_request_body(extension: str, *, upload_field: str) -> dict:
@@ -303,9 +308,11 @@ async def rcel_extraer_texto(request: Request, principal: ApiPrincipal = Depends
     "/utilidades/apoc/{cuit}",
     summary="Consulta si un CUIT figura como apócrifo",
     description=(
-        "Valida el CUIT y consulta la base local de contribuyentes apócrifos. Devuelve `apoc=true` "
-        "con las fechas de condición y publicación si existe una coincidencia; si no figura, "
-        "devuelve `apoc=false` y ambas fechas como null."
+        "Valida el CUIT y consulta la base local de contribuyentes apócrifos. La tabla "
+        "se descarga automáticamente desde AFIP si no existe y se actualiza cuando la "
+        "copia local tiene más de una semana. Devuelve `apoc=true` con las fechas de "
+        "condición y publicación si existe una coincidencia; si no figura, devuelve "
+        "`apoc=false` y ambas fechas como null."
     ),
     responses={
         200: {
@@ -323,21 +330,23 @@ async def rcel_extraer_texto(request: Request, principal: ApiPrincipal = Depends
             "content": {"application/json": {"example": {"detail": {"error_code": "authentication", "message": "Credenciales inválidas."}}}},
         },
         503: {
-            "description": "La base de consulta no está configurada o no se pudo verificar la autenticación. Solicite que habiliten la consulta y vuelva a intentar.",
+            "description": "No se pudo descargar la tabla de apócrifos desde AFIP ni había una copia local, o no se pudo verificar la autenticación. Reintente más tarde.",
         },
     },
 )
-def apoc(cuit: str, principal: ApiPrincipal = Depends(require_api_principal)) -> JSONResponse:
-    """Consulta la base de apócrifos para un CUIT válido."""
+async def apoc(cuit: str, principal: ApiPrincipal = Depends(require_api_principal)) -> JSONResponse:
+    """Consulta la base de apócrifos, descargándola o actualizándola si hace falta."""
     _ = principal
     digits = _validate_cuit(cuit)
-    for path in _apoc_base_paths():
-        if not path.is_file():
-            continue
-        with path.open(encoding="utf-8") as stream:
-            for line in stream:
-                parts = [part.strip() for part in line.split(",")]
-                if len(parts) >= 3 and parts[0] == digits:
-                    return JSONResponse({"cuit": digits, "fecha_condicion": parts[1], "fecha_publicacion": parts[2], "apoc": True})
-        return JSONResponse({"cuit": digits, "fecha_condicion": None, "fecha_publicacion": None, "apoc": False})
-    raise HTTPException(status_code=503, detail="Base de apócrifos no configurada en central-api.")
+    from central_api.services.apoc_base import obtener_texto
+
+    texto = await obtener_texto()
+    if texto is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo descargar la base de apócrifos desde AFIP y no hay una "
+                "copia local disponible."
+            ),
+        )
+    return JSONResponse(_buscar_en_base_apoc(texto, digits))
