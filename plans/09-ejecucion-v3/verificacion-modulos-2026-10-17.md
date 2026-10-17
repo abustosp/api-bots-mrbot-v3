@@ -322,16 +322,17 @@ estado de la central en todos los casos.
 
 ## Estado de la infraestructura de prueba
 
-- `central-testing` (api2) corre las imágenes `mrbot-central-api:testing-fixes5`
-  y `mrbot-bot-worker:testing-fixes5` (build local con `./build-and-push.sh`
+- `central-testing` (api2) corre las imágenes `mrbot-central-api:testing-fixes6`
+  y `mrbot-bot-worker:testing-fixes6` (build local con `./build-and-push.sh`
   + `docker compose pull/up`), con migraciones aplicadas y un worker propio
   (`mrbot-central-testing-worker`) registrado en el inventario. El tag se
-  actualizó tres veces durante la jornada (`testing-fixes3` → `fixes4` →
-  `fixes5`): cada tag sólo agrega fixes ya commiteados y verificados localmente.
+  actualizó cuatro veces durante la jornada (`testing-fixes3` → `fixes4` →
+  `fixes5` → `fixes6`): cada tag sólo agrega fixes ya commiteados y verificados
+  localmente, y la verificación E2E de cada etapa se hizo contra el tag vigente.
 - Cambios locales en `~/central-testing` (no versionados, respaldo en
   `compose.yaml.bak-*`):
   - `compose.yaml`: `image:` de central y migrate pasa a la imagen del registry
-    con tag `testing-fixes5`, y se agrega el servicio `bot-worker`
+    con tag `testing-fixes6`, y se agrega el servicio `bot-worker`
     (`--central-url http://central-api:8000`,
     `--advertised-url http://bot-worker:8080`, `--concurrency 5`, `shm_size 2gb`,
     red `control`, `depends_on: central-api healthy`).
