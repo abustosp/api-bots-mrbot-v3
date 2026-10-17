@@ -498,3 +498,17 @@ def test_panel_backups_javascript_pasa_node_check() -> None:
             [node, "--check", str(ruta)], capture_output=True, text=True
         )
     assert completado.returncode == 0, completado.stderr
+
+
+def test_panel_se_sirve_sin_cache() -> None:
+    """Sin Cache-Control el navegador reutiliza un panel viejo tras cada despliegue."""
+    from fastapi.testclient import TestClient
+
+    from central_api.main import create_app
+
+    cliente = TestClient(create_app())
+    for ruta in ("/admin/", "/admin/login"):
+        respuesta = cliente.get(ruta)
+        assert respuesta.status_code == 200
+        assert respuesta.headers["cache-control"] == "no-store, must-revalidate"
+        assert respuesta.headers["x-content-type-options"] == "nosniff"

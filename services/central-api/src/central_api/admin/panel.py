@@ -8,7 +8,7 @@ JSON de ``central-api`` y nunca usan la API key de clientes.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from fastapi.responses import HTMLResponse
 
 router = APIRouter()
@@ -165,6 +165,9 @@ th, td { padding: 12px 11px; border-bottom: 1px solid var(--line); text-align: l
 th { color: var(--muted); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; }
 tr:last-child td { border-bottom: 0; }
 td.actions { display: table-cell; white-space: nowrap; }
+/* La ultima columna queda fija: al desplazar la tabla horizontalmente, los
+   botones de accion no se cortan contra el borde. */
+td.actions { position: sticky; right: 0; background: var(--panel-strong); box-shadow: -10px 0 12px -10px rgba(34,24,20,.28); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 td.actions > .actions-inner { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 /* Dentro de una celda, un <details> es un chip compacto y alineado, no un
@@ -1552,6 +1555,24 @@ details > .details-body { padding: 0 14px 14px; }
 </html>'''
 
 
+def _panel_html() -> Response:
+    """Sirve el panel sin caché.
+
+    Sin ``Cache-Control`` el navegador puede reutilizar una copia vieja del
+    documento (y mostrar un layout anterior al despliegue): el panel es una
+    página viva y su HTML cambia con cada versión.
+    """
+    return Response(
+        content=ADMIN_PANEL_HTML,
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get(
     "/",
     response_class=HTMLResponse,
@@ -1572,9 +1593,9 @@ details > .details-body { padding: 0 14px 14px; }
         }
     },
 )
-def portada_admin() -> str:
+def portada_admin() -> Response:
     """Devuelve el documento HTML de entrada a la consola administrativa."""
-    return ADMIN_PANEL_HTML
+    return _panel_html()
 
 
 @router.get(
@@ -1597,6 +1618,6 @@ def portada_admin() -> str:
         }
     },
 )
-def login_admin() -> str:
+def login_admin() -> Response:
     """Devuelve la página HTML de acceso administrativo."""
-    return ADMIN_PANEL_HTML
+    return _panel_html()
