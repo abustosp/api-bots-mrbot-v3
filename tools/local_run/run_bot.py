@@ -474,6 +474,10 @@ def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "
         valor_hasta = fila.get("hasta", fila.get("periodo_hasta"))
         if valor_hasta not in (None, "", "null"):
             fila = {**fila, "fecha_hasta": _fecha_v1(valor_hasta)}
+    if "denominacion" in propiedades and not fila.get("denominacion"):
+        nombre = fila.get("nombre_representado") or fila.get("representado_nombre")
+        if nombre not in (None, "", "null"):
+            fila = {**fila, "denominacion": nombre}
     if "representado_nombre" in propiedades and not fila.get("representado_nombre"):
         for campo_nombre in ("denominacion", "nombre_representado"):
             valor_nombre = fila.get(campo_nombre)

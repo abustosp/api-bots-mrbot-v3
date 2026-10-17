@@ -69,3 +69,14 @@ def test_payload_desde_fila_deriva_cuits_consulta_y_formatos() -> None:
     assert payload["cuits_consulta"] == ["20111111112", "20222222223"]
     assert payload["excel"] is True
     assert "pdf" not in payload
+
+
+def test_payload_hacienda_deriva_denominacion_sin_pisar_el_canonico() -> None:
+    fila = {"nombre_representado": "ENTIDAD LEGACY"}
+    assert _payload_desde_fila(fila, {"denominacion"}) == {
+        "denominacion": "ENTIDAD LEGACY"
+    }
+    fila["denominacion"] = "ENTIDAD CANONICA"
+    assert _payload_desde_fila(fila, {"denominacion"}) == {
+        "denominacion": "ENTIDAD CANONICA"
+    }
