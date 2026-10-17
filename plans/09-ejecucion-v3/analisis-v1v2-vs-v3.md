@@ -97,7 +97,7 @@ producción los `FALLIDO` de estos diagnósticos tienen `attempts = 1` de
 
 - `sct`: 3 filas × 3 corridas V3 + V1 + V2 (ver `report_div_sct.md`).
 - `declaracion_en_linea`: 3 filas + rango parcial, V1/V2/V3 (ver `report_div_declaracion_en_linea.md`).
-- `sifere`: 3 filas × 2 corridas V3 post-ajuste + 3 corridas del logger V2 (ver `report_div_sifere.md`).
+- `sifere`: 3 filas × 2 corridas V3 locales post-ajuste + 3 corridas del logger V2 (ver `report_div_sifere.md`) y 4 corridas E2E contra la central (`testing-fixes6`): 1 falló con `target_unavailable` a los 267 s y el reintento del mismo cuerpo terminó `PARCIAL` con datos; las otras dos terminaron `OK` (407 s y 408 s). Es la tercera medición del patrón transitorio-sin-reintento.
 - `mis_facilidades`: en curso (`report_div_mis_facilidades.md`). Relevante: 1.951 fallos históricos no se reproducen con el build actual; el patrón dominante es `arca_service_not_visible` = DATOS.
 - V2 en api2: servicio `api-bots-mrbot-v2` levantado y `/health` OK, pero **no** se pudo lanzar un job V2: la base solo guarda el verificador HMAC de la API key (irreversible) y `POST /api/v2/user/` requiere credenciales administrativas, deja la cuenta deshabilitada y manda la clave por correo. La comparación V1/V2 en vivo por HTTP queda pendiente de una API key en texto claro por un canal aprobado (ver `report_v1v2_api2.md`); la comparación con el código legacy se hizo ejecutando los loggers V1/V2 localmente.
 - 3 casos por endpoint modificado contra la central de testing: `report_3casos_central.md`, `report_3casos_misret_rcel.md`, `report_3casos_libros_piva.md`.

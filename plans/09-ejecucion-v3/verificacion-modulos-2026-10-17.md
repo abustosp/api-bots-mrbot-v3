@@ -64,7 +64,7 @@ de punta a punta contra `https://testing-central.mrbot.com.ar` con las imágenes
 | `mis_facilidades` | OK (11 planes, 49 artefactos) | OK | 1.951 fallos históricos: no reproducidos con el build actual; `arca_service_not_visible` = DATOS. |
 | `sifere` | OK (102 artefactos, 403 s) | 1.º intento `target_unavailable` (287 s), 2.º `OK` (455 s) con el mismo cuerpo y cuenta | `arca_service_not_visible` = DATOS; la intermitencia la cubre el hallazgo principal. |
 | `declaracion_en_linea` | OK | OK | `plugin_service_api_mismatch` pertenecía a builds viejos del worker. |
-| `portal_iva` | OK con periodo vigente (202610); `portal_iva_period_not_available` con 202608 | OK (202610) tras el defecto 12: la ruta alias descartaba los flags canónicos y 3/3 casos fallaban con `envelope_invalid` | El diagnóstico de período es DATOS: el portal sólo ofrece 202610 para la cuenta. Falta reejecutar los 3 casos contra `testing-fixes6`. |
+| `portal_iva` | OK con periodo vigente (202610); `portal_iva_period_not_available` con 202608 | 3/3 `OK` en `testing-fixes6` (2 CSV por caso: ventas + compras) tras el defecto 12; en `testing-fixes5` los 3 fallaban con `envelope_invalid` | El diagnóstico de período es DATOS: el portal sólo ofrece 202610 para la cuenta. |
 | `sct` | OK (3 juegos de credenciales) | OK (2/2) | `arca_service_not_visible` = DATOS; el resto lo cubren los defectos 3 y 4. |
 | `vep/consulta-pagos` | OK tras el fix (84 filas, CSV 6.803 B) | OK (27 s) | Defecto 9: era `portal_download_missing` por no confirmar el representado. |
 | `aportes_en_linea` | OK con `archivo_historico_minio=false` (genera `AEL - <cuit> - <fecha>.xls`) | OK | El `ENVELOPE_INVALID` del corpus V1 (`archivo_historico_minio=false`) ya no ocurre. |
@@ -120,6 +120,22 @@ El caso 3 es la prueba directa del fix: una sección de ese plan no se pudo
 capturar y la corrida igual entregó 42 artefactos como `PARCIAL`. Antes ese mismo
 error salía como `FALLIDO` (`target_unavailable` / `target_unavailable_unclassified`)
 y el cliente no recibía nada.
+
+### `POST /sifere/consultar`
+
+| Caso | HTTP | Estado / result | `error_code` | Datos | Tiempo |
+|---:|---:|---|---|---|---:|
+| 1 | 202 | `COMPLETO` / `ERROR` | `target_unavailable` | — | 266,9 s |
+| 2 | 202 | `COMPLETO` / `OK` | — | consolidados + jurisdicciones | 407,2 s |
+| 3 | 202 | `COMPLETO` / `OK` | — | consolidados + jurisdicciones | 408,3 s |
+| 1 (reintento) | 202 | `COMPLETO` / `PARCIAL` | — | consolidados + jurisdicciones | 410,3 s |
+
+El caso 1 es la **tercera medición** del hallazgo principal: el mismo cuerpo,
+la misma cuenta y el mismo tag fallan con `target_unavailable` en el primer
+intento y funcionan (con datos) en el reintento. Con el fix del orden de
+expansión del catálogo, 3 de 4 corridas terminan con datos, pero el error
+transitorio sigue terminando el job en el primer intento porque nadie consume
+`reintentable`.
 
 ### `POST /mis_retenciones/consulta` y `POST /rcel/consulta`
 
@@ -244,6 +260,15 @@ estado de la central en todos los casos.
     permite enviar sin marcar Excel/CSV/PDF y el worker exige al menos un
     formato. Recomendación para el cliente: validar en el formulario que haya al
     menos un formato de salida para esa entrada.
+- **Módulos con sospecha de `ENVELOPE_INVALID` (defecto 12)**: se corrió el
+  cliente contra `testing-fixes6` para `siper` y `mis_comprobantes`. Los dos se
+  crearon con 202 desde la ruta canónica cifrada (`/api/v3/bots/<bot>/<op>`),
+  sin 422 ni `envelope_invalid`: `mis_comprobantes` terminó `COMPLETO/OK` con 2/2
+  archivos descargados (directo y por `download_url`), y `siper` quedó
+  `credentials_rejected` porque su única fila del corpus tiene credenciales
+  vencidas (DATOS). Es decir, por el camino del cliente V3 (ruta canónica) el
+  defecto 12 no aplica; afecta a quien manda nombres canónicos a la **ruta
+  alias** (ver la observación abierta 0).
 - **Probes sin job**: `GET /utilidades/apoc/{cuit}` devuelve 200 con la forma
   esperada y un `legacy_b64=""` no dispara el rechazo de contenido inline (el 422
   que aparece es el ordinario por falta de `object_key` cuando el bot necesita un
