@@ -29,34 +29,63 @@ class LibrosPortalIvaPortal(PortalArca):
     nombre = "libros_portal_iva"
 
     async def seleccionar_representado(self, cuit: str) -> None:
-        """Usa primero los selectores comunes y luego el switcher del Portal IVA."""
+        """Selecciona el CUIT y confirma que quedó activo antes de continuar."""
         try:
             await self.page.wait_for_load_state("networkidle", timeout=30_000)
         except Exception:
             pass
         try:
             await super().seleccionar_representado(cuit)
-            return
-        except TargetUnavailableError as error_original:
-            # El Portal IVA usa una SPA con un selector de relación propio. En
-            # ciertos perfiles no aparece como combo ni como link directo.
-            objetivo = solo_digitos(cuit)
-            formateado = self._formatear_cuit(objetivo)
-            cambio = await self._clickear(
-                (
-                    self.page.get_by_title("cambio relacion"),
-                    self.page.get_by_role("link", name="\uf0c0"),
-                    self.page.locator("[title*='cambio relacion' i]"),
-                ),
-                total_ms=4_000,
+            await self._esperar(1_000)
+            if (
+                await self._representado_esta_activo(cuit)
+                or await self._ya_esta_seleccionado(solo_digitos(cuit))
+            ):
+                return
+            error_original = TargetUnavailableError(
+                "Portal IVA no confirmó el CUIT representado solicitado",
+                diagnostic_code="represented_cuit_not_selectable",
             )
-            if cambio:
-                await self._esperar(1_500)
-                try:
-                    await self.page.wait_for_url("**/changeRelation**", timeout=5_000)
-                except Exception:
-                    pass
-                await self._esperar(1_000)
+        except TargetUnavailableError as error_original:
+            pass
+
+        # El Portal IVA usa una SPA con un selector de relación propio. En
+        # ciertos perfiles no aparece como combo ni como link directo.
+        objetivo = solo_digitos(cuit)
+        formateado = self._formatear_cuit(objetivo)
+        cambio = await self._clickear(
+            (
+                self.page.get_by_title("cambio relacion"),
+                self.page.get_by_role("link", name="\uf0c0"),
+                self.page.locator("[title*='cambio relacion' i]"),
+            ),
+            total_ms=4_000,
+        )
+        if cambio:
+            await self._esperar(1_500)
+            try:
+                await self.page.wait_for_url("**/changeRelation**", timeout=5_000)
+            except Exception:
+                pass
+            await self._esperar(1_000)
+        elegido = await self._clickear(
+            (
+                self.page.locator("button.list-group-item").filter(has_text=formateado),
+                self.page.locator("a.list-group-item").filter(has_text=formateado),
+                self.page.get_by_role("button", name=re.compile(re.escape(formateado))),
+                self.page.get_by_text(formateado, exact=False),
+                self.page.get_by_text(objetivo, exact=False),
+            ),
+            total_ms=6_000,
+        )
+        if not elegido:
+            await self._clickear(
+                (
+                    self.page.get_by_title("Representar a..."),
+                    self.page.get_by_text("Representar a...", exact=False),
+                ),
+                total_ms=2_000,
+            )
             elegido = await self._clickear(
                 (
                     self.page.locator("button.list-group-item").filter(has_text=formateado),
@@ -65,33 +94,34 @@ class LibrosPortalIvaPortal(PortalArca):
                     self.page.get_by_text(formateado, exact=False),
                     self.page.get_by_text(objetivo, exact=False),
                 ),
-                total_ms=6_000,
+                total_ms=5_000,
             )
-            if not elegido:
-                await self._clickear(
-                    (
-                        self.page.get_by_title("Representar a..."),
-                        self.page.get_by_text("Representar a...", exact=False),
-                    ),
-                    total_ms=2_000,
-                )
-                elegido = await self._clickear(
-                    (
-                        self.page.locator("button.list-group-item").filter(has_text=formateado),
-                        self.page.locator("a.list-group-item").filter(has_text=formateado),
-                        self.page.get_by_role("button", name=re.compile(re.escape(formateado))),
-                        self.page.get_by_text(formateado, exact=False),
-                        self.page.get_by_text(objetivo, exact=False),
-                    ),
-                    total_ms=5_000,
-                )
-            if not elegido:
-                raise error_original
-            try:
-                await self.page.wait_for_load_state("networkidle", timeout=20_000)
-            except Exception:
-                pass
-            await self._esperar(2_000)
+        if not elegido:
+            raise error_original
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=20_000)
+        except Exception:
+            pass
+        await self._esperar(2_000)
+        if not (
+            await self._representado_esta_activo(objetivo)
+            or await self._ya_esta_seleccionado(objetivo)
+        ):
+            raise error_original
+
+    async def _representado_esta_activo(self, cuit: str) -> bool:
+        """Confirma el CUIT solo dentro del rótulo de relación activa."""
+        objetivo = solo_digitos(cuit)
+        try:
+            texto = await self.page.locator("body").inner_text()
+        except Exception:
+            return False
+        activo = re.search(
+            r"representando\s+a\s*:\s*(.*?)(?:\brepresentar\s+a\s*:|$)",
+            texto,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return bool(activo and objetivo and objetivo in solo_digitos(activo.group(1)))
 
     async def descargar_periodo(
         self, *, operacion: str, periodo: str, destino: Path

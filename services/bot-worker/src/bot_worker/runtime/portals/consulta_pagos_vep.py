@@ -134,7 +134,7 @@ class ConsultaPagosVepPortal(PortalArca):
         try:
             elemento_id = await opcion.first.get_attribute("id")
             if elemento_id:
-                await self.page.evaluate(
+                seleccionado = await self.page.evaluate(
                     """(id) => {
                         const el = document.getElementById(id);
                         if (!el) return false;
@@ -144,12 +144,22 @@ class ConsultaPagosVepPortal(PortalArca):
                     }""",
                     elemento_id,
                 )
+                if not seleccionado:
+                    return False
             else:
                 await opcion.first.click(force=True, timeout=4_000)
         except Exception:
             return False
         await self._esperar(700)
-        return True
+        # V1 no daba por seleccionada la opcion solo porque el evento click
+        # se hubiera despachado: comprobaba que el fake-input reflejara el CUIT.
+        # Sin esta verificacion la SPA puede ignorar un click sintetico y el
+        # flujo continua consultando el representado anterior/sin seleccionar.
+        try:
+            fake = await self.page.locator(".multiselect-fake-input").nth(1).get_attribute("value")
+        except Exception:
+            fake = None
+        return solo_digitos(fake or "") == digits
 
     # ------------------------------------------------------------------
 

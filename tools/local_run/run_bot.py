@@ -470,6 +470,12 @@ def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "
         fila = {**fila, "fecha_desde": _fecha_v1(fila["desde"])}
     if "fecha_hasta" in propiedades and "hasta" in fila and "fecha_hasta" not in fila:
         fila = {**fila, "fecha_hasta": _fecha_v1(fila["hasta"])}
+    if "representado_nombre" in propiedades and not fila.get("representado_nombre"):
+        for campo_nombre in ("denominacion", "nombre_representado"):
+            valor_nombre = fila.get(campo_nombre)
+            if valor_nombre not in (None, "", "null"):
+                fila = {**fila, "representado_nombre": valor_nombre}
+                break
     if "cuits_consulta" in propiedades and not fila.get("cuits_consulta"):
         crudo = fila.get("cuits_consultados") or fila.get("cuits")
         if isinstance(crudo, str) and crudo.strip():

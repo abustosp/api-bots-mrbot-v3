@@ -197,6 +197,40 @@ def test_periodo_distinto_de_72_no_busca_el_combo_12() -> None:
     assert pagina.clicks(COMBO_NUMERICO) == 1
 
 
+def _portal_con_opcion_representado(
+    cuit_seleccionado: str | None,
+) -> tuple[Pagina, ConsultaPagosVepPortal]:
+    pagina = Pagina()
+    opcion_id = f"cuitcontribuyente-multiselect-option-{CUIT}"
+    pagina.poner(f"loc:#{opcion_id}", attrs={"id": opcion_id})
+    fake = pagina.poner("loc:.multiselect-fake-input", attrs={"value": ""})
+
+    def aplicar_click(_script: str, argumento: Any) -> bool:
+        if argumento == opcion_id and cuit_seleccionado is not None:
+            fake.attrs["value"] = cuit_seleccionado
+        return argumento == opcion_id
+
+    pagina.evaluar = aplicar_click
+    portal = ConsultaPagosVepPortal(pagina)
+    return pagina, portal
+
+
+def test_click_opcion_no_confirma_representado_si_fake_input_no_cambia() -> None:
+    _, portal = _portal_con_opcion_representado(None)
+
+    seleccionado = asyncio.run(portal._click_opcion(CUIT))
+
+    assert seleccionado is False
+
+
+def test_click_opcion_confirma_cuit_reflejado_en_fake_input() -> None:
+    _, portal = _portal_con_opcion_representado("20-12345678-6")
+
+    seleccionado = asyncio.run(portal._click_opcion(CUIT))
+
+    assert seleccionado is True
+
+
 def test_sin_ningun_combo_no_falla() -> None:
     _, portal = _portal_con_combos({})
 

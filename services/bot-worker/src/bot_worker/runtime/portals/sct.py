@@ -8,12 +8,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from bot_worker.bots.errors import TargetUnavailableError
 
 from .base import PortalArca
 
 _IFRAME = "iframe"
+_HOST_SCT = "ctacte.cloud.afip.gob.ar"
 
 # Rótulos de pestaña por sección (V2 usa los nombres del portal).
 PESTANAS = {
@@ -42,6 +44,11 @@ class SctPortal(PortalArca):
             await self.page.wait_for_load_state("networkidle", timeout=15_000)
         except Exception:
             pass
+        # open_service puede devolver la página de ARCA/login si el popup no
+        # terminó de navegar al SCT. Verificar el destino antes de intentar
+        # seleccionar el representado evita ocultar ese problema como uno de
+        # selector o de apertura de sección.
+        await self.preparar()
         for intento in range(3):
             try:
                 await super().seleccionar_representado(cuit)
@@ -54,8 +61,22 @@ class SctPortal(PortalArca):
 
     async def preparar(self) -> None:
         """Espera el iframe del SCT (port del bloque previo de V2)."""
+        marco = self.page.locator(_IFRAME)
+        host = (urlsplit(await self._url()).hostname or "").lower().rstrip(".")
         try:
-            marco = self.page.locator(_IFRAME)
+            tiene_iframe = await marco.count() > 0
+        except Exception:
+            tiene_iframe = False
+        # En el host de SCT el iframe puede aparecer con retraso. En cualquier
+        # otro host, la ausencia del iframe significa que open_service dejó la
+        # sesión en ARCA/login u otra página, por lo que no tiene sentido
+        # esperar el timeout completo para diagnosticarlo.
+        if host != _HOST_SCT and not tiene_iframe:
+            raise TargetUnavailableError(
+                "la página abierta no corresponde al Sistema de Cuentas",
+                diagnostic_code="sct_frame_missing",
+            )
+        try:
             await marco.first.wait_for(state="visible", timeout=20_000)
         except Exception as exc:
             raise TargetUnavailableError(

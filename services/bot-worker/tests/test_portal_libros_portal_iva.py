@@ -64,6 +64,45 @@ class _Pagina:
         return self.tablas
 
 
+class _TextoBody:
+    def __init__(self, texto: str) -> None:
+        self.texto = texto
+
+    async def inner_text(self) -> str:
+        return self.texto
+
+
+class _PaginaConRepresentando:
+    def __init__(self, texto: str) -> None:
+        self.body = _TextoBody(texto)
+
+    def locator(self, selector: str) -> _TextoBody:
+        assert selector == "body"
+        return self.body
+
+
+class _LocalizadorDummy:
+    def filter(self, **_: object) -> "_LocalizadorDummy":
+        return self
+
+
+class _PaginaSinSelector:
+    async def wait_for_load_state(self, **_: object) -> None:
+        return None
+
+    def get_by_title(self, *_: object, **__: object) -> _LocalizadorDummy:
+        return _LocalizadorDummy()
+
+    def get_by_role(self, *_: object, **__: object) -> _LocalizadorDummy:
+        return _LocalizadorDummy()
+
+    def get_by_text(self, *_: object, **__: object) -> _LocalizadorDummy:
+        return _LocalizadorDummy()
+
+    def locator(self, *_: object, **__: object) -> _LocalizadorDummy:
+        return _LocalizadorDummy()
+
+
 def test_slots_de_subida_coinciden_con_el_manifiesto() -> None:
     slots_manifestados = {
         spec.nombre.lower().replace(".", "_")
@@ -133,3 +172,60 @@ def test_lectura_filas_de_libros_y_ddjj_usa_la_columna_de_periodo_heredada() -> 
     assert [fila["fila"] for fila in ddjj] == [1]
     assert libros[0]["secuencia"] == "Original"
     assert ddjj[0]["secuencia"] == "Rectificativa 1"
+
+
+def test_confirmacion_de_representado_exige_el_cuit_en_la_relacion_activa() -> None:
+    portal = LibrosPortalIvaPortal(
+        _PaginaConRepresentando(
+            "Portal IVA\nRepresentando a: 30-71816618-3\nRepresentar a:\n"
+        )
+    )
+
+    assert asyncio.run(portal._representado_esta_activo("30718166183")) is True
+    assert asyncio.run(portal._representado_esta_activo("27175256437")) is False
+
+
+def test_no_confirma_el_representado_si_solo_esta_activo_el_representante() -> None:
+    portal = LibrosPortalIvaPortal(
+        _PaginaConRepresentando(
+            "Portal IVA\nRepresentando a: 27-17525643-7\nRepresentar a:\n"
+        )
+    )
+
+    assert asyncio.run(portal._representado_esta_activo("30718166183")) is False
+
+
+def test_no_continua_si_el_selector_comun_no_deja_activo_el_representado(monkeypatch) -> None:
+    from bot_worker.runtime.portals.base import PortalArca
+
+    portal = LibrosPortalIvaPortal(_PaginaSinSelector())
+    monkeypatch.setattr(
+        PortalArca,
+        "seleccionar_representado",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        LibrosPortalIvaPortal,
+        "_representado_esta_activo",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        PortalArca,
+        "_ya_esta_seleccionado",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        LibrosPortalIvaPortal,
+        "_esperar",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        LibrosPortalIvaPortal,
+        "_clickear",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(portal.seleccionar_representado("30718166183"))
+
+    assert error.value.diagnostic_code == "represented_cuit_not_selectable"

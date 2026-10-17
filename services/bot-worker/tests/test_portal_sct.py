@@ -10,6 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
+from bot_worker.bots.errors import TargetUnavailableError
 from bot_worker.bots.sct.plugin import SctPlugin
 from bot_worker.runtime.portals.sct import PESTANAS, SctPortal
 
@@ -63,6 +66,62 @@ class _PaginaSct:
 
     async def wait_for_timeout(self, *_: Any) -> None:
         return None
+
+
+class _Iframe:
+    def __init__(self, visible: bool) -> None:
+        self.visible = visible
+
+    @property
+    def first(self) -> _Iframe:
+        return self
+
+    async def count(self) -> int:
+        return int(self.visible)
+
+    async def wait_for(self, *, state: str, timeout: int) -> None:
+        if state == "visible" and not self.visible:
+            raise TimeoutError("iframe not visible")
+
+
+class _PaginaServicio:
+    def __init__(self, url: str, *, iframe_visible: bool) -> None:
+        self.url = url
+        self.iframe = _Iframe(iframe_visible)
+
+    def locator(self, selector: str) -> _Iframe:
+        assert selector == "iframe"
+        return self.iframe
+
+    async def wait_for_load_state(self, *_: Any, **__: Any) -> None:
+        return None
+
+    async def wait_for_timeout(self, *_: Any) -> None:
+        return None
+
+
+def test_sct_rechaza_pagina_login_antes_de_seleccionar_representado() -> None:
+    portal = SctPortal(
+        _PaginaServicio(
+            "https://auth.afip.gob.ar/contribuyente_/login.xhtml?action=SYSTEM",
+            iframe_visible=False,
+        )
+    )
+
+    with pytest.raises(TargetUnavailableError) as error:
+        asyncio.run(portal.seleccionar_representado("20123456789"))
+    assert error.value.diagnostic_code == "sct_frame_missing"
+
+
+def test_preparar_acepta_iframe_visible_en_el_host_de_sct() -> None:
+    portal = SctPortal(
+        _PaginaServicio(
+            "https://ctacte.cloud.afip.gob.ar/contribuyente/externo",
+            iframe_visible=True,
+        )
+    )
+
+    asyncio.run(portal.preparar())
 
 
 def _insignia(valor: str) -> _Nodo:
@@ -223,4 +282,3 @@ def test_xlsx_y_csv_de_una_seccion_no_se_pisan(tmp_path: Path) -> None:
     assert len(destinos) == 2
     assert len(set(destinos)) == 2
     assert all(d.startswith("sct_vencimientos_20123456789_") for d in destinos)
-
