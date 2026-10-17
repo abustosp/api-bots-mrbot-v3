@@ -235,6 +235,12 @@ class PortalArca:
         Port de los selectores usados por los bots V2: combo
         ``$PropertySelection`` de los portales AFIP clásicos, listas de
         opciones y, por último, el nombre activo de Mis Comprobantes.
+
+        Igual que V1/V2, la ausencia de selector no es un error: los portales
+        solo lo dibujan cuando la cuenta tiene varios representados, así que
+        sin selector se asume representado único o ya activo y el flujo sigue.
+        El error queda reservado para cuando el portal muestra un selector que
+        no contiene el CUIT pedido.
         """
         digits = solo_digitos(cuit)
         if len(digits) != 11:
@@ -250,6 +256,10 @@ class PortalArca:
             return
         if await self._ya_esta_seleccionado(digits):
             return
+        if not await self._hay_selector_representado():
+            # V1: "Selector de representado no encontrado. Asumiendo cuenta
+            # única o ya seleccionada." Sin nada que cambiar, el flujo sigue.
+            return
         # Mapa de selectores (nombre propio y cantidad encontrada): orienta al
         # operador sin exponer texto del sitio.
         mapa = await self._mapa_de_selectores()
@@ -257,6 +267,27 @@ class PortalArca:
             f"no se pudo seleccionar el CUIT representado ({mapa})",
             diagnostic_code="represented_cuit_not_selectable",
         )
+
+    #: Selectores que prueban que el portal ofrece un selector de representado.
+    _SELECTORES_SELECTOR_REPRESENTADO = (
+        'select[name="$PropertySelection"]',
+        "select[id*='representado' i]",
+        "select[name*='representado' i]",
+        "select[id*='contribuyente' i]",
+        "select[name*='contribuyente' i]",
+        "span.nombre-propio.nombre-activo.pull-right",
+        "span.nombre-propio.nombre-activo.pull-righ",
+    )
+
+    async def _hay_selector_representado(self) -> bool:
+        """True si el portal despliega algún selector de representado."""
+        for selector in self._SELECTORES_SELECTOR_REPRESENTADO:
+            try:
+                if await self.page.locator(selector).count():
+                    return True
+            except Exception:
+                continue
+        return False
 
     async def _mapa_de_selectores(self) -> str:
         partes: list[str] = []

@@ -127,15 +127,25 @@ def test_solo_digitos_y_seleccion_de_representado_por_combo() -> None:
     assert solo_digitos("20-12345678-9") == "20123456789"
 
 
-def test_representado_invalido_y_no_seleccionable() -> None:
+def test_representado_invalido_y_sin_selector_no_es_error() -> None:
     portal = PortalArca(_PaginaFake(), service_name="sct")
     with pytest.raises(TargetUnavailableError) as invalido:
         asyncio.run(portal.seleccionar_representado("123"))
     assert invalido.value.diagnostic_code == "represented_cuit_invalid"
 
+    # V1: sin selector de representado el flujo sigue (cuenta unica o ya
+    # seleccionada). Solo un selector presente que excluya el CUIT es error.
+    asyncio.run(portal.seleccionar_representado(CUIT))
+
+
+def test_representado_no_seleccionable_con_selector_presente() -> None:
+    combo = _Combo([_Opcion("OTRO", "1")])
+    portal = PortalArca(_PaginaFake(combo=combo), service_name="sct")
+
     with pytest.raises(TargetUnavailableError) as ausente:
         asyncio.run(portal.seleccionar_representado(CUIT))
     assert ausente.value.diagnostic_code == "represented_cuit_not_selectable"
+    assert combo.seleccionado is None
 
 
 def test_seleccion_por_lista_visible() -> None:

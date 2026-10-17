@@ -103,6 +103,19 @@ def test_similitud_denominacion_normaliza_acentos_y_siglas() -> None:
     assert _similitud_nombre("Compañía del Sur S.A.", "Otra Empresa") < 0.9
 
 
+def test_escribir_xlsx_crea_directorio_de_destino(tmp_path: Any) -> None:
+    from zipfile import ZipFile
+
+    from bot_worker.runtime.portals.hacienda import escribir_xlsx
+
+    destino = tmp_path / "work" / "subdir" / "consolidado.xlsx"
+    escribir_xlsx(destino, [("consolidado", ["campo"], [["valor"]])])
+
+    with ZipFile(destino) as libro:
+        assert libro.testzip() is None
+        assert "xl/workbook.xml" in libro.namelist()
+
+
 def test_selecciona_denominacion_por_coincidencia_normalizada() -> None:
     correcta = _Elemento("COMPANIA DEL SUR S.A.")
     pagina = _Pagina([_Elemento("Otra Empresa"), correcta])

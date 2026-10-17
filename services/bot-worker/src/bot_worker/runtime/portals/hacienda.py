@@ -63,6 +63,7 @@ def escribir_xlsx(
     pandas ni de openpyxl en el worker. Los valores se escriben como texto, que
     es lo que devuelven las tablas HTML del portal.
     """
+    destino.parent.mkdir(parents=True, exist_ok=True)
     ET.register_namespace("", _NS_MAIN)
     ET.register_namespace("r", _NS_REL_DOC)
     workbook = ET.Element(f"{{{_NS_MAIN}}}workbook")

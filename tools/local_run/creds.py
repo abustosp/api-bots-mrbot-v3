@@ -142,6 +142,71 @@ def mask(row: dict, show_secrets: bool) -> dict:
     return out
 
 
+#: orden de preferencia de los campos de la fila que traen cada dato fiscal.
+CAMPOS_CUIT_REPRESENTANTE = ("cuit_representante", "cuit_login", "cuit_inicio_sesion", "cuit")
+CAMPOS_CLAVE = ("clave_representante", "clave", "contrasena")
+CAMPOS_REPRESENTADO = ("cuit_representado", "representado_cuit", "cuit")
+
+#: campos de negocio que se pueden copiar al payload del plugin.
+CAMPOS_PAYLOAD = (
+    "periodo", "periodo_desde", "periodo_hasta", "desde", "hasta",
+    "jurisdicciones", "impuestos", "denominacion", "representado_nombre",
+    "secciones", "formatos", "despachos", "cuits_consulta", "tipos",
+)
+
+
+def credenciales_de_fila(fila: dict) -> dict[str, str]:
+    """Extrae ``{cuit_representante, clave, representado}`` de una fila de logs."""
+    def primero(nombres: tuple[str, ...]) -> str:
+        for nombre in nombres:
+            valor = fila.get(nombre)
+            if valor not in (None, "", "null"):
+                return str(valor).strip()
+        return ""
+
+    return {
+        "cuit_representante": primero(CAMPOS_CUIT_REPRESENTANTE),
+        "clave": primero(CAMPOS_CLAVE),
+        "representado": primero(CAMPOS_REPRESENTADO),
+    }
+
+
+def filas(
+    *,
+    modulo: str | None = None,
+    tabla: str | None = None,
+    status: str | None = "success",
+    limit: int = 25,
+    where: str | None = None,
+    cuit: str | None = None,
+) -> list[dict]:
+    """Filas candidatas ordenadas de la base más reciente a la más vieja.
+
+    Cada elemento incluye ``db``, ``table`` y ``row``. Pensado para que
+    ``run_bot.py`` tome credenciales sin exponerlas en la línea de comandos.
+    """
+    table = tabla or MODULE_TABLES.get(modulo or "", "")
+    if not table:
+        raise ValueError(f"modulo desconocido: {modulo}")
+    if where is None and modulo:
+        where = MODULE_WHERE.get(modulo)
+    salida: list[dict] = []
+    for db in find_dbs():
+        if table not in tables_of(db):
+            continue
+        cols, rows = rows_for(db, table, status=status, limit=limit, where=where)
+        if cuit:
+            rows = [
+                r for r in rows
+                if str(r.get("cuit_representante")) == cuit
+                or str(r.get("cuit_representado")) == cuit
+                or str(r.get("cuit_login")) == cuit
+            ]
+        for row in rows:
+            salida.append({"db": db.name, "table": table, "row": row})
+    return salida
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--module", help="Nombre del modulo (ver MODULE_TABLES).")

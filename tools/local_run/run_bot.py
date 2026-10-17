@@ -148,6 +148,7 @@ class _CapturingFactory:
         self._out = out
         self._screenshot = screenshot
         self.paginas: list[dict] = []
+        self._paginas_interes: dict[str, Any] = {}
 
     @property
     def proxy(self):
@@ -156,17 +157,67 @@ class _CapturingFactory:
     def new_context(self, **kwargs):
         return self._base.new_context(**kwargs)
 
+    def registrar_pagina(self, etiqueta: str, page: Any) -> None:
+        """Guarda una página de interés para capturar evidencia al cerrar."""
+        self._paginas_interes[etiqueta] = page
+
     async def _evidencia(self, session, etapa: str) -> None:
-        with contextlib.suppress(Exception):
-            page = session.page
+        objetivos: list[tuple[str, Any]] = []
+        try:
+            objetivos.append((etapa, session.page))
+        except Exception as exc:  # noqa: BLE001 - se reporta, no se oculta
+            pass
+        for etiqueta, page in list(self._paginas_interes.items()):
+            objetivos.append((f"{etapa}_{etiqueta}", page))
+        problemas: list[str] = []
+        for nombre, page in objetivos:
+            if page is None:
+                continue
             url = getattr(page, "url", "")
-            self.paginas.append({"etapa": etapa, "url": url})
+            self.paginas.append({"etapa": nombre, "url": url})
             if self._screenshot:
-                await page.screenshot(path=str(self._out / f"{etapa}.png"), full_page=True)
-            (self._out / f"{etapa}.html").write_text(await page.content(), encoding="utf-8")
+                try:
+                    await page.screenshot(path=str(self._out / f"{nombre}.png"), full_page=True)
+                except Exception as exc:  # noqa: BLE001
+                    problemas.append(f"{nombre} screenshot: {type(exc).__name__}: {exc}")
+            try:
+                (self._out / f"{nombre}.html").write_text(await page.content(), encoding="utf-8")
+            except Exception as exc:  # noqa: BLE001
+                problemas.append(f"{nombre} html: {type(exc).__name__}: {exc}")
+            try:
+                (self._out / f"{nombre}.url.txt").write_text(str(url), encoding="utf-8")
+            except Exception as exc:  # noqa: BLE001
+                problemas.append(f"{nombre} url: {type(exc).__name__}: {exc}")
+            with contextlib.suppress(Exception):
+                marcos = list(getattr(page, "frames", []) or [])
+                (self._out / f"{nombre}.frames.txt").write_text(
+                    "\n".join(str(getattr(f, "url", "")) for f in marcos), encoding="utf-8"
+                )
+        if problemas:
+            with contextlib.suppress(OSError):
+                (self._out / "evidencia_errores.txt").write_text(
+                    "\n".join(problemas), encoding="utf-8"
+                )
 
     def arca_session(self, credentials, **kwargs):
+        fabrica = self
         base_cm = self._base.arca_session(credentials, **kwargs)
+
+        class _Sesion:
+            """Delega en la sesión real y registra la página del servicio."""
+
+            def __init__(self, sesion: Any) -> None:
+                self._sesion = sesion
+
+            def __getattr__(self, nombre: str) -> Any:
+                return getattr(self._sesion, nombre)
+
+            async def open_service(self, *args: Any, **opts: Any) -> Any:
+                manejador = await self._sesion.open_service(*args, **opts)
+                pagina = getattr(manejador, "page", None)
+                if pagina is not None:
+                    fabrica.registrar_pagina("servicio", pagina)
+                return manejador
 
         class _Wrapper:
             def __init__(self) -> None:
@@ -174,12 +225,12 @@ class _CapturingFactory:
 
             async def __aenter__(self):
                 self._cm = base_cm
-                self.session = await self._cm.__aenter__()
+                self.session = _Sesion(await self._cm.__aenter__())
                 return self.session
 
             async def __aexit__(self, *exc):
                 with contextlib.suppress(Exception):
-                    await self._evidencia(self.session, "final")
+                    await fabrica._evidencia(self.session, "final")
                 return await self._cm.__aexit__(*exc)
 
         return _Wrapper()
@@ -374,6 +425,96 @@ async def _modo_bot(args, out: Path, credentials, proxy, factory) -> dict:
         }
 
 
+_SECCIONES_DESDE_LOGS: dict[str, tuple[str, str]] = {
+    "vencimientos_excel": ("vencimientos", "xlsx"),
+    "vencimientos_xlsx": ("vencimientos", "xlsx"),
+    "vencimientos_csv": ("vencimientos", "csv"),
+    "vencimientos_pdf": ("vencimientos", "pdf"),
+    "deudas_excel": ("deudas", "xlsx"),
+    "deudas_xlsx": ("deudas", "xlsx"),
+    "deudas_csv": ("deudas", "csv"),
+    "deudas_pdf": ("deudas", "pdf"),
+    "ddjj_pendientes_excel": ("ddjj_pendientes", "xlsx"),
+    "ddjj_pendientes_xlsx": ("ddjj_pendientes", "xlsx"),
+    "ddjj_pendientes_csv": ("ddjj_pendientes", "csv"),
+    "ddjj_pendientes_pdf": ("ddjj_pendientes", "pdf"),
+}
+
+
+def _payload_desde_fila(fila: dict, propiedades: set[str], representado: str = "") -> dict:
+    """Campos de negocio de la fila que el esquema del plugin acepta."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from creds import CAMPOS_PAYLOAD
+
+    cuerpo: dict = {}
+    if "representado_cuit" in propiedades and representado:
+        cuerpo["representado_cuit"] = representado
+    for campo in CAMPOS_PAYLOAD:
+        if campo not in propiedades or campo not in fila:
+            continue
+        valor = fila.get(campo)
+        if valor in (None, "", "null"):
+            continue
+        if isinstance(valor, str) and valor.strip().startswith("["):
+            with contextlib.suppress(ValueError, json.JSONDecodeError):
+                valor = json.loads(valor)
+        cuerpo[campo] = valor
+    # SCT: V1 pedia salidas por seccion y formato con nueve banderas; el log
+    # deja la URL de cada archivo entregado, que revela seccion y formato.
+    if "secciones" in propiedades and "secciones" not in cuerpo:
+        secciones: list[str] = []
+        formatos: list[str] = []
+        for columna, (seccion, formato) in _SECCIONES_DESDE_LOGS.items():
+            for sufijo in ("_url_minio", "_minio_url", ""):
+                valor = fila.get(f"{columna}{sufijo}")
+                if isinstance(valor, str) and valor.strip():
+                    secciones.append(seccion)
+                    formatos.append(formato)
+                    break
+        if secciones:
+            cuerpo["secciones"] = sorted(set(secciones))
+            if "formatos" in propiedades:
+                cuerpo["formatos"] = sorted(set(formatos))
+    return cuerpo
+
+
+def _resolver_desde_db(args) -> dict:
+    """Toma credenciales (y campos de negocio) de la base de logs indicada.
+
+    Devuelve ``{"cuit_representante", "clave", "representado", "payload",
+    "origen"}`` sin imprimir la clave.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from creds import credenciales_de_fila, filas
+
+    status = None if str(args.db_status).lower() in {"any", "all"} else args.db_status
+    candidatas = filas(
+        modulo=args.from_db, tabla=args.from_table, status=status,
+        limit=max(1, args.db_index + 1), cuit=args.db_cuit,
+    )
+    if not candidatas:
+        raise SystemExit("--from-db: sin registros para ese modulo/tabla")
+    if args.db_index >= len(candidatas):
+        raise SystemExit(f"--from-db: solo hay {len(candidatas)} registros disponibles")
+    elegida = candidatas[args.db_index]
+    datos = credenciales_de_fila(elegida["row"])
+    if not (datos["cuit_representante"] and datos["clave"]):
+        raise SystemExit("--from-db: el registro no trae CUIT y clave utilizables")
+    propiedades: set[str] = set()
+    if args.bot:
+        from bot_worker.bots.registry import get_plugin_para_payload
+
+        plugin = get_plugin_para_payload(args.bot, {"operacion": args.operacion})
+        esquema = getattr(getattr(plugin, "manifest", None), "esquema_entrada", None)
+        if isinstance(esquema, dict):
+            propiedades = set((esquema.get("properties") or {}).keys())
+    return {
+        **datos,
+        "payload": _payload_desde_fila(elegida["row"], propiedades, datos["representado"]),
+        "origen": f"{elegida['db']}/{elegida['table']}/id={elegida['row'].get('id')}",
+    }
+
+
 async def _run(args) -> dict:
     from bot_worker.runtime.browser import PlaywrightBrowserFactory
     from bot_worker.runtime.context import FiscalCredentials
@@ -381,6 +522,15 @@ async def _run(args) -> dict:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     proxy = _proxy_config(args.proxy)
+    desde_db: dict = {}
+    if args.from_db or args.from_table:
+        desde_db = _resolver_desde_db(args)
+        args.cuit_representante = args.cuit_representante or desde_db["cuit_representante"]
+        args.clave = args.clave or desde_db["clave"]
+        args.representado = args.representado or desde_db["representado"]
+        if desde_db["payload"]:
+            previo = json.loads(args.payload_json) if args.payload_json else {}
+            args.payload_json = json.dumps({**desde_db["payload"], **previo})
     credentials = FiscalCredentials(
         cuit_representante=args.cuit_representante, clave=args.clave
     )
@@ -415,6 +565,7 @@ async def _run(args) -> dict:
         "cuit_representante": args.cuit_representante,
         "representado": args.representado,
         "proxy": bool(proxy),
+        "origen_credenciales": desde_db.get("origen"),
         "paginas": factory.paginas,
         **reporte,
     }
@@ -440,9 +591,21 @@ def main() -> int:
     parser.add_argument("--bot", help="Bot/plugin a ejecutar (sct, sifere, ...).")
     parser.add_argument("--operacion", default="consultar")
     parser.add_argument("--mode", choices=("bot", "login", "portal"), default="bot")
-    parser.add_argument("--cuit-representante", required=True)
-    parser.add_argument("--clave", required=True)
+    parser.add_argument("--cuit-representante", default="", help="CUIT que inicia sesion.")
+    parser.add_argument("--clave", default="", help="Clave fiscal (evite pasarla por CLI si puede).")
     parser.add_argument("--representado", default="")
+    parser.add_argument(
+        "--from-db",
+        help=(
+            "Toma CUIT, clave y campos de negocio del registro mas reciente de la "
+            "tabla de logs del modulo (ver tools/local_run/creds.py). Evita exponer "
+            "la clave en la linea de comandos."
+        ),
+    )
+    parser.add_argument("--from-table", help="Tabla de logs explicita (alternativa a --from-db).")
+    parser.add_argument("--db-index", type=int, default=0, help="0 = registro mas reciente.")
+    parser.add_argument("--db-status", default="success", help="success|any.")
+    parser.add_argument("--db-cuit", help="Filtra los registros por CUIT.")
     parser.add_argument("--payload", help="Archivo JSON con el payload del bot.")
     parser.add_argument("--payload-json", help="Payload JSON inline (se fusiona).")
     parser.add_argument("--service-json", help="Extras para la seccion service del sobre.")
@@ -458,6 +621,8 @@ def main() -> int:
 
     if args.mode in {"bot", "portal"} and not args.bot:
         parser.error("--bot es obligatorio en modo bot/portal")
+    if not (args.from_db or args.from_table) and not (args.cuit_representante and args.clave):
+        parser.error("indique --cuit-representante y --clave, o bien --from-db/--from-table")
 
     _cargar_dotenv()
     reporte = asyncio.run(_run(args))
