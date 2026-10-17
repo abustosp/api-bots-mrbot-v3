@@ -80,22 +80,25 @@ producción los `FALLIDO` de estos diagnósticos tienen `attempts = 1` de
 | 1 | `runtime/arca_login.py::_wait_ready` y nuevo `_esperar_pagina`: `domcontentloaded` + `networkidle` acotados (port de `wait_page_ready`). |
 | 2 | `runtime/arca_login.py::open_service`: reintento del clic y `el.click()` por JS cuando el popup no abre. |
 | 3 | `runtime/portals/base.py::seleccionar_representado`: sin selector presente se continúa (paridad V1); sólo falla con selector presente que excluya el CUIT. Portales que dependen de la selección (libros, vep) ahora la **confirman**. |
-| 4 | Revisión por módulo (ver `verificacion-modulos-2026-10-17.md` y los informes `report_div_*`). |
+| 4 | Revisión por módulo (ver `verificacion-modulos-2026-10-17.md` y los informes `report_div_*`). Caso concreto portado: `sct/plugin.py` acumula el error de cada sección/formato en `data.errores`, sigue con las combinaciones restantes y devuelve `PARCIAL` si entregó al menos un reporte; sólo propaga el error cuando no descargó nada (idéntico al `success` de V1/V2 con `error_logs`). `sifere` y `mis_facilidades` ya devolvían `PARCIAL`. |
 | Retransmisión | Recomendación pendiente de decisión de producto: reencolar `TARGET_UNAVAILABLE`/`DEADLINE_EXCEEDED` mientras `attempts < max_attempts`. |
 
-## 7. Hallazgos por módulo (V1/V2 vs V3, con evidencia)
+## 6. Hallazgos por módulo (V1/V2 vs V3, con evidencia)
 
 | Módulo | Divergencia encontrada | Veredicto |
 |---|---|---|
 | `sct` | ARCA a veces redirige el **popup** de SCT a su login. V1/V2 lo detectan (`bots_dev/sct/sct_bot_logger.py:159-194`), vuelven a autenticar en el mismo popup y reabren el servicio; el V3 lo pasaba a la preparación del iframe y moría con `sct_frame_missing`. | BUG corregido: `sct/plugin.py` + `runtime/portals/sct.py` (reautenticación en el popup y reapertura). Medido: V1 3/3, V2 3/3, V3 8/9 antes y 9/9 después. |
 | `declaracion_en_linea` | Sin divergencia funcional: V1, V2 y V3 consultan mes a mes, toleran períodos sin DDJJ si hay al menos uno con datos y fallan sólo con el rango vacío. `representado_nombre` es etiqueta de salida en los tres, no clave de selección. | OK / DATOS. Los 1.376 fallos de producción se explican por el build de worker previo al port (`plugin_service_api_mismatch`) y por la capa ARCA de sincronización ya corregida. Medido con rango parcial 202606-202612: V1 4/7OK, V2 4/7OK, V3 4/7OK. |
 | `mis_retenciones` | V1/V2 (`app/bot/mis_retenciones_bot.py::_ensure_relation`) devuelven un booleano y agregan "No se pudo seleccionar el representado … en Mis Retenciones" a `error_logs` y **continúan**; el portal V3 lanzaba `represented_cuit_not_selectable` (10 fallos recientes). | BUG corregido (paridad V1/V2): el portal devuelve `False` y el plugin deja el aviso. |
+| `sifere` | V1/V2 expanden el catálogo (`Ver todos`) **antes** de esperar la tarjeta del servicio (`bots_dev/sifere/sifere_bot_logger.py:201-225`); el V3 la esperaba hasta 15 s y recién entonces expandía. En una SPA sin hidratar ese orden agota la búsqueda y deja la sesión en Clave Fiscal → `target_unavailable`/`arca_service_not_visible` (intermitente: 1.º intento falla, 2.º OK). | BUG corregido en `runtime/arca_login.py`: sondeo inmediato de la tarjeta, si no está se pulsa `Ver todos`, se espera el catálogo y se reintenta. Medido: 3 filas × 2 corridas V3 post-ajuste = 6/6 `OK` (102 artefactos, 0 errores) vs. el logger V2 3/3 `OK`. Sin fallo baseline reproducible, así que la muestra valida el flujo, no una tasa. |
+| `mis_facilidades` | En V2 el fallo de un detalle no corta el job (`continue`) pero baja `success` a `False`; V3 devuelve `PARCIAL` con los planes y artefactos ya obtenidos (`plugin.py:212-228`). | PARIDAD aceptable: misma tolerancia, distinto nombre de estado. |
 
-## 8. Estado de las pruebas de contraste
+## 7. Estado de las pruebas de contraste
 
 - `sct`: 3 filas × 3 corridas V3 + V1 + V2 (ver `report_div_sct.md`).
 - `declaracion_en_linea`: 3 filas + rango parcial, V1/V2/V3 (ver `report_div_declaracion_en_linea.md`).
-- `sifere`, `mis_facilidades`: en curso (`report_div_sifere.md`, `report_div_mis_facilidades.md`).
-- V2 en api2: servicio levantado y verificado; la comparación V1/V2 en vivo depende de una API key de V2 (ver `report_v1v2_api2.md`).
+- `sifere`: 3 filas × 2 corridas V3 post-ajuste + 3 corridas del logger V2 (ver `report_div_sifere.md`).
+- `mis_facilidades`: en curso (`report_div_mis_facilidades.md`). Relevante: 1.951 fallos históricos no se reproducen con el build actual; el patrón dominante es `arca_service_not_visible` = DATOS.
+- V2 en api2: servicio `api-bots-mrbot-v2` levantado y `/health` OK, pero **no** se pudo lanzar un job V2: la base solo guarda el verificador HMAC de la API key (irreversible) y `POST /api/v2/user/` requiere credenciales administrativas, deja la cuenta deshabilitada y manda la clave por correo. La comparación V1/V2 en vivo por HTTP queda pendiente de una API key en texto claro por un canal aprobado (ver `report_v1v2_api2.md`); la comparación con el código legacy se hizo ejecutando los loggers V1/V2 localmente.
 - 3 casos por endpoint modificado contra la central de testing: `report_3casos_central.md`, `report_3casos_misret_rcel.md`, `report_3casos_libros_piva.md`.
 
