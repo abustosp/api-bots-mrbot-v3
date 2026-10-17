@@ -142,6 +142,7 @@ class MisFacilidadesPortal(PortalArca):
         self._detalle_por_numero: dict[str, str] = {}
         self._plan_actual: str | None = None
         self._secciones_por_plan: dict[str, list[dict[str, Any]]] = {}
+        self._errores_seccion_por_plan: dict[str, list[dict[str, str]]] = {}
 
     async def seleccionar_representado(self, cuit: str) -> None:
         """Selecciona el combo específico de Mis Facilidades si está presente."""
@@ -231,6 +232,13 @@ class MisFacilidadesPortal(PortalArca):
     async def listar_planes(self) -> list[dict[str, str]]:
         """Lee los planes del listado, conservando el identificador de detalle."""
         return await self.paso("listar_planes", self._leer_planes())
+
+    def errores_de_plan(self, numero: str) -> list[dict[str, str]]:
+        """Errores de seccion del plan, sin mensajes libres del sitio."""
+        return [
+            dict(error)
+            for error in self._errores_seccion_por_plan.get(str(numero or "").strip(), [])
+        ]
 
     async def exportar_plan_pdf(self, *, numero: str, destino: Path) -> Path:
         """Escribe un PDF de consulta con las tablas visibles del plan."""
@@ -381,30 +389,67 @@ class MisFacilidadesPortal(PortalArca):
             return self._secciones_por_plan[numero]
         await self._abrir_plan(numero)
         secciones: list[dict[str, Any]] = []
+        errores: list[dict[str, str]] = []
+        vistas = (
+            ("Ver Pagos", "#tableDetallePagos", "Pagos", True, False),
+            ("Plan de Pago", "#tableDetallePlanPago", "Cuotas", True, False),
+            (
+                "Obligaciones Impositivas",
+                "table[id^='tableDetalleDeuda']",
+                "Obligaciones Impositivas",
+                False,
+                True,
+            ),
+            (
+                "Obligaciones Previsionales",
+                "table[id^='tableDetalleDeuda']",
+                "Obligaciones Previsionales",
+                False,
+                True,
+            ),
+        )
         try:
-            pagos = await self._capturar_vista(
-                "Ver Pagos", "#tableDetallePagos", "Pagos", obligatorio=True
-            )
-            if pagos:
-                secciones.append(pagos)
-            cuotas = await self._capturar_vista(
-                "Plan de Pago", "#tableDetallePlanPago", "Cuotas", obligatorio=True
-            )
-            if cuotas:
-                secciones.append(cuotas)
-            for nombre, rotulo in (
-                ("Obligaciones Impositivas", "Obligaciones Impositivas"),
-                ("Obligaciones Previsionales", "Obligaciones Previsionales"),
-            ):
-                obligaciones = await self._capturar_vista(
-                    nombre, "table[id^='tableDetalleDeuda']", rotulo, obligatorio=False,
-                    multiples=True,
-                )
-                secciones.extend(obligaciones if isinstance(obligaciones, list) else ([obligaciones] if obligaciones else []))
+            for nombre, selector, titulo, obligatorio, multiples in vistas:
+                try:
+                    capturadas = await self._capturar_vista(
+                        nombre,
+                        selector,
+                        titulo,
+                        obligatorio=obligatorio,
+                        multiples=multiples,
+                    )
+                    if isinstance(capturadas, list):
+                        secciones.extend(capturadas)
+                    elif capturadas:
+                        secciones.append(capturadas)
+                except Exception as exc:
+                    codigo = getattr(exc, "diagnostic_code", None)
+                    if not isinstance(codigo, str) or not re.fullmatch(
+                        r"[A-Za-z0-9_.-]{1,80}", codigo
+                    ):
+                        codigo = type(exc).__name__
+                    errores.append({"seccion": titulo, "codigo": codigo})
+                    await self._restaurar_detalle(numero)
+            self._errores_seccion_por_plan[numero] = errores
             self._secciones_por_plan[numero] = secciones
             return secciones
         finally:
             await self._volver_al_listado(suprimir_error=True)
+
+    async def _restaurar_detalle(self, numero: str) -> None:
+        """Recupera el detalle para seguir con la proxima vista del plan."""
+        if await self._es_detalle():
+            return
+        try:
+            await self._volver_a_detalle()
+            return
+        except Exception:
+            pass
+        try:
+            await self._volver_al_listado(suprimir_error=True)
+            await self._abrir_plan(numero)
+        except Exception:
+            pass
 
     async def _capturar_vista(
         self, nombre: str, selector: str, titulo: str, *, obligatorio: bool,
@@ -422,17 +467,21 @@ class MisFacilidadesPortal(PortalArca):
         await self._esperar_carga()
         localizador = self.page.locator(selector)
         try:
-            await localizador.first.wait_for(state="visible", timeout=15_000)
+            await localizador.first.wait_for(state="visible", timeout=20_000)
+        except Exception:
+            pass
+        try:
+            await localizador.first.locator("tbody tr").first.wait_for(
+                state="visible", timeout=20_000
+            )
         except Exception:
             pass
         await self._expandir_tablas(selector)
         cantidad = await localizador.count()
-        if cantidad == 0 and obligatorio:
+        vacia = {"titulo": titulo, "headers": [], "rows": []}
+        if cantidad == 0:
             await self._volver_a_detalle()
-            raise TargetUnavailableError(
-                f"no se encontró la tabla de {titulo} del plan",
-                diagnostic_code="mis_facilidades_table_missing",
-            )
+            return [vacia] if multiples else vacia
         datos = []
         for indice in range(cantidad):
             tabla = localizador.nth(indice)
@@ -448,15 +497,10 @@ class MisFacilidadesPortal(PortalArca):
                 datos.append({"titulo": titulo if indice == 0 else f"{titulo} {indice + 1}", "headers": headers, "rows": rows})
         await self._volver_a_detalle()
         if multiples:
-            return datos
+            return datos or [vacia]
         if datos:
             return datos[0]
-        if obligatorio:
-            raise TargetUnavailableError(
-                f"la tabla de {titulo} del plan está vacía",
-                diagnostic_code="mis_facilidades_table_empty",
-            )
-        return None
+        return vacia
 
     async def _abrir_plan(self, numero: str) -> None:
         if self._plan_actual == numero and await self._es_detalle():
@@ -488,10 +532,10 @@ class MisFacilidadesPortal(PortalArca):
                     except Exception:
                         pass
                     try:
-                        await localizador.first.click(timeout=8_000)
+                        await localizador.first.click(timeout=15_000)
                     except Exception:
                         try:
-                            await localizador.first.click(force=True, timeout=8_000)
+                            await localizador.first.click(force=True, timeout=15_000)
                         except Exception:
                             await self.page.evaluate(
                                 "id => { const el = document.getElementById(id); if (!el) return false; el.click(); return true; }",

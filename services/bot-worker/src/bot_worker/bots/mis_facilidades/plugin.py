@@ -302,17 +302,38 @@ class MisFacilidadesPlugin:
                         destino, ID_ARTEFACTO_XLSX, entrada, runtime, "Subiendo plan"
                     )
                     artefactos.extend(resumen["xlsx"].pop("referencias"))
-            except ErrorDeBot as exc:
+            except Exception as exc:
+                normalizado = _normalizar_error(exc, [])
                 errores.append(
                     BotError(
-                        category=Categoria.TARGET_UNAVAILABLE,
+                        category=normalizado.categoria,
                         internal_diagnostic=(
                             f"plan {numero}: "
-                            f"{getattr(exc, 'diagnostic_code', None) or exc.diagnostico}"
+                            f"{getattr(normalizado, 'diagnostic_code', None) or normalizado.diagnostico}"
                         ),
                         retryable=False,
                     )
                 )
+            leer_errores = getattr(servicio, "errores_de_plan", None)
+            if callable(leer_errores):
+                try:
+                    errores_seccion = leer_errores(numero) or []
+                except Exception:
+                    errores_seccion = []
+                for fallo in errores_seccion:
+                    if not isinstance(fallo, dict):
+                        continue
+                    seccion = str(fallo.get("seccion") or "desconocida")
+                    codigo = str(fallo.get("codigo") or "mis_facilidades_section_failed")
+                    errores.append(
+                        BotError(
+                            category=Categoria.TARGET_UNAVAILABLE,
+                            internal_diagnostic=(
+                                f"plan {numero}: sección {seccion}: {codigo}"
+                            ),
+                            retryable=False,
+                        )
+                    )
             datos["planes"].append(resumen)
         datos["planes_procesados"] = len(datos["planes"])
         return datos, artefactos, errores

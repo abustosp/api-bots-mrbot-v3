@@ -174,10 +174,25 @@ class _TablaExpandible(_Locator):
     def nth(self, _: int) -> _TablaExpandible:
         return self
 
+    async def wait_for(self, **kwargs: object) -> None:
+        self.pagina.esperas.append(dict(kwargs))
+
+    def locator(self, _: str) -> _FilaEsperable:
+        return _FilaEsperable(self.pagina)
+
     async def evaluate(self, _script: str) -> dict[str, object]:
         if self.pagina.expandidas.get(self.selector):
             return {"headers": ["Cuota"], "rows": [["1"], ["2"], ["3"]]}
         return {"headers": ["Cuota"], "rows": [["1"]]}
+
+
+class _FilaEsperable(_Locator):
+    def __init__(self, pagina: _PaginaVista) -> None:
+        super().__init__(1)
+        self.pagina = pagina
+
+    async def wait_for(self, **kwargs: object) -> None:
+        self.pagina.esperas.append(dict(kwargs))
 
 
 class _Visible(_Locator):
@@ -209,12 +224,18 @@ class _PaginaVista:
     def __init__(self) -> None:
         self.expandidas: dict[str, bool] = {}
         self.scripts: list[str] = []
+        self.esperas: list[dict[str, object]] = []
         self.url = "https://serviciosweb.afip.gob.ar/mis_facilidades/"
 
     def get_by_role(self, _: str, *, name: object = None, **__: object) -> _Locator:
         # re.escape agrega barras invertidas a los espacios ("Plan\ de\ Pago"): se quitan.
         pattern = str(getattr(name, "pattern", "")).replace("\\", "").lower()
-        for nombre in ("ver pagos", "plan de pago", "obligaciones impositivas"):
+        for nombre in (
+            "ver pagos",
+            "plan de pago",
+            "obligaciones impositivas",
+            "obligaciones previsionales",
+        ):
             if nombre in pattern:
                 return _BotonVista(nombre)
         return _Locator(0)
@@ -256,6 +277,22 @@ def test_expansion_muestra_filas_de_cuotas_antes_de_leer() -> None:
     assert pagina.expandidas.get(_SELECTOR_CUOTAS) is True
     assert tabla is not None
     assert len(tabla["rows"]) == 3
+
+
+def test_espera_tabla_y_primera_fila_20s_como_v1() -> None:
+    pagina = _PaginaVista()
+    portal = MisFacilidadesPortal(pagina)
+
+    asyncio.run(
+        portal._capturar_vista(
+            "Ver Pagos", "#tableDetallePagos", "Pagos", obligatorio=True
+        )
+    )
+
+    assert pagina.esperas == [
+        {"state": "visible", "timeout": 20_000},
+        {"state": "visible", "timeout": 20_000},
+    ]
 
 
 def test_expansion_de_obligaciones_se_aplica_a_su_tabla() -> None:
@@ -304,6 +341,114 @@ def test_fallo_de_expansion_no_corta_la_captura() -> None:
 
     assert tabla is not None
     assert len(tabla["rows"]) == 1
+
+
+def test_vista_opcional_con_boton_y_sin_tabla_se_exporta_vacia() -> None:
+    class _PaginaSinTabla(_PaginaVista):
+        def locator(self, selector: str) -> _Locator:
+            if selector.startswith("table[id^='tableDetalleDeuda']"):
+                return _Locator(0)
+            return super().locator(selector)
+
+    portal = MisFacilidadesPortal(_PaginaSinTabla())
+    secciones = asyncio.run(
+        portal._capturar_vista(
+            "Obligaciones Previsionales",
+            "table[id^='tableDetalleDeuda']",
+            "Obligaciones Previsionales",
+            obligatorio=False,
+            multiples=True,
+        )
+    )
+
+    assert secciones == [
+        {"titulo": "Obligaciones Previsionales", "headers": [], "rows": []}
+    ]
+
+
+def test_error_de_una_seccion_no_corta_las_siguientes() -> None:
+    portal = MisFacilidadesPortal(_PaginaVista())
+    llamadas: list[str] = []
+
+    async def _abrir(_: str) -> None:
+        return None
+
+    async def _capturar(
+        nombre: str,
+        _selector: str,
+        titulo: str,
+        *,
+        obligatorio: bool,
+        multiples: bool = False,
+    ) -> object:
+        llamadas.append(nombre)
+        if nombre == "Ver Pagos":
+            raise RuntimeError("dato sensible de prueba")
+        if nombre == "Plan de Pago":
+            return {"titulo": titulo, "headers": ["Cuota"], "rows": [["1"]]}
+        return [] if multiples else None
+
+    async def _volver(*, suprimir_error: bool = False) -> None:
+        return None
+
+    portal._abrir_plan = _abrir  # type: ignore[method-assign]
+    portal._capturar_vista = _capturar  # type: ignore[method-assign]
+    portal._volver_al_listado = _volver  # type: ignore[method-assign]
+
+    secciones = asyncio.run(portal._obtener_secciones("P-001"))
+
+    assert llamadas == [
+        "Ver Pagos",
+        "Plan de Pago",
+        "Obligaciones Impositivas",
+        "Obligaciones Previsionales",
+    ]
+    assert [seccion["titulo"] for seccion in secciones] == ["Cuotas"]
+    assert portal.errores_de_plan("P-001") == [
+        {"seccion": "Pagos", "codigo": "RuntimeError"}
+    ]
+
+
+def test_apertura_de_detalle_usa_timeout_legacy_de_15s() -> None:
+    class _ControlPlan(_Locator):
+        def __init__(self) -> None:
+            super().__init__(1)
+            self.timeouts: list[int] = []
+
+        async def scroll_into_view_if_needed(self, **_: object) -> None:
+            return None
+
+        async def click(self, **kwargs: object) -> None:
+            self.timeouts.append(int(kwargs["timeout"]))
+
+    class _PaginaPlan:
+        def __init__(self) -> None:
+            self.control = _ControlPlan()
+
+        def locator(self, selector: str) -> _Locator:
+            if selector == "#detalle-1":
+                return self.control
+            if selector == "#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_nroPlan":
+                return _Visible()
+            return _Locator(0)
+
+        async def wait_for_load_state(self, *_: object, **__: object) -> None:
+            return None
+
+        async def wait_for_timeout(self, *_: object) -> None:
+            return None
+
+    pagina = _PaginaPlan()
+    portal = MisFacilidadesPortal(pagina)
+    portal._detalle_por_numero["P-001"] = "detalle-1"
+
+    async def _volver(*, suprimir_error: bool = False) -> None:
+        return None
+
+    portal._volver_al_listado = _volver  # type: ignore[method-assign]
+    asyncio.run(portal._abrir_plan("P-001"))
+
+    assert pagina.control.timeouts == [15_000]
 
 
 
@@ -372,9 +517,15 @@ def _runtime_mf(tmp_path: Path):
 class _ServicioMF:
     """Servicio falso: planes, vistas PDF por plan y excel por plan."""
 
-    def __init__(self, planes: list[dict[str, str]], fallos: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        planes: list[dict[str, str]],
+        fallos: set[str] | None = None,
+        fallos_genericos: set[str] | None = None,
+    ) -> None:
         self.planes = planes
         self.fallos = fallos or set()
+        self.fallos_genericos = fallos_genericos or set()
         self.pdf_pedidos: list[str] = []
 
     async def listar_planes(self) -> list[dict[str, str]]:
@@ -384,6 +535,8 @@ class _ServicioMF:
         from bot_worker.bots.errors import TargetUnavailableError
 
         self.pdf_pedidos.append(numero)
+        if numero in self.fallos_genericos:
+            raise RuntimeError("marcador_sensible_no_debe_publicarse")
         if numero in self.fallos:
             raise TargetUnavailableError("sin vistas", diagnostic_code="mis_facilidades_view_missing")
         destino_dir.mkdir(parents=True, exist_ok=True)
@@ -498,3 +651,68 @@ def test_un_plan_con_error_no_corta_los_demas(tmp_path: Path) -> None:
     assert len(errores) == 1
     assert "P-001" in errores[0].internal_diagnostic
     assert "mis_facilidades_view_missing" in errores[0].internal_diagnostic
+
+
+def test_excepcion_generica_de_un_plan_no_aborta_consulta_ni_filtra_mensaje(
+    tmp_path: Path,
+) -> None:
+    from bot_worker.bots.mis_facilidades.plugin import MisFacilidadesPlugin
+    from bot_worker.bots.errors import Categoria
+
+    plugin = MisFacilidadesPlugin()
+    _, entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "subir_archivos": False,
+        "incluir_xlsx": False,
+    }))
+    servicio = _ServicioMF(
+        [
+            {"numero": "P-001", "situacion": "Vigente", "denominacion": "A"},
+            {"numero": "P-002", "situacion": "Vigente", "denominacion": "B"},
+        ],
+        fallos_genericos={"P-001"},
+    )
+
+    datos, _, errores = asyncio.run(
+        plugin._consultar(servicio, entrada, _runtime_mf(tmp_path), "20123456789")
+    )
+
+    assert servicio.pdf_pedidos == ["P-001", "P-002"]
+    assert [plan["numero"] for plan in datos["planes"]] == ["P-001", "P-002"]
+    assert len(errores) == 1
+    assert errores[0].category == Categoria.TARGET_UNAVAILABLE
+    assert "target_unavailable_unclassified" in errores[0].internal_diagnostic
+    assert "marcador_sensible_no_debe_publicarse" not in errores[0].internal_diagnostic
+
+
+def test_error_de_seccion_del_portal_llega_al_resultado_parcial(tmp_path: Path) -> None:
+    from bot_worker.bots.mis_facilidades.plugin import MisFacilidadesPlugin
+    from bot_worker.bots.errors import Categoria
+
+    plugin = MisFacilidadesPlugin()
+    _, entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "subir_archivos": False,
+        "incluir_xlsx": False,
+    }))
+    servicio = _ServicioMF([
+        {"numero": "P-001", "situacion": "Vigente", "denominacion": "A"},
+    ])
+    servicio.errores_de_plan = lambda numero: (
+        [{"seccion": "Pagos", "codigo": "PlaywrightTimeoutError"}]
+        if numero == "P-001"
+        else []
+    )
+
+    datos, _, errores = asyncio.run(
+        plugin._consultar(servicio, entrada, _runtime_mf(tmp_path), "20123456789")
+    )
+
+    assert datos["planes_procesados"] == 1
+    assert len(errores) == 1
+    assert errores[0].category == Categoria.TARGET_UNAVAILABLE
+    assert errores[0].internal_diagnostic == (
+        "plan P-001: sección Pagos: PlaywrightTimeoutError"
+    )
