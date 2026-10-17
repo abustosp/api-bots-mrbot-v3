@@ -375,15 +375,19 @@ _V2_COMPAT_FIELDS: dict[str, tuple[Any, Any]] = {
     "pdf": (bool | None, Field(default=None)),
     "descarga_emitidos": (bool, Field(default=False, validation_alias=AliasChoices("descarga_emitidos", "emitidos"))),
     "descarga_recibidos": (bool, Field(default=False, validation_alias=AliasChoices("descarga_recibidos", "recibidos"))),
-    "descarga_csv_ventas": _boolean(),
-    "descarga_csv_compras": _boolean(),
-    "descarga_ventas": (
+    "descarga_csv_ventas": (
         bool,
-        Field(default=False, validation_alias=AliasChoices("descarga_ventas", "descarga_csv_ventas")),
+        Field(
+            default=False,
+            validation_alias=AliasChoices("descarga_csv_ventas", "descarga_ventas"),
+        ),
     ),
-    "descarga_compras": (
+    "descarga_csv_compras": (
         bool,
-        Field(default=False, validation_alias=AliasChoices("descarga_compras", "descarga_csv_compras")),
+        Field(
+            default=False,
+            validation_alias=AliasChoices("descarga_csv_compras", "descarga_compras"),
+        ),
     ),
     "carga_minio": _boolean(default=False),
     "pv": (bool | None, Field(default=False)),
@@ -477,7 +481,7 @@ _V2_OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
     ("mis_retenciones_iva_simple", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "desde", "hasta", "proxy_request", "carga_minio"),
     ("moa", "consultar"): ("clave_encriptada", "cuit_representante", "clave", "cuit_representado", "despachos", "tipo_agente", "rol", "minio_upload", "proxy_request"),
     ("pago_devoluciones", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "proxy_request", "carga_minio"),
-    ("portal_iva", "descargar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "periodo", "operaciones_ng_o_e", "prorrateo_global", "prorrateo_asignacion_directa", "prorrateo_ambos", "importacion_definitiva_bienes", "importacion_servicios", "regimen_turiva", "bienes_usados", "ninguna_anteriores", "descarga_ventas", "descarga_compras", "carga_minio", "proxy_request", "descartar_borrador"),
+    ("portal_iva", "descargar"): ("clave_encriptada", "cuit_representante", "clave_representante", "cuit_representado", "denominacion", "periodo", "operaciones_ng_o_e", "prorrateo_global", "prorrateo_asignacion_directa", "prorrateo_ambos", "importacion_definitiva_bienes", "importacion_servicios", "regimen_turiva", "bienes_usados", "ninguna_anteriores", "descarga_csv_ventas", "descarga_csv_compras", "carga_minio", "proxy_request", "descartar_borrador"),
     ("rcel", "descargar"): ("clave_encriptada", "desde", "hasta", "cuit_representante", "nombre_rcel", "representado_cuit", "clave", "minio_upload", "proxy_request"),
     ("retper_iibb_agip", "consultar"): ("clave_encriptada", "usuario", "clave", "cuit_representado", "denominacion", "desde", "hasta", "proxy_request", "pv", "carga_minio"),
     ("retper_iibb_misiones", "consultar"): ("clave_encriptada", "cuit_representante", "clave_representante", "desde", "hasta", "denominacion", "proxy_request", "carga_minio"),
