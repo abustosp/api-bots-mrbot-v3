@@ -117,6 +117,20 @@ capturar y la corrida igual entregó 42 artefactos como `PARCIAL`. Antes ese mis
 error salía como `FALLIDO` (`target_unavailable` / `target_unavailable_unclassified`)
 y el cliente no recibía nada.
 
+### `POST /mis_retenciones/consulta` y `POST /rcel/consulta`
+
+| Endpoint | Casos | Resultado | Artefactos |
+|---|---|---|---|
+| `mis_retenciones` | 3 filas distintas | 2 `COMPLETO`/`OK` + 1 `FALLIDO` `target_unavailable` que **pasó en el reintento** con el mismo cuerpo y otra vez la misma fila (`COMPLETO`/`OK`) | 5 CSV por caso |
+| `rcel` | 3 filas distintas, `minio_upload=true` | 3/3 `COMPLETO`/`OK` | 148, 15 y 26 PDF |
+
+El caso de `mis_retenciones` que falló y luego pasó con el mismo cuerpo es la
+segunda medición directa del hallazgo "transitorio sin reintento automático":
+el job se marca `FALLIDO` con `attempts=1` y el usuario tiene que reintentar a
+mano. En local, los tres casos de `mis_retenciones` (5 CSV cada uno) y los tres
+de `rcel` (15/26 PDF) también cerraron `OK`, y los `error_code` públicos
+coinciden con los de la central.
+
 ### Endpoints de `central-api`
 
 | Endpoint | Casos | Resultado |
@@ -188,22 +202,40 @@ en la tabla de resultados por módulo y en los informes `report_div_*`.
 Se ejecutó el cliente de escritorio (`mrbot-cliente-escritorio-v3`) contra
 `https://testing-central.mrbot.com.ar` usando su propia UI y su `JobClient`
 (payload construido por las entradas del cliente, clave fiscal cifrada con la
-clave pública de la central, POST, polling y descarga de artefactos).
+clave pública de la central, POST, polling y descarga de artefactos). Dos
+vueltas: la primera con `testing-fixes2` (madrugada) y la segunda con
+`testing-fixes5` (tarde), después de los fixes de `mis_facilidades` y `sct`.
+
+### Segunda vuelta (`testing-fixes5`)
+
+| Flujo del cliente | Creación | Estado / result | Descargas del cliente | Tiempo |
+|---|---|---|---|---:|
+| `sct` (control) | 202 | `COMPLETO` / `OK` | 2/2 directas y 2/2 por fallback autenticado | 46,0 s |
+| `mis_facilidades` (fila A) | 202 | `COMPLETO` / `OK` | 50/50 directas y 50/50 autenticadas | 491,7 s |
+| `mis_facilidades` (fila B) | 202 | `COMPLETO` / `PARCIAL` | 78/78 directas (74/78 por fallback) | ≈928 s |
+| `mis_facilidades` (fila C) | 202 | `COMPLETO` / `OK` | 17/17 directas y 17/17 autenticadas | 208,9 s |
+| `liquidacion_granos` (control) | 202 | `COMPLETO` / `OK` | el job no ofreció archivos | 71,3 s |
+
+Los cinco jobs quedaron `COMPLETO`; el `ERROR`/`target_unavailable` de
+`mis_facilidades` que se veía en la primera vuelta ya no se reproduce, y una de
+las filas devolvió 78 artefactos como `PARCIAL`, que es el comportamiento
+buscado. Dos POST de la primera pasada recibieron 401 `authentication` porque la
+API key de testing se **rotó durante la corrida** (incidente de custodia
+resuelto en la misma jornada): reintentados con la clave vigente, ambos dieron
+202 y `COMPLETO/OK`. La UI local (detalle y polling) respondió 200 y reflejó el
+estado de la central en todos los casos.
 
 - **Contrato**: OpenAPI remoto con 179 rutas `/api/v3`; registro de endpoints del
   cliente sin rutas/métodos inexistentes; 38/38 alias alineados; QA de contrato
-  162/163 (el único fallo es un falso positivo del verificador: busca `*_key` en
-  el esquema de la ruta alias, mientras el cliente resuelve el alias a la ruta
-  canónica y ahí el `payload` es `dict` genérico).
-- **Cinco flujos reales**: `sct` → 202 y `COMPLETO/OK` con 2/2 archivos
-  descargados por el cliente (URL directa y fallback autenticado);
-  `liquidacion_granos` → 202 y `COMPLETO/OK`; `facturometro` → 202 y
-  `COMPLETO/OK` con 1/1 archivo; el cliente interpretó correctamente el estado y
-  el `result` en los cinco casos (UI incluida).
-- **Errores observados (no del cliente)**:
+  162/163 y QA offline completo 1334/1336 (los fallos son el mismo falso positivo
+  del verificador: busca `*_key` en el esquema de la ruta alias, mientras el
+  cliente resuelve el alias a la ruta canónica y ahí el `payload` es `dict`
+  genérico).
+- **Primera vuelta (`testing-fixes2`), errores observados (no del cliente)**:
   - `mis_facilidades` → `TARGET_UNAVAILABLE` con causa `ConnectTimeout`
     (`target_unavailable_unclassified`): error transitorio de red, el mismo
-    patrón del hallazgo principal (sin reintento automático).
+    patrón del hallazgo principal (sin reintento automático). Verificado
+    corregido en la segunda vuelta: 3/3 filas `COMPLETO`.
   - `sct_compensaciones` → `ENVELOPE_INVALID` (`ValidationError`): el formulario
     permite enviar sin marcar Excel/CSV/PDF y el worker exige al menos un
     formato. Recomendación para el cliente: validar en el formulario que haya al
