@@ -202,7 +202,10 @@ class SctPlugin:
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
-        return BotResult(result="OK", data=datos, artifacts=artefactos)
+        # Con errores de seccion/formato pero con reportes entregados la corrida
+        # es PARCIAL, como el `success` de V1/V2 con `error_message` poblado.
+        resultado = "PARCIAL" if datos.get("errores") else "OK"
+        return BotResult(result=resultado, data=datos, artifacts=artefactos)
 
     @staticmethod
     async def _sin_registros(servicio: Any, seccion: str) -> bool:
@@ -229,11 +232,25 @@ class SctPlugin:
             "reportes": [],
         }
         artefactos: list[dict[str, Any]] = []
+        # V1/V2 aislaban cada seccion y cada formato: un fallo de descarga se
+        # registraba en error_logs y la corrida seguia con el resto. Se replica
+        # aca; el primer error se conserva para informarlo si no quedo ningun
+        # reporte (mismo criterio que V2, que solo fallaba si nada se pudo
+        # descargar).
+        primer_error: ErrorDeBot | None = None
         # Un solo sello por corrida: como V1, todos los archivos de la corrida
         # comparten la fecha-hora, y xlsx/csv de una misma seccion no se pisan.
         sello = datetime.now().strftime("%Y%m%d_%H%M%S")
         for seccion in entrada.secciones:
-            if getattr(entrada, "omitir_vacias", True) and await self._sin_registros(servicio, seccion):
+            try:
+                vacia = getattr(entrada, "omitir_vacias", True) and await self._sin_registros(
+                    servicio, seccion
+                )
+            except ErrorDeBot:
+                raise
+            except Exception:
+                vacia = False
+            if vacia:
                 if getattr(entrada, "incluir_json", True):
                     datos["reportes"].append(
                         {"seccion": seccion, "omitido": True, "motivo": "sin_registros"}
@@ -245,9 +262,32 @@ class SctPlugin:
                     entrada.representado_cuit, seccion, formato, marca=sello
                 )
                 destino = runtime.artifact_store.resolve(nombre)
-                await servicio.descargar_reporte(
-                    seccion=seccion, formato=formato, destino=destino
-                )
+                try:
+                    await servicio.descargar_reporte(
+                        seccion=seccion, formato=formato, destino=destino
+                    )
+                except ErrorDeBot as exc:
+                    from bot_worker.bots.errors import DeadlineExceededError as _Deadline
+                    from bot_worker.runtime.context import JobCancelled
+
+                    if isinstance(exc, (JobCancelled, _Deadline)) or isinstance(
+                        exc, CredentialsRejectedError
+                    ):
+                        raise
+                    primer_error = primer_error or exc
+                    datos.setdefault("errores", []).append(
+                        {"seccion": seccion, "formato": formato, "error": type(exc).__name__}
+                    )
+                    continue
+                except Exception as exc:  # noqa: BLE001 - seccion aislada como V1/V2
+                    primer_error = primer_error or TargetUnavailableError(
+                        "falla de descarga en SCT",
+                        diagnostic_code="sct_download_failed",
+                    )
+                    datos.setdefault("errores", []).append(
+                        {"seccion": seccion, "formato": formato, "error": type(exc).__name__}
+                    )
+                    continue
                 resumen: dict[str, Any] = {
                     "seccion": seccion,
                     "formato": formato,
@@ -269,6 +309,9 @@ class SctPlugin:
                     resumen["size_bytes"] = referencia["size_bytes"]
                 if getattr(entrada, "incluir_json", True):
                     datos["reportes"].append(resumen)
+        if primer_error is not None and not artefactos and not datos.get("reportes"):
+            # Nada se pudo descargar: la corrida falla con el diagnostico real.
+            raise primer_error
         if not getattr(entrada, "incluir_json", True):
             datos.pop("reportes", None)
         return datos, artefactos

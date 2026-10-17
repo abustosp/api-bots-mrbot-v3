@@ -241,6 +241,47 @@ def test_plugin_sin_omitir_vacias_descarga_todo(tmp_path: Path) -> None:
     assert sorted(servicio.descargas) == [("deudas", "csv"), ("vencimientos", "csv")]
 
 
+def test_plugin_aisla_el_fallo_de_una_seccion(tmp_path: Path) -> None:
+    """V1/V2 registraban el error de la sección y seguían con las demás."""
+
+    class _ServicioConFallo(_ServicioSct):
+        async def descargar_reporte(self, *, seccion: str, formato: str, destino: Path) -> Path:
+            if seccion == "deudas":
+                raise TargetUnavailableError(
+                    "timeout de descarga", diagnostic_code="portal_download_missing"
+                )
+            return await super().descargar_reporte(
+                seccion=seccion, formato=formato, destino=destino
+            )
+
+    servicio = _ServicioConFallo({"vencimientos": 4, "deudas": 3})
+
+    datos = _ejecutar(servicio, tmp_path)
+
+    assert servicio.descargas == [("vencimientos", "csv")]
+    assert datos["errores"] == [
+        {"seccion": "deudas", "formato": "csv", "error": "TargetUnavailableError"}
+    ]
+    assert datos["reportes"][0]["seccion"] == "vencimientos"
+
+
+def test_plugin_falla_si_no_pudo_descargar_nada(tmp_path: Path) -> None:
+    """Sin ningún reporte, el error de la primera sección se propaga (V2)."""
+
+    class _ServicioTodoFalla(_ServicioSct):
+        async def descargar_reporte(self, *, seccion: str, formato: str, destino: Path) -> Path:
+            raise TargetUnavailableError(
+                "timeout de descarga", diagnostic_code="portal_download_missing"
+            )
+
+    servicio = _ServicioTodoFalla({"vencimientos": 4, "deudas": 3})
+
+    with pytest.raises(TargetUnavailableError) as error:
+        _ejecutar(servicio, tmp_path)
+
+    assert error.value.diagnostic_code == "portal_download_missing"
+
+
 def test_plugin_reabre_sct_si_popup_redirige_a_login_arca(tmp_path: Path) -> None:
     eventos: list[str] = []
 
