@@ -175,6 +175,108 @@ MiPyME faltaban filas de esa operación en `/home/abp/Desktop/api/DBs`, por lo q
 se usó también el corpus legacy ya configurado en `creds.py`, bajo
 `/home/abp/Desktop/Proyectos Python/Scripts/Mr bot/api/BD-api-v1`.
 
+## Trazabilidad de requisitos y salidas modificadas
+
+La raíz privada de las rutas abreviadas siguientes es
+`/home/abp/.jcode/scratch/verificacion-20261017-`. Un bloqueo observado cuenta
+como evidencia del límite, no como requisito funcional satisfecho.
+
+| Requisito de verificación | Evidencia concreta | Aceptación observada o restricción |
+|---|---|---|
+| Facturómetro | `2221/facturometro/summary.json`, `2218/facturometro/summary.json`, `cli-acceptance/facturometro-acceptance.json` | Dos cuentas locales y una descarga API con SHA-256 idéntico |
+| Certificado MiPyME | `2221/certificado_mipyme/summary.json` | Bloqueado: servicio no visible, sin descarga aceptada |
+| Pago Devoluciones | `2221/pago_devoluciones/summary.json` | Bloqueado: dos credenciales rechazadas |
+| Hacienda | `2232/hacienda/summary.json` | Payload ya válido, relación/nombre no seleccionable |
+| Liquidación Granos | `2221/liquidacion_granos/summary.json` | Cinco archivos reales locales |
+| Compensaciones | `2221/compensaciones/summary.json` y HTML privado | Sesión vencida intercepta consulta, sin aceptación funcional |
+| SRT | `2221/srt/summary.json` | Credencial rechazada o servicio ausente, sin aceptación funcional |
+| Libros Portal IVA | `2221/libros_portal_iva/summary.json` | Dos archivos reales locales |
+| Mis Facilidades | `2221/mis_facilidades/summary.json` | Cuatro archivos reales, aceptación parcial, no todas las secciones |
+| SIFERE | `2232/sifere/summary.json` | 102 archivos reales después de descartar credencial rechazada |
+| Declaración en Línea | `2232/declaracion_en_linea/summary.json` | Catorce archivos reales en el rango solicitado |
+| Portal IVA | `2242/portal_iva/summary.json` y `1/final_servicio.html` en esa carpeta | Bloqueado en Datos Iniciales, Registrar deshabilitado. No se eligieron opciones fiscales ni se forzó Registrar |
+| SCT | `2232/sct/summary.json`, `cli-acceptance/sct-acceptance.json`, `cli-acceptance/sct-upload-timeout.json` | Archivo local y descarga API tras reintento. Timeout transitorio de storage comprobado en intento anterior, no certifica los nueve formatos/secciones |
+| VEP consulta-pagos | `2218/consulta_pagos_vep/summary.json`, `legacy/v1/summary.json`, `legacy/v2/summary.json`, `e2e/consulta_pagos_vep.json` | CSV idéntico por SHA-256 en V1/V2/V3 local y API testing |
+| Aportes en Línea | `2218/aportes_en_linea/summary.json`, `e2e/aportes_en_linea.json` | XLS real local y API testing, SHA-256 validado. No demuestra causa del INTERNAL histórico |
+| Comparar V1/V2 y revisar api2 | Secciones de hashes y diferencias de este informe, más loggers VEP | Contraste exhaustivo solo VEP, análisis de código parcial para otros flujos. Producción tiene código distinto |
+| Usar credenciales recientes sin divulgarlas | Tests de ordenación y metadatos de fuente/fecha en cada summary | Se priorizó timestamp antes del LIMIT. Recencia de un registro no garantiza clave vigente |
+
+Cada cambio tiene además una comprobación de su salida observable. En
+particular, el exit code E2E se observó en SCT real: 1 para COMPLETO/ERROR
+(`cli-acceptance/sct-upload-timeout.json`) y 0 para su reintento con descarga
+(`cli-acceptance/sct-acceptance.json`).
+
+| Cambio | Comprobación exacta | Mejora observada y límite |
+|---|---|---|
+| Selección de credenciales | `tests/test_local_run_creds.py::test_filas_ordena_por_timestamp_antes_del_limite_y_entre_bases` y `test_filas_usa_id_como_fallback_si_no_hay_timestamp` | Registro nuevo gana aunque ID/base induzcan otro orden, fallback sin timestamp. Casos SQLite temporales, además usados por las consultas reales |
+| Exit code E2E | `tests/test_local_run_e2e.py::test_main_exige_estado_y_resultado_exitosos` | COMPLETO/ERROR, FALLIDO, CORRIENDO y timeout devuelven 1. OK/PARCIAL terminales devuelven 0. Estados anómalos son pruebas aisladas, no se fabricaron jobs fiscales para producirlos |
+| Denominación Hacienda | `tests/test_local_run_payload.py::test_payload_hacienda_deriva_denominacion_sin_pisar_el_canonico` y rerun `2232/hacienda` | Dejó de fallar ENVELOPE_INVALID y llegó a selección de relación real. La consulta sigue bloqueada allí |
+| Flags Portal IVA | `tests/test_local_run_payload.py::test_payload_portal_iva_conserva_flags_y_prioriza_canonicos` y rerun `2242/portal_iva` | Dejó de rechazar la entrada y llegó al período/formulario real. Respeta false y valores canónicos |
+| ArtifactStore | `services/bot-worker/tests/test_artifact_manifest_slots.py::test_upload_confirma_http_y_normaliza_error_sin_url_firmada` y `storage-acceptance/result.json` | 403/500 ya no retornan referencia ficticia, transporte ya no escapa genérico. 403 y conexión rechazada se observaron también sin mocks, contra storage real y socket TCP respectivamente. 500 permanece prueba aislada |
+| Guardado Portal IVA | `services/bot-worker/tests/test_portal_portal_iva.py::test_preparar_periodo_no_oculta_fallo_al_guardar` y `test_preparar_periodo_sin_guardar_permite_libro_existente` | Timeout ahora interrumpe con diagnóstico de guardado, éxito y libro existente conservan contrato. Tres casos aislados, no equivalen a descarga fiscal real posterior al fix |
+
+### Aceptación adicional mediante la CLI pública del proyecto
+
+Se ejecutó `tools/local_run/e2e_testing.py` como proceso real, con `--body-file`,
+clave por entorno y API de testing, sin sustituir HTTP ni el worker:
+
+- **Facturómetro:** job `01a14c15-9c44-741a-80ac-13d665508977`, POST 202,
+  `COMPLETO/OK`, exit code 0, 38,4 s. Descarga HTTP 200 de 28.243 bytes,
+  SHA-256 publicado idéntico al descargado. Evidencia:
+  `cli-acceptance/facturometro-acceptance.json`.
+- **SCT, fallo de integración real:** job
+  `01a14c17-2e83-784e-b9e8-55ec101ecc2d`, POST 202, `COMPLETO/ERROR`,
+  `target_unavailable`, exit code **1**, 64,4 s, sin archivo publicado.
+  Los logs del worker prueban `httpx.ConnectTimeout` en
+  `sct/plugin.py::_descargar -> ArtifactStore.upload -> http.put`,
+  no un fallo de navegación ARCA. En `fixes8` ese timeout de almacenamiento
+  se transforma en `TargetUnavailableError`. Este caso confirma que también
+  un problema secundario de storage puede aparentar un fallo del organismo.
+  El fix local compartido ahora lo tipa como `ARTIFACT_UPLOAD_FAILED`, pero
+  no soluciona por sí mismo la conectividad del servidor. Evidencia:
+  `cli-acceptance/sct-upload-timeout.json` y log privado
+  `/home/abp/.jcode/scratch/sct-testing-acceptance-private.log`.
+- **SCT, reintento controlado de solo consulta:** job
+  `01a14c19-7be8-728d-b023-b26de2580c74`, POST 202, `COMPLETO/OK`, exit code 0,
+  32,3 s. Descarga HTTP 200 de 5.120 bytes con SHA-256 publicado idéntico.
+  No se cambió el servidor entre intentos. Este resultado demuestra que el
+  timeout anterior fue transitorio en esta muestra, no que la conectividad
+  esté resuelta ni que el worker tenga reintento automático. Evidencia:
+  `cli-acceptance/sct-acceptance.json`.
+- **Borde público observado:** un cuerpo con nombres de credenciales de otra
+  familia fue rechazado HTTP 422 y la CLI devolvió 1. Se corrigió la invocación
+  al contrato V2 de estas rutas: `cuit_login` y `clave`. En SCT deben enviarse
+  las banderas públicas, por ejemplo `deudas_excel_minio=true`; los campos
+  canónicos `secciones/formatos` por sí solos no solicitaron archivos en esta
+  ruta de compatibilidad. El job `01a14c15-9d0e-7b62-8d38-012672b4ebd0`
+  dio `COMPLETO/OK` sin archivos, por lo que **no se aceptó como descarga**.
+  Se conserva `cli-acceptance/sct-canonical-no-artifact.json`.
+
+Estas observaciones cierran el recorrido CLI -> API -> worker -> portal ->
+archivo para Facturómetro y SCT, y prueban el rechazo de errores de verdad en
+la CLI: el SCT `COMPLETO/ERROR` devolvió 1, mientras su reintento con descarga
+real devolvió 0. Junto con VEP/Aportes son cuatro bots verificados mediante API.
+No convierten los nueve éxitos locales en nueve éxitos de API. El estado
+terminal y el exit code no sustituyen la comprobación de archivos solicitados.
+
+### Límite real de aceptación de los cambios nuevos
+
+El almacenamiento real respondió **HTTP 403** a un PUT con firma deliberadamente
+inválida y clave aleatoria de verificación. El `ArtifactStore` local corregido
+emitió `ARTIFACT_UPLOAD_FAILED / artifact_upload_http_failed`, sin referencia
+exitosa ni URL firmada en el error. Se volvió a descargar el archivo autorizado
+original y su SHA-256 permaneció idéntico. No se escribió ni reemplazó un objeto
+fiscal. Una conexión TCP real rechazada produjo también el error tipado. La
+prueba usa el código de producción del componente y el storage real, pero no
+es un job completo del worker desplegado con este cambio.
+
+El cambio de guardado de Portal IVA sigue **bloqueado para aceptación fiscal**:
+la pantalla observada exige resolver Datos Iniciales y tiene Registrar
+deshabilitado. Cambiar elecciones fiscales para forzar una prueba verde queda
+fuera de esta verificación. El fix local y el de ArtifactStore no están en la
+imagen testing observada. No se los certifica como desplegados ni se confunde
+una suite verde con paridad fiscal completa de los 15 bots.
+
 ## Pruebas y límites
 
 - Suite completa del worker después del fix de subida: **781 passed**.
@@ -185,6 +287,15 @@ se usó también el corpus legacy ya configurado en `creds.py`, bajo
 - Raíz + compat runner, repetida después de todos los cambios: **130 passed**.
 - Pruebas específicas de los tres archivos de tooling tras el último cambio:
   **13 passed**.
+- Comprobación focalizada de todos los cambios y sus callers: **65 passed**
+  (creds, payload, CLI E2E, ArtifactStore, Portal IVA y Carga Portal IVA).
+- Empaquetado real: `uv build --offline --wheel --out-dir <scratch> services/bot-worker`
+  produjo `mrbot_bot_worker-3.0.0-py3-none-any.whl`. Se importaron `ArtifactStore`
+  y `PortalIvaPortal` desde el wheel con Python aislado (`-I`), se comprobó
+  `bot-worker = bot_worker.main:run` y se compararon los bytes empaquetados con
+  ambos archivos fuente modificados. No requirió dependencias nuevas ni red.
+  El intento previo con `python -m pip wheel` no pudo ejecutarse porque este
+  venv no tiene pip, por eso se usó el backend declarado mediante uv.
 - La matriz local tuvo una interrupción externa por el límite de 600 segundos
   del lanzador. Se retomaron las consultas pendientes. No se atribuye esa
   interrupción a los bots ni se cuentan archivos incompletos como éxito.
