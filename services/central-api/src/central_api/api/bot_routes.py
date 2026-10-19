@@ -17,7 +17,10 @@ from central_api.api.bot_compat import (
     _decode_payload,
     _openapi_error,
 )
-from central_api.api.bot_payloads import public_bot_compat_body_schema
+from central_api.api.bot_payloads import (
+    OPERATION_DESCRIPTIONS,
+    public_bot_compat_body_schema,
+)
 from central_api.api.file_inputs import (
     MULTIPART_FIELDS,
     externalizar_archivos,
@@ -737,6 +740,10 @@ def build_bot_routers() -> list[APIRouter]:
                     "`Idempotency-Key` para identificar reintentos: con la misma clave y los "
                     "mismos datos se recupera la ejecución creada; si reutiliza la clave con "
                     "datos distintos, recibirá `409 idempotency_conflict`."
+                    + (
+                        " " + OPERATION_DESCRIPTIONS[(bot, operation)]
+                        if (bot, operation) in OPERATION_DESCRIPTIONS else ""
+                    )
                 ),
                 name=f"{bot}_{operation}_{safe_name}_create",
             )

@@ -607,6 +607,37 @@ _V2_OPERATION_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
     },
 }
 
+# Qué hace cada operación, en términos de las acciones que ejecuta en el portal.
+OPERATION_DESCRIPTIONS: dict[tuple[str, str], str] = {
+    ("portal_iva", "descargar"): (
+        "Descarga los libros de IVA de un período desde el servicio Portal IVA de ARCA. "
+        "Inicia sesión fiscal con las credenciales, selecciona el contribuyente "
+        "representado y el período, y descarga en CSV el libro de ventas "
+        "(`descarga_ventas`) y/o el de compras (`descarga_compras`); al menos uno es "
+        "obligatorio. Con `subir_csv` los CSV quedan disponibles en `files[]` y con "
+        "`incluir_json` el resultado incluye la cantidad de filas y una muestra. "
+        "Con `descartar_borrador` se descarta el borrador de la declaración al terminar "
+        "las descargas. No modifica datos en ARCA."
+    ),
+    ("portal_iva", "importar"): (
+        "Importa en Portal IVA los archivos TXT de ventas y/o compras de un período. "
+        "Inicia sesión fiscal, selecciona el contribuyente representado y el período "
+        "(completando las opciones de actividad declaradas, como prorrateo o "
+        "importaciones), y carga cada TXT de comprobantes junto con su TXT de alícuotas. "
+        "Los archivos se suben antes con `POST /api/v3/uploads` y se indican por "
+        "`object_key`; se requiere al menos un par de ventas o de compras. El resultado "
+        "informa en `importaciones[]` si cada libro se importó. Modifica el borrador de "
+        "la declaración en ARCA."
+    ),
+    ("portal_iva", "gestionar"): (
+        "Flujo completo en una sola ejecución: primero importa los TXT de ventas y/o "
+        "compras (igual que `importar`) y luego descarga en CSV los libros de ventas y/o "
+        "compras ya actualizados (igual que `descargar`). Sirve para cargar comprobantes "
+        "y obtener de inmediato el libro resultante. Devuelve los datos de la descarga y "
+        "`importaciones[]`. Modifica el borrador de la declaración en ARCA."
+    ),
+}
+
 _V2_REQUIRED_AS_CREDENTIAL_ALTERNATIVE = frozenset(
     {"clave", "clave_representante", "contrasena"}
 )
@@ -1365,6 +1396,7 @@ def install_v1_openapi_patch(app: Any) -> Any:
 
 
 __all__ = [
+    "OPERATION_DESCRIPTIONS",
     "CompatBodyBase",
     "public_bot_body_model",
     "public_bot_compat_body_model",

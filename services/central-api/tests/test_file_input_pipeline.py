@@ -221,6 +221,8 @@ def test_portal_iva_importar_and_gestionar_require_operation_scoped_uploads(monk
                 content=b"alicuotas", content_type="text/plain",
             )
             body = {
+                "cuit_representante": "20123456786",
+                "clave": "clave_fiscal",
                 "periodo": "202609",
                 "representado_cuit": "20123456786",
                 "ventas_txt_key": ventas["object_key"],

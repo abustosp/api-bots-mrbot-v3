@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from central_api.api.bot_payloads import (
     public_bot_body_schema,
+    OPERATION_DESCRIPTIONS,
     public_bot_payload_schema,
 )
 from central_api.api.dependencies import (
@@ -246,6 +247,10 @@ class BotOperationDocumentation(BaseModel):
             "cada solicitud consume una unidad del cupo de la cuenta."
         ), ge=0,
         examples=[2],
+    )
+    descripcion: str | None = Field(
+        default=None,
+        description="Qué hace la operación y qué acciones realiza.",
     )
     input_schema: dict[str, Any] = Field(
         ...,
@@ -823,6 +828,7 @@ def _operation_documentation(bot: str, operation: str) -> dict[str, Any]:
         "id": operation,
         "modo": "job",
         "costo_creditos": BOT_CREDIT_COST.get((bot, operation), 1),
+        "descripcion": OPERATION_DESCRIPTIONS.get((bot, operation)),
         "input_schema": payload_schema,
         "credentials_schema": {
             "type": "object",
