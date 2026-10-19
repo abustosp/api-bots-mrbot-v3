@@ -73,6 +73,17 @@ DATE = r"^\d{2}/\d{2}/\d{4}$"
 PERIOD = r"^\d{6}$"
 
 
+# Credenciales fiscales de los bots que no usan el vocabulario plano V2. La
+# central las separa del payload (``normalize_payload_and_credentials``) y el
+# worker las recibe en el sobre sellado, pero deben figurar en la documentación.
+def _login_fields() -> dict[str, tuple[Any, Any]]:
+    return {
+        "cuit_representante": _string(required=True, pattern=CUIT, min_length=11, max_length=11),
+        "clave": _string(required=True),
+        "clave_encriptada": (str | None, Field(default=None)),
+    }
+
+
 # Campos públicos por familia. ``operacion`` no se expone como requerido: la
 # ruta ya fija la operación canónica y el worker la recibe en el envelope.
 _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
@@ -130,12 +141,13 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "representado_cuit": _string(required=True, pattern=CUIT),
         "fecha_desde": _string(required=True, pattern=DATE),
         "fecha_hasta": _string(required=True, pattern=DATE),
-        "representado_nombre": _string(min_length=1, max_length=128),
+        "representado_nombre": _string(required=True, min_length=1, max_length=128),
         "emitidos": _boolean(), "recibidos": _boolean(),
         "puntos_venta_emitidos": _list(item=str | int),
         "puntos_venta_recibidos": _list(item=str | int),
         "timeout_mc": (int | None, Field(default=None, ge=1, le=86400)),
         "incluir_json": _boolean(default=True), "subir_csv": _boolean(default=True),
+        **_login_fields(),
     },
     "consulta_cuit": {
         "cuit": _string(pattern=CUIT),
@@ -167,7 +179,7 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "incluir_json": _boolean(default=True), "subir_excel": _boolean(default=True),
     },
     "libro_sueldos_digital": {
-        "cuit_representante": _string(pattern=CUIT),
+        **_login_fields(),
         "representado_cuit": _string(pattern=CUIT),
         "periodo_desde": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
         "periodo_hasta": _string(required=True, pattern=PERIOD, min_length=6, max_length=6),
@@ -243,6 +255,7 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "ventas_alicuotas_txt_key": _object_key(),
         "compras_txt_key": _object_key(),
         "compras_alicuotas_txt_key": _object_key(),
+        **_login_fields(),
     },
     "rcel": {
         "representado_cuit": _string(pattern=CUIT),
@@ -305,6 +318,7 @@ _OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
     ("consulta_cuit", "consultar_masivo"): ("cuits",),
     # solicitar no tiene opciones de salida porque solo inicia la consulta.
     ("comprobantes", "solicitar"): (
+        "cuit_representante", "clave", "clave_encriptada",
         "representado_cuit", "fecha_desde", "fecha_hasta", "representado_nombre",
         "emitidos", "recibidos",
     ),
@@ -314,14 +328,17 @@ _OPERATION_FIELD_NAMES: dict[tuple[str, str], tuple[str, ...]] = {
     ),
     # descargar no recibe el contenido TXT y importar no recibe flags de salida.
     ("portal_iva", "descargar"): (
+        "cuit_representante", "clave", "clave_encriptada",
         "periodo", "representado_cuit", "representado_nombre", "descarga_ventas",
         "descarga_compras", "incluir_json", "subir_csv",
     ),
     ("portal_iva", "importar"): (
+        "cuit_representante", "clave", "clave_encriptada",
         "periodo", "representado_cuit", "representado_nombre", "ventas_txt_key",
         "ventas_alicuotas_txt_key", "compras_txt_key", "compras_alicuotas_txt_key",
     ),
     ("portal_iva", "gestionar"): (
+        "cuit_representante", "clave", "clave_encriptada",
         "periodo", "representado_cuit", "representado_nombre", "descarga_ventas",
         "descarga_compras", "incluir_json", "subir_csv", "ventas_txt_key",
         "ventas_alicuotas_txt_key", "compras_txt_key", "compras_alicuotas_txt_key",
