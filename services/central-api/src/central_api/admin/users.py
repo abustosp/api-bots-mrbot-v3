@@ -531,6 +531,23 @@ async def _usuario_pg_por_id(user_id: str) -> AdminUser | None:
     )
 
 
+def _meta_clave_desde_fila(row) -> ApiKeyMeta:
+    """Convierte una fila ``api_keys`` en metadatos administrativos."""
+    return ApiKeyMeta(
+        id=str(row.id),
+        user_id=str(row.user_id),
+        prefijo=str(row.key_prefix),
+        # El HMAC persistido usa el formato canónico de autenticación, no se
+        # utiliza para comparar una clave nueva en claro en el proceso admin.
+        verificador_hmac=str(row.verifier_hmac),
+        scopes=list(row.scopes or []),
+        expira_en=row.expires_at.isoformat() if row.expires_at else "",
+        revocada=row.revoked_at is not None,
+        emitida_en=row.created_at.isoformat() if row.created_at else "",
+        valor_cifrado=row.encrypted_value,
+    )
+
+
 async def _api_key_pg_por_id(user_id: str, key_id: str) -> ApiKeyMeta | None:
     """Hidrata metadatos de una clave persistida sin revelar su valor."""
     from central_api.db import db_configurado, nueva_sesion
@@ -550,19 +567,46 @@ async def _api_key_pg_por_id(user_id: str, key_id: str) -> ApiKeyMeta | None:
         raise HTTPException(status_code=503, detail="Servicio no disponible") from None
     if row is None or row.user_id != user_uuid:
         return None
-    return ApiKeyMeta(
-        id=str(row.id),
-        user_id=str(row.user_id),
-        prefijo=str(row.key_prefix),
-        # El HMAC persistido usa el formato canónico de autenticación, no se
-        # utiliza para comparar una clave nueva en claro en el proceso admin.
-        verificador_hmac=str(row.verifier_hmac),
-        scopes=list(row.scopes or []),
-        expira_en=row.expires_at.isoformat() if row.expires_at else "",
-        revocada=row.revoked_at is not None,
-        emitida_en=row.created_at.isoformat() if row.created_at else "",
-        valor_cifrado=row.encrypted_value,
-    )
+    return _meta_clave_desde_fila(row)
+
+
+async def _clave_activa_pg_por_usuario(user_id: str) -> ApiKeyMeta | None:
+    """Devuelve la clave activa más reciente del usuario en PostgreSQL.
+
+    Se usa como respaldo cuando el panel envía el ID de una clave que solo
+    existe en el cache del proceso (por ejemplo, una lista desactualizada tras
+    una edición manual de la base). Sin este respaldo la rotación fallaba con
+    404 aunque el usuario sí tuviera una clave persistida válida.
+    """
+    from sqlalchemy import func, select
+
+    from central_api.db import db_configurado, nueva_sesion
+    from central_api.models.identity import ApiKey
+
+    if not db_configurado():
+        return None
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    try:
+        async with nueva_sesion() as sesion:
+            row = (
+                await sesion.execute(
+                    select(ApiKey)
+                    .where(
+                        ApiKey.user_id == user_uuid,
+                        ApiKey.revoked_at.is_(None),
+                        (ApiKey.expires_at.is_(None))
+                        | (ApiKey.expires_at > func.current_timestamp()),
+                    )
+                    .order_by(ApiKey.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+    except Exception:  # noqa: BLE001 - error DB sanitizado
+        raise HTTPException(status_code=503, detail="Servicio no disponible") from None
+    return _meta_clave_desde_fila(row) if row is not None else None
 
 
 async def _persistir_api_key_pg(
@@ -909,10 +953,12 @@ async def listar_usuarios(
     periodos_vigentes = await _periodos_vigentes_pg()
     from central_api.billing.entitlements import BILLING_ACCOUNTS
     usuarios_por_id = {user.id: user for user in USERS.values()}
+    usuarios_pg: set[str] = set()
     claves_por_usuario: dict[str, dict[str, dict]] = {}
     ahora = utcnow()
     for user_id, email_pg, habilitado in filas_usuarios:
         uid = str(user_id)
+        usuarios_pg.add(uid)
         usuario = usuarios_por_id.get(uid)
         if usuario is None:
             usuario = AdminUser(
@@ -958,6 +1004,11 @@ async def listar_usuarios(
             "revelable": bool(revelable),
         }
     for clave in API_KEYS.values():
+        # PostgreSQL es canónico para los usuarios persistidos. Una clave que
+        # solo viva en el cache no se puede rotar contra la base y, al figurar
+        # como activa, hacía fallar el botón «Guardar» del panel con un 404.
+        if clave.user_id in usuarios_pg:
+            continue
         # PostgreSQL es la fuente canónica cuando la misma clave existe en
         # ambos stores. No sustituir su selector opaco por metadata de memoria.
         if clave.id in claves_por_usuario.get(clave.user_id, {}):
@@ -1526,11 +1577,24 @@ async def rotar_clave_api(
             USERS[user_id] = usuario
     if usuario is None:
         raise HTTPException(status_code=404, detail="usuario no encontrado")
-    anterior = API_KEYS.get(body.key_id)
-    if anterior is None:
+    anterior = None
+    from central_api.db import db_configurado
+
+    if db_configurado():
+        # PostgreSQL manda: si el ID enviado por el panel no está persistido
+        # pero sí en el cache, se rota la clave activa real del usuario en vez
+        # de devolver 404 (clave fantasma de una lista desactualizada).
         anterior = await _api_key_pg_por_id(user_id, body.key_id)
         if anterior is not None:
             API_KEYS[body.key_id] = anterior
+        else:
+            en_memoria = API_KEYS.get(body.key_id)
+            if en_memoria is not None and en_memoria.user_id == user_id:
+                anterior = await _clave_activa_pg_por_usuario(user_id)
+                if anterior is not None:
+                    API_KEYS[anterior.id] = anterior
+    else:
+        anterior = API_KEYS.get(body.key_id)
     if anterior is None or anterior.user_id != user_id:
         raise HTTPException(status_code=404, detail="clave anterior no encontrada")
     if anterior.revocada:
