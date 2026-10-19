@@ -307,6 +307,106 @@ def test_usuarios_persistidos_se_hidratan_y_su_estado_se_alterna(admin, monkeypa
     ] == "habilitado"
 
 
+def test_listado_omite_clave_solo_en_memoria_de_usuario_persistido(admin, monkeypatch) -> None:
+    """Regresión: una clave del cache no debe figurar activa si el usuario está en PostgreSQL."""
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    user_id = str(uuid4())
+    key_id = str(uuid4())
+
+    async def filas_pg():
+        return (
+            [(user_id, "persistido@example.test", True)],
+            [
+                (
+                    key_id,
+                    user_id,
+                    "pg-prefix",
+                    [],
+                    None,
+                    None,
+                    datetime.now(timezone.utc),
+                    True,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(admin, "_filas_identidad_pg", filas_pg)
+    fantasma = admin.ApiKeyMeta(
+        id=str(uuid4()),
+        user_id=user_id,
+        prefijo="mbk_fantasma",
+        verificador_hmac="hmac-fantasma",
+        emitida_en=datetime.now(timezone.utc).isoformat(),
+    )
+    admin.API_KEYS[fantasma.id] = fantasma
+    cliente = TestClient(create_app())
+
+    respuesta = cliente.get("/admin/users", headers=_headers())
+    assert respuesta.status_code == 200
+    usuario = next(u for u in respuesta.json()["usuarios"] if u["id"] == user_id)
+    assert [clave["id"] for clave in usuario["claves_api"]] == [key_id]
+
+
+def test_rotacion_con_clave_fantasma_usa_la_persistida(admin, monkeypatch) -> None:
+    """Regresión: el panel puede enviar el ID de una clave que solo vive en el cache."""
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("API_KEY_HMAC_SECRET", "secreto-servidor-test")
+    get_settings.cache_clear()
+    cliente = TestClient(create_app())
+    creado = _crear_usuario(cliente, "abp")
+    assert creado.status_code == 201
+    user_id = creado.json()["usuario"]["id"]
+    real = next(iter(admin.API_KEYS.values()))
+
+    fantasma = admin.ApiKeyMeta(
+        id=str(uuid4()),
+        user_id=user_id,
+        prefijo="mbk_fantasma",
+        verificador_hmac="hmac-fantasma",
+        emitida_en=datetime.now(timezone.utc).isoformat(),
+    )
+    admin.API_KEYS[fantasma.id] = fantasma
+    rotadas: list[tuple[str, str]] = []
+
+    async def sin_clave_persistida(user_id_arg: str, key_id_arg: str):
+        assert (user_id_arg, key_id_arg) == (user_id, fantasma.id)
+        return None
+
+    async def clave_activa_persistida(user_id_arg: str):
+        assert user_id_arg == user_id
+        return real
+
+    async def rotar_persistida(usuario, anterior, meta, valor: str) -> None:
+        rotadas.append((anterior.id, meta.id))
+        anterior.revocada = True
+
+    monkeypatch.setattr("central_api.db.db_configurado", lambda: True)
+    monkeypatch.setattr(admin, "_api_key_pg_por_id", sin_clave_persistida)
+    monkeypatch.setattr(admin, "_clave_activa_pg_por_usuario", clave_activa_persistida)
+    monkeypatch.setattr(admin, "_rotar_api_key_pg", rotar_persistida)
+
+    respuesta = cliente.post(
+        f"/admin/users/{user_id}/api-keys/rotate",
+        headers=_headers(),
+        json={
+            "key_id": fantasma.id,
+            "motivo": "rotar la clave persistida real",
+            "valor_fijo": "clave-nueva",
+        },
+    )
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json()["revocada"] == real.id
+    assert respuesta.json()["valor_unica_vez"] == "clave-nueva"
+    assert rotadas[0][0] == real.id
+    assert real.revocada is True
+
+
 def test_emision_manual_invoca_persistencia_y_mantiene_secreto_de_una_sola_vez(
     admin, monkeypatch
 ) -> None:

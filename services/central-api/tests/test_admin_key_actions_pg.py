@@ -227,3 +227,68 @@ def test_restaurar_con_valor_ya_activo_devuelve_409(pg_panel) -> None:
     assert r.status_code == 409
     assert "ya está activo" in r.json()["detail"]
     assert _fila(a_key)[0] is True
+
+
+def _clave_fantasma(admin_users, user_id: str):
+    return admin_users.ApiKeyMeta(
+        id=str(uuid.uuid4()),
+        user_id=user_id,
+        prefijo="mbk_fantasma",
+        verificador_hmac=f"hmac-{uuid.uuid4().hex}",
+        emitida_en=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def test_listado_omite_clave_solo_en_memoria_para_usuario_persistido(pg_panel) -> None:
+    """Regresión: una clave del cache sin fila en PostgreSQL no debe figurar activa."""
+    client, admin_users = pg_panel
+    email = f"pg-ghost-list-{uuid.uuid4().hex[:8]}@example.test"
+    creado = client.post(
+        "/admin/users",
+        headers=H,
+        json={"email": email, "api_key": f"ghost{uuid.uuid4().hex[:6]}", "motivo": "abc"},
+    )
+    assert creado.status_code == 201, creado.text
+    user_id = creado.json()["usuario"]["id"]
+    key_id = creado.json()["credenciales"]["clave"]["id"]
+
+    # Simula un reinicio y un cache con una clave que ya no está persistida.
+    admin_users.USERS.clear()
+    admin_users.API_KEYS.clear()
+    fantasma = _clave_fantasma(admin_users, user_id)
+    admin_users.API_KEYS[fantasma.id] = fantasma
+
+    listado = client.get("/admin/users", headers=H, params={"email": email})
+    assert listado.status_code == 200, listado.text
+    fila = next(u for u in listado.json()["usuarios"] if u["id"] == user_id)
+    assert [clave["id"] for clave in fila["claves_api"]] == [key_id]
+    assert fantasma.id not in {clave["id"] for clave in fila["claves_api"]}
+
+
+def test_rotacion_con_id_fantasma_usa_la_clave_persistida(pg_panel) -> None:
+    """Regresión: el panel enviaba el ID de una clave que solo vivía en memoria."""
+    client, admin_users = pg_panel
+    email = f"pg-ghost-rot-{uuid.uuid4().hex[:8]}@example.test"
+    anterior = f"antes{uuid.uuid4().hex[:6]}"
+    creado = client.post(
+        "/admin/users",
+        headers=H,
+        json={"email": email, "api_key": anterior, "motivo": "abc"},
+    )
+    assert creado.status_code == 201, creado.text
+    user_id = creado.json()["usuario"]["id"]
+    key_id = creado.json()["credenciales"]["clave"]["id"]
+
+    admin_users.USERS.clear()
+    admin_users.API_KEYS.clear()
+    fantasma = _clave_fantasma(admin_users, user_id)
+    admin_users.API_KEYS[fantasma.id] = fantasma
+
+    nueva = f"despues{uuid.uuid4().hex[:6]}"
+    rotada = _rotar(client, user_id, fantasma.id, nueva)
+    assert rotada.status_code == 200, rotada.text
+    assert rotada.json()["revocada"] == key_id
+    assert rotada.json()["valor_unica_vez"] == nueva
+    assert _fila(key_id)[0] is True
+    assert client.get("/api/v3/bots", auth=(email, anterior)).status_code == 401
+    assert client.get("/api/v3/bots", auth=(email, nueva)).status_code == 200
