@@ -54,6 +54,15 @@ Debe solicitarse al menos una vista y una salida (`incluir_json=true` o `subir=t
 
 ## Resultado y archivos
 
-El objeto `data` incluye `operacion` y `representado_cuit`; `vistas` contiene, por cada captura incluida, `vista` (`detalle`/`categorias`), `archivo`, `ancho` y `alto`, más `sha256` y `size_bytes` cuando se publica. `campos` puede incluir `contribuyente`, `categoria_siper`, `motivo`, `fecha_ultima_categoria_siper` y `estado_tramite_disconformidad`; solo se devuelven valores no vacíos.
+En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final, `data` contiene las vistas y campos solicitados y `files` enumera las capturas publicadas. `files` es una lista vacía cuando no hay archivos publicados.
 
-Si la captura falla, el trabajo falla. Si una extracción estructurada falla después de guardar/subir capturas, estas pueden conservarse y el resultado será `PARCIAL` con error. Aunque `incluir_detalle=false`, la extracción de `campos` predeterminada sigue consultando el detalle: especifique `extraer_campos=false` para evitarla. Consulta de solo lectura.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el trabajo | `OK` si terminan las capturas y la extracción solicitada; `PARCIAL` si falla la extracción de campos tras producir capturas; `ERROR` si falla una captura o la operación completa. | `"PARCIAL"` |
+| `data.operacion`, `data.representado_cuit` | texto | En un resultado de operación disponible | Operación y CUIT consultado. | `{"operacion":"consultar","representado_cuit":"20123456786"}` |
+| `data.vistas` | lista de objetos | Con `incluir_json=true`; se omite si es `false` | Una entrada por captura incluida, con nombre de vista, archivo y dimensiones. | `[{"vista":"detalle","archivo":"siper-detalle.png","ancho":1280,"alto":900}]` |
+| `data.vistas[].sha256`, `data.vistas[].size_bytes` | texto, entero | Solo con `incluir_json=true` y si la captura se publicó | Huella y tamaño de la imagen publicada. Si `subir=false`, estas propiedades no aparecen. | `{"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":24576}` |
+| `data.campos` | objeto | Si `extraer_campos=true` y la extracción termina correctamente, incluso con `incluir_json=false` | Puede contener `contribuyente`, `categoria_siper`, `motivo`, `fecha_ultima_categoria_siper` y `estado_tramite_disconformidad`; solo se devuelven valores no vacíos. Si la extracción falla, la propiedad no aparece. | `{"categoria_siper":"B","motivo":"Conducta fiscal ficticia"}` |
+| `files[]` | lista de archivos | Siempre en la respuesta del trabajo; un elemento por captura publicada | Referencia pública de cada imagen. Sin publicaciones, el valor es `[]`. | `[{"name":"siper-detalle.png","url":"","filename":"siper-detalle.png","size":24576,"size_bytes":24576}]` |
+
+Si la captura falla, el trabajo falla. Si la extracción estructurada falla después de producir capturas, estas pueden conservarse y `result` será `PARCIAL`. Aunque `incluir_detalle=false`, `extraer_campos=true` puede consultar el detalle para formar `data.campos`; use `extraer_campos=false` para evitar esa extracción. Consulta de solo lectura.

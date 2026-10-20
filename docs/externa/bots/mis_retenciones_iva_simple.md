@@ -56,8 +56,17 @@ No incluya secretos en `payload`. Los alias duplicados deben coincidir.
 }
 ```
 
-## Resultado y archivos
+## Resultado y archivos por operación
 
-La consulta activa el modo IVA Simple y procesa tres categorías de operación, en exportación IVA Simple y su alternativa XLS. Para cada combinación se informa cantidad de filas y estado/mensaje; los CSV se adjuntan en `files[]` cuando `subir_csv` está activo. `incluir_json: false` omite datos de muestra, no los archivos solicitados.
+`result` es `OK` cuando termina el recorrido, incluso si falla una exportación de categoría o formato. El error queda en el resumen de esa combinación y se continúa con las demás; esos fallos no cambian por sí solos el resultado global a `PARCIAL`.
 
-Los errores de una categoría/formato se incluyen en el resultado y el trabajo continúa con las demás combinaciones; el estado global puede permanecer `OK`. Verifique los mensajes y conteos para identificar resultados incompletos. El portal limita fechas futuras al día actual al consultar, aunque la validación de entrada permite el rango indicado si cumple la regla mensual.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | `OK` cuando finaliza el recorrido de categorías y formatos. | `"OK"` |
+| `data.operacion`, `data.representado_cuit`, `data.fecha_desde`, `data.fecha_hasta` | textos | Cuando se devuelve `data` | Operación, representado y período consultado. | `{"operacion":"consultar","representado_cuit":"30876543210","fecha_desde":"01/09/2025","fecha_hasta":"31/10/2025"}` |
+| `data.operaciones` | objeto anidado | Cuando se devuelve `data` | Se organiza por las tres categorías `RETENCIONES IMPOSITIVAS`, `PERCEPCIONES IMPOSITIVAS` y `PERCEPCIONES ADUANERAS`; cada una contiene los formatos `iva_simple` y `xls`. | `{"RETENCIONES IMPOSITIVAS":{"iva_simple":{"filas":2,"archivo":"retenciones.csv","muestra":[{"fecha":"10/09/2025","importe":"1250.00"}]}}}` |
+| `data.operaciones.<categoría>.<formato>` | objeto | Para cada combinación categoría/formato | En una exportación correcta incluye `filas` y `archivo`. `muestra` solo aparece con `incluir_json: true`; `sha256` y `size_bytes` solo aparecen con `subir_csv: true`. | `{"filas":2,"archivo":"retenciones.csv","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":1234,"muestra":[]}` |
+| `data.operaciones.<categoría>.<formato>` | objeto de fallo | Solo para una combinación cuya exportación falló | Incluye `filas: 0`, `mensaje` y `diagnostic_code`; no incluye `archivo` ni `muestra` para esa combinación. | `{"filas":0,"mensaje":"Exportación no disponible","diagnostic_code":"export_unavailable"}` |
+| `files[]` | lista de archivos | Solo por exportaciones correctas publicadas; puede quedar vacía | Incluye los CSV de categoría/formato que se generaron y publicaron con `subir_csv: true`. Los errores de otras combinaciones no eliminan los archivos correctos. | `[{"name":"retenciones.csv","url":"","size":1234,"artifact_id":"retenciones_csv","filename":"retenciones.csv","content_type":"text/csv","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |
+
+Con `incluir_json: false`, `muestra` se omite, no queda como `null` ni como `[]`. Una muestra habilitada puede ser `[]` si no hubo filas. Las fechas en `data` son las del período validado; el servicio puede limitar la consulta si parte del rango está en el futuro.

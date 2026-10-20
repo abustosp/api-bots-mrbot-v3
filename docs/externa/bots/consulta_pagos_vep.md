@@ -51,17 +51,21 @@ No usar valores reales en ejemplos.
 
 ## Resultado
 
-El estado del job incluye `result` (`OK`, `PARCIAL` o `ERROR`); la carga del bot está en `data`:
+La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son ilustrativos y no proceden de ejecuciones.
 
-| Clave de `data` | Tipo / condición |
-|---|---|
-| `operacion` | string, valor `consultar`. |
-| `representado_cuit`, `periodo`, `archivo` | string. |
-| `filas` | entero. |
-| `sha256` | string, presente si el CSV se publicó. |
-| `size_bytes` | entero, presente si el CSV se publicó. |
-| `muestra` | lista de objetos, presente si `incluir_json=true`. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el job | `OK` si la consulta y la exportación terminan correctamente; los fallos de sesión, consulta o exportación terminan con error. No se define resultado parcial. | `"OK"` |
+| `data.operacion` | texto | En una respuesta correcta | Operación ejecutada. | `"consultar"` |
+| `data.representado_cuit` | texto | En una respuesta correcta | CUIT consultado. | `"20123456786"` |
+| `data.periodo` | texto | En una respuesta correcta | Período en meses usado en la consulta. | `"72"` |
+| `data.filas` | entero | En una respuesta correcta | Cantidad de filas de datos contadas en el CSV. Puede ser `0`. | `0` |
+| `data.archivo` | texto | En una respuesta correcta | Nombre del CSV generado, incluso cuando `subir_csv=false`. | `"pagos_vep_<cuit>_<periodo>.csv"` |
+| `data.sha256` | texto hexadecimal | Si `subir_csv=true` y la publicación termina correctamente | Huella del CSV publicado. | `"<64 caracteres hexadecimales>"` |
+| `data.size_bytes` | entero | Si `subir_csv=true` y la publicación termina correctamente | Tamaño del CSV publicado en bytes. | `12345` |
+| `data.muestra` | lista de objetos | Si `incluir_json=true` | Muestra de filas del CSV; puede ser vacía. Cada valor de fila se representa como texto. | `[]` |
+| `files` | lista de archivos | En la respuesta final | Contiene el CSV publicado si `subir_csv=true`; queda vacía si `subir_csv=false`. | `[]` |
 
-Con `subir_csv=true`, el CSV se referencia en `files[]`; con `false`, no hay archivo publicado aunque se haya generado para procesar las filas. Los errores de sesión, consulta o exportación hacen fallar la operación. No crea ni paga un VEP.
+Con `subir_csv=true`, el CSV se obtiene en `files`; con `false`, no hay archivo descargable aunque se haya generado para procesar las filas. `incluir_json=false` omite `data.muestra`. La consulta no crea ni paga un VEP.
 
 El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.

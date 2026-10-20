@@ -71,7 +71,7 @@ Ejemplo estrictamente ilustrativo del envoltorio genérico de estado, no de la s
 }
 ```
 
-`data` contiene el resultado específico de la operación y puede ser `null`. `files` es una lista, incluso cuando no hay archivos. `COMPLETO` junto con `PARCIAL` indica que el resultado no fue completo en todos sus aspectos. La estructura de `data` depende del bot.
+`data` contiene el resultado específico de la operación. Cuando el job termina con un resultado disponible, `data` es un objeto que incluye `schema_version` con el valor `1`. Si el servicio consultado ya devuelve una propiedad `schema_version`, se conserva el valor de ese servicio; ocurre, por ejemplo, en `consulta_cuit`. En un fallo sin datos, `data` es `null`; la propiedad sigue presente en la respuesta. `files` es una lista, incluso cuando no hay archivos. `COMPLETO` junto con `PARCIAL` indica que el resultado no fue completo en todos sus aspectos. La estructura de `data` depende del bot.
 
 ## Cancelar y consultar el cupo
 

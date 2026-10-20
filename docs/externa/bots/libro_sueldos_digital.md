@@ -58,22 +58,21 @@ Ruta: `POST /api/v3/bots/libro_sueldos_digital/descargar`.
 }
 ```
 
-## Resultado y parciales
+## Resultado y archivos por operación
 
-`result` es el estado `OK`, `PARCIAL` o `ERROR`. `data` incluye:
+`result` puede ser `OK`, `PARCIAL` o `ERROR`: una mezcla de descargas correctas y fallidas da `PARCIAL`; si fallan todas las liquidaciones encontradas, da `ERROR`. El detalle de cada descarga se conserva en `data` cuando se devuelve un resultado con datos. Si no se encuentra ninguna liquidación, la ejecución falla y no se garantiza ese detalle.
 
-| Clave | Tipo / condición |
-|---|---|
-| `operacion` | string, `descargar`. |
-| `representado_cuit` | string del empleador verificado. |
-| `periodo_desde`, `periodo_hasta` | strings. |
-| `periodos_solicitados`, `periodos_encontrados`, `periodos_descargados` | listas de strings. |
-| `liquidaciones_encontradas`, `liquidaciones_descargadas` | enteros. |
-| `empleador` | objeto de identidad devuelto por el servicio. |
-| `detalle` | lista opcional con `periodo`, `liquidacion`, `archivo` strings; `sha256` string, `size_bytes` entero y `object_key` string si se publica; `error` string en registro fallido. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | Estado de las descargas. | `"PARCIAL"` |
+| `data.operacion` | texto | Cuando se devuelve `data` | Operación realizada. | `"descargar"` |
+| `data.representado_cuit`, `data.periodo_desde`, `data.periodo_hasta` | textos | Cuando se devuelve `data` | CUIT del empleador verificado y rango solicitado. | `{"representado_cuit":"20123456786","periodo_desde":"202601","periodo_hasta":"202603"}` |
+| `data.empleador` | objeto | Cuando se devuelve `data` | Identidad informada para el empleador, con `cuit` y `denominacion`. | `{"cuit":"20123456786","denominacion":"Empleador Ejemplo SA"}` |
+| `data.periodos_solicitados`, `data.periodos_encontrados`, `data.periodos_descargados` | listas de textos | Cuando se devuelve `data` | Períodos del rango, períodos con liquidaciones listadas y períodos con al menos una descarga correcta, respectivamente. Pueden ser `[]` si no hay elementos en esa etapa. | `{"periodos_solicitados":["202601","202602"],"periodos_encontrados":["202601"],"periodos_descargados":["202601"]}` |
+| `data.liquidaciones_encontradas`, `data.liquidaciones_descargadas` | enteros | Cuando se devuelve `data` | Cantidad listada y cantidad descargada correctamente. La segunda no depende de que se adjunten los archivos. | `{"liquidaciones_encontradas":2,"liquidaciones_descargadas":1}` |
+| `data.detalle[]` | lista de objetos | Solo con `incluir_json: true`; con `false` se omite la clave | Cada fila incluye `periodo`, `liquidacion` y `archivo`. Si falla una descarga, incluye `error` con el código del fallo. En una descarga correcta, `sha256`, `size_bytes` y `object_key` aparecen únicamente cuando `subir_archivos: true`. | `[{"periodo":"202601","liquidacion":"0007","archivo":"libro-202601-0007.pdf","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":1234,"object_key":"jobs/demo/libro/ejemplo"},{"periodo":"202602","liquidacion":"0008","archivo":"libro-202602-0008.pdf","error":"lsd_download_error"}]` |
+| `files[]` | lista de archivos | PDF descargados y publicados; puede estar vacía | Con `subir_archivos: true`, contiene solo las liquidaciones descargadas correctamente. Con `false`, queda vacía aunque se consulten y descarguen archivos durante el trabajo. En un resultado `PARCIAL`, conserva los archivos exitosos. | `[{"name":"libro-202601-0007.pdf","url":"","size":1234,"artifact_id":"lsd_pdf","filename":"libro-202601-0007.pdf","content_type":"application/pdf","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |
 
-PDF exitosos se publican en `files[]` cuando `subir_archivos=true`.
-
-Sin liquidaciones encontradas, la operación falla. Si todas las descargas encontradas fallan, `result=ERROR`; con éxitos y fallos es `PARCIAL`, conservando archivos exitosos y errores; con éxito completo es `OK`. No reintentar un parcial sin revisar qué liquidaciones ya se obtuvieron.
+`incluir_json: false` no cambia los contadores ni las listas de períodos, pero `data.detalle` no aparece, no se devuelve como `null` ni como lista vacía. Si todas las descargas fallan, `data.detalle` puede describir esos fallos cuando está habilitado. No se promete un objeto superior de advertencias o errores.
 
 El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.

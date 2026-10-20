@@ -64,8 +64,17 @@ Si se envían alias repetidos con valores distintos, la solicitud se rechaza. Ma
 
 El CUIT y la denominación del ejemplo son ficticios. Para obtener resultados, el representado y el período deben existir en la cuenta real.
 
-## Resultado y archivos
+## Resultado y archivos por operación
 
-`data.secciones` incluye solo categorías solicitadas. Cada sección resume la planilla (nombre y tamaño) y los comprobantes encontrados; cada comprobante puede tener su propio archivo PDF. Los archivos generados se exponen en `files[]` si `subir_archivos` es `true`. Con `false`, el resumen puede informar nombres locales, pero no se adjuntan archivos descargables al trabajo.
+`result` es `OK` cuando termina una consulta normal. Si falla el acceso, la consulta o la generación de una sección, el trabajo termina con error; no se emite un resultado `PARCIAL` por sección.
 
-Una consulta completada devuelve estado `OK`. Una falla durante el acceso o la extracción puede abortar el trabajo; no se ofrece un estado parcial independiente por categoría. Una sección sin datos puede no producir planilla o comprobantes.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | En una consulta completada vale `OK`. Una falla que aborta no garantiza datos de salida. | `"OK"` |
+| `data.operacion` | texto | Cuando se devuelve `data` | Operación realizada. | `"consultar"` |
+| `data.representado_cuit`, `data.fecha_desde`, `data.fecha_hasta` | textos | Cuando se devuelve `data` | CUIT consultado y fechas normalizadas del rango. | `{"representado_cuit":"30876543210","fecha_desde":"01/01/2025","fecha_hasta":"31/01/2025"}` |
+| `data.secciones` | objeto | Cuando se devuelve `data`; contiene solo las categorías activas | Cada clave identifica una categoría, por ejemplo `lpg_emitidas`. El resumen incluye `archivo`, `size_bytes` y `comprobantes`; `sha256` de la planilla solo aparece si `subir_archivos: true`. | `{"lpg_emitidas":{"archivo":"LPG-emitidas.xlsx","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","comprobantes":{"cantidad":1,"archivos":["comprobante-01.pdf"]}}}` |
+| `data.secciones.<categoria>.comprobantes` | objeto | Por cada categoría activa | `cantidad` es el número de comprobantes. `archivos` es una lista de nombres, que puede ser `[]`; con `subir_archivos: false` contiene nombres locales y no significa que estén adjuntos. | `{"cantidad":0,"archivos":[]}` |
+| `files[]` | lista de archivos | Solo archivos publicados; puede quedar vacía | Con `subir_archivos: true`, puede incluir la planilla XLSX de cada categoría activa y sus comprobantes PDF. Con `false`, no contiene archivos aunque se hayan consultado o generado localmente. | `[{"name":"LPG-emitidas.xlsx","url":"","size":1234,"artifact_id":"planilla_xlsx","filename":"LPG-emitidas.xlsx","content_type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |
+
+`data.secciones` contiene solo las categorías activas. Una falla de una sección no devuelve como resultado público los resúmenes previos: no se promete una salida parcial con archivos de otras secciones.

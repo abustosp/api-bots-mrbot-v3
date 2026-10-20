@@ -74,21 +74,26 @@ Las claves de archivos son marcadores de ejemplo: deben reemplazarse por claves 
 }
 ```
 
-## Resultado, archivos y resultados parciales
+## Resultado y archivos
 
-`data` tiene este envelope estable:
+La respuesta pública del trabajo contiene `result` y `data`. En un resultado `ERROR`, `data` puede ser `null`. Los ejemplos de esta sección son ilustrativos, ficticios y no fueron ejecutados.
 
-| Ruta | Tipo | Cuándo aparece |
-|---|---|---|
-| `data.operacion` | Texto (`"cargar"`) | Siempre que haya resultado. |
-| `data.representado_cuit` | Texto, 11 dígitos | Siempre. |
-| `data.periodo` | Texto `AAAAMM` | Siempre. |
-| `data.secciones` | Objeto mapa `texto → texto` | Siempre. Las claves aparecen sólo para secciones solicitadas. |
-| `data.secciones.ventas_txt` | Texto de estado | Sólo si se envió el par TXT de ventas. Éxito indica `ventas: importado (intento N)`; fallo empieza con `error:`. |
-| `data.secciones.compras_txt` | Texto de estado | Sólo si se envió el par TXT de compras. Éxito indica `compras: importado (intento N)`; fallo empieza con `error:`. |
-| `data.secciones.CF`, `CF Restitucion`, `DF`, `DF Restitucion` | Texto de estado | Sólo para el CSV de apertura correspondiente. Éxito indica `<sección>: cargado`; fallo empieza con `error:`. |
-| `data.secciones.credito_fiscal_compras` | Texto de estado | Sólo después de CSV CF cargado y con `prorrateo_global=true`; resultado `ok`, `sin_modal` o error. |
-| `data.periodos_seleccionables` | Lista de textos | Sólo si la pantalla devuelve períodos seleccionables. |
-| `data.total_credito_fiscal_computable_cf` | Texto | Sólo si se envió `csv_cf_key`; total interpretado del CSV. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si no hay secciones fallidas, `PARCIAL` si fallan algunas y `ERROR` si fallan todas. | `"PARCIAL"` |
+| `data.operacion` | texto | Siempre que se produzca `data`. | Nombre de la operación. | `"cargar"` |
+| `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado del representado. | `"20123456786"` |
+| `data.periodo` | texto | Siempre que se produzca `data`. | Período normalizado `AAAAMM`. | `"202401"` |
+| `data.secciones` | objeto | Siempre que se produzca `data`. | Mapa de estados de las secciones solicitadas. Puede contener una o más entradas; las secciones no solicitadas se omiten. | `{"ventas_txt":"ventas: importado (intento 1)","CF":"CF: cargado"}` |
+| `data.secciones.ventas_txt` | texto | Si se envió el par TXT de ventas. | Estado de la importación. El valor comienza con `error:` cuando falla esa sección. | `"ventas: importado (intento 1)"` |
+| `data.secciones.compras_txt` | texto | Si se envió el par TXT de compras. | Estado de la importación. El valor comienza con `error:` cuando falla esa sección. | `"error: TargetUnavailableError"` |
+| `data.secciones.CF` | texto | Si se envió `csv_cf_key`. | Estado de la apertura de crédito fiscal. | `"CF: cargado"` |
+| `data.secciones.CF Restitucion` | texto | Si se envió `csv_cf_restitucion_key`. | Estado de la restitución de crédito fiscal. | `"CF Restitucion: cargado"` |
+| `data.secciones.DF` | texto | Si se envió `csv_df_key`. | Estado de la apertura de débito fiscal. | `"DF: cargado"` |
+| `data.secciones.DF Restitucion` | texto | Si se envió `csv_df_restitucion_key`. | Estado de la restitución de débito fiscal. | `"DF Restitucion: cargado"` |
+| `data.secciones.credito_fiscal_compras` | texto | Si se envió `csv_cf_key`, la apertura `CF` terminó correctamente y `prorrateo_global` es `true`. | Resultado de la actualización del crédito fiscal computable de compras: `ok`, `sin_modal` o un valor de error que comienza con `error:`. | `"ok"` |
+| `data.periodos_seleccionables` | lista de objetos | Solo cuando la preparación devuelve una lista no vacía; si devuelve `[]`, la propiedad se omite, no se devuelve como `null`. | Opciones de período comunicadas durante la preparación. Los nombres de las propiedades pueden variar y no se documenta un conjunto estable de claves. | `[{"campo-ilustrativo":"valor-ficticio"}]` |
+| `data.total_credito_fiscal_computable_cf` | texto | Si se incluyó `csv_cf_key` y se pudo interpretar un total. Si no hay total interpretable, la propiedad se omite. | Total leído del CSV de apertura CF. | `"12345.67"` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo; queda vacía porque esta operación no publica archivos de salida. | Archivos disponibles para descargar desde el resultado del trabajo. | `[]` |
 
-La envoltura del job indica resultado `OK`, `PARCIAL` o `ERROR`. En parcialidad se conservan estados por sección y las operaciones que sí alcanzaron el portal no se revierten. Este bot no emite archivo de salida en `files`.
+`secciones` puede registrar éxitos y fallos en la misma respuesta. Un resultado `PARCIAL` o `ERROR` no revierte las secciones que ya se completaron. La respuesta no incluye una propiedad independiente de advertencias.

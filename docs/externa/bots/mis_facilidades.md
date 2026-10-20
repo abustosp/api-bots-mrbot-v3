@@ -54,8 +54,17 @@ Los valores de alias duplicados deben coincidir. Envíe estos datos dentro de `c
 }
 ```
 
-## Resultado y archivos
+## Resultado y archivos por operación
 
-El resultado lista los CUIT disponibles, los planes examinados y procesados, y los errores asociados a planes o secciones. Los planes cancelados se excluyen; además, se excluye cualquier plan cuya situación coincida con `situacion_excluyente`. Para cada plan procesado se pueden generar PDFs y un archivo XLSX. Los adjuntos aparecen en `files[]` si `subir_archivos` está activo.
+`result` es `OK` si no hubo errores de exportación y `PARCIAL` si una o más exportaciones de planes o secciones fallaron. El trabajo conserva los resúmenes y archivos que sí alcanzó a producir. El detalle de esos errores no está incluido en `data`, por lo que el estado `PARCIAL` no garantiza una lista pública de causas ni del plan afectado.
 
-Si algunas exportaciones fallan y otras continúan, el trabajo puede terminar `PARCIAL`, con errores por plan/sección. Una consulta sin errores termina `OK`. El resultado no garantiza que cada plan tenga todas las vistas exportables.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | Estado global de las exportaciones completadas. | `"PARCIAL"` |
+| `data.operacion`, `data.representado_cuit` | texto | Cuando se devuelve `data` | Operación y CUIT seleccionado para la consulta. | `{"operacion":"consultar","representado_cuit":"30876543210"}` |
+| `data.cuits_disponibles` | lista de textos | Cuando se devuelve `data` | CUIT visibles para la cuenta. Puede ser `[]` si no se pudieron leer del servicio. | `["30876543210"]` |
+| `data.planes` | lista de objetos | Cuando se devuelve `data` | Planes procesados, salvo los cancelados y los que coinciden con `situacion_excluyente`. Puede ser `[]` si no queda ningún plan para procesar. | `[{"numero":"00042","denominacion":"Comercio Ejemplo SA","situacion":"Vigente"}]` |
+| `data.planes_procesados` | entero | Cuando se devuelve `data` | Cantidad de elementos de `data.planes`. | `1` |
+| `data.planes[].pdf_vistas[]` | lista de objetos | En cada plan solo con `incluir_pdf: true` | Una entrada por vista PDF producida, con `vista`, `archivo` y `size_bytes`. Con `subir_archivos: true` se agregan `sha256` y el tamaño publicado; sin subida se omite `sha256`. Puede ser `[]` si no hubo vistas disponibles. | `[{"vista":"pagos","archivo":"plan-00042-pagos.pdf","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}]` |
+| `data.planes[].xlsx` | objeto | En cada plan solo con `incluir_xlsx: true` | Resumen de la planilla del plan: `archivo` y `size_bytes`; `sha256` solo cuando `subir_archivos: true`. Con `incluir_xlsx: false`, la clave se omite. | `{"archivo":"plan-00042-tablas.xlsx","size_bytes":2345,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}` |
+| `files[]` | lista de archivos | Solo archivos publicados correctamente; puede quedar vacía | Contiene PDF por vista y planillas XLSX únicamente si se solicitaron y `subir_archivos: true`. En `PARCIAL` conserva los adjuntos exitosos. Con `subir_archivos: false`, los resúmenes pueden conservar nombres y tamaños, pero esta lista queda vacía. | `[{"name":"plan-00042-pagos.pdf","url":"","size":1234,"artifact_id":"plan_pdf","filename":"plan-00042-pagos.pdf","content_type":"application/pdf","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |

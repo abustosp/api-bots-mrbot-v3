@@ -33,6 +33,17 @@ El CUIT es ilustrativo, elegido para satisfacer el formato y el dígito verifica
 
 ## Resultado y límites
 
-En `data` se devuelven `cuit`, `apoc` (booleano), `fecha_condicion` y `fecha_publicacion`. Si no hay coincidencia, `apoc` es `false` y ambas fechas son `null`; no se afirma que no haya coincidencia si la información de consulta no está disponible, en cuyo caso la ejecución falla. Esta operación no produce archivos (`files` queda vacío). No hay resultado parcial definido para una consulta individual.
+La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son ilustrativos y no proceden de ejecuciones.
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el job | En una consulta válida es `OK`. Si no se puede consultar la base, la ejecución falla. | `"OK"` |
+| `data.cuit` | texto | Cuando la consulta termina correctamente | CUIT consultado. | `"20123456786"` |
+| `data.apoc` | booleano | Cuando la consulta termina correctamente | `true` indica coincidencia y `false` indica que no se encontró el CUIT en la base consultada. | `false` |
+| `data.fecha_condicion` | texto o `null` | Cuando la consulta termina correctamente | Fecha asociada a la condición si hay coincidencia; `null` si no la hay. | `null` |
+| `data.fecha_publicacion` | texto o `null` | Cuando la consulta termina correctamente | Fecha de publicación si hay coincidencia; `null` si no la hay. | `null` |
+| `files` | lista de archivos | En la respuesta final | Siempre vacía. La operación no publica archivos. | `[]` |
+
+Una consulta válida sin coincidencia es un resultado correcto con `apoc: false` y ambas fechas en `null`. La ausencia o indisponibilidad de la base causa error, no un falso negativo. Esta operación no genera resultados parciales.
 
 La aceptación inicial del job no equivale a una respuesta de consulta: revise el resultado final del job.

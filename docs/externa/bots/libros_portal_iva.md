@@ -68,6 +68,43 @@ Los alias de una misma clave no pueden contener valores distintos. No incluya cl
 
 ## Resultado y archivos
 
-El resultado contiene el representado y el rango. Para `descargar`, `libros` y `ddjj` agrupan cada salida; también se devuelven `periodos_descargados` y `periodos_error`. Para operaciones de un solo tipo se informan esos contadores en la sección correspondiente. Con `incluir_json: true` se agregan detalles de períodos; errores por período se devuelven en la lista de errores de período, y la respuesta puede terminar con estado exitoso aunque haya períodos fallidos. Revise siempre ambos contadores.
+Las tablas describen la respuesta pública del trabajo. Los ejemplos son JSON ficticio, ilustrativo y no ejecutado. Los errores de descarga se informan por período, pero no cambian por sí solos el `result` global de `OK`.
 
-Los libros disponibles se agrupan en un archivo comprimido por período. Las DDJJ se descargan como documentos PDF. Los archivos adjuntos del trabajo aparecen en `files[]` solo si se solicitó la subida y esta se completó. Si no hay documentos disponibles, o falla la descarga del período, el período figura como error y puede no haber archivo. No se garantiza un adjunto por cada mes solicitado.
+### `descargar`
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si la operación terminó, incluso si una o más descargas por período fallaron; los fallos del trabajo se informan como `ERROR`. | `"OK"` |
+| `data.operacion` | texto | Siempre que se produzca `data`. | Operación solicitada. | `"descargar"` |
+| `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado del representado. | `"20123456786"` |
+| `data.periodo_desde` | texto | Siempre que se produzca `data`. | Primer período normalizado del rango. | `"202501"` |
+| `data.periodo_hasta` | texto | Siempre que se produzca `data`. | Último período normalizado del rango. | `"202502"` |
+| `data.libros` | objeto | Siempre en `descargar`. | Resumen de libros con CUIT, rango, períodos descargados y con error, además de `detalle` si se solicitó JSON. | `{"representado_cuit":"20123456786","periodo_desde":"202501","periodo_hasta":"202502","periodos_descargados":["202501"],"periodos_error":["202502"],"detalle":[{"periodo":"202501","archivo":"archivo-ejemplo.bin","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size_bytes":1200}]}` |
+| `data.ddjj` | objeto | Siempre en `descargar`. | Resumen de DDJJ con la misma estructura que `data.libros`. | `{"representado_cuit":"20123456786","periodo_desde":"202501","periodo_hasta":"202502","periodos_descargados":[],"periodos_error":["202501","202502"]}` |
+| `data.libros.periodos_descargados`, `data.ddjj.periodos_descargados` | lista de textos | Siempre dentro de cada resumen. Puede ser `[]`. | Períodos cuya descarga se completó para ese tipo. | `["202501"]` |
+| `data.libros.periodos_error`, `data.ddjj.periodos_error` | lista de textos | Siempre dentro de cada resumen. Puede ser `[]`. | Períodos cuya descarga falló para ese tipo. | `["202502"]` |
+| `data.libros.detalle`, `data.ddjj.detalle` | lista de objetos | Solo con `incluir_json=true`; puede ser `[]`. Si se omite `incluir_json`, usa su valor predeterminado `true`; no se sustituye por `null`. | Un elemento por período procesado. Los libros se entregan como archivo comprimido y las DDJJ como PDF, aunque el nombre del archivo interno termina en `.bin`. | `[{"periodo":"202501","archivo":"archivo-ejemplo.bin","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size_bytes":1200}]` |
+| `data.libros.detalle[].periodo`, `data.ddjj.detalle[].periodo` | texto | En cada elemento de `detalle`. | Período descargado o fallido. | `"202501"` |
+| `data.libros.detalle[].archivo`, `data.ddjj.detalle[].archivo` | texto | En cada elemento de `detalle` de una descarga completada; se omite en el registro de error. | Nombre del archivo descargado. | `"archivo-ejemplo.bin"` |
+| `data.libros.detalle[].sha256`, `data.ddjj.detalle[].sha256` | texto | En un período descargado solo si `subir_archivos=true` y se publicó el archivo; en caso contrario se omite. | Huella del archivo publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `data.libros.detalle[].size_bytes`, `data.ddjj.detalle[].size_bytes` | entero | En un período descargado solo si `subir_archivos=true` y se publicó el archivo; en caso contrario se omite. | Tamaño del archivo publicado, en bytes. | `1200` |
+| `data.libros.detalle[].error`, `data.ddjj.detalle[].error` | texto | En el elemento de detalle de un período fallido, solo con `incluir_json=true`. | Tipo de error de descarga. No se incluye en el resumen de períodos descargados. | `"TargetUnavailableError"` |
+| `data.periodos_descargados` | lista de textos | Siempre en `descargar`; puede ser `[]`. | Concatenación de los períodos descargados en las dos categorías. Un mismo período puede aparecer una vez por categoría. | `["202501","202501"]` |
+| `data.periodos_error` | lista de textos | Siempre en `descargar`; puede ser `[]`. | Concatenación de los períodos con error en las dos categorías. Un mismo período puede aparecer una vez por categoría. | `["202502"]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Vacía si `subir_archivos=false` o no se publicó ningún archivo. | Adjuntos producidos para períodos descargados. No se garantiza un adjunto por cada mes solicitado. | `[{"name":"archivo-ejemplo.bin","url":"","size":1200,"artifact_id":"id-ficticio","filename":"archivo-ejemplo.bin","content_type":"application/octet-stream","size_bytes":1200,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
+
+### `descargar_libros` y `descargar_ddjj`
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `data.operacion` | texto | Siempre que se produzca `data`. | `descargar_libros` o `descargar_ddjj`. | `"descargar_libros"` |
+| `result` | texto | Siempre que la operación tenga resultado final. | `OK` al terminar, incluidos los resultados con fallos limitados a algunos períodos; un fallo de operación produce `ERROR`. | `"OK"` |
+| `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado del representado. | `"20123456786"` |
+| `data.periodo_desde` | texto | Siempre que se produzca `data`. | Primer período normalizado del rango. | `"202501"` |
+| `data.periodo_hasta` | texto | Siempre que se produzca `data`. | Último período normalizado del rango. | `"202502"` |
+| `data.periodos_descargados` | lista de textos | Siempre; puede ser `[]`. | Períodos descargados para el tipo solicitado. | `["202501"]` |
+| `data.periodos_error` | lista de textos | Siempre; puede ser `[]`. | Períodos fallidos para el tipo solicitado. | `[]` |
+| `data.detalle` | lista de objetos | Solo con `incluir_json=true`; puede ser `[]`. | Por período descargado incluye `periodo`, `archivo` y, cuando `subir_archivos=true`, `sha256` y `size_bytes`. Para un período fallido incluye `periodo` y `error`. Si `incluir_json=false`, la propiedad se omite. | `[{"periodo":"202501","archivo":"archivo-ejemplo.bin"}]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Vacía si `subir_archivos=false` o no se publicó ningún archivo. | Archivos comprimidos de libros o PDF de DDJJ, según la operación. | `[]` |
+
+Con `subir_archivos=false`, los archivos pueden procesarse temporalmente, pero no se adjuntan ni se incluyen `sha256` y `size_bytes` en los detalles. Un período fallido permanece en `periodos_error`; el motivo detallado solo aparece en `detalle` cuando esa lista está habilitada.

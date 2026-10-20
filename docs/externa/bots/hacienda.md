@@ -65,18 +65,20 @@ Ruta: `POST /api/v3/bots/hacienda/consultar`.
 }
 ```
 
-## Resultado y faltantes
+## Resultado y archivos por operación
 
-`result` es el estado `OK`, `PARCIAL` o `ERROR`. `data` informa:
+`result` es `OK` cuando la consulta termina normalmente. Los fallos que interrumpen la consulta terminan en error, no en un resultado parcial. `data` contiene solo la información indicada a continuación.
 
-| Clave | Tipo / condición |
-|---|---|
-| `operacion` | string, `consultar`. |
-| `representado_cuit`, `denominacion`, `fecha_desde`, `fecha_hasta` | strings. |
-| `por_emisor`, `por_receptor` | objeto por consulta activa: `filas` entero; `muestra` lista de objetos con `incluir_json=true`; `pdf` objeto si se intentaron descargas PDF. |
-| `por_emisor.pdf`, `por_receptor.pdf` | `total`, `subidos` enteros y `errores` lista de objetos `{archivo: string, error: string}`. |
-| `consolidado` | objeto opcional con `archivo` string, `filas` entero, `hojas` lista de strings; `sha256` string y `size_bytes` entero cuando se publica. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | En una consulta completada vale `OK`. Los fallos que abortan la ejecución no garantizan datos de salida. | `"OK"` |
+| `data.operacion` | texto | Siempre que se devuelve `data` | Operación realizada. | `"consultar"` |
+| `data.representado_cuit`, `data.denominacion`, `data.fecha_desde`, `data.fecha_hasta` | textos | Siempre que se devuelve `data` | Identidad consultada y rango usado. | `{"representado_cuit":"20123456786","denominacion":"Comercial Ejemplo","fecha_desde":"01/08/2026","fecha_hasta":"31/08/2026"}` |
+| `data.por_emisor`, `data.por_receptor` | objeto | Solo por cada tipo de consulta activo | Incluye `filas`; `muestra` se agrega únicamente con `incluir_json: true`. Si `incluir_json` es `false`, `muestra` no aparece, no se reemplaza por `null` ni por `[]`. | `{"filas":2,"muestra":[{"comprobante":"0001-00000042","importe":"1250.00"}]}` |
+| `data.por_emisor.pdf`, `data.por_receptor.pdf` | objeto | En la consulta correspondiente cuando `descargar_pdf: true` | `total` cuenta los PDF encontrados, `subidos` los publicados y `errores` enumera fallos por comprobante. Con `descargar_pdf: false`, el campo `pdf` no aparece. | `{"total":2,"subidos":1,"errores":[{"archivo":"comprobante-02.pdf","error":"No se pudo descargar"}]}` |
+| `data.consolidado` | objeto | En una consulta completada | Resumen de la planilla generada, con `archivo`, `filas` y `hojas`. La planilla se genera aunque no se adjunte. `sha256` y `size_bytes` solo aparecen si `subir_excel: true`; con `false` se omiten. | `{"archivo":"consolidado.xlsx","filas":2,"hojas":["Consolidado","Por emisor"],"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":1234}` |
+| `files[]` | lista de archivos | Archivos publicados correctamente; puede estar vacía | Incluye la planilla cuando `subir_excel: true` y cada PDF individual que se descargó y publicó. Un fallo de PDF queda en `pdf.errores` y no detiene las demás descargas. | `[{"name":"comprobante-01.pdf","url":"","size":1234,"artifact_id":"hacienda_pdf","filename":"comprobante-01.pdf","content_type":"application/pdf","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |
 
-La planilla Excel aparece en `files[]` si `subir_excel=true`. PDF individuales exitosos aparecen en `files[]`; un PDF fallido se registra sin detener el resto de la consulta. `incluir_json=false` conserva contadores y resúmenes, no muestras. No modifica ni presenta información fiscal.
+Los objetos `por_emisor` y `por_receptor` que no se seleccionaron no aparecen en `data`. Una lista `muestra` puede estar vacía si la consulta no produjo filas. La salida no presenta ni modifica información fiscal.
 
 El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.

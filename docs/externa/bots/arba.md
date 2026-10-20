@@ -47,20 +47,22 @@ Los CUIT son valores ilustrativos que pasan el control de dígito verificador; n
 
 ## Resultado, archivos y parciales
 
-La salida de éxito con ZIP tiene este envelope estable en `data`:
+La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son ilustrativos y no proceden de ejecuciones.
 
-| Ruta | Tipo | Cuándo aparece |
-|---|---|---|
-| `data.operacion` | Texto (`"descargar"`) | Siempre. |
-| `data.representado_cuit` | Texto | Siempre. |
-| `data.periodo` | Texto `AAAAMM` | Siempre. |
-| `data.tipo` | Texto (`"RETPER ARBA"`) | Cuando hay archivo. |
-| `data.archivo` | Texto, nombre ZIP | Cuando hay archivo. |
-| `data.archivos` | Lista de objetos | Siempre en respuesta exitosa; vacía si no hay archivos. |
-| `data.archivos[].tipo` | Texto (`"RETPER ARBA"`) | Por cada archivo descargado. |
-| `data.archivos[].archivo` | Texto, nombre ZIP | Por cada archivo descargado. |
-| `data.sha256` | Texto hexadecimal | Cuando hay ZIP y `subir=true`. |
-| `data.size_bytes` | Entero | Cuando hay ZIP y `subir=true`. |
-| `data.mensaje` | Texto | Sólo cuando el portal informa que no hay archivos; en ese caso `data.archivos=[]` y no aparecen tipo/nombre/huella. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el job | `OK` tanto si hay ZIP como si la consulta informa que no hay archivos. Los fallos terminan con error. | `"OK"` |
+| `data.operacion` | texto | En una respuesta correcta | Operación ejecutada. | `"descargar"` |
+| `data.representado_cuit` | texto | En una respuesta correcta | CUIT consultado. | `"20123456786"` |
+| `data.periodo` | texto | En una respuesta correcta | Período consultado en formato `AAAAMM`. | `"202401"` |
+| `data.archivos` | lista de objetos | En toda respuesta correcta | Archivos descargados; puede ser una lista vacía cuando no hay archivos para el período. | `[]` |
+| `data.tipo` | texto | Cuando se descargó un ZIP | Tipo de archivo. | `"RETPER ARBA"` |
+| `data.archivo` | texto | Cuando se descargó un ZIP | Nombre del ZIP descargado. | `"<nombre>.zip"` |
+| `data.archivos[].tipo` | texto | Por cada ZIP descargado | Tipo de archivo. | `"RETPER ARBA"` |
+| `data.archivos[].archivo` | texto | Por cada ZIP descargado | Nombre del ZIP. | `"<nombre>.zip"` |
+| `data.sha256` | texto hexadecimal | Si hay ZIP y `subir=true` | Huella del ZIP publicado. | `"<64 caracteres hexadecimales>"` |
+| `data.size_bytes` | entero | Si hay ZIP y `subir=true` | Tamaño del ZIP publicado en bytes. | `12345` |
+| `data.mensaje` | texto | Cuando la consulta no encuentra archivos | Mensaje informativo; en este caso `data.archivos` es `[]` y no aparecen `data.tipo`, `data.archivo`, `data.sha256` ni `data.size_bytes`. | `"<mensaje informativo>"` |
+| `files` | lista de archivos | En la respuesta final | Contiene el ZIP si se publicó; queda vacía sin archivo o con `subir=false`. | `[]` |
 
-Para recuperar el ZIP publicado, consúmalo desde `files` del job. Si `subir=false`, el nombre permanece en `data` pero no hay archivo recuperable. La ausencia de datos es resultado correcto, no parcial; un fallo de descarga o publicación da error.
+Para recuperar el ZIP publicado, consúltelo en `files` del job. Si `subir=false`, el nombre permanece en `data` pero no hay archivo recuperable. La ausencia de archivos es un resultado correcto, no parcial; un fallo de descarga o publicación termina con error.

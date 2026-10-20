@@ -51,4 +51,16 @@ Los valores CUIT son ilustrativos, elegidos para satisfacer el formato y el díg
 
 ## Resultado, archivos y resultados parciales
 
-`data` informa `operacion`, `representado_cuit` y `archivo`. Cuando `subir` es `true`, también informa `sha256` y `size_bytes`, y `files` contiene el `.xls` descargable. Cuando `subir` es `false`, `data.archivo` solo identifica la descarga de esa ejecución: no se devuelve Base64 ni un archivo descargable. Si falla la descarga o la publicación del archivo, el job termina con error, no con un resultado parcial.
+La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son ilustrativos y no proceden de ejecuciones.
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el job | `OK` si la descarga solicitada termina correctamente; los fallos terminan con error. No se define resultado parcial. | `"OK"` |
+| `data.operacion` | texto | En una descarga correcta | Operación ejecutada. | `"descargar"` |
+| `data.representado_cuit` | texto | En una descarga correcta | CUIT del representado usado en la consulta. | `"20123456786"` |
+| `data.archivo` | texto | En una descarga correcta | Nombre del archivo Histórico descargado. | `"<nombre>.xls"` |
+| `data.sha256` | texto hexadecimal | Si `subir=true` y la publicación termina correctamente | Huella del archivo publicado. | `"<64 caracteres hexadecimales>"` |
+| `data.size_bytes` | entero | Si `subir=true` y la publicación termina correctamente | Tamaño del archivo publicado en bytes. | `12345` |
+| `files` | lista de archivos | En la respuesta final | Contiene el archivo descargable si se publicó. Queda vacía si `subir=false`. | `[]` |
+
+`data.archivo` identifica lo descargado aun con `subir=false`, pero en ese caso no se entrega un archivo recuperable. `incluir_base64=true` no agrega contenido Base64 a la salida. Si falla la descarga o la publicación, el job termina con error, no con un resultado parcial.

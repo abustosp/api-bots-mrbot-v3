@@ -58,4 +58,18 @@ El ejemplo supone que la referencia corresponde a un archivo con estructura vál
 
 **Generar el VEP es un efecto fiscal.** El portal recibe el archivo, crea el volante y selecciona el medio de pago. No se realiza el pago. Un click final ambiguo no se reintenta porque podría duplicar la generación; un error posterior no permite inferir que el portal no haya creado el VEP.
 
-`data` con `incluir_json=true` tiene `operacion`, `representado_cuit`, `medio_pago`, `registros` (cantidad), `lote` (texto) y `detalle` (nombre del PDF). Si se publica PDF, agrega `sha256` y `size_bytes`; si el medio es `qr` y hay QR disponible, `nombre_qr` y, cuando se publica, `sha256_qr`. El archivo resultado es un PDF de detalle y opcionalmente PNG QR. Un fallo al descargar/subir después de generar puede reportar error pese a que el VEP ya exista.
+En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final, `data` describe el VEP y `files` enumera los archivos publicados. `files` es una lista vacía cuando no hay archivos publicados.
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el trabajo | `OK` si se genera el VEP y concluyen las descargas/publicaciones solicitadas; `ERROR` si falla una fase. No se devuelve un resultado `PARCIAL`. | `"OK"` |
+| `data.detalle` | texto | En todo resultado de operación disponible, también con `incluir_json=false` | Nombre del PDF de detalle generado. | `"20123456786 - VEP - internet_banking.pdf"` |
+| `data.operacion`, `data.representado_cuit`, `data.medio_pago` | texto | Solo con `incluir_json=true` (predeterminado) | Operación, CUIT y medio de pago elegido. | `{"operacion":"generar","representado_cuit":"20123456786","medio_pago":"qr"}` |
+| `data.registros` | entero | Solo con `incluir_json=true` | Cantidad de registros del archivo de entrada. | `2` |
+| `data.lote` | texto | Solo con `incluir_json=true` | Identificador de lote informado por el portal. | `"LOTE-DEMO-001"` |
+| `data.sha256`, `data.size_bytes` | texto, entero | Solo con `incluir_json=true`, `subir_pdf=true` y publicación del PDF exitosa | Huella y tamaño del PDF publicado. | `{"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":24576}` |
+| `data.nombre_qr` | texto | Solo con `incluir_json=true`, `medio_pago="qr"` y QR disponible | Nombre del PNG QR descargado. | `"20123456786 - VEP - qr - QR.png"` |
+| `data.sha256_qr` | texto | Solo con `incluir_json=true`, `subir_pdf=true` y publicación exitosa del QR disponible | Huella del PNG QR publicado. | `"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"` |
+| `files[]` | lista de archivos | Siempre en la respuesta del trabajo; contiene el PDF y, si está disponible, el QR cuando se publican | Referencias públicas de los archivos. Sin publicaciones, el valor es `[]`. | `[{"name":"20123456786 - VEP - internet_banking.pdf","url":"","filename":"20123456786 - VEP - internet_banking.pdf","size":24576,"size_bytes":24576}]` |
+
+Con `incluir_json=false`, `data` contiene únicamente `detalle`; por ello no incluye los otros campos ni las huellas aunque los archivos sí se publiquen y aparezcan en `files`. El QR solo se descarga para el medio `qr` y puede no estar disponible. Un fallo posterior a la generación puede producir `ERROR` aunque el VEP ya exista.

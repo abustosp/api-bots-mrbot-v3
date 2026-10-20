@@ -49,4 +49,16 @@ No se aceptan campos adicionales. Los campos históricos de secreto/sesión/prox
 
 ## Resultado, archivos y límites
 
-El resultado indica operación, CUIT, rango y nombres del XLSX y PDF; si se publican, se adjuntan sus huellas y tamaños. El XLSX se valida como archivo no vacío y el PDF como documento PDF. El campo `incluir_json` no elimina la respuesta estructurada pese a su nombre. Si cualquiera de las fases obligatorias de generación falla, no hay resultado parcial; un fallo al publicar puede ocurrir después de que el portal haya generado ambos reportes. El trámite consulta información, no liquida ni paga obligaciones.
+En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final, `data` describe los dos reportes y `files` enumera los archivos publicados. `files` es una lista vacía cuando no hay archivos publicados.
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el trabajo | `OK` cuando se generan los dos reportes y termina la operación; `ERROR` si falla una fase obligatoria. No se devuelve un resultado `PARCIAL`. | `"OK"` |
+| `data.operacion` | texto | En un resultado de operación disponible | Nombre de la operación. | `"consultar"` |
+| `data.representado_cuit` | texto | En un resultado de operación disponible | CUIT consultado, normalizado a 11 dígitos. | `"20123456786"` |
+| `data.periodo_desde`, `data.periodo_hasta` | texto | En un resultado de operación disponible | Primer y último período consultados. | `{"periodo_desde":"202601","periodo_hasta":"202603"}` |
+| `data.archivos` | lista de textos | En un resultado de operación disponible | Nombres del XLSX y el PDF generados, en ese orden. | `["retper-misiones-demo.xlsx","retper-misiones-demo.pdf"]` |
+| `data.sha256_xlsx`, `data.sha256_pdf` | texto | Solo si `subir_archivo=true` y la publicación de ambos reportes terminó | Huellas de los archivos publicados. Estos campos no incluyen tamaños. | `"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"` |
+| `files[]` | lista de archivos | Siempre en la respuesta del trabajo; contiene los dos reportes si se publicaron | Referencia pública de cada XLSX y PDF. Sin publicaciones, el valor es `[]`. | `[{"name":"retper-misiones-demo.xlsx","url":"","filename":"retper-misiones-demo.xlsx","size":24576,"size_bytes":24576}]` |
+
+`incluir_json=false` no suprime los campos de `data`. La fase de generación valida el XLSX no vacío y el PDF como documento PDF; si falla una fase obligatoria no se devuelve un resultado parcial. Un fallo de publicación puede ocurrir después de que el portal haya generado uno o ambos archivos. El trámite consulta información, no liquida ni paga obligaciones.

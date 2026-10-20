@@ -49,22 +49,28 @@ El CUIT es ilustrativo y pasa el control de dígito verificador; no identifica a
 
 ## Resultado, archivos y parciales
 
-El resultado usa este envelope estable en `data`; los importes leídos del portal se devuelven como texto:
+La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son ilustrativos y no proceden de ejecuciones. Los valores del resumen y de los movimientos se devuelven como texto.
 
-| Ruta | Tipo | Cuándo aparece |
-|---|---|---|
-| `data.operacion` | Texto (`"consultar"`) | Siempre. |
-| `data.representado_cuit` | Texto | Siempre. |
-| `data.periodo_desde` | Texto `MM/AAAA` | Siempre, con default `04/2000` si se omitió. |
-| `data.cuit` | Texto | Siempre; CUIT devuelto por el resumen del portal, normalmente igual al representado. |
-| `data.periodo` | Texto | Siempre; período que muestra el resumen del portal. |
-| `data.deuda_capital`, `data.deuda_accesorios`, `data.total_deuda` | Texto | Siempre si el resumen principal se obtuvo. |
-| `data.credito_capital`, `data.credito_accesorios`, `data.total_a_favor` | Texto | Siempre si el resumen principal se obtuvo. |
-| `data.movimientos` | Lista de objetos; cada propiedad es texto: `periodo`, `impuesto`, `concepto`, `subconcepto`, `descripcion`, `fecha_movimiento`, `debe`, `haber`. | Sólo cuando `incluir_movimientos=true` o se fuerza por PDF. |
-| `data.movimientos_corte` | Texto | Con movimientos solicitados; indica la causa de corte o fin de lectura. |
-| `data.movimientos_completos` | Booleano | Sólo se incluye como `false` ante ciertos cortes; si se omite, no se emitió marca explícita `true`. |
-| `data.archivo` | Texto, nombre PDF | Si se genera PDF y `subir=false`. |
-| `data.sha256` | Texto hexadecimal | Si se genera PDF y `subir=true`. |
-| `data.size_bytes` | Entero | Si se genera PDF y `subir=true`. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el job | Una consulta completada devuelve `OK`. Un corte de lectura de movimientos no cambia por sí solo este resultado a parcial. | `"OK"` |
+| `data.operacion` | texto | En una consulta correcta | Operación ejecutada. | `"consultar"` |
+| `data.representado_cuit` | texto | En una consulta correcta | CUIT consultado. | `"20123456786"` |
+| `data.periodo_desde` | texto | En una consulta correcta | Período inicial aplicado, incluido el default cuando se omitió en la solicitud. | `"04/2000"` |
+| `data.cuit` | texto | Si se obtuvo el resumen | CUIT incluido en el resumen. | `"20123456786"` |
+| `data.periodo` | texto | Si se obtuvo el resumen | Período indicado por el resumen. | `"<texto del resumen>"` |
+| `data.deuda_capital` | texto | Si se obtuvo el resumen | Deuda de capital. | `"<importe>"` |
+| `data.deuda_accesorios` | texto | Si se obtuvo el resumen | Deuda de accesorios. | `"<importe>"` |
+| `data.total_deuda` | texto | Si se obtuvo el resumen | Total de deuda. | `"<importe>"` |
+| `data.credito_capital` | texto | Si se obtuvo el resumen | Crédito de capital. | `"<importe>"` |
+| `data.credito_accesorios` | texto | Si se obtuvo el resumen | Crédito de accesorios. | `"<importe>"` |
+| `data.total_a_favor` | texto | Si se obtuvo el resumen | Total a favor. | `"<importe>"` |
+| `data.movimientos` | lista de objetos | Si se solicitan movimientos o se activan al pedir PDF | Cada movimiento tiene los campos textuales `periodo`, `impuesto`, `concepto`, `subconcepto`, `descripcion`, `fecha_movimiento`, `debe` y `haber`. La lista puede estar vacía. | `[]` |
+| `data.movimientos_corte` | texto | Cuando se recorren movimientos | Indica el motivo de cierre o corte del recorrido. | `"<motivo>"` |
+| `data.movimientos_completos` | booleano | Sólo ante ciertos cortes | Se informa como `false` para esos cortes. Si se omite, no se emitió una marca explícita `true`. | `false` |
+| `data.archivo` | texto | Si se genera PDF y `subir=false` | Nombre del PDF generado, no publicado para descarga. | `"<nombre>.pdf"` |
+| `data.sha256` | texto hexadecimal | Si se genera PDF y `subir=true` | Huella del PDF publicado. | `"<64 caracteres hexadecimales>"` |
+| `data.size_bytes` | entero | Si se genera PDF y `subir=true` | Tamaño del PDF publicado en bytes. | `12345` |
+| `files` | lista de archivos | En la respuesta final | Contiene el PDF publicado; queda vacía si no se pidió PDF o si `subir=false`. | `[]` |
 
-El `files` del job contiene el PDF sólo si se publicó. Los movimientos tienen límites de recorrido de 100 páginas y 500 registros. Un corte de lectura se comunica en `data` y el resultado de la consulta sigue siendo `OK`, no se convierte por sí solo en `PARCIAL`; los datos faltantes pueden deberse a que el portal o el límite impidieron completar el recorrido.
+Los movimientos tienen límites de recorrido de 100 páginas y 500 registros. Un corte se comunica en `data`; la operación no declara resultado parcial por ese motivo.

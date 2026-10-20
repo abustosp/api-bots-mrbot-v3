@@ -53,6 +53,18 @@ No se aceptan campos adicionales. `clave`, `clave_representante`, `clave_encript
 
 ## Resultado, archivos y límites
 
-`data` incluye operación, CUIT representado, períodos, tipo de reporte, nombre del ZIP y nombres de sus archivos internos. El paquete agrupa formatos de hoja de cálculo y texto de las secciones de retenciones, percepciones, retenciones bancarias, percepciones aduaneras y retenciones SIRTAC que el portal ofrezca para el rango. Si se publica el ZIP, también se devuelven huella y tamaño. No se informan registros estructurados por fila.
+En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final, `data` describe el paquete y `files` enumera los archivos publicados. `files` es una lista vacía cuando no hay archivos publicados.
 
-La respuesta se marca `OK` al completar; si el portal no produce archivos o falla la carga, no se devuelve un resultado parcial. El servicio de AGIP puede bloquear temporalmente la consulta, por lo que un trabajo puede fallar aunque las entradas sean válidas. Es una consulta de reportes; no presenta declaraciones ni genera pagos.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el trabajo | `OK` al completar la consulta; `ERROR` si falla la consulta o la publicación. La operación no devuelve un resultado `PARCIAL`. | `"OK"` |
+| `data.operacion` | texto | En un resultado de operación disponible | Nombre de la operación. | `"consultar"` |
+| `data.representado_cuit` | texto | En un resultado de operación disponible | CUIT consultado, normalizado a 11 dígitos. | `"20123456786"` |
+| `data.periodo_desde`, `data.periodo_hasta` | texto | En un resultado de operación disponible | Primer y último período consultados. | `{"periodo_desde":"202601","periodo_hasta":"202603"}` |
+| `data.tipo` | texto | En un resultado de operación disponible | Identifica el paquete de reportes. | `"RETPER IIBB AGIP"` |
+| `data.archivo` | texto | En un resultado de operación disponible | Nombre del paquete ZIP generado, incluso si no se publica. | `"retper-agip-demo.zip"` |
+| `data.archivos` | lista de textos | En un resultado de operación disponible | Nombres de los archivos incluidos dentro del ZIP. No contiene datos tabulares por fila. | `["retenciones-demo.xlsx","percepciones-demo.txt"]` |
+| `data.sha256`, `data.size_bytes` | texto, entero | Solo si `subir_archivo=true` y la publicación del ZIP tuvo éxito | Huella y tamaño del ZIP publicado. | `"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`, `24576` |
+| `files[]` | lista de archivos | Siempre en la respuesta del trabajo; contiene el ZIP si se publicó | Referencia pública del ZIP. Sin publicación, el valor es `[]`. | `[{"name":"retper-agip-demo.zip","url":"","filename":"retper-agip-demo.zip","size":24576,"size_bytes":24576}]` |
+
+La consulta puede agrupar los formatos que el portal ofrezca para retenciones, percepciones, retenciones bancarias, percepciones aduaneras y retenciones SIRTAC. Si el portal no produce reportes o falla una fase obligatoria, no se devuelve una salida parcial. El servicio puede bloquear temporalmente una consulta válida. Es una consulta de reportes; no presenta declaraciones ni genera pagos.

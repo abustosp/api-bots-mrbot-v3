@@ -43,4 +43,16 @@ El CUIT pasa el control de dígito verificador, pero se usa solo como ejemplo y 
 
 ## Resultado, archivos y parciales
 
-`data` informa `operacion`, `representado_cuit` y `archivo` (`certificado.pdf`). Cuando `subir=true`, también agrega `sha256` y `size_bytes`, y el PDF queda en `files`. El archivo es obligatorio para que la operación termine correctamente. Si la publicación está desactivada, `data.archivo` identifica lo producido en esa ejecución, pero no proporciona un archivo descargable. No se define una salida parcial: un CUIT no encontrado, una descarga fallida o una publicación fallida termina con error.
+La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son ilustrativos y no proceden de ejecuciones.
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el job | `OK` si se descarga y procesa el certificado; los fallos terminan con error. No se define resultado parcial. | `"OK"` |
+| `data.operacion` | texto | En una descarga correcta | Operación ejecutada. | `"descargar"` |
+| `data.representado_cuit` | texto | En una descarga correcta | CUIT seleccionado para la descarga. | `"20123456786"` |
+| `data.archivo` | texto | En una descarga correcta | Nombre del PDF descargado. | `"certificado.pdf"` |
+| `data.sha256` | texto hexadecimal | Si `subir=true` y la publicación termina correctamente | Huella del PDF publicado. | `"<64 caracteres hexadecimales>"` |
+| `data.size_bytes` | entero | Si `subir=true` y la publicación termina correctamente | Tamaño del PDF publicado en bytes. | `12345` |
+| `files` | lista de archivos | En la respuesta final | Contiene el PDF si se publicó; queda vacía si `subir=false`. | `[]` |
+
+El archivo es necesario para completar la operación. Si `subir=false`, `data.archivo` identifica el archivo producido, pero no se entrega un archivo recuperable. Un CUIT no encontrado, una descarga fallida o una publicación fallida termina con error, no con un resultado parcial.

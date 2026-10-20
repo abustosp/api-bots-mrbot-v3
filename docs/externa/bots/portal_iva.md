@@ -97,23 +97,43 @@ Para `POST /api/v3/bots/portal_iva/gestionar`, envíe por lo menos un par TXT co
 }
 ```
 
-## Resultado y efectos
+## Resultado, archivos y efectos
 
-Claves reales de `data`:
+Las tablas describen los campos de la respuesta pública del trabajo. En un resultado `ERROR`, `data` puede ser `null`. Los ejemplos son valores JSON ficticios, ilustrativos y no ejecutados. `result` toma `OK` al completar la operación y `ERROR` ante un fallo; esta operación no devuelve `PARCIAL`.
 
-| Clave | Tipo | Cuándo aparece |
-|---|---|---|
-| `operacion`, `representado_cuit`, `periodo` | textos | Siempre; `periodo` normalizado como `AAAAMM`. |
-| `periodos_seleccionables` | lista de objetos `{string:string}` | Solo si el portal devuelve valores durante la preparación. |
-| `ventas`, `compras` | objetos | Por cada libro solicitado en descarga/gestión. |
-| `ventas.filas`, `compras.filas` | entero | Filas de datos, sin contar cabecera. |
-| `ventas.archivo`, `compras.archivo` | texto | Nombre del CSV resultante. |
-| `ventas.sha256`, `compras.sha256` | texto | Solo si se publica el archivo. |
-| `ventas.size_bytes`, `compras.size_bytes` | entero | Solo si se publica el archivo. |
-| `ventas.muestra`, `compras.muestra` | lista de objetos de texto | Solo con `incluir_json=true`, hasta cinco filas con claves de la cabecera CSV. |
-| `importaciones` | lista de `{libro: texto, ok: booleano}` | En `importar` y `gestionar`, con un elemento por libro importado. |
-| `avisos` | lista de textos | Puede aparecer si falla el intento opcional de descartar borrador tras descargas completas. |
+### Campos comunes
 
-Los CSV publicados aparecen como archivos de resultado. `gestionar` combina datos de descarga e importación. Si una descarga posterior falla, no hay contrato de resultado parcial: el trabajo puede fallar después de que una fase anterior ya haya cambiado el portal o publicado un archivo.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Siempre que el trabajo tenga resultado final. | Estado global de la operación. | `"OK"` |
+| `data.operacion` | texto | Siempre que se produzca `data`. | `descargar`, `importar` o `gestionar`. | `"gestionar"` |
+| `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado consultado o gestionado. | `"20123456786"` |
+| `data.periodo` | texto | Siempre que se produzca `data`. | Período normalizado `AAAAMM`. | `"202605"` |
 
-**Efectos importantes:** por defecto una descarga actualiza desde el organismo, guarda las opciones del período, borra registros después de exportar y descarta el borrador tras completar. `importar` borra todos los registros del libro antes de cargar el TXT nuevo. Estos borrados pueden ser irreversibles. Para impedir las tres acciones adicionales al descargar, especificar explícitamente `refrescar_desde_arca=false`, `limpiar_despues=false` y `descartar_borrador=false`. Generar un CSV no equivale a presentar una declaración.
+### `descargar` y la fase de descarga de `gestionar`
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `data.periodos_seleccionables` | lista de objetos | Si la preparación devuelve una lista no vacía. Si devuelve `[]`, la propiedad se omite, no se serializa como `null`. | Opciones devueltas durante la preparación. Las claves internas de cada objeto dependen de la respuesta del portal y no tienen nombres estables documentados. | `[{"campo-ilustrativo":"valor-ficticio"}]` |
+| `data.ventas` | objeto | Si se solicitó descarga de ventas y esta terminó. | Resumen del CSV de ventas. | `{"filas":12,"archivo":"ventas-ejemplo.csv","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size_bytes":1200,"muestra":[]}` |
+| `data.compras` | objeto | Si se solicitó descarga de compras y esta terminó. | Resumen del CSV de compras, con la misma estructura que `data.ventas`. | `{"filas":0,"archivo":"compras-ejemplo.csv","muestra":[]}` |
+| `data.ventas.filas`, `data.compras.filas` | entero | Dentro del resumen de cada libro descargado. | Cantidad de filas de datos, sin contar la cabecera. | `12` |
+| `data.ventas.archivo`, `data.compras.archivo` | texto | Dentro del resumen de cada libro descargado. | Nombre del CSV procesado. Se informa aunque `subir_csv=false`. | `"ventas-ejemplo.csv"` |
+| `data.ventas.sha256`, `data.compras.sha256` | texto | Solo si `subir_csv=true` y se publicó el CSV. Si no se publica, la propiedad se omite. | Huella del archivo publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `data.ventas.size_bytes`, `data.compras.size_bytes` | entero | Solo si `subir_csv=true` y se publicó el CSV. Si no se publica, la propiedad se omite. | Tamaño del archivo publicado, en bytes. | `1200` |
+| `data.ventas.muestra`, `data.compras.muestra` | lista de objetos | Solo con `incluir_json=true`; puede ser `[]` si el CSV no contiene filas. | Hasta cinco filas. Los nombres de columna corresponden a la cabecera recibida y pueden variar. | `[{"columna-ilustrativa":"valor-ficticio"}]` |
+| `data.avisos` | lista de textos | Solo si falla el intento de descartar el borrador tras completarse las descargas. | Aviso incluido dentro de `data`; si no hay avisos, la propiedad se omite en lugar de devolver `[]`. | `["aviso-ficticio-sobre-borrador"]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye los CSV publicados; es `[]` si `subir_csv=false` o no se generó un archivo. | Archivos descargables del trabajo, separados de `data`. | `[{"name":"ventas-ejemplo.csv","url":"","size":1200,"artifact_id":"id-ficticio","filename":"ventas-ejemplo.csv","content_type":"text/csv","size_bytes":1200,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":"/api/v3/jobs/{job_id}/artifacts/{artifact_id}/download","url_expires_in":3600}]` |
+
+Si un resumen se genera correctamente con `incluir_json=false`, `muestra` se omite. Con `subir_csv=false`, el nombre `archivo` permanece en `data`, mientras `sha256`, `size_bytes` y el adjunto `files` se omiten o quedan vacíos. La descarga conserva los efectos configurados en la entrada, incluidos la actualización desde el organismo y la limpieza posterior.
+
+### `importar` y fase de importación de `gestionar`
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `data.importaciones` | lista de objetos | Siempre en `importar` y `gestionar` cuando se produce `data`. Contiene una entrada por cada libro importado. | Registra el libro y el valor booleano informado por el servicio tras la importación. | `[{"libro":"ventas","ok":true}]` |
+| `data.importaciones[].libro` | texto | En cada elemento de `data.importaciones`. | `ventas` o `compras`. | `"ventas"` |
+| `data.importaciones[].ok` | booleano | En cada elemento de `data.importaciones`. | Resultado booleano devuelto por el servicio para ese libro. | `true` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. En `importar` es `[]`; `gestionar` puede incluir los CSV que publique su fase de descarga. | Archivos descargables. | `[]` |
+
+`gestionar` combina los resúmenes de descarga con `data.importaciones`. Cada importación reemplaza los registros existentes del libro correspondiente. Si una fase falla después de haber cambiado el portal, la respuesta puede ser `ERROR` sin un resultado `PARCIAL` que describa lo completado anteriormente.

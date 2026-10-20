@@ -49,17 +49,24 @@ Primero se cargan dos archivos de prueba y se sustituyen estos ejemplos por los 
 }
 ```
 
-## Resultado y parciales
+## Resultado, parciales y archivos
 
-`result` es el estado `OK`, `PARCIAL` o `ERROR`. `data` contiene:
+Las tablas describen los campos de la respuesta pública del trabajo. Los ejemplos son JSON ficticio, ilustrativo y no ejecutado. En un resultado `ERROR`, `data` puede ser `null`.
 
-| Clave | Tipo / condición |
-|---|---|
-| `operacion` | string, `presentar`. |
-| `archivos_presentados` | entero: cantidad de archivos procesados con resultado, incluidos los que fallaron. |
-| `total_archivos`, `total_exitosos`, `total_errores` | enteros; `total_exitosos` cuenta las presentaciones exitosas. |
-| `detalle` | lista de objetos, solo con `incluir_json=true`; cada uno tiene `archivo` y `estado` strings, `constancia` string o null, y `sha256` string/`size_bytes` entero si se publicó. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si no hubo fallos por archivo, `PARCIAL` si al menos uno se presentó y otro falló, `ERROR` si fallaron todos. | `"PARCIAL"` |
+| `data.operacion` | texto | Cuando `data` está disponible. | Nombre de operación. | `"presentar"` |
+| `data.archivos_presentados` | entero | Cuando `data` está disponible. | Cantidad de archivos cuyo procesamiento produjo un registro de resultado, incluidos los fallidos. | `2` |
+| `data.total_archivos` | entero | Cuando `data` está disponible. | Cantidad de archivos del lote después de eliminar duplicados. | `2` |
+| `data.total_exitosos` | entero | Cuando `data` está disponible. | Cantidad de presentaciones exitosas. | `1` |
+| `data.total_errores` | entero | Cuando `data` está disponible. | Cantidad de archivos con estado de error. | `1` |
+| `data.detalle` | lista de objetos | Solo con `incluir_json=true`; si es `false`, la propiedad se omite. En un resultado con `data` incluye al menos un registro. | Un registro por archivo procesado. Los errores de archivo no detienen el resto del lote. | `[{"archivo":"archivo.pem","estado":"estado-ficticio-del-servicio","constancia":"constancia_archivo.pdf","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size_bytes":500},{"archivo":"paquete.zip","estado":"error\u007cdiagnostico-ficticio","constancia":null}]` |
+| `data.detalle[].archivo` | texto | En cada registro de `detalle`. | Nombre del archivo presentado. | `"archivo.pem"` |
+| `data.detalle[].estado` | texto | En cada registro de `detalle`. | Estado informado por el servicio para una presentación exitosa; el valor comienza con el prefijo de error del servicio cuando falla ese archivo. El contenido específico puede variar. | `"estado-ficticio-del-servicio"` |
+| `data.detalle[].constancia` | texto o null | En cada registro de `detalle`. | Nombre de la constancia exitosa; `null` cuando la presentación de ese archivo falló. | `null` |
+| `data.detalle[].sha256` | texto | Solo en presentaciones exitosas con `subir_constancia=true` y publicación completada. Si no se sube la constancia, se omite. | Huella de la constancia publicada. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `data.detalle[].size_bytes` | entero | Solo en presentaciones exitosas con `subir_constancia=true` y publicación completada. Si no se sube la constancia, se omite. | Tamaño de la constancia publicada, en bytes. | `500` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye constancias exitosas publicadas; puede ser `[]`. | Adjuntos del trabajo. `subir_constancia=false` deja la lista vacía, pero no cambia la presentación. | `[{"name":"constancia-ejemplo.pdf","url":"","size":500,"artifact_id":"id-ficticio","filename":"constancia-ejemplo.pdf","content_type":"application/pdf","size_bytes":500,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
 
-Las constancias exitosas se publican en `files[]` solo si `subir_constancia=true`. Si unos archivos se presentan y otros fallan, `result=PARCIAL`; si todos fallan, `result=ERROR`. Un error de transporte tampoco prueba que no haya habido efecto: si la conexión se corta después de confirmar, comprobar el portal antes de reintentar.
-
-El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.
+Los estados por archivo y los contadores permiten distinguir el lote parcial. La respuesta no incluye una propiedad independiente de advertencias.

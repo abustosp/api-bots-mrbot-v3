@@ -57,20 +57,33 @@ Ruta: `POST /api/v3/bots/declaracion_en_linea/consultar`.
 }
 ```
 
-## Resultado
+## Resultado y archivos
 
-`result` es el estado `OK`, `PARCIAL` o `ERROR`; el contenido está en `data`:
+Las tablas describen el resultado público del trabajo. Los ejemplos son JSON ficticio, ilustrativo y no ejecutado. Si no se encuentra ninguna DDJJ, el trabajo termina con `ERROR` y `data` puede ser `null`.
 
-| Clave de `data` | Tipo / condición |
-|---|---|
-| `operacion` | string, `consultar`. |
-| `representado_cuit`, `periodo_desde`, `periodo_hasta` | strings normalizados. |
-| `periodos_consultados` | entero. |
-| `periodos_sin_ddjj` | lista de strings. |
-| `detalle` | lista de objetos, presente con `incluir_json=true`; cada registro contiene `periodo`, `ddjj`, `vep` strings; `estado_vep` string, `pagado` boolean, `vep_datos` objeto; `cabecera`/`secciones` objetos y `advertencias` lista de strings cuando existen. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si se encontró al menos una DDJJ, incluso si algunos períodos no tienen DDJJ; `ERROR` si no se encontró ninguna. No se emite `PARCIAL` por períodos sin DDJJ. | `"OK"` |
+| `data.operacion` | texto | En resultados públicos con `data`. | Operación ejecutada. | `"consultar"` |
+| `data.representado_cuit` | texto | En resultados públicos con `data`. | CUIT normalizado consultado. | `"20123456786"` |
+| `data.periodo_desde` | texto | En resultados públicos con `data`. | Primer período normalizado del rango procesado. | `"202601"` |
+| `data.periodo_hasta` | texto | En resultados públicos con `data`. | Último período normalizado del rango procesado. | `"202603"` |
+| `data.periodos_consultados` | entero | En resultados públicos con `data`. | Cantidad de períodos que contienen DDJJ. | `2` |
+| `data.periodos_sin_ddjj` | lista de textos | En resultados públicos con `data`; puede ser `[]`. | Períodos del rango sin DDJJ. | `["202602"]` |
+| `data.detalle` | lista de objetos | Solo con `incluir_json=true`; si `incluir_json=false`, la propiedad se omite, no se devuelve como `null`. En un resultado `OK` contiene al menos un registro. | Un registro por período consultado con DDJJ. | `[{"periodo":"202601","ddjj":"ddjj-ejemplo.pdf","vep":"vep-ejemplo.pdf","estado_vep":"Pendiente","pagado":false,"vep_datos":{},"cabecera":{},"secciones":{},"advertencias":[]}]` |
+| `data.detalle[].periodo` | texto | En cada registro de `detalle`. | Período de la declaración. | `"202601"` |
+| `data.detalle[].ddjj` | texto | En cada registro de `detalle`. | Nombre del PDF de DDJJ; es `""` cuando el archivo no existe o está vacío. | `"ddjj-ejemplo.pdf"` |
+| `data.detalle[].vep` | texto | En cada registro de `detalle`. | Nombre del PDF de VEP; es `""` cuando el archivo no existe o está vacío. | `""` |
+| `data.detalle[].estado_vep` | texto | Cuando la consulta del período devuelve información de VEP. | Estado del VEP informado en los datos del período. | `"Pendiente"` |
+| `data.detalle[].pagado` | booleano | Cuando la consulta del período devuelve información de VEP. | Indicador de pago normalizado a booleano. | `false` |
+| `data.detalle[].vep_datos` | objeto | Cuando la consulta del período devuelve información de VEP; puede ser `{}`. | Datos de VEP devueltos para ese período. Los nombres de sus propiedades dependen de la respuesta recibida. | `{}` |
+| `data.detalle[].cabecera` | objeto | Cuando la consulta del período devuelve un objeto de resultado; puede ser `{}`. | Cabecera de DDJJ recibida para el período. | `{}` |
+| `data.detalle[].secciones` | objeto | Cuando la consulta del período devuelve un objeto de resultado; puede ser `{}`. | Secciones de DDJJ recibidas para el período. | `{}` |
+| `data.detalle[].advertencias` | lista de textos | Cuando la consulta del período devuelve un objeto de resultado; puede ser `[]`. | Advertencias incluidas en los datos del período. | `[]` |
+| `data.detalle[].sha256_ddjj` | texto | Solo si `subir_archivos=true` y el PDF DDJJ existe, no está vacío y se publicó; en caso contrario se omite. | Huella del PDF DDJJ publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `data.detalle[].sha256_vep` | texto | Solo si `subir_archivos=true` y el PDF VEP existe, no está vacío y se publicó; en caso contrario se omite. | Huella del PDF VEP publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `data.detalle[].sha256_nomina` | texto | Solo si `subir_archivos=true` y la planilla de nómina existe, no está vacía y se publicó; en caso contrario se omite. | Huella de la planilla de nómina publicada. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `data.detalle[].sha256_json` | texto | Solo si `subir_archivos=true` y el JSON DDJJ existe, no está vacío y se publicó; en caso contrario se omite. | Huella del JSON DDJJ publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Puede estar vacía o contener los archivos existentes y publicados para cada período. | Archivos adjuntos: PDF de DDJJ, PDF de VEP, planilla de nómina y JSON de DDJJ. | `[{"name":"ddjj-ejemplo.pdf","url":"","size":900,"artifact_id":"id-ficticio","filename":"ddjj-ejemplo.pdf","content_type":"application/pdf","size_bytes":900,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
 
-Si existe al menos una DDJJ en el rango, el estado es `OK` aunque haya faltantes; si no existe ninguna, falla. Los períodos sin DDJJ se listan sin descartar resultados de otros períodos.
-
-Según lo que exista en el portal se publican en `files[]` PDF de DDJJ, PDF de VEP, XLS de nómina y JSON de DDJJ. Un archivo ausente aparece vacío/se omite, no se inventa. `subir_archivos=false` suprime `files[]`; `incluir_json=false` suprime `detalle`, no los archivos.
-
-El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.
+`subir_archivos=false` deja `files=[]` y omite las huellas, pero no evita las descargas temporales. `incluir_json=false` omite `data.detalle`, pero no impide publicar en `files` el JSON de DDJJ si `subir_archivos=true` y el archivo existe.

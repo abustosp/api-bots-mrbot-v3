@@ -58,8 +58,18 @@ No envíe credenciales en `payload`; los alias de contraseña no deben discrepar
 
 Los identificadores son sintácticamente ilustrativos; para obtener datos, deben existir y ser visibles para la cuenta.
 
-## Resultado y archivos
+## Resultado y archivos por operación
 
-El resultado incluye `despachos_procesados`, `despachos_exitosos`, `despachos_con_error`, `errores`, `datos` y un resumen `csv` con filas y nombre, además de información de tamaño/huella si se adjuntó. Cada fila CSV aplana datos de carátula y estado de presentación. El CSV se adjunta solo cuando `subir_csv` es `true`.
+`result` es `OK` si termina el recorrido de despachos, incluso si alguno falla. Los fallos individuales se cuentan y se incluyen en `data`; no convierten por sí solos el estado global en `PARCIAL`.
 
-Los errores de un despacho se registran y no impiden procesar los siguientes. El estado global puede ser `OK` aun cuando `despachos_con_error` sea mayor que cero; compruebe los contadores y `errores`. Con `incluir_json: false`, la lista `datos` se omite aunque el CSV y los contadores sigan reflejando el procesamiento.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | `OK` cuando finaliza el recorrido. | `"OK"` |
+| `data.operacion`, `data.ejecucion`, `data.metodo`, `data.representado_cuit` | textos | Cuando se devuelve `data` | Operación, fecha y hora de ejecución, método seleccionado y CUIT consultado. | `{"operacion":"consultar","ejecucion":"2026-10-20T16:00:00+00:00","metodo":"url","representado_cuit":"30876543210"}` |
+| `data.despachos_procesados`, `data.despachos_exitosos`, `data.despachos_con_error` | enteros | Cuando se devuelve `data` | Cantidades de despachos procesados, correctos y fallidos. | `{"despachos_procesados":2,"despachos_exitosos":1,"despachos_con_error":1}` |
+| `data.datos[]` | lista de objetos | Siempre dentro de `data`; con `incluir_json: false` queda como `[]` | Con JSON habilitado, contiene un registro por despacho. Un registro correcto tiene `despacho`, `metodo`, `timestamp`, `datos_caratula` y `estado_presentacion`, objetos de pares texto-texto, y `error: null`. Un registro fallido conserva esos objetos como `{}` y agrega `error` con el diagnóstico. | `[{"despacho":"DESPACHO-DEMO-0001","metodo":"url","timestamp":"2026-10-20T16:00:00+00:00","datos_caratula":{"Aduana":"001"},"estado_presentacion":{"Estado":"Presentado"},"error":null}]` |
+| `data.errores[]` | lista de objetos | Siempre dentro de `data`; queda como `[]` sin fallos | Cada error individual incluye `despacho`, `diagnostico` y `diagnostic_code`, que puede ser `null`. Con `incluir_json: false`, esta lista se conserva aunque `data.datos` sea `[]`. | `[{"despacho":"DESPACHO-DEMO-0002","diagnostico":"No disponible","diagnostic_code":"moa_dispatch_not_found"}]` |
+| `data.csv` | objeto | Cuando se devuelve `data` | Resumen del CSV consolidado, con `filas` y `archivo`. `sha256` y `size_bytes` solo aparecen si `subir_csv: true`. El CSV aplana los datos de carátula y estado en columnas. | `{"filas":2,"archivo":"MOA-30876543210.csv","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":1234}` |
+| `files[]` | lista de archivos | Solo si el CSV se publica; puede quedar vacía | Incluye el CSV consolidado cuando `subir_csv: true`. Con `false`, el resumen `data.csv` permanece, pero no se adjunta. | `[{"name":"MOA-30876543210.csv","url":"","size":1234,"artifact_id":"despachos_csv","filename":"MOA-30876543210.csv","content_type":"text/csv","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |
+
+Con `incluir_json: false`, `data.datos` no se omite ni se vuelve `null`: queda como lista vacía. Los contadores, `data.errores` y el CSV siguen describiendo el recorrido; pueden incluirse errores aunque `result` sea `OK`.

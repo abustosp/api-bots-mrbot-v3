@@ -48,8 +48,17 @@ No envíe credenciales en `payload`. Si se repiten aliases, sus valores deben co
 }
 ```
 
-## Resultado y archivos
+## Resultado y archivos por operación
 
-El resultado incluye `representado_cuit`, `archivo`, `detalle_archivo` y `errores_por_seccion`. `detalle_archivo` puede incluir nombre y tamaño y, cuando se adjunta el archivo, huella y tamaño reportados. El archivo XLSX se adjunta en `files[]` si `subir_archivo` está activo. Con `incluir_json: false`, `archivo` queda en `null`, pero `detalle_archivo` permanece.
+`result` es `OK` cuando no hay errores por sección, `PARCIAL` cuando solo se registran errores no críticos y `ERROR` cuando falla una sección crítica o el trabajo se interrumpe. Los errores no críticos se agrupan en `data.errores_por_seccion`. Un fallo de publicación del archivo no se informa como un éxito parcial silencioso.
 
-Errores críticos de validación, acceso, servicio, representado o consulta producen estado `ERROR`; errores no críticos pueden producir `PARCIAL`. Una subida fallida genera error de archivo, no un éxito parcial silencioso. Si no hay archivo exportado, revise el resultado y sus errores antes de interpretar el resumen.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | `OK` sin errores por sección; `PARCIAL` con solo errores no críticos; `ERROR` ante una sección crítica o una interrupción. | `"PARCIAL"` |
+| `data.operacion`, `data.representado_cuit` | textos | Cuando se devuelve `data` | Operación y CUIT efectivo consultado. | `{"operacion":"consultar","representado_cuit":"30876543210"}` |
+| `data.archivo` | texto o `null` | Siempre dentro de `data` tras completar | Nombre del XLSX si `incluir_json: true`; con `false` el campo permanece y vale `null`, no se omite. | `"pagos-devoluciones.xlsx"` |
+| `data.detalle_archivo` | objeto | Siempre que se devuelve `data` | Resumen del archivo exportado con `archivo` y `size_bytes`. `sha256` solo aparece cuando `subir_archivo: true`; si no se adjunta, ese campo se omite, no se devuelve como `null`. | `{"archivo":"pagos-devoluciones.xlsx","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}` |
+| `data.errores_por_seccion` | objeto | Siempre dentro de `data`; vacío si no hay errores | En una consulta sin errores vale `{}`. En un resultado `PARCIAL` enumera los errores no críticos por sección. Los errores de la sección crítica abortan antes de devolver los datos y no se garantiza que aparezcan aquí. | `{}` |
+| `files[]` | lista de archivos | Solo si el XLSX se publica; puede quedar vacía | Con `subir_archivo: true`, contiene el XLSX. Con `false`, no se adjunta, aunque se conserva `data.detalle_archivo`. Si falla la publicación, el trabajo termina con error y no se informa un éxito parcial silencioso. | `[{"name":"pagos-devoluciones.xlsx","url":"","size":1234,"artifact_id":"pagos_xlsx","filename":"pagos-devoluciones.xlsx","content_type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |
+
+Con `incluir_json: false`, solo `data.archivo` pasa a `null`; `data.detalle_archivo` se conserva. Con `subir_archivo: false`, se conservan el nombre y tamaño del archivo generado, pero no la huella ni el adjunto. Un error que interrumpe el trabajo puede dejar `data` en `null`.

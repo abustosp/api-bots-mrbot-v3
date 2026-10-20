@@ -57,22 +57,30 @@ Se reconocen `clave_representante` y `contrasena` como nombres compatibles de `c
 
 ## Resultado, archivos y resultados parciales
 
-`data` tiene los siguientes campos estables. Los datos extraídos directamente del resumen y el detalle de reafectaciones conservan formatos textuales devueltos por el portal.
+La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son ilustrativos y no proceden de ejecuciones. Los campos del resumen conservan los textos obtenidos en la consulta.
 
-| Ruta | Tipo | Cuándo aparece |
-|---|---|---|
-| `data.operacion` | Texto (`"compensar"`) | Siempre. |
-| `data.representado_cuit` | Texto | Siempre. |
-| `data.compensar` | Booleano | Siempre; indica si se intentó el paso de reafectación. |
-| `data.confirmar` | Booleano | Siempre; refleja el modo solicitado, no prueba por sí solo que hubo cambios. |
-| `data.cuit`, `data.periodo`, `data.periodo_desde` | Texto | Siempre, si el resumen de cuenta se obtuvo. |
-| `data.deuda_capital`, `data.deuda_accesorios`, `data.total_deuda`, `data.credito_capital`, `data.credito_accesorios`, `data.total_a_favor` | Texto | Siempre, si el resumen de cuenta se obtuvo. |
-| `data.movimientos` | Lista de objetos, cada campo texto: `periodo`, `impuesto`, `concepto`, `subconcepto`, `descripcion`, `fecha_movimiento`, `debe`, `haber`. | Si se solicita movimientos o el PDF activa ese requisito. |
-| `data.movimientos_corte` | Texto | Cuando se recorren movimientos. |
-| `data.compensaciones` | Objeto | Sólo cuando `compensar=true`. Contiene listas `saldos`, `reafectaciones`, `pagos_sin_destino` y `errores`. Las filas son detalle variable del portal, no un esquema de filas uniforme garantizado. |
-| `data.avisos` | Lista de textos | Sólo cuando el proceso devuelve avisos. Los avisos también se reportan en `warnings` del resultado del job. |
-| `data.archivo` | Texto, nombre PDF | Si se genera PDF y `subir=false`. |
-| `data.sha256` | Texto hexadecimal | Si se genera PDF y `subir=true`. |
-| `data.size_bytes` | Entero | Si se genera PDF y `subir=true`. |
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al finalizar el job | `OK` si no se reportan avisos ni errores en el detalle; `PARCIAL` si los hay. | `"OK"` |
+| `data.operacion` | texto | En una respuesta correcta o parcial | Operación ejecutada. | `"compensar"` |
+| `data.representado_cuit` | texto | En una respuesta correcta o parcial | CUIT consultado. | `"20123456786"` |
+| `data.compensar` | booleano | En una respuesta correcta o parcial | Indica si se intentó el paso de reafectación. | `true` |
+| `data.confirmar` | booleano | En una respuesta correcta o parcial | Modo solicitado; por sí solo no confirma que se hayan aplicado cambios. | `false` |
+| `data.cuit` | texto | Si se obtuvo el resumen | CUIT incluido en el resumen. | `"20123456786"` |
+| `data.periodo` | texto | Si se obtuvo el resumen | Período incluido en el resumen. | `"<texto del resumen>"` |
+| `data.deuda_capital` | texto | Si se obtuvo el resumen | Deuda de capital. | `"<importe>"` |
+| `data.deuda_accesorios` | texto | Si se obtuvo el resumen | Deuda de accesorios. | `"<importe>"` |
+| `data.total_deuda` | texto | Si se obtuvo el resumen | Total de deuda. | `"<importe>"` |
+| `data.credito_capital` | texto | Si se obtuvo el resumen | Crédito de capital. | `"<importe>"` |
+| `data.credito_accesorios` | texto | Si se obtuvo el resumen | Crédito de accesorios. | `"<importe>"` |
+| `data.total_a_favor` | texto | Si se obtuvo el resumen | Total a favor. | `"<importe>"` |
+| `data.movimientos` | lista de objetos | Si se solicitan movimientos o se activan al pedir PDF | Cada movimiento tiene los campos textuales `periodo`, `impuesto`, `concepto`, `subconcepto`, `descripcion`, `fecha_movimiento`, `debe` y `haber`. La lista puede estar vacía. | `[]` |
+| `data.movimientos_corte` | texto | Cuando se recorren movimientos | Indica el motivo de cierre o corte del recorrido. | `"<motivo>"` |
+| `data.compensaciones` | objeto | Sólo cuando `compensar=true` | Contiene las listas `saldos`, `reafectaciones`, `pagos_sin_destino` y `errores`. Los objetos de cada lista contienen detalle variable. | `{"saldos": [], "reafectaciones": [], "pagos_sin_destino": [], "errores": []}` |
+| `data.avisos` | lista de textos | Cuando la reafectación devuelve uno o más avisos | Avisos asociados al proceso. | `["<aviso>"]` |
+| `data.archivo` | texto | Si se genera PDF y `subir=false` | Nombre del PDF generado, no publicado para descarga. | `"<nombre>.pdf"` |
+| `data.sha256` | texto hexadecimal | Si se genera PDF y `subir=true` | Huella del PDF publicado. | `"<64 caracteres hexadecimales>"` |
+| `data.size_bytes` | entero | Si se genera PDF y `subir=true` | Tamaño del PDF publicado en bytes. | `12345` |
+| `files` | lista de archivos | En la respuesta final | Contiene el PDF si se publicó; queda vacía si no se pidió PDF o si `subir=false`. | `[]` |
 
-El archivo publicado aparece en `files` del job. Los cortes de movimientos se informan en datos. Errores o avisos en reafectaciones producen `PARCIAL` y conservan el detalle disponible. `confirmar=true` puede haber confirmado algunas operaciones antes de un error posterior, por lo que el resultado parcial no implica reversión. Si `compensar=false`, no aparece `data.compensaciones`.
+Los cortes de movimientos se informan en `data.movimientos_corte` y no convierten por sí solos el resultado en `PARCIAL`. `confirmar=true` puede haber confirmado algunas operaciones antes de un error posterior, por lo que el resultado parcial no implica reversión. Si `compensar=false`, no aparece `data.compensaciones`. El envelope implementado no incluye `data.periodo_desde`.

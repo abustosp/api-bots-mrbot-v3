@@ -96,20 +96,48 @@ Ruta: `POST /api/v3/bots/comprobantes/solicitar`.
 
 La operación crea la solicitud en el portal, no un CSV. Para consultar o ver el historial se usan, respectivamente, `/api/v3/bots/comprobantes/consultar` y `/api/v3/bots/comprobantes/historial`; sus campos específicos se documentan por separado en este contrato.
 
-## Resultado
+## Resultado y archivos
 
-El estado del trabajo incluye `result` como `OK`, `PARCIAL` o `ERROR`; el objeto del bot va en `data`. Campos de `data`:
+Las tablas describen el resultado público del trabajo. Los ejemplos son JSON ficticio, ilustrativo y no ejecutado. En un resultado `ERROR`, `data` puede ser `null`. Los campos de muestra y los registros históricos contienen datos variables.
 
-| Operación | Clave | Tipo / condición |
-|---|---|---|
-| Todas | `operacion`, `representado_cuit`, `fecha_desde`, `fecha_hasta` | string; siempre presentes en una respuesta con datos. |
-| `solicitar` | `ids_consulta` | objeto cuyas claves son `emitidos`/`recibidos` y valores son identificadores string de solicitud. |
-| `consultar` / `historial` | `emitidos`, `recibidos` | objeto por tipo consultado: `filas` entero y `archivo` string; `sha256` string y `size_bytes` entero si se publicó; `muestra` lista de objetos si se pidió JSON. |
-| `historial` | `consultas` | objeto por tipo con listas de registros encontrados. |
-| `historial` | `faltantes` | lista de strings con los tipos no disponibles. |
+### Campos comunes
 
-Los CSV publicados aparecen en `files[]`. `solicitar` no genera CSV. `historial` puede ser `PARCIAL` si algunos tipos no están disponibles, o `ERROR` si no hay resultado utilizable. La composición de cada muestra y los registros del portal varían con los datos consultados.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` al completar una consulta o solicitud. En `historial`, es `PARCIAL` si faltan algunos tipos y `ERROR` si faltan todos los tipos pedidos. | `"PARCIAL"` |
+| `data.operacion` | texto | En resultados públicos `OK` o `PARCIAL` con `data`. | Operación ejecutada. | `"consultar"` |
+| `data.representado_cuit` | texto | En resultados públicos `OK` o `PARCIAL` con `data`. | CUIT normalizado del representado. | `"20123456786"` |
+| `data.fecha_desde`, `data.fecha_hasta` | texto | En resultados públicos `OK` o `PARCIAL` con `data`. | Extremos inclusivos del rango, en formato `DD/MM/AAAA`. | `"01/09/2026"` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Vacía para `solicitar`; en `consultar` e `historial` contiene los CSV publicados, si los hubo. | Archivos descargables, separados de `data`. | `[]` |
 
-`POST /api/v3/uploads` es la vía pública para aportar archivos en bots que lo solicitan; este bot no requiere carga de archivos de entrada.
+### `solicitar`
 
-El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `data.ids_consulta` | objeto | En una solicitud completada. | Mapea solo los tipos solicitados (`emitidos`, `recibidos`) a los identificadores devueltos. El formato del identificador depende del portal y no se garantiza un patrón estable. | `{"emitidos":"identificador-ficticio-no-estable"}` |
+| `files` | lista de archivos | Siempre. | Esta operación registra la solicitud, pero no genera ni adjunta CSV. | `[]` |
+
+### `consultar`
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `data.emitidos`, `data.recibidos` | objeto | Por cada tipo seleccionado que se descargó correctamente. El tipo no seleccionado se omite, no se devuelve como `null`. | Resumen del CSV filtrado al rango solicitado. | `{"filas":1,"archivo":"comprobantes-ejemplo.csv","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size_bytes":120,"muestra":[]}` |
+| `data.emitidos.filas`, `data.recibidos.filas` | entero | Dentro del resumen del tipo descargado. | Cantidad de filas del archivo filtrado. | `1` |
+| `data.emitidos.archivo`, `data.recibidos.archivo` | texto | Dentro del resumen del tipo descargado. | Nombre del CSV procesado. | `"comprobantes-ejemplo.csv"` |
+| `data.emitidos.sha256`, `data.recibidos.sha256` | texto | Si `subir_csv=true` y se publicó el CSV; en caso contrario se omite. | Huella del archivo publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
+| `data.emitidos.size_bytes`, `data.recibidos.size_bytes` | entero | Si `subir_csv=true` y se publicó el CSV; en caso contrario se omite. | Tamaño del archivo publicado, en bytes. | `120` |
+| `data.emitidos.muestra`, `data.recibidos.muestra` | lista de objetos | Si `incluir_json=true`; puede ser `[]`. Si `incluir_json=false`, se omite. | Hasta las filas configuradas de muestra. Los campos derivan de la planilla y pueden variar. | `[{"MC":"MCE","CUIT Cliente":"20123456786","MC AUX":"valor-ficticio"}]` |
+| `files` | lista de archivos | Siempre. Contiene los CSV publicados; queda `[]` si `subir_csv=false`. | Archivos adjuntos disponibles en el resultado del trabajo. | `[{"name":"comprobantes-ejemplo.csv","url":"","size":120,"artifact_id":"id-ficticio","filename":"comprobantes-ejemplo.csv","content_type":"text/csv","size_bytes":120,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
+
+### `historial`
+
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `data.consultas` | objeto | Siempre en un resultado público `OK` o `PARCIAL` con `data`. | Contiene una lista por cada tipo seleccionado. La lista puede estar vacía. | `{"emitidos":[]}` |
+| `data.consultas.emitidos`, `data.consultas.recibidos` | lista de objetos | Por cada tipo seleccionado, aunque no haya registros. | Registros visibles en el historial del tipo. | `[{"indice":0,"estado":"Finalizada","exportable":true,"texto_completo":"Rango y estado ficticios","fecha_desde":"01/09/2026","fecha_hasta":"30/09/2026"}]` |
+| `data.consultas.<tipo>[].fecha_desde`, `data.consultas.<tipo>[].fecha_hasta` | texto | Solo si el registro del historial permite reconocer ambas fechas. Si no se reconocen, ambas propiedades se omiten. | Rango que se muestra en el registro histórico. | `"01/09/2026"` |
+| `data.faltantes` | lista de textos | Siempre en `historial` cuando `data` está disponible. Puede ser `[]`. | Tipos solicitados cuyo resultado no se pudo descargar del historial. | `["recibidos"]` |
+| `data.emitidos`, `data.recibidos` | objeto | Solo para un tipo cuyo CSV se descargó. Si no hay descarga, el resumen se omite, aunque exista `data.consultas.<tipo>`. | Tiene los mismos campos `filas`, `archivo` y los campos opcionales `sha256`, `size_bytes`, `muestra` de `consultar`. | `{"filas":1,"archivo":"comprobantes-ejemplo.csv","muestra":[]}` |
+| `files` | lista de archivos | Siempre. Puede incluir el CSV descargado para cada tipo disponible; si no se subió ninguno, es `[]`. | Adjuntos del historial, no solicitudes nuevas. | `[{"name":"comprobantes-ejemplo.csv","url":"","size":120,"artifact_id":"id-ficticio","filename":"comprobantes-ejemplo.csv","content_type":"text/csv","size_bytes":120,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
+
+En `historial`, `faltantes=[]` corresponde a los tipos pedidos disponibles; algunos faltantes producen `PARCIAL` y todos los tipos pedidos faltantes producen `ERROR`. En un resultado `ERROR`, `data` puede ser `null`. `consultar` y `historial` omiten `sha256` y `size_bytes` si `subir_csv=false`, y omiten `muestra` si `incluir_json=false`. `solicitar` no devuelve identificadores de portal con un formato estable.

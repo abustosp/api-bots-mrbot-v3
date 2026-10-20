@@ -60,8 +60,19 @@ No envíe credenciales en `payload`. Los nombres alternativos repetidos deben co
 }
 ```
 
-## Resultado y archivos
+## Resultado y archivos por operación
 
-`data.impuestos` organiza resultados por código de impuesto, tipo y formato. Las entradas resumen filas y nombre de archivo; si `incluir_json` está activo, puede incluir muestra, tamaño y huella del archivo. `files[]` contiene archivos adjuntos cuando `subir_csv` está activo.
+`result` es `OK` cuando termina el recorrido, incluso si alguna combinación impuesto/tipo/formato falla. Esos fallos se describen dentro de `data`; no convierten por sí solos el resultado en `PARCIAL`. Un error fatal puede interrumpir la consulta.
 
-Los fallos de una combinación impuesto/tipo/formato se registran dentro de `data.errores` y el bot continúa con las demás combinaciones. El estado global puede ser `OK` aunque se informen errores por combinación; compruebe `data.errores` y las cantidades por salida. Si ARCA no confirma el representado, el resultado puede incluir un aviso y consultar la relación activa.
+| Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
+|---|---|---|---|---|
+| `result` | texto | Al devolver un resultado | `OK` cuando finaliza el recorrido de combinaciones. | `"OK"` |
+| `data.operacion`, `data.representado_cuit`, `data.fecha_desde`, `data.fecha_hasta` | textos | Cuando se devuelve `data` | Operación, representado y período consultado. | `{"operacion":"consultar","representado_cuit":"30876543210","fecha_desde":"01/01/2025","fecha_hasta":"31/01/2025"}` |
+| `data.impuestos` | objeto anidado | Cuando se devuelve `data` | Se organiza como código → tipo → formato. El formato es `csv` en la exportación normal, o `siap` y `xls` en la exportación para aplicativo. Los tipos no admitidos para un código no aparecen. | `{"217":{"Retencion":{"csv":{"filas":2,"archivo":"retenciones.csv","muestra":[{"fecha":"10/01/2025","importe":"1250.00"}]}}}}` |
+| `data.impuestos.<código>.<tipo>.<formato>` (exportación correcta) | objeto | Para cada combinación procesada correctamente | Incluye `filas` y `archivo`. `muestra` solo aparece con `incluir_json: true`; `sha256` y `size_bytes` solo con `subir_csv: true`. Con `incluir_json: false` se omite `muestra`; con `subir_csv: false` se omiten los metadatos de publicación. | `{"filas":2,"archivo":"retenciones.csv","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":1234,"muestra":[]}` |
+| `data.impuestos.<código>.<tipo>.<formato>` (fallo) | objeto | Solo para una combinación cuya exportación falló | Incluye `filas: 0`, `mensaje` y `diagnostic_code`; no incluye `archivo` ni `muestra` para esa combinación. | `{"filas":0,"mensaje":"Exportación no disponible","diagnostic_code":"export_unavailable"}` |
+| `data.errores[]` | lista de textos | Siempre dentro de `data`; puede ser `[]` | Describe las combinaciones con error. La consulta continúa con las demás combinaciones. | `["217 Retencion csv: Exportación no disponible"]` |
+| `data.avisos[]` | lista de textos | Solo si no se confirma la selección del representado | Informa que se continuó con la relación activa. Es un campo dentro de `data`, no un aviso superior. | `["No se pudo confirmar el representado en Mis Retenciones; se consultó la relación activa."]` |
+| `files[]` | lista de archivos | Solo por exportaciones correctas publicadas; puede quedar vacía | Incluye los CSV exitosos cuando `subir_csv: true`. Las exportaciones fallidas no producen un archivo adjunto. | `[{"name":"retenciones.csv","url":"","size":1234,"artifact_id":"retenciones_csv","filename":"retenciones.csv","content_type":"text/csv","size_bytes":1234,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","download_url":null,"url_expires_in":null}]` |
+
+Una `muestra` puede ser `[]` si el archivo no tiene filas de datos. La lista de errores y los resúmenes por combinación están dentro de `data`; no se garantiza que el estado global refleje cada fallo individual.
