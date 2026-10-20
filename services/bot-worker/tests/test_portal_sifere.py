@@ -469,7 +469,12 @@ def test_consultar_consolidados_escribe_sircreb_y_sirtac(tmp_path: Path) -> None
         "Distribución Jurisdicciones": 1,
         "Operaciones Informadas": 1,
     }
-    assert any("srbPadron.do?method=detalleMensual&anio=2026&mes=01" in u for u in portal.urls)
+    # SIRCREB: el portal muestra como "Mes/Año" el mes siguiente al parámetro,
+    # así que se pide el mes anterior al período.
+    assert any(
+        "srbPadron.do?method=detalleMensual&anio=2025&mes=12" in u
+        for u in portal.urls
+    )
     assert any("srtPadron.do?method=retenciones&cuit=20123456789&periodo=202601" in u for u in portal.urls)
     assert (tmp_path / resumen["archivos"][0]).exists()
 
