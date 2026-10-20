@@ -101,6 +101,38 @@ docker compose -f infra/compose/worker.compose.yaml \
   --env-file infra/compose/.env.worker up -d
 ```
 
+### Actualizar desde el panel (workers manuales)
+
+Con el updater de host instalado, el panel de flota actualiza los workers
+manuales sin acceso SSH: botón **Actualizar** por fila (solo si el worker está
+desactualizado) y **Actualizar todos**. Los efímeros EC2 no se actualizan así.
+
+Requisitos en la central (`.env`):
+
+- `WORKER_IMAGE_REF`: imagen completa a desplegar (`repo:tag` o `repo@sha256:...`).
+  `build-and-push.sh` imprime el valor al terminar.
+- `WORKER_LATEST_VERSION`: el mismo `APP_VERSION` (define qué workers están desactualizados).
+- `UPDATER_TOKEN`: secreto compartido con los updaters. Opcional `WORKER_UPDATE_MAX_PARALLEL` (1 por defecto).
+
+Instalar el updater en cada host (una sola vez), en `.env.worker`: `UPDATER_TOKEN`,
+`UPDATER_NODE` (el `host:puerto` exacto del nodo en la central), `UPDATER_ALLOWED_REPOS`,
+`UPDATER_HOST_DIR` (ruta absoluta de `infra/compose`), `UPDATER_DOCKER_CONFIG`
+(`config.json` del `docker login`) y `UPDATER_IMAGE`; luego:
+
+```text
+docker compose -f infra/compose/worker.compose.yaml \
+  --env-file infra/compose/.env.worker --profile updater up -d
+```
+
+Cada actualización: el worker se pausa y termina lo que tiene en vuelo (hasta
+`WORKER_UPDATE_DRAIN_SECONDS`, 180 s), el updater hace `pull`, reescribe `WORKER_IMAGE`,
+`APP_VERSION` y `WORKER_IMAGE_DIGEST` en `.env.worker`, recrea solo `bot-worker` y
+espera a que esté `healthy`. Si no lo está, restaura los valores anteriores
+(estado `REVERTIDO`). El updater es el único contenedor con docker socket; solo
+acepta imágenes de `UPDATER_ALLOWED_REPOS`. El estado de las solicitudes vive en
+memoria de la central: si esta se reinicia a mitad de camino, el updater termina
+igual y la versión nueva se ve por latido.
+
 ## 6. Rollback
 
 Desplegar el digest anterior conocido y verificar registro SANO mas

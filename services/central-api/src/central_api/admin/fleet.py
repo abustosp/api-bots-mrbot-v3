@@ -225,6 +225,13 @@ def _admin_nodes() -> set[str]:
     return ADMIN_NODES
 
 
+def _vista_actualizacion(nodo: str) -> dict | None:
+    from central_api.worker_updates import UPDATE_REQUESTS
+
+    req = UPDATE_REQUESTS.get(nodo)
+    return req.public() if req is not None else None
+
+
 def _vista_fila(nodo: str) -> dict:
     base = worker_overview(nodo)
     entrada = WORKERS.get(nodo)
@@ -251,6 +258,7 @@ def _vista_fila(nodo: str) -> dict:
         "tasa_error": round(tasa_error, 4),
         "muestra_error": {"total": len(terminales), "fallidos": fallidos},
         "alertas": [asdict(a) for a in ALERTS.values() if a.worker == nodo and a.estado != "RESUELTA"],
+        "actualizacion": _vista_actualizacion(nodo),
     }
 
 

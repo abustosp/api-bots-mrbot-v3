@@ -58,3 +58,42 @@ services:
       - /tmp:rw,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=1777
     read_only: true
     restart: unless-stopped
+
+  # Updater de host (opcional): permite el botón "Actualizar" del panel central.
+  # Solo conexiones salientes hacia la central; recrea `bot-worker` con la imagen
+  # que ordena la central. Es el único servicio con docker socket: el worker
+  # sigue sin él (W-3). Requiere UPDATER_TOKEN, UPDATER_DOCKER_CONFIG y UPDATER_HOST_DIR (ruta absoluta
+  # de este directorio, montada con la misma ruta dentro del contenedor porque
+  # compose resuelve rutas relativas contra el host).
+  worker-updater:
+    image: ${UPDATER_IMAGE:-mrbot-worker-updater:dev}
+    profiles: [updater]
+    init: true
+    environment:
+      UPDATER_CENTRAL_URL: ${CENTRAL_URL:-}
+      UPDATER_TOKEN: ${UPDATER_TOKEN:-}
+      UPDATER_NODE: ${UPDATER_NODE:-}
+      UPDATER_ALLOWED_REPOS: ${UPDATER_ALLOWED_REPOS:-}
+      UPDATER_COMPOSE_FILE: ${UPDATER_HOST_DIR:-}/worker.compose.yaml
+      UPDATER_ENV_FILE: ${UPDATER_HOST_DIR:-}/${UPDATER_ENV_NAME:-.env.worker}
+      UPDATER_PROJECT: ${UPDATER_PROJECT:-mrbot-v3-worker}
+      UPDATER_SERVICE: ${UPDATER_SERVICE:-bot-worker}
+      UPDATER_HEALTH_TIMEOUT: ${UPDATER_HEALTH_TIMEOUT:-180}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${UPDATER_HOST_DIR:-/nonexistent}:${UPDATER_HOST_DIR:-/nonexistent}
+      # Credenciales del registry (docker login del host) para `docker pull`.
+      - ${UPDATER_DOCKER_CONFIG:-/dev/null}:/root/.docker/config.json:ro
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, CHOWN]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=16m
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    restart: unless-stopped

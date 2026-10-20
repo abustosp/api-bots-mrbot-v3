@@ -8,6 +8,7 @@ set -euo pipefail
 # la V3 al registry privado, igual que la V1 y la V2:
 #   - $REGISTRY_URL/abustosp/mrbot-central-api
 #   - $REGISTRY_URL/abustosp/mrbot-bot-worker
+#   - $REGISTRY_URL/abustosp/mrbot-worker-updater (updater de host, opcional)
 #
 # Uso:      ./build-and-push.sh [TAG]
 #           (sin TAG usa la fecha actual YYYYMMDD_HHMMSS)
@@ -40,6 +41,7 @@ fi
 TAG="${1:-$(date +%Y%m%d_%H%M%S)}"
 CENTRAL_REPO="$REGISTRY_URL/abustosp/mrbot-central-api"
 WORKER_REPO="$REGISTRY_URL/abustosp/mrbot-bot-worker"
+UPDATER_REPO="$REGISTRY_URL/abustosp/mrbot-worker-updater"
 
 echo "=============================================="
 echo "  Build & Push — V3 (central-api + bot-worker)"
@@ -68,6 +70,14 @@ docker build -f services/bot-worker/Dockerfile \
     -t "$WORKER_REPO:latest" \
     .
 
+# ── 3b. Build worker-updater ─────────────────────────────────
+echo ""
+echo "[3b/6] Build de worker-updater..."
+docker build -f services/worker-updater/Dockerfile \
+    -t "$UPDATER_REPO:$TAG" \
+    -t "$UPDATER_REPO:latest" \
+    .
+
 # ── 4. Push central-api ──────────────────────────────────────
 echo ""
 echo "[4/6] Push de central-api ($TAG y latest)..."
@@ -80,6 +90,11 @@ echo "[5/6] Push de bot-worker ($TAG y latest)..."
 docker push "$WORKER_REPO:$TAG"
 docker push "$WORKER_REPO:latest"
 
+echo ""
+echo "[5b/6] Push de worker-updater ($TAG y latest)..."
+docker push "$UPDATER_REPO:$TAG"
+docker push "$UPDATER_REPO:latest"
+
 # ── 6. Digests ───────────────────────────────────────────────
 echo ""
 echo "[6/6] Digests publicados (valor inmutable para el overlay prod):"
@@ -87,6 +102,10 @@ CENTRAL_DIGEST="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{
 WORKER_DIGEST="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$WORKER_REPO:$TAG" | grep "@sha256:" | head -1)"
 echo "  CENTRAL_IMAGE='$CENTRAL_DIGEST'"
 echo "  WORKER_IMAGE='$WORKER_DIGEST'"
+echo ""
+echo "Para el boton Actualizar del panel, en el .env de la central:"
+echo "  WORKER_IMAGE_REF='$WORKER_REPO:$TAG'"
+echo "  WORKER_LATEST_VERSION='$TAG'"
 
 # ── Resumen ──────────────────────────────────────────────────
 echo ""

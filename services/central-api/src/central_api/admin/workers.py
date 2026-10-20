@@ -197,6 +197,10 @@ def derive_state(entry: WorkerEntry | None) -> str:
     now: datetime = utcnow()
     if entry is None:
         return "DESCONOCIDO"
+    from central_api.worker_updates import solicitud_activa
+
+    if solicitud_activa(entry.node) is not None:
+        return "ACTUALIZANDO"
     if entry.status == "DRENANDO":
         return "DRENANDO"
     if entry.node in PAUSED_NODES:

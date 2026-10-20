@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     # Versión objetivo opcional de la flota. Sin valor, se deriva el máximo
     # observado entre los workers registrados.
     worker_latest_version: str = Field(default="", alias="WORKER_LATEST_VERSION")
+    # Referencia completa de imagen (repo:tag o repo@sha256:...) que el botón
+    # "Actualizar" ordena desplegar a los workers manuales. Vacío = deshabilitado.
+    worker_image_ref: str = Field(default="", alias="WORKER_IMAGE_REF")
+    # Token compartido con los updaters de los hosts (GET/POST /internal/v1/updater).
+    updater_token: str = Field(default="", alias="UPDATER_TOKEN")
+    # Cuántos workers se actualizan a la vez en una actualización masiva.
+    worker_update_max_parallel: int = Field(default=1, ge=1, le=20, alias="WORKER_UPDATE_MAX_PARALLEL")
+    # Espera máxima de drenaje antes de liberar el comando (el worker aún drena 120 s al recibir SIGTERM).
+    worker_update_drain_seconds: int = Field(default=180, ge=0, alias="WORKER_UPDATE_DRAIN_SECONDS")
+    worker_update_timeout_seconds: int = Field(default=900, ge=60, alias="WORKER_UPDATE_TIMEOUT_SECONDS")
     # Firma Ed25519 de asignaciones (la central firma, el worker verifica con
     # la pública que recibe en el registro). Sin clave configurada se genera
     # una efímera por proceso (desarrollo): los workers deben re-registrarse
