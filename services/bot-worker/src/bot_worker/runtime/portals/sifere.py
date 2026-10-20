@@ -366,6 +366,15 @@ class SiferePortal(PortalArca):
         """
         self._exigir_representado()
         anio, mes, texto = self._normalizar_periodo(periodo)
+        # ``detalleMensual`` interpreta ``mes``/``anio`` como el mes anterior
+        # al "Mes/Año" que muestra la página: con el período tal cual
+        # (202502) devolvía 03/2025. Hay que retroceder un mes.
+        mes_sircreb = int(mes) - 1
+        anio_sircreb = int(anio)
+        if mes_sircreb == 0:
+            mes_sircreb = 12
+            anio_sircreb -= 1
+        mes_sircreb_texto = f"{mes_sircreb:02d}"
         destino_dir = Path(destino_dir)
         destino_dir.mkdir(parents=True, exist_ok=True)
         digitos = solo_digitos(representado_cuit)
@@ -376,7 +385,8 @@ class SiferePortal(PortalArca):
         await self.paso(
             "abrir_retenciones_sircreb",
             self.abrir_url(
-                f"{BASE_COMARB}/srbPadron.do?method=detalleMensual&anio={anio}&mes={mes}"
+                f"{BASE_COMARB}/srbPadron.do?method=detalleMensual"
+                f"&anio={anio_sircreb}&mes={mes_sircreb_texto}"
             ),
         )
         html_sircreb = await self.paso("leer_sircreb", self._html_actual())

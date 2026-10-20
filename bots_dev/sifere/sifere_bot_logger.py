@@ -438,7 +438,13 @@ async def sifere_consultas(
 
         # ==================== SIRCREB ====================
         if debug: debug.log("Navegando a SIRCREB (detalle mensual)")
-        await page1.goto(f"https://app1.comarb.gob.ar/siferewebconsultas/srbPadron.do?method=detalleMensual&anio={periodo_ano}&mes={periodo_mes}")
+        # SIRCREB: detalleMensual muestra el "Mes/Año" del mes siguiente al parámetro.
+        mes_sircreb = (int(periodo_mes) - 2) % 12 + 1
+        anio_sircreb = int(periodo_ano) - (1 if periodo_mes == "01" else 0)
+        await page1.goto(
+            "https://app1.comarb.gob.ar/siferewebconsultas/srbPadron.do"
+            f"?method=detalleMensual&anio={anio_sircreb}&mes={mes_sircreb:02d}"
+        )
         await _wait_ready(page1)
         try:
             await page1.wait_for_selector(
