@@ -29,7 +29,7 @@ Se necesita clave fiscal y CUIT representante. Convenciones de envío, nombres a
 | `representado_nombre` | texto nullable, opcional, default `null`, máximo 256; alias `representado` | Nombre para rótulos de archivo; vacío/null se convierte a ausencia y el nombre usa el CUIT. |
 | `jurisdicciones` | lista de enteros nullable, default `null` | `null`/omitir selecciona todas las jurisdicciones 901–924. Lista vacía no consulta SIRCAR por jurisdicción. Valores fuera de 901–924 se eliminan silenciosamente; los restantes se deduplican y ordenan. |
 | `incluir_json` | booleano, default `true` | `false` omite `jurisdicciones` y `consolidados` de `data`, no impide la consulta ni descargas. `null` inválido. |
-| `subir` | booleano, default `true`; alias `carga_minio` | `true` publica reportes, `false` no. Omitir = `true`; `null` inválido. |
+| `subir` | booleano, default `true` | `true` publica reportes, `false` no. Omitir = `true`; `null` inválido. |
 | `consolidados` | booleano, default `true` | Solicita además SIRCREB y SIRTAC; `false` los desactiva. Omitir = `true`; `null` inválido. |
 
 No se aceptan campos adicionales excepto los cuatro nombres de sesión/clave/proxy que se descartan por compatibilidad. Se exige al menos una salida (`incluir_json=true` o `subir=true`). Aunque `jurisdicciones=[]`, `consolidados=true` mantiene la consulta consolidada.

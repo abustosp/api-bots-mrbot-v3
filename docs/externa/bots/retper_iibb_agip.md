@@ -25,7 +25,7 @@ Se requiere la clave de acceso y CUIT representante. Usar `credentials.clave` y 
 | `periodo_desde` | texto, requerido; alias `desde` | Se eliminan caracteres no numéricos, se toman los primeros seis dígitos como `AAAAMM` y se valida mes 01–12. Puede aceptar separadores. Vacío, menos de seis dígitos o mes inválido se rechazan. |
 | `periodo_hasta` | texto, requerido; alias `hasta` | Misma normalización; no puede preceder a `periodo_desde`. |
 | `incluir_json` | booleano, default `true` | Se valida y participa en la regla de al menos una salida, pero actualmente no controla qué datos JSON se devuelven. `false` no quita los campos de respuesta; omitido = `true`; `null` inválido. |
-| `subir_archivo` | booleano, default `true`; aliases `carga_minio`, `minio_upload`, `archivo_historico_minio` | `true` publica un archivo ZIP; `false` evita su publicación y no cambia la consulta. Omitido = `true`; `null` inválido. |
+| `subir_archivo` | booleano, default `true` | `true` publica un archivo ZIP; `false` evita su publicación y no cambia la consulta. Omitido = `true`; `null` inválido. |
 | `pv` | booleano, default `false` | `true` selecciona la variante alternativa de presentación; `false` o ausente usa la modalidad habitual. `null` equivale a `false`. En esta entrada, textos como `"true"`, `"1"`, `"si"`, `"yes"`, `"on"` (ignorando mayúsculas/espacios) son verdaderos; otros textos falsos. |
 
 No se aceptan campos adicionales. `clave`, `clave_representante`, `clave_encriptada`, `cuit_representante`, `cuit_inicio_sesion`, `proxy` y `proxy_request` dentro del payload se descartan por compatibilidad y no reemplazan las credenciales separadas. Debe elegirse al menos una salida (`incluir_json=true` o `subir_archivo=true`).

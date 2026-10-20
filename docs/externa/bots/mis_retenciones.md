@@ -18,7 +18,7 @@ Ruta canónica: `POST /api/v3/bots/mis_retenciones/consultar`. Alias compatible:
 | `tipos` | lista de `"Retencion"` y/o `"Percepcion"`; opcional; [`"Retencion"`, `"Percepcion"`] | Selecciona tipos. Debe tener al menos un valor; `null`, `[]` o cualquier otra etiqueta: rechazo. Los códigos `216` y `787` solo admiten `Retencion`; los demás admiten ambos tipos. Una selección incompatible con cualquier impuesto elegido se rechaza. |
 | `exportar_para_aplicativo` | booleano; opcional; `false` | `true` produce las variantes de exportación para aplicativo, usando los códigos admitidos en ese modo; el código `787` se rechaza si se solicita expresamente. `false` genera la salida CSV estándar. `null` se rechaza. |
 | `incluir_json` | booleano; opcional; `true` | Incluye muestra/resumen de filas. `false` omite la muestra, no la consulta. `null` se rechaza. |
-| `subir_csv` | booleano; opcional; `true` | Adjunta archivos producidos. `false` evita los adjuntos, no la consulta ni la generación necesaria. `null` se rechaza. Alias compatibles `carga_minio`, `minio_upload` y `archivo_historico_minio`. |
+| `subir_csv` | booleano; opcional; `true` | Adjunta archivos producidos. `false` evita los adjuntos, no la consulta ni la generación necesaria. `null` se rechaza. |
 
 Debe quedar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaza. Los valores de `tipos` distinguen exactamente `Retencion` y `Percepcion`. Se aceptan claves de payload adicionales, pero no se documenta ni garantiza efecto alguno para ellas.
 
@@ -26,11 +26,15 @@ Debe quedar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaz
 
 Se requieren credenciales fiscales válidas y autorización sobre el representado.
 
-| Campo en `credentials` | Tipo; requerido; default | Omisión, `null` o vacío |
+| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
 |---|---|---|
-| `cuit_representante` | texto; requerido operativamente; sin default | Identidad de acceso; se admite `cuit_inicio_sesion` como alias. Si no hay valor, no se puede iniciar sesión. |
-| `clave` | texto; requerida operativamente; sin default | Clave fiscal; aliases `clave_representante` y `contrasena`. Si todas las variantes están omitidas, `null` o vacías, no hay credencial utilizable. |
-| `clave_encriptada` | texto cifrado; alternativa opcional | Solo acepta cifrado generado por el mecanismo de la API. `null` o vacío equivale a ausencia; cifrado inválido se rechaza. Si se combina con texto claro, ambos deben coincidir. |
+| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
+| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
+| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
+| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
+| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
 
 No envíe credenciales en `payload`. Los nombres alternativos repetidos deben contener el mismo valor.
 

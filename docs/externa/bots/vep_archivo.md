@@ -7,7 +7,7 @@
 Catálogo: `vep_archivo`, operación `generar`.
 
 - Canónica: `POST /api/v3/bots/vep_archivo/generar`.
-- Alias V3: `POST /api/v3/vep/carga` y `POST /api/v3/vep_archivo/carga`.
+- Alias V3: `POST /api/v3/vep/carga` y `POST /api/v3/vep_archivo/carga`; ambos reciben cuerpo plano de compatibilidad, no el sobre canónico.
 
 Cuerpo canónico: `{ "payload": { ... }, "credentials": { ... } }`. La referencia de archivo se obtiene con `POST /api/v3/uploads`; consultar ejecución en `/api/v3/jobs/{job_id}`.
 
@@ -27,11 +27,11 @@ Se requiere clave fiscal y CUIT representante; ver [API pública](../api.md) par
 | `archivo_key` | texto, requerido | Referencia `object_key` de un TXT previamente cargado (el catálogo puede mostrar el alias histórico `archivo`). Vacío/null rechazan. Debe ser `.txt`, UTF-8, no vacío, máximo 7.000.000 bytes; primera línea de cabecera `01`, seguida de 1–600 líneas de registro `02`. |
 | `representado_cuit` | texto nullable, opcional; default `null`; aliases `cuit`, `cuit_inicio_sesion` | CUIT de 11 dígitos, admite separadores comunes. Omitir/null usa CUIT representante; vacío inválido. |
 | `medio_pago` | texto, default `internet_banking` | Uno de `link`, `pago_mis_cuentas`, `internet_banking`, `xn_group`, `qr`; se normaliza a minúsculas. `null`/vacío y otros valores se rechazan. |
-| `incluir_json` | booleano, default `true` | `false` reduce `data` a solo `{detalle: ...}`; no cancela el VEP ni la descarga PDF. Omitir = `true`; `null` inválido. |
-| `subir_pdf` | booleano, default `true`; aliases `minio_upload`, `subir_a_minio` | Controla publicación del PDF y, si aplica, QR. `false` evita publicación pero no generación/descarga. Los aliases deben tener valores booleanos coherentes; la validación interna convierte cada valor a booleano antes de compararlos, por lo que un texto no vacío como `"false"` puede resultar verdadero. Omitir = `true`; `null` equivale a omitir. |
+| `incluir_json` | booleano, default `true` | `false` reduce `data` a solo `{detalle: ...}`; no cancela el VEP ni la descarga PDF. Omitir o `null` deja el default `true`; vacío o tipo no booleano inválidos. |
+| `subir_pdf` | booleano, default `true` | Controla publicación del PDF y, si aplica, QR. `false` evita publicación pero no generación/descarga. Omitir = `true`; `null` equivale a omitir. |
 | `eliminar_descargas` | booleano, default `true` | Se acepta por compatibilidad, pero no cambia el resultado: los archivos temporales se eliminan al terminar en ambos casos. `null` equivale a omitir; `false` no conserva archivos. |
 
-Se exige al menos una salida: JSON (`incluir_json=true`) o publicación PDF (`subir_pdf=true`). Los secretos/proxy históricos en payload se descartan. En operaciones canónicas use `archivo_key`, no el nombre temporal local.
+Se exige al menos una salida: JSON (`incluir_json=true`) o publicación PDF (`subir_pdf=true`). Los secretos/proxy históricos en payload se descartan. En operaciones canónicas use `archivo_key`, no el nombre temporal local; para controlar publicación use el nombre canónico `subir_pdf`.
 
 ## Ejemplo ficticio válido
 

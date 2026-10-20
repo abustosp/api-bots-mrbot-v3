@@ -8,7 +8,7 @@
 
 ## Resultado
 
-`result=OK` devuelve `operacion`, `representado_cuit`, `monto`, `tope`, `categoria`, `screenshot_url` inicialmente null, y si se obtiene PNG incluye metadatos en `captura` y artefacto `files[]`. El campo `screenshot_url` se rellena con `object_key`, no con URL firmada. Si el panel no está presente y se solicitó captura, agrega warning sin artefacto. La lectura del servicio puede devolver valor string/null según respuesta del organismo.
+Con el estado superior `result=OK`, `data` devuelve `operacion`, `representado_cuit`, `monto`, `tope`, `categoria`, `screenshot_url` inicialmente null, y si se obtiene PNG incluye metadatos en `captura` y artefacto `files[]`. El campo `data.screenshot_url` se rellena con `object_key`, no con URL firmada. Si el panel no está presente y se solicitó captura, agrega warning sin artefacto. La lectura del servicio puede devolver valor string/null según respuesta del organismo.
 
 ## Fuentes, catálogo y pruebas
 
@@ -20,11 +20,10 @@
 
 ## Discrepancias concretas
 
-1. El encabezado del schema dice que no produce archivos (`schema.py:5-7`) mientras el manifest declara un PNG (`plugin.py:78-85`) y el default `incluir_captura=true` lo intenta producir. El comentario del portal también dice “Sin ... screenshot” (`runtime/portals/facturometro.py:13-14`), aunque el plugin captura el panel fuera de ese método. Actualizar los comentarios/contrato, no quitar el comportamiento sin decisión de producto.
-2. La familia pública central solo incluye `representado_cuit` requerido (`bot_payloads.py:172`), mientras no publica `incluir_captura`; el request model acepta extras (`CompatBodyBase.extra=allow`), así que la bandera puede llegar al proceso pese a faltar en OpenAPI. Exponer captura/default/alias formalmente.
-3. En sentido opuesto, el esquema de entrada permite omitir `representado_cuit` y usar CUIT de sesión, pero el request model central lo exige. Hacer pública la alternativa o alinear requiredness.
-4. El campo de resultado `screenshot_url` recibe un `object_key` (`plugin.py:198-220`), no URL. Renombrar en un modelo de resultado futuro o exponer el nombre inequívoco sin ruptura.
-5. Manifest declara `requiere_credenciales_fiscales=True`, aunque el encabezado del schema llama al bot de solo lectura y el modelo central no enumera credenciales bajo la familia. Asegurar que OpenAPI explique credenciales como bloque separado y no como propiedades del payload.
+1. El encabezado del esquema indica que no produce archivos (`services/bot-worker/src/bot_worker/bots/facturometro/schema.py:5-7`), aunque el manifest declara un PNG y `incluir_captura=true` intenta producirlo (`services/bot-worker/src/bot_worker/bots/facturometro/plugin.py:78-85,198-220`). El comentario del portal señala que el método de lectura no devuelve captura (`services/bot-worker/src/bot_worker/runtime/portals/facturometro.py:13-14`); el servicio obtiene la imagen por otra etapa. Alinear comentarios y contrato.
+2. El esquema descriptivo del catálogo central marca `representado_cuit` requerido y no lista `incluir_captura` (`services/central-api/src/central_api/api/bot_payloads.py:172`), mientras el esquema efectivo permite omitir el CUIT y habilita la captura por default (`services/bot-worker/src/bot_worker/bots/facturometro/schema.py:20-47,58-72`). La ruta genérica no valida contra el DTO del catálogo, así que esto es una discrepancia de descripción pública, no un rechazo canónico previo. Publicar la opción de captura y el uso de CUIT de sesión.
+3. El campo de resultado `data.screenshot_url` recibe un `object_key` (`services/bot-worker/src/bot_worker/bots/facturometro/plugin.py:198-220`), no URL. Renombrar en un modelo de resultado futuro o exponer el significado inequívoco sin ruptura.
+4. El manifest declara que se requieren credenciales fiscales (`services/bot-worker/src/bot_worker/bots/facturometro/plugin.py:70-96`), aunque el encabezado del esquema lo describe como solo lectura y el catálogo no enumera credenciales como propiedades de la familia (`services/central-api/src/central_api/api/bot_payloads.py:172`). Describir credenciales como bloque del envelope, no como campos del payload.
 
 ## Propuestas sin implementar
 

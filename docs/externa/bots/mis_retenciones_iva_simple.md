@@ -15,7 +15,7 @@ Ruta V3: `POST /api/v3/bots/mis_retenciones_iva_simple/consultar`. Alias compati
 | `fecha_desde` | fecha `dd/mm/aaaa`; requerida | Inicio del período. Alias `desde`. Fecha real obligatoria; omitida, `null`, vacía o inválida: rechazo. |
 | `fecha_hasta` | fecha `dd/mm/aaaa`; requerida | Fin inclusive. Alias `hasta`. Debe ser igual o posterior a `fecha_desde` y no posterior al último día del mes siguiente al mes de `fecha_desde`. Omitida, `null`, vacía, inválida o fuera de ese rango: rechazo. |
 | `incluir_json` | booleano; opcional; `true` | Incluye muestras/detalle resumido en el resultado. `false` omite ese detalle, no detiene la consulta. `null` se rechaza. |
-| `subir_csv` | booleano; opcional; `true` | Adjunta los CSV generados. `false` evita adjuntarlos, no detiene su consulta/generación. `null` se rechaza. Alias compatibles `carga_minio`, `minio_upload` y `archivo_historico_minio`. |
+| `subir_csv` | booleano; opcional; `true` | Adjunta los CSV generados. `false` evita adjuntarlos, no detiene su consulta/generación. `null` se rechaza. |
 | `required_result_marker` | texto; opcional; `"IVA SIMPLE"` | Texto requerido para comprobar que la exportación corresponde al modo esperado. Si se omite, se usa `"IVA SIMPLE"`; `null` se rechaza. Cadena vacía se acepta y desactiva esa comprobación; un marcador no vacío debe aparecer en el contenido descargado, sin distinguir mayúsculas/minúsculas, o la exportación se considera fallida. |
 
 Debe estar activo `incluir_json` o `subir_csv`; ambos en `false` se rechazan. Se aceptan campos adicionales, pero no se documenta ni garantiza efecto para los no listados.
@@ -24,11 +24,15 @@ Debe estar activo `incluir_json` o `subir_csv`; ambos en `false` se rechazan. Se
 
 Se requieren credenciales fiscales válidas y acceso al servicio para el CUIT indicado.
 
-| Campo en `credentials` | Tipo; requerido; default | Omisión, `null` o vacío |
+| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
 |---|---|---|
-| `cuit_representante` | texto; requerido operativamente; sin default | CUIT de la cuenta que inicia sesión; admite `cuit_inicio_sesion` como alias. Sin valor no se puede acceder al servicio. |
-| `clave` | texto; requerida operativamente; sin default | Clave fiscal; puede usarse `clave_representante` o `contrasena`. Si las variantes faltan o quedan vacías, no se puede iniciar sesión. |
-| `clave_encriptada` | texto cifrado; alternativa opcional | Debe generarse con el mecanismo publicado por la API. `null` o vacío equivale a ausencia; valor no descifrable: rechazo. Si se acompaña de una clave en texto, ambas deben coincidir. |
+| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
+| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
+| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
+| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
+| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
 
 No incluya secretos en `payload`. Los alias duplicados deben coincidir.
 

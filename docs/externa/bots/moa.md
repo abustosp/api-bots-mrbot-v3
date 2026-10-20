@@ -16,7 +16,7 @@ Ruta V3: `POST /api/v3/bots/moa/consultar`. Alias compatible: `POST /api/v3/moa/
 | `rol` | texto 1–128; opcional; `"IMEX-Rol Importador Exportador"` | Rol para abrir el árbol de empresa. Omitido: usa el valor indicado. `null`, vacío o más de 128 caracteres: rechazo. |
 | `metodo` | `"url"` o `"form"`; opcional; `"url"` | Forma de abrir cada despacho. `null`, cadena vacía u otro valor: rechazo. |
 | `incluir_json` | booleano; opcional; `true` | Incluye registros detallados por despacho en `data.datos`. `false` vacía esa lista; los contadores, errores y resumen CSV se mantienen. `null` se rechaza. |
-| `subir_csv` | booleano; opcional; `true` | Adjunta el CSV consolidado en `files[]`. `false` no adjunta el archivo. `null` se rechaza. Alias compatible `minio_upload`; también se normalizan `carga_minio` y `archivo_historico_minio`. |
+| `subir_csv` | booleano; opcional; `true` | Adjunta el CSV consolidado en `files[]`. `false` no adjunta el archivo. `null` se rechaza. |
 
 Debe estar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaza. Los campos desconocidos se rechazan.
 
@@ -24,11 +24,15 @@ Debe estar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaza
 
 Se requieren credenciales fiscales válidas y autorización sobre el CUIT indicado.
 
-| Campo en `credentials` | Tipo; requerido; default | Omisión, `null` o vacío |
+| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
 |---|---|---|
-| `cuit_representante` | texto; requerido operativamente; sin default | CUIT de inicio de sesión; admite `cuit_inicio_sesion` como alias. Si falta o está vacío, no se puede iniciar sesión. |
-| `clave` | texto; requerida operativamente; sin default | Clave fiscal; alias compatibles `clave_representante` y `contrasena`. Si todas las formas faltan o están vacías, no hay acceso. |
-| `clave_encriptada` | texto cifrado; alternativa opcional | Debe estar cifrada con el mecanismo de la API. `null` o vacío equivale a ausencia; cifrado inválido se rechaza. Si se envía también clave en texto, deben coincidir. |
+| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
+| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
+| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
+| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
+| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
 
 No envíe credenciales en `payload`; los alias de contraseña no deben discrepar.
 

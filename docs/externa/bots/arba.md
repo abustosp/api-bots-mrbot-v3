@@ -12,10 +12,10 @@ Descarga el archivo ZIP de retenciones/percepciones de Ingresos Brutos para un C
 
 | Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
 |---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Si se omite o es `null`, se rechaza. Vacío o `false`: rechazo. V3 exige 11 dígitos sin separadores. |
+| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Si se omite o es `null`, se rechaza. Vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. |
 | `periodo` | Texto, requerido, formato `AAAAMM`. | Omitir, `null`, vacío o `false`: rechazo. Mes 01–12 y el período no puede ser futuro al validar. |
 | `representado_nombre` | Texto, requerido, 1–128 caracteres. Alias: `denominacion`. | Omitir, `null`, vacío o `false`: rechazo. Se limpia para formar el nombre del archivo, no cambia datos del portal. |
-| `subir` | Booleano, opcional, default `true`. Alias: `carga_minio`, `minio_upload`, `archivo_historico_minio`. | Omitir: publica el ZIP como archivo descargable. `null`, vacío o texto no booleano: rechazo. `false`: no publica archivo descargable ni agrega huella/tamaño. |
+| `subir` | Booleano, opcional, default `true`. | Omitir: publica el ZIP como archivo descargable. `null`, vacío o texto no booleano: rechazo. `false`: no publica archivo descargable ni agrega huella/tamaño. |
 
 La fecha máxima permitida depende del mes en que se valide la solicitud. Los alias de un mismo dato no deben tener valores contradictorios.
 
@@ -59,9 +59,8 @@ La salida de éxito con ZIP tiene este envelope estable en `data`:
 | `data.archivos` | Lista de objetos | Siempre en respuesta exitosa; vacía si no hay archivos. |
 | `data.archivos[].tipo` | Texto (`"RETPER ARBA"`) | Por cada archivo descargado. |
 | `data.archivos[].archivo` | Texto, nombre ZIP | Por cada archivo descargado. |
-| `data.archivos[].url_minio` | Texto o `null` | Por cada archivo; referencia de publicación si `subir=true`, `null` si no se sube. |
 | `data.sha256` | Texto hexadecimal | Cuando hay ZIP y `subir=true`. |
 | `data.size_bytes` | Entero | Cuando hay ZIP y `subir=true`. |
 | `data.mensaje` | Texto | Sólo cuando el portal informa que no hay archivos; en ese caso `data.archivos=[]` y no aparecen tipo/nombre/huella. |
 
-Con archivo publicado, también aparece en `files` del job. Si `subir=false`, el nombre permanece en `data` pero no hay archivo recuperable. La ausencia de datos es resultado correcto, no parcial; un fallo de descarga o publicación da error.
+Para recuperar el ZIP publicado, consúmalo desde `files` del job. Si `subir=false`, el nombre permanece en `data` pero no hay archivo recuperable. La ausencia de datos es resultado correcto, no parcial; un fallo de descarga o publicación da error.

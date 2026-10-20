@@ -4,9 +4,9 @@ Consulta comprobantes emitidos/recibidos del contribuyente representado, solicit
 
 ## Ruta V3 y catálogo
 
-Ruta genérica: `POST /api/v3/bots/{bot}/{operacion}`. El catálogo V3 todavía publica `comprobantes` con `consultar`, `solicitar` e `historial` (2 créditos cada una), pero lo marca **deprecated** y `alias_de: mis_comprobantes`. Para integraciones nuevas, usar `/api/v3/bots/mis_comprobantes/consultar`, `/solicitar` o `/historial` con el mismo contrato de campos. La operación va en la ruta, no dentro de `payload`.
+Ruta canónica de este bot: `POST /api/v3/bots/comprobantes/{operacion}`. El catálogo publica `consultar`, `solicitar` e `historial`, y marca `comprobantes` como **deprecated** con `alias_de: mis_comprobantes`. Es una anotación de catálogo, no convierte ambas entradas en una sola operación: `mis_comprobantes` tiene su propio registro y contrato. La operación va en la ruta, no dentro de `payload`.
 
-En la ruta pública V3 el formato admitido es exactamente 11 dígitos sin separadores, por el patrón de validación del endpoint; la normalización interna acepta separadores, pero no amplía ese patrón público. En los ejemplos usar CUIT ficticio numérico.
+La ruta canónica valida con las reglas efectivas de la operación: la CUIT representada se normaliza quitando espacios, guiones, puntos y barras, y luego debe quedar en 11 dígitos. No se valida el dígito verificador. Los aliases HTTP planos tienen un modelo de entrada distinto; no aplicar sus restricciones a esta ruta.
 
 Cuerpo canónico: `{"payload": {...}, "credentials": {...}}`. La identidad de sesión y la contraseña fiscal pertenecen a `credentials`.
 
@@ -17,26 +17,34 @@ Cuerpo canónico: `{"payload": {...}, "credentials": {...}}`. La identidad de se
 | `representado_cuit` | string, requerido; alias `cuit` | Se quitan separadores y se exigen 11 dígitos. Identifica al contribuyente consultado. `null` o vacío no satisfacen el requisito. |
 | `representado_nombre` | string 1–128, requerido | Nombre que se selecciona/valida en el portal. Vacío o `null` inválidos. |
 | `fecha_desde`, `fecha_hasta` | strings, requeridos, `DD/MM/AAAA`; aliases `desde`, `hasta` | Rango inclusivo y `fecha_desde <= fecha_hasta`. Fechas inválidas, vacías o nulas se rechazan. |
-| `emitidos`, `recibidos` | boolean, ambos default `false`; aliases `descarga_emitidos`, `descarga_recibidos` | Debe ser `true` al menos uno. `false` omite ese tipo. `null` se trata como omitido en la ruta pública y queda en `false`. |
-| `puntos_venta_emitidos`, `puntos_venta_recibidos` | lista de string o entero, opcional | Aceptan también un solo string/entero, hasta 200 valores. Se conservan ceros iniciales y se aceptan solo dígitos. Omitido, `null` o lista vacía significa sin filtro por punto de venta. |
-| `timeout_mc` | entero 1–86400, opcional; default operativo 30 segundos | Si se omite o es `null`, se usa 30. Controla la espera del portal. No usar cero. |
-| `incluir_json` | boolean, default `true`; alias `carga_json` | `false` omite la muestra de filas, no el resumen. `null` público aplica el default. |
-| `subir_csv` | boolean, default `true`; aliases de carga históricos | `false` no publica los CSV en `files[]`; el proceso todavía los descarga/procesa para contar filas. `null` público aplica el default. |
-| `carga_b64` | boolean, default `false`, obsoleto | Se acepta por compatibilidad, pero no cambia la salida: los archivos se entregan como archivos, nunca como base64. `null` público aplica `false`. |
-| `eliminar_descargas` | boolean, default `true` | Aceptado por compatibilidad, sin efecto adicional en la ejecución actual. |
-| `proxy_request` | boolean nullable, default `null` | Aceptado por compatibilidad; el cliente no selecciona la conexión del servicio con este campo. |
-| `verbose` | boolean, default `false` | Aceptado, no cambia el resultado público. |
-| `cookies_header` | string opcional, máximo 8192, solo para `historial` | Campo legado, no se usa para autenticar ni modificar la sesión. Vacío se acepta sin efecto. |
+| `emitidos`, `recibidos` | boolean, ambos default `false`; aliases `descarga_emitidos`, `descarga_recibidos` | Debe ser `true` al menos uno. `false` omite ese tipo. Si se omite se aplica `false`; `null` explícito se rechaza. |
+| `puntos_venta_emitidos`, `puntos_venta_recibidos` | lista de strings o enteros, opcional, hasta 200 elementos | Se conservan ceros iniciales y cada elemento debe contener solo dígitos. Omitido, `null` o lista vacía significa sin filtro. Debe enviarse una lista, no un valor escalar. |
+| `timeout_mc` | entero 1–86400, opcional; default efectivo 30 segundos | Omitido o `null` usa el valor efectivo de 30 segundos. Controla la espera del servicio. Cero y otros valores fuera del rango se rechazan. |
+| `incluir_json` | boolean, default `true`; alias `carga_json` | `false` omite la muestra de filas, no el resumen. Omitido aplica `true`; `null` explícito se rechaza. |
+| `subir_csv` | boolean, default `true` | `false` no publica CSV en `files[]`, pero el archivo aún se procesa. Omitido aplica `true`; `null` explícito se rechaza. |
+| `carga_b64` | boolean, default `false`, obsoleto | Se acepta y se ignora: los archivos se entregan como archivos, nunca como base64. `null` explícito se rechaza. |
+| `eliminar_descargas` | boolean, default `true` | Se elimina antes de procesar la operación, por lo que no tiene efecto. En la ruta canónica también se ignoran `null` y valores no booleanos. |
+| `proxy_request` | boolean nullable, default `null` | Aceptado por compatibilidad y sin efecto de selección de conexión; `null` es válido. |
+| `verbose` | boolean, default `false` | Aceptado sin cambiar el resultado. `null` explícito se rechaza. |
+| `cookies_header` | string nullable, máximo 8192, solo para `historial` | Campo legado sin efecto de autenticación. Omitido o `null` no modifica la sesión; cadena vacía se acepta sin efecto. |
 
-Para `solicitar`, los únicos campos de esta tabla que no forman parte del modelo son `incluir_json` y `subir_csv`. `cookies_header` solo corresponde a `historial`. La validación rechaza campos desconocidos y requiere `emitidos=true` o `recibidos=true`. Los valores booleanos deben ser booleanos, no texto como `"false"`.
+Para `solicitar`, `incluir_json` y `subir_csv` no forman parte del modelo. `cookies_header` solo corresponde a `historial`. La validación rechaza campos desconocidos y requiere `emitidos=true` o `recibidos=true`. Los valores booleanos deben ser booleanos, no texto como `"false"`. En la ruta canónica se aplican estas reglas del bot; el alias HTTP plano tiene un DTO separado y puede tratar `null` de forma distinta.
 
 ## Credenciales
 
-`credentials.cuit_representante` es string de exactamente 11 dígitos sin separadores en la ruta pública V3; la validación de ejecución normaliza separadores, pero la capa pública exige el patrón estricto. Es requerido para la sesión fiscal. `credentials.clave` es string requerido para ingresar. Se aceptan los nombres heredados `clave_representante` o `contrasena` en lugar de `clave`; `clave_encriptada` es una alternativa cifrada admitida por la plataforma. No enviar varias contraseñas distintas. Credencial omitida, vacía o nula no inicia una sesión válida. No incluir credenciales reales en ejemplos, registros o documentación.
+El objeto `credentials` puede omitirse en el envelope, pero se necesita una sesión fiscal para completar la operación. La identidad de sesión y la contraseña no tienen default; su falta normalmente causa un fallo de autenticación. La normalización central de credenciales no exige un patrón numérico para la identidad.
+
+| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
+|---|---|---|
+| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
+| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
+| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+
+No incluir credenciales reales en ejemplos.
 
 ## Ejemplos ficticios
 
-Consultar emitidos y recibidos:
+Consultar emitidos y recibidos, ruta `POST /api/v3/bots/comprobantes/consultar`:
 
 ```json
 {
@@ -59,10 +67,43 @@ Consultar emitidos y recibidos:
 }
 ```
 
-Para solicitar, el mismo cuerpo debe ir a `/api/v3/bots/mis_comprobantes/solicitar`; la consulta crea solicitudes para cada tipo activado. Para historial, usar `/historial` y las fechas/tipos de interés. El historial busca solicitudes existentes, no crea una nueva.
+Para solicitar comprobantes emitidos, use esta ruta y un cuerpo mínimo compatible con `solicitar`:
+
+Ruta: `POST /api/v3/bots/comprobantes/solicitar`.
+
+```json
+{
+  "payload": {
+    "representado_cuit": "20123456786",
+    "representado_nombre": "Comercial Ejemplo SRL",
+    "fecha_desde": "01/09/2026",
+    "fecha_hasta": "30/09/2026",
+    "emitidos": true,
+    "recibidos": false
+  },
+  "credentials": {
+    "cuit_representante": "20123456786",
+    "clave": "CLAVE-FICTICIA-NO-UTILIZABLE"
+  }
+}
+```
+
+La operación crea la solicitud en el portal, no un CSV. Para consultar o ver el historial se usan, respectivamente, `/api/v3/bots/comprobantes/consultar` y `/api/v3/bots/comprobantes/historial`; sus campos específicos se documentan por separado en este contrato.
 
 ## Resultado
 
-La respuesta de trabajo incluye estado y `result`. `consultar` informa `operacion`, CUIT y rango, y por cada tipo solicitado un resumen de filas, nombre de archivo y metadatos disponibles (hash SHA-256, tamaño y muestra si se pidió). Si `subir_csv=true`, el CSV aparece en `files[]`; si es `false`, no hay referencia descargable en `files[]`. `solicitar` devuelve `ids_consulta` por tipo y no devuelve CSV. `historial` devuelve `consultas` y `faltantes`; puede terminar `PARCIAL` o `ERROR` si no hay una descarga para todos los tipos solicitados. Los nombres de archivo y el número de comprobantes dependen de los datos del portal.
+El estado del trabajo incluye `result` como `OK`, `PARCIAL` o `ERROR`; el objeto del bot va en `data`. Campos de `data`:
+
+| Operación | Clave | Tipo / condición |
+|---|---|---|
+| Todas | `operacion`, `representado_cuit`, `fecha_desde`, `fecha_hasta` | string; siempre presentes en una respuesta con datos. |
+| `solicitar` | `ids_consulta` | objeto cuyas claves son `emitidos`/`recibidos` y valores son identificadores string de solicitud. |
+| `consultar` / `historial` | `emitidos`, `recibidos` | objeto por tipo consultado: `filas` entero y `archivo` string; `sha256` string y `size_bytes` entero si se publicó; `muestra` lista de objetos si se pidió JSON. |
+| `historial` | `consultas` | objeto por tipo con listas de registros encontrados. |
+| `historial` | `faltantes` | lista de strings con los tipos no disponibles. |
+
+Los CSV publicados aparecen en `files[]`. `solicitar` no genera CSV. `historial` puede ser `PARCIAL` si algunos tipos no están disponibles, o `ERROR` si no hay resultado utilizable. La composición de cada muestra y los registros del portal varían con los datos consultados.
 
 `POST /api/v3/uploads` es la vía pública para aportar archivos en bots que lo solicitan; este bot no requiere carga de archivos de entrada.
+
+El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.

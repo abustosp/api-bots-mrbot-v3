@@ -4,7 +4,7 @@ Obtiene datos de constancia de inscripción asociados a uno o varios CUIT. No in
 
 ## Ruta V3 y catálogo
 
-`POST /api/v3/bots/consulta_cuit/consultar` consulta un CUIT; `POST /api/v3/bots/consulta_cuit/consultar_masivo` consulta una lista. El catálogo también publica `consulta`, alias operativo de `consultar`. Las tres operaciones cuestan 1 crédito. La operación se selecciona en la ruta.
+`POST /api/v3/bots/consulta_cuit/consultar` consulta un CUIT; `POST /api/v3/bots/consulta_cuit/consultar_masivo` consulta una lista. El catálogo también publica `consulta`, alias operativo de `consultar`. La operación se selecciona en la ruta. La ruta genérica aplica la validación efectiva de cada operación, no el DTO del alias plano.
 
 Cuerpo: `{"payload": {...}}`. No se necesitan `credentials` del usuario.
 
@@ -12,8 +12,8 @@ Cuerpo: `{"payload": {...}}`. No se necesitan `credentials` del usuario.
 
 | Operación | Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
 |---|---|---|---|
-| `consultar` | `cuit` | string, requerido, exactamente 11 dígitos sin separadores en V3 | Omisión, `null` o vacío se rechazan. El endpoint público exige el patrón estricto; la normalización del servicio también elimina separadores, pero estos no se deben usar en V3. No se valida el dígito verificador. |
-| `consultar_masivo` | `cuits` | lista de strings, requerida, 1–100 elementos | Debe ser lista, no un scalar. Cada CUIT debe ser string de 11 dígitos en V3; duplicados se eliminan conservando el primer orden. Nulo, vacío o lista vacía inválidos. La normalización interna elimina separadores, pero el patrón público estricto no los admite. |
+| `consultar` | `cuit` | string requerido; tras normalización, 11 dígitos | Se quitan espacios, guiones, puntos y barras; no se valida el dígito verificador. Omitido, `null`, vacío o valor que no normaliza a 11 dígitos se rechaza. |
+| `consultar_masivo` | `cuits` | lista requerida de 1–100 valores, normalmente strings | Debe ser lista, no un scalar. Cada elemento se convierte a texto, se normaliza igual que el CUIT individual y debe quedar en 11 dígitos. Duplicados se eliminan conservando el primer orden. `null`, vacío o lista vacía inválidos. |
 
 No hay campos con default ni filtros. Los campos desconocidos se rechazan. Para la consulta masiva el máximo se aplica a la lista recibida antes de deduplicar.
 
@@ -33,6 +33,8 @@ Consulta masiva, ruta `POST /api/v3/bots/consulta_cuit/consultar_masivo`:
 
 ## Resultado
 
-El resultado exitoso contiene el objeto JSON que devuelve el servicio para el CUIT solicitado o, en masivo, el resultado del endpoint de lotes. Su forma y los campos fiscales presentes son los del servicio vigente, no una estructura enriquecida por esta operación. No produce `files[]`. Una respuesta no JSON o que no sea un objeto, errores HTTP o de conexión causan resultado de error, no una respuesta parcial documentada.
+`result` es el estado del job (`OK`, `PARCIAL` o `ERROR`). `data` es un objeto JSON con la respuesta entregada por el servicio consultado, individual o masivo. No se añade un conjunto fijo de claves fiscales: su forma depende de la respuesta disponible del servicio. No produce `files[]`. Una respuesta no JSON o que no sea un objeto, errores HTTP o de conexión causan error, no una respuesta parcial transformada.
 
 No se envían contraseñas personales. La autenticación técnica del servicio, si está configurada, se administra fuera del payload del cliente. No se debe incluir usuario o clave del servicio en `payload`.
+
+El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.

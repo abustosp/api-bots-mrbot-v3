@@ -14,7 +14,7 @@ La ruta fija la operación. En el cuerpo V3, los datos del bot van dentro de `pa
 
 | Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
 |---|---|---|
-| `cuit` | Texto, requerido. | Omitir, `null` o vacío: rechazo. V3 exige exactamente 11 dígitos sin separadores. `false` no es un CUIT y se rechaza. |
+| `cuit` | Texto, requerido. | Omitir, `null` o vacío: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. `false` no es un CUIT y se rechaza. |
 
 No se requiere objeto de credenciales: use `credentials: {}`. No envíe claves fiscales para esta consulta.
 

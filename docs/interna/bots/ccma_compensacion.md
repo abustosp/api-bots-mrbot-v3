@@ -5,7 +5,7 @@
 - Catálogo central: `ccma_compensacion`, operación `compensar`; `services/central-api/src/central_api/api/bots.py:329-339`, `378-386`.
 - Ruta de creación canónica: `POST /api/v3/bots/{bot}/{operacion}`; el cuerpo separa `payload` y `credentials` y despacha `submit_job`; `services/central-api/src/central_api/api/bots.py:194-208`, `748-817`.
 - Plugin activo y manifiesto `operaciones=("compensar",)`, clase de idempotencia `EFECTO`: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:80-108`.
-- Directorio activo coincide con catálogo: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/`. Discrepancia de nombre solo en árbol heredado de desarrollo: `services/bot-worker/src/bot_worker/bots_dev/ccma_compenscion/` (falta la segunda `a` de `compensacion`); el registro activo usa el nombre correcto, `services/bot-worker/src/bot_worker/bots/_plugins.py:90-100`.
+- Directorio activo coincide con catálogo: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/`. Discrepancia de nombre solo en árbol heredado de desarrollo: `bots_dev/ccma_compenscion/` (falta la segunda `a` de `compensacion`); el registro activo usa el nombre correcto, `services/bot-worker/src/bot_worker/bots/_plugins.py:90-100`.
 
 ## Flujo esquema → plugin → portal
 

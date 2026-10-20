@@ -2,7 +2,7 @@
 
 ## Flujo esquema → plugin → portal
 
-1. **Esquema.** `services/bot-worker/src/bot_worker/bots/siper/schema.py:18-95` normaliza CUIT, flags y salida. El JSON Schema de entrada figura en `:104-...`; no publica `extraer_campos`, aunque el modelo sí lo admite.
+1. **Esquema.** `services/bot-worker/src/bot_worker/bots/siper/schema.py:18-82` normaliza CUIT, flags y salida. El JSON Schema de entrada figura en `:83-96`; no publica `extraer_campos`, aunque el modelo sí lo admite.
 2. **Plugin.** `services/bot-worker/src/bot_worker/bots/siper/plugin.py:148-208` valida, requiere credenciales y abre el servicio; `:210-281` captura vistas solicitadas, sube imágenes opcionalmente y extrae datos de detalle con acumulación de error no fatal.
 3. **Portal real.** `services/bot-worker/src/bot_worker/runtime/portals/siper.py:17-32` define páginas/campos; `:90-141` extrae campos estructurados; `:149-206` captura pantalla de las vistas detalle/categorías. La selección del representado sucede antes de consulta en el plugin.
 
@@ -22,8 +22,8 @@ La ruta canónica pasa por `normalize_v2_payload` también: `services/central-ap
 ## Discrepancias concretas y propuestas (sin implementar)
 
 1. **Fallback de CUIT falla con credencial anidada.** Central normaliza payload antes de extraer credentials, y no combina los mappings (`api/bots.py:574,608-618,793-817`; `credentials.py:138-158`). El modelo requiere `representado_cuit`, pero catálogo `services/central-api/src/central_api/api/bot_payloads.py:289-293` no expresa bien el requerido. **Propuesta:** hacer CUIT representado requerido explícito en contrato público; no inferirlo de identidad autenticadora, o añadir una regla de composición explícita con tests.
-2. **Default de subida diferente según entrada.** Schema/modelo declara `subir=true`, normalizador API establece `false` sin flags legacy (`schema.py:...`; `credentials.py:143-158`). **Propuesta:** alinear defaults documentados y publicados, añadir tests de API canónica con flags ausentes y ambos valores explícitos.
-3. **`extraer_campos` omitido del manifest/familia pública.** El plugin lo usa para una operación con consultas de detalle aun si la vista no se incluye (`schema.py:...`, `plugin.py:263-280`), pero el espejo `bot_payloads.py:289-293` no lo ofrece. **Propuesta:** añadirlo al schema del manifest y catálogo o quitarlo de la interfaz, con prueba `incluir_detalle=false` combinada con `extraer_campos`.
+2. **Default de subida diferente según entrada.** Schema/modelo declara `subir=true`, normalizador API establece `false` sin flags legacy (`schema.py:18-82`; `credentials.py:143-158`). **Propuesta:** alinear defaults documentados y publicados, añadir tests de API canónica con flags ausentes y ambos valores explícitos.
+3. **`extraer_campos` omitido del manifest/familia pública.** El modelo lo admite para operaciones con consultas de detalle aun si la vista no se incluye (`schema.py:18-82`, `plugin.py:263-280`), pero el espejo `bot_payloads.py:289-293` no lo ofrece. **Propuesta:** añadirlo al schema del manifest y catálogo o quitarlo de la interfaz, con prueba `incluir_detalle=false` combinada con `extraer_campos`.
 4. **`incluir_json` no controla `campos`.** El flag suprime `vistas` y conserva `campos` (`plugin.py:259-268`). **Propuesta:** definir por separado `incluir_vistas` y `extraer_campos` o aclarar un contrato de datos consistente.
 
 ## Pruebas consultadas
@@ -32,7 +32,7 @@ La ruta canónica pasa por `normalize_v2_payload` también: `services/central-ap
 
 ## Referencias consultadas
 
-- `services/bot-worker/src/bot_worker/bots/siper/schema.py:18-...`
+- `services/bot-worker/src/bot_worker/bots/siper/schema.py:18-96`
 - `services/bot-worker/src/bot_worker/bots/siper/plugin.py:148-281`
 - `services/bot-worker/src/bot_worker/runtime/portals/siper.py:17-32,90-141,149-206`
 - `services/central-api/src/central_api/api/bots.py:417,574,608-618,793-817`

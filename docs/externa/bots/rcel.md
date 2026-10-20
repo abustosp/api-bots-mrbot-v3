@@ -24,7 +24,7 @@ Se necesita clave fiscal y CUIT representante en `credentials.clave` y `credenti
 | `fecha_desde` | texto, requerido; alias `desde` | Fecha real `DD/MM/AAAA`; se valida el calendario. Vacío/null/formato inválidos. |
 | `fecha_hasta` | texto, requerido; alias `hasta` | Fecha real `DD/MM/AAAA`; debe ser igual o posterior a `fecha_desde`. Vacío/null inválidos. |
 | `incluir_json` | booleano, default `true` | `true` incluye listado resumido de facturas en `data`; `false` omite la lista, sin impedir descargas. Omitir = `true`; `null` inválido. |
-| `subir_pdf` | booleano, default `true`; alias `minio_upload` | `true` publica cada PDF en los resultados; `false` conserva la descarga solo durante el trabajo y no publica el archivo. Omitir = `true`; `null` inválido. Los nombres de compatibilidad V3 para subida se normalizan al campo equivalente. |
+| `subir_pdf` | booleano, default `true` | `true` publica cada PDF en los resultados; `false` conserva la descarga solo durante el trabajo y no publica el archivo. Omitir = `true`; `null` inválido. |
 | `extraer_campos` | booleano, default `true` | `true` intenta extraer campos del PDF; `false` devuelve solo el nombre/tamaño de cada comprobante aceptado. Omitir = `true`; `null` inválido. |
 
 No se aceptan otros campos del payload. Las fechas invertidas se rechazan. Se exige al menos una salida: `incluir_json=true` o `subir_pdf=true`.

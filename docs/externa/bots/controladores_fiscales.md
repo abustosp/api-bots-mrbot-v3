@@ -4,21 +4,29 @@ Presenta archivos de controladores fiscales ante el servicio de ARCA y puede dev
 
 ## Ruta V3 y catálogo
 
-`POST /api/v3/bots/controladores_fiscales/presentar` (2 créditos). Cuerpo canónico: `{"payload": {...}, "credentials": {...}}`. Los archivos de entrada se cargan antes mediante `POST /api/v3/uploads`; en `payload.archivos` se envía cada `object_key` devuelto por la carga.
+Ruta canónica: `POST /api/v3/bots/controladores_fiscales/presentar`. Cuerpo: `{"payload": {...}, "credentials": {...}}`. Los archivos de entrada se cargan antes mediante `POST /api/v3/uploads`; en `payload.archivos` se envía cada `object_key` devuelto por la carga. El validador efectivo de la operación determina los formatos y valores admitidos; el schema de catálogo es descriptivo.
 
 ## Campos de `payload`
 
 | Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
 |---|---|---|
-| `archivos` | lista de strings, requerida, 1–50 referencias | Cada archivo cargado debe tener nombre simple con extensión `.pem` o `.zip` (sin distinguir mayúsculas). Se rechazan rutas, nombres vacíos, `.`/`..`, nombres con `/` o `\\`, nombres de más de 255 caracteres y duplicados. No admite una cadena en lugar de lista. Nulo/lista vacía inválidos. |
-| `subir_constancia` | boolean, default `true`; aliases históricos `minio_upload`, `subir_a_minio` | `false` suprime la publicación de constancias en `files[]`, pero **no evita la presentación**. Nulo en la ruta pública aplica default. |
-| `incluir_json` | boolean, default `true` | `false` omite el detalle por archivo en `result`, no los contadores globales ni las presentaciones. Nulo público aplica default. |
+| `archivos` | lista de strings, requerida, 1–50 referencias | Cada archivo cargado debe tener nombre simple con extensión `.pem` o `.zip` (sin distinguir mayúsculas). Se rechazan rutas, nombres vacíos, `.`/`..`, nombres con `/` o `\\` y nombres de más de 255 caracteres. Los duplicados se deduplican conservando la primera aparición. No admite una cadena en lugar de lista. Nulo/lista vacía inválidos. |
+| `subir_constancia` | boolean, default `true` | `false` suprime la publicación de constancias en `files[]`, pero **no evita la presentación**. Omitido aplica `true`; el `null` explícito se convierte a `false` en la normalización efectiva. |
+| `incluir_json` | boolean, default `true` | `false` omite el detalle por archivo en `data`, no los contadores globales ni las presentaciones. Omitido aplica `true`; `null` explícito se rechaza. |
 
-Si se incluyen aliases de carga, sus valores deben coincidir. En el adaptador de compatibilidad antiguo algunos booleanos se convertían por verdad/falsedad del valor, así que se recomienda enviar booleanos JSON estrictos (`true`/`false`). Los campos desconocidos se rechazan. El sufijo permitido se comprueba al validar la operación, además de los límites generales de carga.
+Los campos desconocidos se rechazan. Los booleanos deben enviarse como `true`/`false`; no use strings. El sufijo permitido se comprueba sobre el nombre del archivo cargado, además de los límites generales de carga.
 
 ## Credenciales
 
-Se requiere `credentials.cuit_representante` y `credentials.clave` para la sesión fiscal. La CUIT debe tener 11 dígitos. Se aceptan los nombres heredados `clave_representante`, `contrasena` o la alternativa cifrada `clave_encriptada`. Si falta la sesión o la clave está vacía/nula, la presentación no se ejecuta. Nunca usar credenciales reales en ejemplos.
+El objeto `credentials` puede omitirse en el envelope, pero se necesita sesión fiscal para presentar. La identidad y la contraseña no tienen default; si faltan, normalmente falla la autenticación.
+
+| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
+|---|---|---|
+| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
+| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
+| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+
+Nunca usar credenciales reales en ejemplos.
 
 ## Ejemplo ficticio completo
 
@@ -40,4 +48,15 @@ Primero se cargan dos archivos de prueba y se sustituyen estos ejemplos por los 
 
 ## Resultado y parciales
 
-`result` incluye `archivos_presentados`, `total_archivos`, `total_exitosos` y `total_errores`. Con `incluir_json=true`, `detalle[]` informa por archivo estado, nombre de constancia y, cuando corresponde, hash/tamaño. Las constancias exitosas se publican en `files[]` solo si `subir_constancia=true`. Si unos archivos se presentan y otros fallan, el trabajo queda `PARCIAL`; si todos fallan, `ERROR`. Un `ERROR` de transporte tampoco prueba que no haya habido efecto: si la conexión se corta después de la confirmación, comprobar el portal antes de reintentar.
+`result` es el estado `OK`, `PARCIAL` o `ERROR`. `data` contiene:
+
+| Clave | Tipo / condición |
+|---|---|
+| `operacion` | string, `presentar`. |
+| `archivos_presentados` | entero: cantidad de archivos procesados con resultado, incluidos los que fallaron. |
+| `total_archivos`, `total_exitosos`, `total_errores` | enteros; `total_exitosos` cuenta las presentaciones exitosas. |
+| `detalle` | lista de objetos, solo con `incluir_json=true`; cada uno tiene `archivo` y `estado` strings, `constancia` string o null, y `sha256` string/`size_bytes` entero si se publicó. |
+
+Las constancias exitosas se publican en `files[]` solo si `subir_constancia=true`. Si unos archivos se presentan y otros fallan, `result=PARCIAL`; si todos fallan, `result=ERROR`. Un error de transporte tampoco prueba que no haya habido efecto: si la conexión se corta después de confirmar, comprobar el portal antes de reintentar.
+
+El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.

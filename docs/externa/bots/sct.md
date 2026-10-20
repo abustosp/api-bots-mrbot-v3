@@ -9,7 +9,7 @@ Catálogo: `sct`, operación `consultar`.
 - Canónica: `POST /api/v3/bots/sct/consultar`.
 - Alias V3: `POST /api/v3/sct/consulta`.
 
-Cuerpo: `{ "payload": { ... }, "credentials": { ... } }`. La aceptación devuelve `job_id`; consultar estado/resultado en `/api/v3/jobs/{job_id}`.
+Cuerpo canónico: `{ "payload": { ... }, "credentials": { ... } }`; el alias de compatibilidad recibe los campos en un cuerpo plano. No mezclar ambas formas. La aceptación devuelve `job_id`; consultar estado/resultado en `/api/v3/jobs/{job_id}`. Convenciones compartidas de credenciales: [API pública](../api.md).
 
 ## Credenciales
 
@@ -20,13 +20,13 @@ Se requiere clave fiscal y CUIT representante en `credentials.clave` y `credenti
 | Campo | Tipo, requerido y default | Efecto y tratamiento de omisión/null/vacío/false |
 |---|---|---|
 | `representado_cuit` | texto requerido; alias `cuit` | CUIT de 11 dígitos, normaliza espacios, guiones, puntos y `/`. Vacío/null inválidos. |
-| `secciones` | lista no vacía de textos, requerida | Valores: `vencimientos`, `deudas`, `ddjj_pendientes`. Se recortan espacios, se ignora mayúsculas y se deduplica/ordena. Vacío/null o valor desconocido rechaza. Define qué pestañas consultar. |
-| `formatos` | lista no vacía de textos, requerida | Valores: `xlsx`, `csv`, `pdf`; se recortan espacios, normalizan a minúsculas, deduplican/ordenan. Vacío/null o valor desconocido rechaza. |
+| `secciones` | lista de textos opcional; default: las tres secciones | Valores: `vencimientos`, `deudas`, `ddjj_pendientes`. Se recortan espacios, se ignora mayúsculas y se deduplica/ordena. Lista vacía/null o valor desconocido rechaza. En la API canónica, si se omite esta clave, la normalización agrega las tres secciones. |
+| `formatos` | lista de textos opcional; default `['xlsx']` | Valores: `xlsx`, `csv`, `pdf`; se recortan espacios, normalizan a minúsculas, deduplican/ordenan. Lista vacía/null o valor desconocido rechaza. En la API canónica, si se omite esta clave, se agrega `['xlsx']`. |
 | `incluir_json` | booleano, default `true` | `true` incluye el listado `reportes`; `false` lo omite. `null` inválido. |
-| `subir` | booleano, default `true` | `true` publica archivos; `false` no publica. Omitir = `true`; `null` inválido. Alias V3 de subida: `carga_minio`, `minio_upload` y `archivo_historico_minio`. |
+| `subir` | booleano, default `false` | `true` publica archivos; `false` no publica. `null` inválido. En la API V3, si se omite `subir`, la normalización lo establece en `false`; el default efectivo API es `false`. Envíelo explícitamente para controlar la publicación. |
 | `omitir_vacias` | booleano, default `true` | Omite una sección solo si el portal informa explícitamente cero elementos. `false` intenta descargarla de todos modos. Omitir = `true`; `null` inválido. |
 
-En la forma V3 compatible también se aceptan las banderas históricas `vencimientos_{excel,xlsx,csv,pdf}_minio`, `deudas_{excel,xlsx,csv,pdf}_minio` y `ddjj_pendientes_{excel,xlsx,csv,pdf}_minio`; una bandera verdadera incorpora esa sección y formato. Si se envían todas ausentes o falsas, la normalización histórica selecciona las tres secciones con XLSX y desactiva la publicación de archivos. No enviar valores contradictorios entre forma moderna y banderas antiguas.
+La normalización de payload se aplica también a la ruta canónica. Si no se envían opciones de sección/formato, el comportamiento efectivo es consultar las tres secciones en formato XLSX; la publicación queda desactivada (`subir=false`). Para controlar selección y publicación, enviar explícitamente `secciones`, `formatos` y `subir`. Use los nombres canónicos y no mezcle grafías alternativas, pues una forma antigua puede eliminarse antes de validar.
 
 Se exige al menos una salida: `incluir_json=true` o `subir=true`.
 

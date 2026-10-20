@@ -15,7 +15,7 @@ Consulte `GET /api/v3/bots` y `GET /api/v3/bots/{bot}` para ver los campos publi
 | Booleano | `true` o `false` | Envíe un booleano JSON, no el texto `"true"` o `"false"`. |
 | Lista vacía | `[]` | No equivale a una lista omitida. Revise si la operación exige uno o más elementos. |
 
-Use los nombres exactos y los tipos publicados. No incluya propiedades con nombres parecidos esperando que se traduzcan. Mantenga separados el cuerpo canónico (`payload` y `credentials`) y los cuerpos planos de compatibilidad cuando el catálogo ofrezca ambos.
+Use los nombres exactos y los tipos publicados. No incluya propiedades con nombres parecidos esperando que se traduzcan. Mantenga separados el cuerpo canónico (`payload` y `credentials`) y los cuerpos planos de compatibilidad cuando el catálogo ofrezca ambos. Para opciones que afecten descargas, presentaciones u otros efectos, envíe explícitamente el valor deseado y no deduzca el comportamiento de la omisión, `null` o `false` por analogía con otro campo.
 
 ## Enviar un archivo de entrada
 
@@ -39,9 +39,23 @@ Ejemplo de ticket ficticio para un TXT de VEP:
 }
 ```
 
-`filename` y `size_bytes` son obligatorios; el tamaño debe ser positivo. `campo` se predetermina a `archivos` y `content_type` a `application/octet-stream` si se omiten. `cuit` y `sha256` son opcionales. Envíe el campo correcto para el par bot/operación: por ejemplo, VEP acepta `archivo` o `archivo_excel`; la carga de IVA usa campos como `liv_cbte`, `liv_alicuota`, `lic_cbte`, `lic_alicuota` y los campos `csv_*`; controladores fiscales usa `archivos`. La operación puede requerir campos relacionados además del archivo.
+`filename` y `size_bytes` son obligatorios; el tamaño debe ser positivo y se debe declarar el tamaño real del archivo que enviará. `campo` se predetermina a `archivos` y `content_type` a `application/octet-stream` si se omiten. Si la operación no admite `archivos`, indique `campo` explícitamente. `cuit` y `sha256` son opcionales. La API observada no compara el tamaño declarado ni el hash opcional con los bytes cargados, por lo que estos metadatos no confirman la integridad del archivo. Envíe el campo correcto para el par bot/operación: por ejemplo, VEP acepta `archivo` o `archivo_excel`; la carga de IVA usa campos como `liv_cbte`, `liv_alicuota`, `lic_cbte`, `lic_alicuota` y los campos `csv_*`; controladores fiscales usa `archivos`. La operación puede requerir campos relacionados además del archivo.
 
-La respuesta incluye `upload_url`, `upload_url_expires_in`, `required_headers`, `object_key` y `expires_at`, además de identificadores del ticket. Use el valor de `upload_url` recibido y envíe los bytes originales con los headers indicados, sin sustituir el `Content-Type`:
+La respuesta incluye `upload_url`, `upload_url_expires_in`, `required_headers`, `object_key` y `expires_at`, además de identificadores del ticket. Ejemplo con valores ficticios y marcadores para los valores que debe copiar de su respuesta:
+
+```json
+{
+  "upload_id": "0190f0c0-7f5b-7b2e-9f7e-123456789abe",
+  "object_key": "<object_key devuelto por el ticket>",
+  "bucket": "<bucket indicado>",
+  "upload_url": "<upload_url devuelta>",
+  "upload_url_expires_in": 900,
+  "expires_at": "2026-10-20T13:00:00Z",
+  "required_headers": {"Content-Type": "text/plain"}
+}
+```
+
+Use el valor de `upload_url` recibido y envíe los bytes originales con los headers indicados, sin sustituir el `Content-Type`:
 
 ```sh
 curl -X PUT "$UPLOAD_URL" \

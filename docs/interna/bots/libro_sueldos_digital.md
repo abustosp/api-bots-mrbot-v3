@@ -8,7 +8,7 @@
 
 ## Resultados y fallos parciales
 
-`result` incorpora CUIT del empleador, rango, `periodos_solicitados`, `periodos_encontrados`, `liquidaciones_encontradas`, `liquidaciones_descargadas` y períodos con resultados. `detalle[]` opcional por liquidación contiene período, número, nombre de PDF y, si se publicó, hash, tamaño y `object_key`; cada fallo queda en el registro. No encontrar liquidaciones hace fallar; errores en todas las liquidaciones encontradas dan `ERROR`; mezcla éxito/error da `PARCIAL`, conserva artefactos exitosos; éxito completo da `OK`. `subir_archivos=false` suprime publicación pero no lectura/descarga; `incluir_json=false` omite detalle, no contadores.
+El estado superior `result` es `OK`/`PARCIAL`/`ERROR`; `data` incorpora CUIT del empleador, rango, `periodos_solicitados`, `periodos_encontrados`, `liquidaciones_encontradas`, `liquidaciones_descargadas` y períodos con resultados. `data.detalle[]` opcional por liquidación contiene período, número, nombre de PDF y, si se publicó, hash, tamaño y `object_key`; cada fallo queda en el registro. No encontrar liquidaciones hace fallar; errores en todas las liquidaciones encontradas dan `ERROR`; mezcla éxito/error da `PARCIAL`, conserva artefactos exitosos; éxito completo da `OK`. `subir_archivos=false` suprime publicación pero no lectura/descarga; `incluir_json=false` omite detalle, no contadores.
 
 ## Catálogo, referencias y pruebas
 

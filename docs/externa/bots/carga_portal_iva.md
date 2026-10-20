@@ -13,7 +13,7 @@ Importa comprobantes de ventas/compras y/o datos de apertura en el libro IVA del
 
 | Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
 |---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`. | Omitir, `null`, vacío o `false`: rechazo. V3 exige 11 dígitos sin separadores. |
+| `representado_cuit` | Texto, requerido. Alias: `cuit`. | Omitir, `null`, vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. |
 | `periodo` | Texto, requerido, formato `AAAAMM`. | Omitir, `null`, vacío o `false`: rechazo. Mes 01–12; no se admite período futuro al validar. |
 | `denominacion` | Texto, opcional, default `""`, máximo 128 caracteres. | Omitir: queda vacío. `null` o `false`: rechazo. Cadena vacía permitida; no altera la carga. |
 | `operaciones_ng_o_e` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `false`: desactivado. |

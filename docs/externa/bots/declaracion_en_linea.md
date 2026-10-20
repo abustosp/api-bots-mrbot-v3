@@ -4,24 +4,32 @@ Consulta declaraciones juradas (DDJJ), VEP e información de nómina ya generado
 
 ## Ruta V3 y catálogo
 
-`POST /api/v3/bots/declaracion_en_linea/consultar` (2 créditos). El alias de compatibilidad `/declaracion-en-linea/consulta` apunta a esta operación. Cuerpo canónico: `{"payload": {...}, "credentials": {...}}`. En la ruta V3, CUIT debe ser exactamente 11 dígitos sin separadores; aunque la normalización interna acepta separadores, el patrón público es estricto. Los períodos públicos son seis dígitos `AAAAMM`.
+Ruta canónica: `POST /api/v3/bots/declaracion_en_linea/consultar`. El alias plano `/declaracion-en-linea/consulta` apunta a esta operación, pero aplica su propio modelo. Cuerpo canónico: `{"payload": {...}, "credentials": {...}}`. La ruta genérica sigue la normalización y validación efectivas de la operación: limpia separadores comunes de CUIT y normaliza períodos `AAAAMM`, `MM/AAAA`, `AAAA/MM`, `MM-AAAA` y `AAAA-MM` a `AAAAMM`.
 
 ## Campos de `payload`
 
 | Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
 |---|---|---|
-| `representado_cuit` | string 11 dígitos, opcional; aliases de compatibilidad `cuit`, `cuit_representado` | Si se omite, es nulo o vacío, se consulta el CUIT de la sesión. Si se informa, debe corresponder al contribuyente que se desea consultar. |
-| `representado_nombre` | string máximo 128; default `""` | Nombre de referencia para los nombres de archivos; vacío/nulo queda vacío y no impide la consulta. |
-| `periodo_desde`, `periodo_hasta` | strings requeridos, `AAAAMM`, mes `01`–`12` | Rango inclusivo. Si se envían invertidos, la validación los intercambia. Aunque algunos canales heredados normalizan otros formatos, el contrato público V3 requiere seis dígitos. El rango inclusivo está limitado internamente a 1200 períodos; si se pide uno más largo, se procesa solo el máximo de 1200 sin error explícito. |
-| `incluir_json` | boolean, default `true` | `false` omite el arreglo de detalle por período, no el resumen ni los archivos. Nulo público aplica el default. |
-| `subir_archivos` | boolean, default `true`; aliases `carga_minio`, `minio_upload`, `archivo_historico_minio` | `false` evita publicar PDFs/XLS/JSON en `files[]`, aunque se consultan y descargan durante la ejecución. Nulo público aplica el default. |
-| `proxy_request`, `proxy` | boolean/string legado, opcional | Se descartan/no permiten elegir la conexión. No cambian el resultado. |
+| `representado_cuit` | string nullable, opcional; aliases `cuit`, `cuit_representado` | Si se omite, es `null` o vacío, se consulta el CUIT de la sesión. Si se informa, se limpian separadores y debe quedar en 11 dígitos. |
+| `representado_nombre` | string máximo 128; default `""` | Nombre de referencia para los nombres de archivos. Omitido queda vacío; cadena vacía es válida; `null` explícito se rechaza. |
+| `periodo_desde`, `periodo_hasta` | strings requeridos; período válido normalizado a `AAAAMM`, mes `01`–`12` | Rango inclusivo. Se aceptan `AAAAMM`, `MM/AAAA`, `AAAA/MM`, `MM-AAAA`, `AAAA-MM`; invertidos se intercambian. `null`/vacío se rechaza. Se generan hasta 1200 períodos y el resto se trunca sin error explícito. |
+| `incluir_json` | boolean, default `true` | `false` omite `detalle`, no resumen ni archivos. Omitido aplica `true`; `null` explícito se rechaza. |
+| `subir_archivos` | boolean, default `true` | `false` evita publicar PDFs/XLS/JSON en `files[]`, aunque se consultan y descargan. Omitido aplica `true`; `null` explícito se rechaza. |
+| `proxy_request`, `proxy` | boolean/string nullable, opcional, legado | Se descartan/no permiten elegir conexión. `null` permitido; no cambian el resultado. |
 
-Se requiere al menos una salida: `incluir_json=true` o `subir_archivos=true`. Campos desconocidos no reconocidos por compatibilidad se rechazan en la validación del bot.
+Se requiere al menos una salida: `incluir_json=true` o `subir_archivos=true`. Campos desconocidos se rechazan por la validación de esta operación. El schema del catálogo es descriptivo y no debe confundirse con el DTO del alias plano.
 
 ## Credenciales
 
-Se requiere `credentials.cuit_representante` (exactamente 11 dígitos en la ruta pública) y `credentials.clave` para ingresar al servicio fiscal. Se aceptan `clave_representante` o `clave_encriptada` como credenciales heredadas/alternativa cifrada. `cuit_representante` también sirve como CUIT consultado si se omite `representado_cuit`. Sin credenciales válidas no se abre el servicio. No usar datos reales en ejemplos.
+El objeto `credentials` puede omitirse en el envelope, pero se necesita una sesión fiscal. Si `representado_cuit` no se informa, el CUIT de sesión se usa como representado. La falta de identidad o contraseña normalmente causa fallo de autenticación; no se aplican defaults.
+
+| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
+|---|---|---|
+| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
+| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
+| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+
+No usar datos reales en ejemplos.
 
 ## Ejemplo ficticio
 
@@ -46,6 +54,18 @@ Ruta: `POST /api/v3/bots/declaracion_en_linea/consultar`.
 
 ## Resultado
 
-`result` contiene CUIT, período inicial/final, cantidad de períodos consultados y `periodos_sin_ddjj`. Si existe al menos una DDJJ en el rango, la operación informa resultados disponibles; si no existe ninguna, falla. La falta de DDJJ en algunos períodos se lista y no descarta resultados de otros períodos.
+`result` es el estado `OK`, `PARCIAL` o `ERROR`; el contenido está en `data`:
 
-Con `incluir_json=true`, `detalle[]` puede incluir período, nombres DDJJ/VEP, estado de VEP, indicador pagado, cabecera, secciones y advertencias. Según lo que exista en el portal se publican en `files[]` PDF de DDJJ, PDF de VEP, XLS de nómina y JSON de DDJJ. Un archivo ausente aparece vacío/se omite, no se inventa. `subir_archivos=false` suprime `files[]`; `incluir_json=false` suprime detalle, no los archivos.
+| Clave de `data` | Tipo / condición |
+|---|---|
+| `operacion` | string, `consultar`. |
+| `representado_cuit`, `periodo_desde`, `periodo_hasta` | strings normalizados. |
+| `periodos_consultados` | entero. |
+| `periodos_sin_ddjj` | lista de strings. |
+| `detalle` | lista de objetos, presente con `incluir_json=true`; cada registro contiene `periodo`, `ddjj`, `vep` strings; `estado_vep` string, `pagado` boolean, `vep_datos` objeto; `cabecera`/`secciones` objetos y `advertencias` lista de strings cuando existen. |
+
+Si existe al menos una DDJJ en el rango, el estado es `OK` aunque haya faltantes; si no existe ninguna, falla. Los períodos sin DDJJ se listan sin descartar resultados de otros períodos.
+
+Según lo que exista en el portal se publican en `files[]` PDF de DDJJ, PDF de VEP, XLS de nómina y JSON de DDJJ. Un archivo ausente aparece vacío/se omite, no se inventa. `subir_archivos=false` suprime `files[]`; `incluir_json=false` suprime `detalle`, no los archivos.
+
+El catálogo en `GET /api/v3/bots` publica `costo_creditos` como metadata informativa. La creación actual reserva una unidad de cuota por trabajo; consultar disponibilidad y límites en la API, no interpretar la metadata como cargo efectivo.

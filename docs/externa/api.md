@@ -4,7 +4,7 @@
 
 ## Base, autenticación y catálogo
 
-Las solicitudes de cliente usan el prefijo `/api/v3`. La descripción interactiva está disponible en `/docs`, su versión de lectura en `/redoc` y el catálogo de contratos en `/openapi.json`.
+Las solicitudes de cliente usan el prefijo `/api/v3`. En los ejemplos, `API_BASE` es la dirección base del servicio sin añadir `/api/v3`, `API_USER` es el correo o alias de la cuenta y `API_KEY` es la API key de la cuenta, no una clave fiscal de un organismo. La descripción interactiva está disponible en `/docs`, su versión de lectura en `/redoc` y el catálogo de contratos en `/openapi.json`.
 
 La mayoría de las operaciones requiere autenticación. Puede usar HTTP Basic con el correo o alias de su cuenta como usuario y su API key como contraseña:
 
@@ -15,11 +15,11 @@ curl --user "${API_USER}:${API_KEY}" \
 
 También se admite la credencial V1 `X-API-Key`; `email` puede enviarse como identidad adicional. No use un token Bearer. La clave pública para proteger credenciales de ciertas operaciones se consulta sin autenticación en `GET /api/v3/seguridad/clave-publica`.
 
-Descubra bots y operaciones con `GET /api/v3/bots`; consulte el detalle de una clave con `GET /api/v3/bots/{bot}`. La disponibilidad efectiva y los campos dependen de la operación. Revise sus campos, valores predeterminados, tipos, requisitos de archivo y opciones antes de enviar un pedido. Cada creación aceptada reserva una unidad de uso. `costo_creditos` es un dato informativo del catálogo, no una garantía de cálculo proporcional del consumo por bot; consulte el resumen de cuenta para el uso informado.
+Descubra bots y operaciones con `GET /api/v3/bots`; consulte el detalle de una clave con `GET /api/v3/bots/{bot}`. La disponibilidad efectiva y los campos dependen de la operación. Revise sus campos, valores predeterminados, tipos, requisitos de archivo y opciones antes de enviar un pedido. Cada ejecución nueva aceptada reserva una unidad de uso. `costo_creditos` es informativo y no garantiza un cálculo proporcional del consumo por bot. Consulte el resumen de cuenta para el uso informado. El catálogo señala `comprobantes` como alias deprecado de `mis_comprobantes`. Prefiera el nombre canónico.
 
 ## Crear una ejecución
 
-La forma canónica es `POST /api/v3/bots/{bot}/{operacion}`. El cuerpo separa los datos de la operación (`payload`) de las credenciales (`credentials`). Por ejemplo, consulta ficticia de un CUIT:
+La forma canónica es `POST /api/v3/bots/{bot}/{operacion}`. En el cuerpo publicado, incluya `payload` como objeto. `credentials` lleva solo las credenciales que requiera esa operación; su omisión, valor nulo y propiedades dependen del contrato de la operación. El cuerpo separa los datos de la operación (`payload`) de las credenciales (`credentials`). Por ejemplo, consulta ficticia de un CUIT:
 
 ```sh
 curl --user "${API_USER}:${API_KEY}" \
@@ -43,15 +43,16 @@ Use el identificador para consultar el resultado. La respuesta de creación tamb
 
 ### Reintentos e idempotencia
 
-Envíe `Idempotency-Key` en cada creación, con una clave única por intención de pedido, y reutilice la misma clave solo al reintentar exactamente el mismo contenido. Con la misma clave y contenido se reutiliza la ejecución; si el contenido cambia, puede recibir `409 Conflict`. El header es opcional en el servicio observado. Si no lo envía, un reintento puede crear otra ejecución. Las claves persistidas tienen una retención limitada, por lo que no use esta función como registro permanente.
+Envíe `Idempotency-Key` en cada creación, con una clave única por intención de pedido, y reutilice la misma clave solo al reintentar exactamente el mismo contenido. Dentro de la retención de la clave, el mismo contenido reutiliza la ejecución; si el contenido cambia, puede recibir `409 Conflict`. El header es opcional en el servicio observado. Si no lo envía, un reintento puede crear otra ejecución. Las claves persistidas tienen una retención limitada, por lo que no use esta función como registro permanente.
 
-Las rutas de compatibilidad históricas, cuando aparecen en el catálogo, usan cuerpos planos y nombres de campo propios. No mezcle ese formato con el cuerpo canónico `payload`/`credentials`. Para integraciones nuevas, prefiera la operación canónica publicada en el catálogo.
+Las rutas de compatibilidad históricas, cuando aparecen en el catálogo, usan cuerpos planos y nombres de campo propios. Por ejemplo, `POST /api/v3/consulta_cuit/individual` recibe `{"cuit":"20123456786"}` en el cuerpo, no `payload`/`credentials`. No mezcle ambos formatos. Para integraciones nuevas, prefiera la operación canónica publicada en el catálogo.
 
 ## Consultar ejecuciones y resultados
 
 - `GET /api/v3/jobs/{job_id}` consulta una ejecución propia.
 - `GET /api/v3/jobs` lista ejecuciones propias y puede paginar con cursor.
 - `GET /api/v3/jobs/cola` consulta la cola propia.
+- `GET /api/v3/usuarios/me` consulta la identidad y el estado de la cuenta.
 - `POST /api/v3/jobs/estado:lote` consulta hasta 200 identificadores. La respuesta HTTP puede ser `200` aunque algún elemento tenga error; revise cada entrada de `items`.
 
 Estados que puede encontrar: `PENDIENTE`, `ASIGNADO`, `CORRIENDO`, `COMPLETO`, `FALLIDO` y `CANCELADO`. En la vista compatible, `ASIGNADO` puede aparecer como `PENDIENTE` y un fallo puede aparecer como `COMPLETO` con `result: "ERROR"`. No infiera éxito a partir de `COMPLETO`: revise siempre `result` y `status_detail`. El resultado final puede ser `OK`, `PARCIAL` o `ERROR`; no está disponible mientras la ejecución sigue activa.

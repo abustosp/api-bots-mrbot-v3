@@ -19,19 +19,23 @@ Ruta V3: `POST /api/v3/bots/liquidacion_granos/consultar`. Ruta compatible: `POS
 | `lsg_emitidas` | booleano; opcional; `true` | Incluye LSG emitidas. `false` excluye esa categoría; `null` se rechaza. |
 | `lsg_recibidas` | booleano; opcional; `true` | Incluye LSG recibidas. `false` excluye esa categoría; `null` se rechaza. |
 | `certificados_deposito` | booleano; opcional; `true` | Incluye certificados de depósito. `false` excluye esa categoría; `null` se rechaza. |
-| `subir_archivos` | booleano; opcional; `true` | Si es `true`, adjunta las planillas y comprobantes producidos. `false` evita adjuntarlos al resultado, pero no evita consultar ni generar los archivos durante el trabajo. Omitido equivale a `true`; `null` se rechaza. `minio_upload`, `carga_minio` y `archivo_historico_minio` son nombres compatibles de esta opción. |
+| `subir_archivos` | booleano; opcional; `true` | Si es `true`, adjunta las planillas y comprobantes producidos. `false` evita adjuntarlos al resultado, pero no evita consultar ni generar los archivos durante el trabajo. Omitido o `null` equivale al default `true`; un booleano `false` desactiva la subida. |
 
-Debe quedar al menos una de las cinco categorías en `true`; si todas son `false`, se rechaza. Los campos desconocidos se rechazan. El alias `subir_a_minio` no forma parte del contrato V3.
+Los campos booleanos de sección en `null` se rechazan. La opción de subida es excepción: `subir_archivos: null` se trata como omitido y recupera el default `true`. Debe quedar al menos una de las cinco categorías en `true`; si todas son `false`, se rechaza. Los campos desconocidos se rechazan.
 
 ## Credenciales
 
 Se requieren credenciales fiscales funcionales y autorización de ARCA sobre el CUIT consultado.
 
-| Campo en `credentials` | Tipo; requerido; default | Omisión, `null` o vacío |
+| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
 |---|---|---|
-| `cuit_representante` | texto; requerido operativamente; sin default | CUIT de la cuenta de acceso; `cuit_inicio_sesion` es alias compatible. Si falta o está vacío, el inicio de sesión no podrá completarse. |
-| `clave` | texto; requerida operativamente; sin default | Clave de acceso; se aceptan `clave_representante` o `contrasena` como alias. Faltar o estar vacía equivale a no aportar clave. |
-| `clave_encriptada` | texto cifrado; alternativa opcional | Se acepta mediante el mecanismo de cifrado de la API. Vacía o `null` equivale a ausencia; un valor no descifrable se rechaza. Si se combina con una clave en texto, deben coincidir. |
+| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
+| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
+| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
+| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
+| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
 
 Si se envían alias repetidos con valores distintos, la solicitud se rechaza. Mantenga las credenciales fuera de `payload`.
 

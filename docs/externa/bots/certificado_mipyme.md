@@ -12,7 +12,7 @@ Inicia sesión, selecciona el CUIT representado y descarga su certificado MiPyME
 
 | Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
 |---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Omitir, `null`, vacío o `false`: rechazo. V3 exige 11 dígitos sin separadores. Si se informan varios alias, deben coincidir. |
+| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Omitir, `null`, vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. Si se informan varios alias, deben coincidir. |
 | `subir` | Booleano, opcional, default `true`. | Omitir: publica el PDF recuperable en el resultado. `null`, vacío o valor no booleano: rechazo. `false`: no lo publica ni informa huella/tamaño. |
 
 ## Credenciales

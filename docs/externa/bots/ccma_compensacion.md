@@ -16,12 +16,12 @@ Consulta la cuenta corriente de Monotributistas y Autónomos, prepara una propue
 
 | Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
 |---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Omitir o `null`: rechazo. V3 exige 11 dígitos sin separadores. Vacío o `false`: inválido. |
+| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Omitir o `null`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. Vacío o `false`: inválido. |
 | `compensar` | Booleano, default `true`. | Omitir: intenta preparar reafectaciones. `null`: se trata como omitido, por tanto `true`. Vacío: inválido. `false`: no ejecuta el paso de reafectación. |
 | `confirmar` | Booleano, default `false`. | Omitir o `null`: `false`. Vacío: inválido. `false`: cancela las propuestas, sin modificación confirmada. `true`: confirma las reafectaciones aplicadas y puede cambiar la cuenta corriente. |
 | `incluir_movimientos` | Booleano, default `false`. Alias: `movimientos`. | Omitir: no solicita movimientos. `null` o vacío: inválido. `false`: omite la lista, salvo que `incluir_pdf` active los movimientos automáticamente. |
 | `incluir_pdf` | Booleano, default `false`. Alias: `pdf`. | Omitir: no genera PDF. `null` o vacío: inválido. `false`: no genera PDF. `true`: genera PDF y activa también `incluir_movimientos`. |
-| `subir` | Booleano, default `true`. Alias: `carga_minio`, `minio_upload`. | Omitir: publica el PDF si se pidió. `null` o vacío: inválido. `false`: no publica el PDF; no afecta la reafectación. |
+| `subir` | Booleano, default `true`. | Omitir: publica el PDF si se pidió. `null` o vacío: inválido. `false`: no publica el PDF; no afecta la reafectación. |
 
 ## Credenciales
 

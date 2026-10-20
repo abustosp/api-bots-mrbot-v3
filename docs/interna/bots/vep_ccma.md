@@ -30,7 +30,7 @@ La familia pública `services/central-api/src/central_api/api/bot_payloads.py:30
 
 ## Pruebas consultadas
 
-`services/bot-worker/tests/test_portal_vep_ccma.py:58-76,123-204,207-...` cubre filtros, selección, límite al click final y PDF/QR; también se revisaron pruebas del plugin. No se ejecutaron portales ni se usaron credenciales reales.
+`services/bot-worker/tests/test_portal_vep_ccma.py:58-76,123-204,207-216` cubre filtros, selección, límite al click final y PDF/QR; también se revisaron pruebas del plugin. No se ejecutaron portales ni se usaron credenciales reales.
 
 ## Referencias consultadas
 
@@ -41,5 +41,5 @@ La familia pública `services/central-api/src/central_api/api/bot_payloads.py:30
 - `services/central-api/src/central_api/api/bot_compat.py:107`
 - `services/central-api/src/central_api/security/credentials.py:74-114,227-263`
 - `services/central-api/src/central_api/api/bot_payloads.py:304-310,434-438,510`
-- `services/bot-worker/tests/test_portal_vep_ccma.py:58-76,123-204,207-...`
+- `services/bot-worker/tests/test_portal_vep_ccma.py:58-76,123-204,207-216`
 - `services/bot-worker/tests/test_vep_ccma_plugin.py`

@@ -20,8 +20,8 @@ Retorna rango, CUIT, número de períodos con DDJJ y `periodos_sin_ddjj`. `detal
 ## Discrepancias concretas
 
 1. El esquema canónico acepta/normaliza varios formatos de período; el esquema OpenAPI del catálogo anuncia solo `AAAAMM` (`services/central-api/src/central_api/api/bot_payloads.py:71-73,168-169`). La ruta genérica no aplica ese DTO antes de ejecutar, de modo que la publicación describe una restricción más estrecha que el comportamiento real. Alinear la documentación con los formatos normalizados.
-2. El rango se trunca a 1200 meses (`schema.py:72-93`) sin error ni aviso. La respuesta devuelve rango de entrada normalizado, no indica que se descartó la cola del rango. Propuesta: rechazar rangos largos o exponer `periodos_procesados`/warning con límite explícito.
-3. La ruta genérica V3 permite enviar períodos invertidos al modelo público; la ejecución los intercambia. Reflejar esa normalización en contrato o validar/rechazar tempranamente para evitar sorpresas.
+2. El rango se trunca a 1200 meses (`services/bot-worker/src/bot_worker/bots/declaracion_en_linea/schema.py:72-93`) sin error ni aviso. La respuesta devuelve rango de entrada normalizado, no indica que se descartó la cola del rango. Propuesta: rechazar rangos largos o exponer `periodos_procesados`/warning con límite explícito.
+3. El descriptor del catálogo no representa que el esquema efectivo acepta períodos invertidos y los intercambia (`services/bot-worker/src/bot_worker/bots/declaracion_en_linea/schema.py:72-93`). La ruta genérica no aplica ese DTO descriptivo antes de validar; documentar la normalización canónica o decidir rechazar rangos invertidos.
 4. La relación entre `incluir_json` y `subir_archivos` (al menos uno true) no está expresada por el esquema OpenAPI del catálogo, que lista ambos booleanos independientes (`services/central-api/src/central_api/api/bot_payloads.py:165-171`). Añadir restricción cruzada a la descripción/esquema publicado.
 5. Algunos alias upload existen en schema, pero OpenAPI central solo describe `subir_archivos`; los aliases son útiles en compatibilidad, no como campos canónicos V3.
 

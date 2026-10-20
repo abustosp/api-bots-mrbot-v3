@@ -2,7 +2,7 @@
 
 ## Flujo esquema → plugin → portal
 
-1. **Esquema.** `services/bot-worker/src/bot_worker/bots/srt/schema.py:18-87` normaliza CUITs individuales/lote y define flags; `:96-...` define la entrada. La lista debe contener 1–50 CUIT, sin duplicados tras normalización.
+1. **Esquema.** `services/bot-worker/src/bot_worker/bots/srt/schema.py:18-87` normaliza CUITs individuales/lote, define flags y publica la entrada. La lista debe contener 1–50 CUIT, sin duplicados tras normalización.
 2. **Plugin.** `services/bot-worker/src/bot_worker/bots/srt/plugin.py:158-219` valida, requiere credenciales y abre el servicio; configura captcha SRT y consulta cada CUIT; `:221-292` acumula registros y errores, serializa un JSON consolidado y opcionalmente publica el artefacto.
 3. **Portal real.** `services/bot-worker/src/bot_worker/runtime/portals/srt.py:15-20` fija rutas; `:23-194` navega el servicio autenticado, consulta cada CUIT y extrae estado/mensaje/datos. La entrada del servicio se hace por navegación interna después de la autenticación, no por URL pública de consulta directa (`:81-127`).
 
@@ -20,7 +20,7 @@ La familia de payloads del catálogo es `services/central-api/src/central_api/ap
 
 ## Discrepancias concretas y propuestas (sin implementar)
 
-1. **Manifest y modelo difieren en campos requeridos.** El manifiesto requiere solo operación aunque el modelo exige lista de CUIT (`schema.py:18-87` y `:...`). La familia central publica lista de entrada y flags, pero no sustituye la validación (`bot_payloads.py:294-297`). **Propuesta:** generar schema del modelo para publicarlo con required, min/max y defaults.
+1. **Manifest y modelo difieren en campos requeridos.** El manifiesto requiere solo operación aunque el modelo exige lista de CUIT (`schema.py:18-87`). La familia central publica lista de entrada y flags, pero no sustituye la validación (`bot_payloads.py:294-297`). **Propuesta:** generar schema del modelo para publicarlo con required, min/max y defaults.
 2. **Truncamiento no conserva JSON válido.** Se corta una cadena JSON serializada por longitud (`plugin.py:272-275`), dejando archivo potencialmente inválido. **Propuesta:** limitar cantidad de filas/bytes antes de serializar con metadata de truncamiento, o particionar el resultado.
 3. **Semántica de estados.** `SIN_AFILIACION_VIGENTE` cuenta como consulta correcta (`plugin.py:266-270`), mientras estados de error pueden provenir de portal no disponible. **Propuesta:** publicar enums documentados y distinguir “sin afiliación” de éxito con resultado regulatorio.
 4. **Credenciales humanas/captcha son dependencias del servicio.** La sesión ARCA y captcha de formulario SRT son pasos separados (`plugin.py:187-203`). **Propuesta:** telemetría no sensible por etapa y pruebas contractuales de timeouts/fallo captcha sin exponer datos.
@@ -31,7 +31,7 @@ La familia de payloads del catálogo es `services/central-api/src/central_api/ap
 
 ## Referencias consultadas
 
-- `services/bot-worker/src/bot_worker/bots/srt/schema.py:18-...`
+- `services/bot-worker/src/bot_worker/bots/srt/schema.py:18-87`
 - `services/bot-worker/src/bot_worker/bots/srt/plugin.py:158-292`
 - `services/bot-worker/src/bot_worker/runtime/portals/srt.py:15-194`
 - `services/central-api/src/central_api/api/bots.py:418-438`

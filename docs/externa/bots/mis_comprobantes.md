@@ -23,7 +23,7 @@ Los campos marcados `consultar/historial` no se usan por `solicitar`; los campos
 | `puntos_venta_recibidos` | lista de enteros o textos; opcional; `null` | Igual que el campo anterior, aplicado a recibidos. Omitido o `null`: sin filtro. Lista vacía: sin filtro. |
 | `timeout_mc` | entero de 1 a 86.400 segundos; opcional; efectivo por defecto 30 | Tiempo de espera de la descarga/consulta. Omitido o `null`: 30 segundos. `0`, vacío, decimal o fuera del rango: rechazo. |
 | `incluir_json` | booleano; opcional; `true` en `consultar` y `historial` | En `consultar`/`historial` incluye muestra de filas en el resultado. Alias `carga_json`. En `solicitar` no aplica. `false` omite la muestra; `null` se rechaza. |
-| `subir_csv` | booleano; opcional; `true` en `consultar` y `historial` | Adjunta los CSV al trabajo en `consultar`/`historial`. Alias `carga_minio`. `false` evita adjuntar, sin evitar la descarga/lectura. En `solicitar` no aplica. `null` se rechaza. |
+| `subir_csv` | booleano; opcional; `true` en `consultar` y `historial` | Adjunta los CSV al trabajo en `consultar`/`historial`. `false` evita adjuntar, sin evitar la descarga/lectura. En `solicitar` no aplica. `null` se rechaza. |
 | `cookies_header` | texto hasta 8.192 caracteres; solo `historial`; opcional; `null` | Campo de compatibilidad. No se utiliza para autenticar ni altera la consulta. Omitido o `null`: sin efecto; `""` no aporta valor. No lo envíe. |
 | `carga_b64` | booleano; opcional; `false` | Campo legado aceptado y sin efecto; los archivos no se devuelven en Base64. Omitido equivale a `false`; `false` no cambia la respuesta; `null` se rechaza. |
 | `proxy_request` | booleano o `null`; opcional; `null` | Se descarta en V3 y no controla el acceso ni la ruta de red; cualquier valor se ignora antes de la validación específica. |
@@ -36,11 +36,15 @@ En `solicitar`, `incluir_json` y `subir_csv` no forman parte de sus opciones; su
 
 Se requieren credenciales fiscales válidas y acceso a Mis Comprobantes para la cuenta y el representado.
 
-| Campo en `credentials` | Tipo; requerido; default | Omisión, `null` o vacío |
+| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
 |---|---|---|
-| `cuit_representante` | texto; requerido operativamente; sin default | Cuenta que inicia sesión; admite el alias `cuit_inicio_sesion`. Si no hay CUIT utilizable, el acceso no podrá completarse. |
-| `clave` | texto; requerida operativamente; sin default | Clave de la cuenta; alias compatibles `clave_representante` y `contrasena`. Si faltan o están vacías todas las variantes, no se puede iniciar sesión. |
-| `clave_encriptada` | texto cifrado; alternativa opcional | Debe ser un valor generado por el mecanismo de cifrado de la API. Vacío o `null` equivale a ausencia; un cifrado inválido se rechaza. Si se envía además la clave en texto, debe representar el mismo valor. |
+| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
+| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
+| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
+| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
+| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
+| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
 
 Los alias de credenciales con valores distintos se rechazan. No envíe secretos en `payload`.
 

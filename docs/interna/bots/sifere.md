@@ -2,9 +2,9 @@
 
 ## Flujo esquema → plugin → portal
 
-1. **Esquema.** `services/bot-worker/src/bot_worker/bots/sifere/schema.py:30-66` fija patrón CUIT/período y rango de jurisdicciones; `:69-129` define el modelo, aliases, valores por omisión, filtrado de jurisdicciones y regla de al menos una salida; `:139-...` publica JSON Schema con `required` limitado a operación.
+1. **Esquema.** `services/bot-worker/src/bot_worker/bots/sifere/schema.py:30-66` fija patrón CUIT/período y rango de jurisdicciones; `:69-129` define el modelo, aliases, valores por omisión, filtrado de jurisdicciones y regla de al menos una salida; `:139-164` publica JSON Schema con `required` limitado a operación.
 2. **Plugin.** `services/bot-worker/src/bot_worker/bots/sifere/plugin.py:154-208` valida, requiere credenciales y abre la sesión ARCA/servicio; `:210-304` consulta cada método SIRCAR por jurisdicción y conserva errores individuales; `:306-369` consulta consolidados SIRCREB/SIRTAC y adjunta resúmenes/archivos.
-3. **Portal real.** `services/bot-worker/src/bot_worker/runtime/portals/sifere.py:28-70` mapea navegación y selección; `:73-...` conduce consultas SIRCAR y consolidadas. SIFERE depende del servicio del portal y no usa una petición directa por CUIT/período.
+3. **Portal real.** `services/bot-worker/src/bot_worker/runtime/portals/sifere.py:28-70` mapea navegación y selección; `:73-792` conduce consultas SIRCAR y consolidadas. SIFERE depende del servicio del portal y no usa una petición directa por CUIT/período.
 
 ## Catálogo, operación y normalización
 
@@ -21,7 +21,7 @@
 
 ## Discrepancias concretas y propuestas (sin implementar)
 
-1. **Validación efectiva más estricta que OpenAPI.** El JSON Schema manifest requiere solo operación, aunque el modelo exige CUIT y período (`schema.py:69-129,139-...`). El espejo de catálogo `services/central-api/src/central_api/api/bot_payloads.py:283-288` enumera campos básicos, no el rango de jurisdicciones. **Propuesta:** compartir/derivar schema del modelo y publicar límites, defaults y nullable.
+1. **Validación efectiva más estricta que OpenAPI.** El JSON Schema manifest requiere solo operación, aunque el modelo exige CUIT y período (`schema.py:69-129,139-164`). El espejo de catálogo `services/central-api/src/central_api/api/bot_payloads.py:283-288` enumera campos básicos, no el rango de jurisdicciones. **Propuesta:** compartir/derivar schema del modelo y publicar límites, defaults y nullable.
 2. **Jurisdicciones inválidas se silencian.** Los elementos fuera de 901–924 desaparecen, pudiendo resultar lista vacía sin error (`schema.py:115-126`). **Propuesta:** rechazar fuera de rango o devolver advertencia explícita y códigos ignorados.
 3. **Default de consolidado no visible de forma completa en espejo público.** `consolidados=true` genera consultas/archivos adicionales incluso si la lista de jurisdicciones es `[]` (`schema.py:92-94`, `plugin.py:302-303`). **Propuesta:** hacer explícito este efecto y ofrecer modos con propósito claro.
 4. **No atomicidad y errores de publicación.** Los reportes anteriores pueden descargarse/publicarse antes de un fallo posterior que eleva excepción; no todo fallo se representa como resultado parcial (`plugin.py:257-303,345-369`). **Propuesta:** manejar los fallos de cada archivo como error acumulado y probar el estado final con artefactos ya publicados.
@@ -34,7 +34,7 @@
 
 - `services/bot-worker/src/bot_worker/bots/sifere/schema.py:30-149`
 - `services/bot-worker/src/bot_worker/bots/sifere/plugin.py:154-369`
-- `services/bot-worker/src/bot_worker/runtime/portals/sifere.py:28-70,73-...`
+- `services/bot-worker/src/bot_worker/runtime/portals/sifere.py:28-70,73-792`
 - `services/central-api/src/central_api/api/bots.py:416-438`
 - `services/central-api/src/central_api/api/bot_compat.py:70`
 - `services/central-api/src/central_api/security/credentials.py:74-103,247-263,303-370`

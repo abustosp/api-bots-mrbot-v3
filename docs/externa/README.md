@@ -30,6 +30,8 @@ MrBot permite consultar información, obtener archivos y realizar operaciones au
 
 Los nombres de propiedades son exactos y distinguen su vocabulario por operación. No mezcle el cuerpo de una ruta de compatibilidad con el de una ruta que utiliza `payload` y `credentials`. Cada ficha indica la forma que corresponde.
 
+**Dos accesos distintos:** la API key identifica su cuenta en MrBot y se envía en la autenticación HTTP. La clave fiscal, cuando el bot la requiere, se envía en `credentials.clave` junto con el CUIT de sesión. No intercambie ambas claves. `representado_cuit` identifica al contribuyente consultado y puede ser distinto del CUIT que inicia sesión.
+
 ## Catálogo de bots
 
 La disponibilidad de una operación en su cuenta debe confirmarse con el catálogo de la API. Los bots con nombres similares no tienen necesariamente los mismos campos ni el mismo resultado.
@@ -74,6 +76,8 @@ La disponibilidad de una operación en su cuenta debe confirmarse con el catálo
 ## Antes de una operación con efectos
 
 Presentar archivos, importar información, confirmar compensaciones o generar VEP puede modificar datos del organismo. Revise el CUIT, el período, los archivos y las opciones de confirmación en la ficha correspondiente. Generar un VEP no significa que esté pagado.
+
+Si envía ZIP, utilice nombres de archivo únicos en todo el lote, también entre carpetas y entre ZIP distintos. No suponga que dos archivos llamados igual se conservan por estar en carpetas diferentes: uno puede reemplazar al otro al preparar la entrada.
 
 Cancelar una ejecución **no deshace** lo que ya haya sido realizado. Si una ejecución con efectos termina sin confirmación suficiente, consulte el estado en el organismo antes de crear otro pedido. Repetir un pedido con otra clave de idempotencia puede crear otra ejecución.
 

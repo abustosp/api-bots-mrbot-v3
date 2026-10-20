@@ -10,7 +10,7 @@ Catálogo: `portal_iva` con `descargar`, `importar` y `gestionar`.
 - Alias V3: `POST /api/v3/portal_iva/consulta` equivale solo a `descargar`.
 - No hay alias equivalente para `importar` ni `gestionar`; usar la ruta canónica.
 
-Enviar `{ "payload": { ... }, "credentials": { ... } }`. La solicitud aceptada devuelve `job_id`; consultar su estado y resultado en `/api/v3/jobs/{job_id}`. Los nombres de archivo de entrada deben referenciar cargas previas mediante `object_key`.
+La ruta canónica recibe `{ "payload": { ... }, "credentials": { ... } }`; el alias de compatibilidad recibe un cuerpo plano. No mezclar ambas formas. La solicitud aceptada devuelve `job_id`; consultar su estado y resultado en `/api/v3/jobs/{job_id}`. Los nombres de archivo de entrada deben referenciar cargas previas mediante `object_key`. Convenciones compartidas de credenciales: [API pública](../api.md).
 
 ## Credenciales fiscales
 
@@ -28,7 +28,7 @@ Tipos y valores siguientes reflejan validación efectiva. Campos de descarga son
 | `descarga_ventas` | booleano; default `false`; alias `descarga_CSV_ventas` | `true` solicita libro ventas; `false` no lo descarga. Omitir equivale a `false`; `null` inválido. |
 | `descarga_compras` | booleano; default `false`; alias `descarga_CSV_compras` | `true` solicita libro compras; `false` no lo descarga. Omitir equivale a `false`; `null` inválido. Debe activarse ventas y/o compras. |
 | `incluir_json` | booleano; default `true` | Incluye resúmenes y muestras de filas en el resultado. `false` los omite; no afecta la consulta. Omitir equivale a `true`; `null` inválido. |
-| `subir_csv` | booleano; default `true` | Solicita que los CSV queden disponibles como archivos de resultado. `false` no los publica; omitir equivale a `true`; `null` inválido. También se aceptan nombres de compatibilidad `carga_minio`, `minio_upload` y `archivo_historico_minio` en las solicitudes V3 compatibles. |
+| `subir_csv` | booleano; default `true` | Solicita que los CSV queden disponibles como archivos de resultado. `false` no los publica; omitir equivale a `true`; `null` inválido. Envíe este nombre canónico para controlar la publicación. |
 | `refrescar_desde_arca` | booleano; default `true` | Antes de cada descarga solicita importar datos desde el organismo fiscal al libro. `false` evita esa actualización. Omitir activa la actualización; `null` inválido. |
 | `limpiar_despues` | booleano; default `true` | Después de cada descarga intenta borrar los registros del libro. `false` evita ese borrado. Omitir lo activa; `null` inválido. |
 | `descartar_borrador` | booleano; default `true` | Tras completar las descargas intenta descartar el borrador de declaración. `false` evita el intento. Omitir lo activa; `null` inválido. |
@@ -49,6 +49,14 @@ Tipos y valores siguientes reflejan validación efectiva. Campos de descarga son
 
 Cada referencia de archivo debe provenir de `POST /api/v3/uploads`. El contenido debe ser un TXT existente, no vacío, menor o igual a 5 MB. No enviar el contenido del archivo dentro del JSON ni usar los nombres locales terminados en `_path`.
 
+Ejemplo ficticio mínimo para `POST /api/v3/bots/portal_iva/importar`; las dos claves deben reemplazarse por referencias efectivamente obtenidas al cargar archivos:
+
+```json
+{"payload":{"periodo":"05/2026","representado_cuit":"20-12345678-6","ventas_txt_key":"uploads/demo/ventas.txt","ventas_alicuotas_txt_key":"uploads/demo/ventas-alicuotas.txt"},"credentials":{"cuit_representante":"20123456786","clave":"CLAVE_FISCAL_FICTICIA"}}
+```
+
+Para `POST /api/v3/bots/portal_iva/gestionar`, envíe por lo menos un par TXT como arriba, active al menos una descarga (`descarga_ventas` o `descarga_compras`) y una salida. Para `POST /api/v3/bots/portal_iva/descargar`, no envíe claves TXT y active uno o ambos libros.
+
 ### Restricciones por operación
 
 - `descargar`: activar ventas y/o compras, y dejar al menos una salida (`incluir_json=true` o `subir_csv=true`).
@@ -56,7 +64,7 @@ Cada referencia de archivo debe provenir de `POST /api/v3/uploads`. El contenido
 - `gestionar`: aplica las reglas de `descargar` y de `importar`; primero importa los TXT proporcionados y después descarga los libros elegidos.
 - Los flags de opciones declarativas se envían al preparar y guardar el período antes de importar/descargar.
 
-## Ejemplo ficticio válido
+## Ejemplo ficticio válido: `POST /api/v3/bots/portal_iva/descargar`
 
 ```json
 {
@@ -91,6 +99,21 @@ Cada referencia de archivo debe provenir de `POST /api/v3/uploads`. El contenido
 
 ## Resultado y efectos
 
-El resultado informa operación, CUIT, período y, por libro, filas, nombre de archivo, muestra opcional, tamaño y huella de archivo si se publica. La operación `importar` informa libros y si la carga se confirmó. `gestionar` combina datos de descarga e importación. Si una descarga posterior falla, no hay contrato de resultado parcial: el trabajo puede fallar después de que una fase anterior ya haya cambiado el portal o publicado un archivo.
+Claves reales de `data`:
+
+| Clave | Tipo | Cuándo aparece |
+|---|---|---|
+| `operacion`, `representado_cuit`, `periodo` | textos | Siempre; `periodo` normalizado como `AAAAMM`. |
+| `periodos_seleccionables` | lista de objetos `{string:string}` | Solo si el portal devuelve valores durante la preparación. |
+| `ventas`, `compras` | objetos | Por cada libro solicitado en descarga/gestión. |
+| `ventas.filas`, `compras.filas` | entero | Filas de datos, sin contar cabecera. |
+| `ventas.archivo`, `compras.archivo` | texto | Nombre del CSV resultante. |
+| `ventas.sha256`, `compras.sha256` | texto | Solo si se publica el archivo. |
+| `ventas.size_bytes`, `compras.size_bytes` | entero | Solo si se publica el archivo. |
+| `ventas.muestra`, `compras.muestra` | lista de objetos de texto | Solo con `incluir_json=true`, hasta cinco filas con claves de la cabecera CSV. |
+| `importaciones` | lista de `{libro: texto, ok: booleano}` | En `importar` y `gestionar`, con un elemento por libro importado. |
+| `avisos` | lista de textos | Puede aparecer si falla el intento opcional de descartar borrador tras descargas completas. |
+
+Los CSV publicados aparecen como archivos de resultado. `gestionar` combina datos de descarga e importación. Si una descarga posterior falla, no hay contrato de resultado parcial: el trabajo puede fallar después de que una fase anterior ya haya cambiado el portal o publicado un archivo.
 
 **Efectos importantes:** por defecto una descarga actualiza desde el organismo, guarda las opciones del período, borra registros después de exportar y descarta el borrador tras completar. `importar` borra todos los registros del libro antes de cargar el TXT nuevo. Estos borrados pueden ser irreversibles. Para impedir las tres acciones adicionales al descargar, especificar explícitamente `refrescar_desde_arca=false`, `limpiar_despues=false` y `descartar_borrador=false`. Generar un CSV no equivale a presentar una declaración.

@@ -2,8 +2,8 @@
 
 ## Flujo esquema -> plugin -> servicio
 
-1. `schema.py` usa modelos estrictos. Normaliza CUIT quitando separadores y verifica exactamente 11 dígitos, sin validar checksum. El modo masivo requiere lista de 1–100 CUIT, normaliza/deduplica en orden estable.
-2. `plugin.py` declara `consultar` y `consultar_masivo`, sin credencial fiscal, navegador o captcha. Consulta endpoints HTTP configurables; individual envía CUIT como parámetro y masivo un JSON `{"cuits": [...]}`. La respuesta útil es el objeto JSON remoto, no un esquema fiscal local. Respuesta no objeto, error HTTP/red o JSON inválido producen error.
+1. El esquema (`services/bot-worker/src/bot_worker/bots/consulta_cuit/schema.py:1-89`) usa modelos estrictos. Normaliza CUIT quitando separadores y verifica exactamente 11 dígitos, sin validar checksum. El modo masivo requiere lista de 1–100 CUIT, normaliza/deduplica en orden estable.
+2. El servicio del bot (`services/bot-worker/src/bot_worker/bots/consulta_cuit/plugin.py:43-202`) declara `consultar` y `consultar_masivo`, sin credencial fiscal, navegador o captcha. Consulta endpoints HTTP configurables; individual envía CUIT como parámetro y masivo un JSON `{"cuits": [...]}`. La respuesta útil es el objeto JSON remoto, no un esquema fiscal local. Respuesta no objeto, error HTTP/red o JSON inválido producen error.
 3. No hay navegación de portal ARCA en este bot: el portal/servicio integrado es el endpoint de constancias de inscripción configurable; URLs base y credenciales técnicas se configuran fuera del payload del cliente.
 
 No produce archivos ni una respuesta parcial transformada. La configuración de base URL, usuario y API key es del servicio y no forma parte de `credentials` públicas del solicitante.

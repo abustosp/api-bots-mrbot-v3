@@ -14,8 +14,8 @@ En V3, envíe las consultas bajo `payload` y los datos fiscales bajo `credential
 
 | Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
 |---|---|---|
-| `representado_cuit` | Texto o `null`; opcional, default `null`. Alias aceptados: `cuit`, `cuit_representado`. | Omitir o `null`: usa el CUIT de `credentials.cuit_representante`. Vacío o `false`: se rechaza. En V3, el campo canónico debe contener 11 dígitos sin separadores. |
-| `subir` | Booleano, opcional, default `true`. Alias compatibles: `archivo_historico_minio`, `carga_minio`, `subir_archivo`. | Omitir: se sube el resultado. `null` o texto vacío: inválido. `false`: no se publica el archivo; no se devuelve en Base64. |
+| `representado_cuit` | Texto o `null`; opcional, default `null`. Alias aceptados: `cuit`, `cuit_representado`. | Omitir o `null`: usa el CUIT de `credentials.cuit_representante`. Vacío o `false`: se rechaza. Se eliminan espacios, guiones, puntos y barras; si se informa deben quedar exactamente 11 dígitos. |
+| `subir` | Booleano, opcional, default `true`. | Omitir: se publica el resultado. `null` o texto vacío: inválido. `false`: no se publica el archivo; no se devuelve en Base64. |
 | `incluir_base64` | Booleano, opcional, default `false`. Alias: `archivo_historico_b64`. | Omitir o `false`: no cambia la salida. `null` o texto vacío: inválido. `true` se acepta por compatibilidad, pero no produce contenido Base64. |
 
 El CUIT del representado es opcional solo porque puede heredarse del CUIT de inicio de sesión. Para evitar ambigüedad, inclúyalo explícitamente cuando descargue para un representado distinto. El campo heredado `proxy_request` (booleano o `null`, opcional) se acepta por compatibilidad y se ignora: omitirlo o enviar `false` no cambia la solicitud; `null` también es válido. Los nombres de credenciales heredados en el payload (`cuit_representante`, `cuit_inicio_sesion`, `cuit_login`, `clave_representante`, `contrasena`, `clave` y `clave_encriptada`) son compatibles con solicitudes antiguas y se trasladan al bloque de credenciales; para V3 use `credentials` directamente y no envíe valores contradictorios.
