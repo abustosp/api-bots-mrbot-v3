@@ -13,7 +13,7 @@ Esta carpeta separa dos audiencias:
 
 ## Alcance y criterio
 
-- Se revisan los **34 bots registrados** y sus operaciones. Una variante de ejecución no se cuenta como otro producto.
+- Se revisan los **34 bots registrados y sus 45 operaciones públicas**. Una variante de ejecución no se cuenta como otro producto.
 - La implementación actual prevalece sobre los planes históricos. Las propuestas de cambios no se presentan como funciones ya disponibles.
 - Una solicitud aceptada no significa que el trámite haya terminado. Las salidas y los archivos dependen del resultado de cada operación.
 - Se distingue entre omitir una propiedad, enviar `null`, una cadena vacía, espacios, `false`, `0` o una lista vacía. No hay una regla universal entre bots ni entre las rutas de compatibilidad y las canónicas.

@@ -59,7 +59,9 @@ Cada ficha interna debe leerse junto a la ficha del mismo nombre de `docs/extern
 
 ## Regla de publicación
 
-Distribuir solo la carpeta `docs/externa/`. Antes de publicar, comprobar que no contiene tecnologías, rutas de código, referencias a informes internos, credenciales reales, detalles de provisión ni diagnósticos reservados. Los nombres heredados de un parámetro pueden requerir describir su efecto sin explicar la infraestructura a la que aludían.
+Distribuir solo la carpeta `docs/externa/`. Antes de publicar, comprobar que no contiene tecnologías, rutas de código, referencias a informes internos, credenciales reales, detalles de provisión ni diagnósticos reservados. Los aliases con nombres de infraestructura se documentan únicamente aquí, y el manual externo utiliza nombres canónicos.
+
+La limpieza documental no renombra propiedades de la API actual. El catálogo, OpenAPI o ciertos datos heredados todavía pueden contener identificadores como `carga_minio` o `url_minio`. Ocultar también esos nombres en el servicio requiere una evolución de contrato con compatibilidad y pruebas, no está implementado en esta auditoría.
 
 ## Criterio para actualizar contratos
 
