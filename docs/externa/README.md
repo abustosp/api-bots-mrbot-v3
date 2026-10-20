@@ -79,7 +79,7 @@ Cancelar una ejecución **no deshace** lo que ya haya sido realizado. Si una eje
 
 ## Cómo interpretar el resultado
 
-- `status` indica el avance de la ejecución. `result` indica el resultado cuando está disponible.
+- `status` indica el avance de la ejecución. Revise también `status_detail` y `result`: una ejecución fallida puede aparecer como `COMPLETO` con `result: "ERROR"` en la vista de compatibilidad.
 - `COMPLETO` con `PARCIAL` no significa que todas las secciones o descargas hayan terminado correctamente.
 - No tener registros no equivale siempre a un error. Revise el resultado y los contadores que describe la ficha.
 - Solo los archivos publicados en `files` tienen una referencia de descarga del resultado. Desactivar su publicación puede dejar una respuesta sin archivos descargables aunque se haya consultado información.

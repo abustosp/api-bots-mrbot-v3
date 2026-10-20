@@ -1,5 +1,3 @@
-# Repository audit
-
 What this repo does: MrBot accepts requests for 34 tax and social-security bots, runs them in the background, and returns data and files. Some bots only read data. Others submit files, import records, confirm offsets, or create payment slips.
 
 **Load assumed:** many users, several jobs at once, workers running five jobs by default, and processes that stay up for days or weeks. The stored production path matters more than the in-memory test path. This is a report only: no application code, models, dependencies, or migrations were changed.
@@ -58,11 +56,17 @@ Review date: 20 October 2026. See [validation evidence](validacion.md), [API ana
    - **Fix:** Keep only the replay window the protocol actually needs, with an age limit and a size limit. Use the API's saved terminal result as the authority after that window.
    - **If we skip it:** A healthy long-running worker keeps more memory after every batch. Large result bodies make the growth faster, even when concurrency stays at five.
 
-9. **The advertised whole-repo test command cannot collect the suite** (`Makefile:L25-26`, `packages/mrbot-contracts/tests/test_worker_capacity.py`, `services/bot-worker/tests/test_worker_capacity.py`)
+9. **The advertised whole-repo test command cannot collect the suite** (`Makefile:L23-24`, `packages/mrbot-contracts/tests/test_worker_capacity.py`, `services/bot-worker/tests/test_worker_capacity.py`)
    - **What this is:** `make test` runs all tests from the repository root. Collecting tests is the step that imports them before they run.
    - **Problem:** The root command stops because two test files import as the same module name. Switching only to importlib mode then fails on helper imports such as `fakes_playwright` and `runner`; separate package runs pass.
    - **Fix:** Make the test entry point run each package and the compatibility tool in separate processes. This is smaller than changing all helper imports and avoids claiming that importlib alone fixes the suite.
    - **If we skip it:** Contributors cannot use the documented acceptance command. They may stop after a partial run and miss a real regression in another package.
+
+10. **Three generated catalogue examples cannot run as shown** (`services/central-api/src/central_api/api/bots.py:L820-845`, `services/central-api/src/central_api/api/bot_payloads.py:L1348-1371`)
+   - **What this is:** The catalogue publishes sample requests so users can learn which inputs a bot needs. The samples should pass the same input checks as a real request after its upload references are resolved.
+   - **Problem:** Checking all 45 generated samples against the actual plugin validators found three failures: `carga_portal_iva/cargar` has no required TXT pair or opening CSV, `controladores_fiscales/presentar` has no files, and `vep_archivo/generar` has no input file. The other 42 passed this local input check.
+   - **Fix:** Include the required upload reference fields and a valid fake uploaded-file reference in those operation samples. Add one offline example-to-validator test for every published operation, with file downloads replaced only by local names.
+   - **If we skip it:** Users copy a sample that is accepted or displayed by the API but fails before the intended action. The new written guides explain the upload requirement, but the generated catalogue still needs the same correction.
 
 ## Evidence and scope
 
