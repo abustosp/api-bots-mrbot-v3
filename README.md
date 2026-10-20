@@ -4,6 +4,20 @@ API de automatización de trámites fiscales y previsionales argentinos (ARCA/AF
 ARBA, AGIP, SIFERE, SRT y otros organismos), construida como un conjunto de
 microservicios.
 
+## Documentación de uso y funcionamiento
+
+La documentación revisada del comportamiento de los 34 bots está en
+[`docs/`](docs/README.md):
+
+- [`docs/externa/`](docs/externa/README.md): manual para usuarios e integradores,
+  entradas, resultados, archivos y efecto de omitir o dejar vacío cada campo.
+- [`docs/interna/`](docs/interna/README.md): API, workers, análisis por bot,
+  auditoría y propuestas de mejora de schemas y models.
+
+Para compartir con usuarios, distribuir **únicamente `docs/externa/`**.
+Los planes históricos que siguen describen diseño y evolución, no sustituyen
+el contrato observado y sus limitaciones documentadas.
+
 > **Estado: implementación inicial F0-F2.** Las fundaciones, los contratos, el
 > plano central, el worker y la infraestructura de desarrollo ya tienen una
 > implementación verificable. El plan completo está en [`plan.md`](plan.md),
