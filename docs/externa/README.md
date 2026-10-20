@@ -2,7 +2,7 @@
 
 Revisión: **20 de octubre de 2026**.
 
-MrBot permite consultar información, obtener archivos y realizar operaciones autorizadas en distintos organismos. Cada pedido devuelve un identificador de ejecución (`job_id`): consulte su estado para conocer el resultado y los archivos disponibles.
+MrBot permite consultar información, obtener archivos y realizar operaciones autorizadas en distintos organismos. Cada pedido devuelve un identificador de ejecución (`job_id`): consulte su estado para conocer el resultado y los archivos disponibles. Una aceptación `202` confirma la recepción, no que todos los datos sean válidos ni que la operación haya terminado: ciertos errores se informan en el resultado posterior.
 
 ## Por dónde empezar
 
