@@ -87,12 +87,38 @@ Resultado del cierre local del 20 de octubre de 2026:
 - 78 páginas, 122 enlaces relativos y 16 anchors comprobados, sin errores de destino o escapes del paquete público.
 - 49 bloques JSON parseables y 39 cuerpos completos de solicitud que pasan la normalización y validación local correspondientes.
 - Las 45 operaciones tienen al menos un cuerpo compatible entre los ejemplos de su ficha. Algunos cuerpos sirven para más de una operación, por lo que no son 45 ejemplos distintos ni 45 ejecuciones reales.
-- 91 tablas con columnas consistentes y tres bloques de terminal con sintaxis válida.
+- 92 tablas con columnas consistentes y tres bloques de terminal con sintaxis válida.
 - Las referencias completas a fuentes se comprobaron por existencia y límites de líneas, sin rangos abiertos pendientes. No se encontraron nombres de tecnologías internas en el paquete externo.
 - `git diff --check` sin errores. Los cambios de esta entrega se limitan a `README.md` y documentación Markdown bajo `docs/`.
 
 Estos resultados corresponden a la documentación nueva. No sustituyen el hallazgo separado del catálogo generado existente, cuyos ejemplos normalizados válidos fueron 42 de 45.
 
+## Aceptación por HTTP de la aplicación real
+
+El 20 de octubre de 2026, entre las 11:52 y las 11:54 UTC, se arrancó la fábrica real `central_api.main:create_app` con Uvicorn en `127.0.0.1:18765`, incluyendo su ciclo de arranque. Se usó un entorno de proceso limpio, sin `DATABASE_URL`, con `SCHEDULER_ENABLED=false`, `AUTOSCALE_ENABLED=false`, inventario de workers vacío y sin servicios de correo o almacenamiento configurados. Se configuraron secretos efímeros locales para exigir autenticación real. No se sustituyeron handlers, dependencias ni transportes de la aplicación. El cliente de comprobación solo envió HTTP a loopback y leyó los ejemplos Markdown.
+
+Se creó una cuenta efímera mediante `POST /admin/users`, con `account_type=PRUEBA`, clave ilustrativa y `enviar_credenciales=false`. La respuesta confirmó `enviadas=false`. Los usuarios, reservas y jobs existieron únicamente en la memoria de ese proceso. El refresco APOC tenía URL vacía y registró `UnsupportedProtocol`, sin consultar el organismo. El proceso fue detenido al terminar.
+
+La pasada final completó **57 solicitudes HTTP con las respuestas esperadas**, además del alta local y la comprobación inicial de vivacidad:
+
+| Recorrido documentado | Observación de la aplicación real |
+|---|---|
+| Acceso sin credenciales, con Bearer o con clave incorrecta | Los tres casos devolvieron `401`. |
+| Autenticación Basic y `email` + `X-API-Key` | Ambas formas devolvieron `200` al consultar el catálogo. |
+| Catálogo y detalle | El catálogo devolvió 34 bots y 45 operaciones, todos presentes en las fichas. Los 34 `GET /api/v3/bots/{bot}` devolvieron `200`. |
+| Documentación interactiva y contrato | `/docs`, `/redoc` y `/openapi.json` devolvieron `200`. OpenAPI publica la ruta genérica `/api/v3/bots/{bot}/{operacion}`, no 45 rutas expandidas. |
+| Ejemplo de creación de la guía externa | El cuerpo se extrajo literalmente del `curl` de `docs/externa/api.md`. El POST canónico devolvió `202`, `job_id` y `PENDIENTE`. |
+| Repetición con la misma intención | Mismo cuerpo y misma `Idempotency-Key`: `202` con el mismo `job_id`. Cuerpo cambiado y misma clave: `409`. |
+| Reserva de uso | Entre el resumen anterior a la creación y el posterior al replay, `reservadas` aumentó exactamente una unidad y `disponibles` disminuyó exactamente una. No se produjo una segunda reserva por el replay. |
+| Consulta individual, listado y lote | Las tres consultas devolvieron `200` e incluyeron el identificador creado. La consulta pendiente devolvió `result=null`, `data=null` y `files=[]`. |
+| Identidad de cuenta | `GET /api/v3/usuarios/me` devolvió `200`. |
+| Cancelación pendiente | El POST de cancelación devolvió `200`; una consulta posterior confirmó `CANCELADO`, sin ejecutar el bot. |
+| Alias plano | `POST /api/v3/consulta_cuit/individual` con el payload plano documentado devolvió `202`. |
+| Cuerpo raíz inválido y bot inexistente | `payload` como lista devolvió `422`; un bot inexistente devolvió `404`. |
+| Disponibilidad completa | `/ready` devolvió HTTP `200` con `ready=false` y razón `DATABASE_URL no configurada`. No se confunde vivacidad con disponibilidad de producción. |
+
+Esto añade evidencia de uso a la comprobación de textos: un consumidor puede seguir el ejemplo publicado para autenticarse, descubrir operaciones, crear una ejecución, reintentar sin duplicarla, consultar y cancelar una ejecución pendiente. No demuestra que los 45 bots produzcan salidas reales correctas, que las credenciales fiscales funcionen o que la ejecución persistente sea equivalente al modo local. La primera comprobación del cliente asumía rutas OpenAPI expandidas y se corrigió para usar el catálogo real, sin cambiar la aplicación ni atribuir esa suposición a un fallo del producto.
+
 ## Límites
 
-No se levantó infraestructura, no se ejecutaron migraciones y no se cambió código operativo. Las pruebas con base de datos que la suite omitió, el almacenamiento real, la entrega tras caída de procesos, los portales, la disponibilidad por cuenta, la concurrencia de producción y los efectos fiscales requieren otra validación en un entorno autorizado.
+No se levantó infraestructura externa, no se ejecutaron migraciones y no se cambió código operativo. La aplicación local descrita arriba no tuvo workers ejecutores. Las pruebas con base de datos que la suite omitió, el almacenamiento real, la entrega tras caída de procesos, los portales, la disponibilidad por cuenta, la concurrencia de producción y los efectos fiscales requieren otra validación en un entorno autorizado.
