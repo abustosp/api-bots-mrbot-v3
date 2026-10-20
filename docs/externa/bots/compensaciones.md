@@ -63,7 +63,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | `OK` si la consulta no tiene resultados o si al menos una exportación solicitada se completa. Si fallan todas las exportaciones solicitadas, termina con error. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | `OK` si la consulta no tiene resultados o si al menos una exportación solicitada se completa y publica correctamente. Si fallan todas las exportaciones o falla una publicación con `subir=true`, termina con error. | `"OK"` |
 | `data.operacion` | texto | En una respuesta correcta | Operación ejecutada. | `"consultar"` |
 | `data.representado_cuit` | texto | En una respuesta correcta | CUIT consultado. | `"20123456786"` |
 | `data.fecha_desde` | texto | En una respuesta correcta | Inicio del rango consultado, formato `dd/mm/aaaa`. | `"01/01/2024"` |

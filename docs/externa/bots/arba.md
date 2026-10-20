@@ -51,7 +51,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | `OK` tanto si hay ZIP como si la consulta informa que no hay archivos. Los fallos terminan con error. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | `OK` tanto si hay ZIP como si la consulta informa que no hay archivos. Los fallos terminan con error. | `"OK"` |
 | `data.operacion` | texto | En una respuesta correcta | Operación ejecutada. | `"descargar"` |
 | `data.representado_cuit` | texto | En una respuesta correcta | CUIT consultado. | `"20123456786"` |
 | `data.periodo` | texto | En una respuesta correcta | Período consultado en formato `AAAAMM`. | `"202401"` |

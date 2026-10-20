@@ -61,7 +61,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | `OK` si no se reportan avisos ni errores en el detalle; `PARCIAL` si los hay. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | `OK` si no se reportan avisos ni errores en el detalle; `PARCIAL` si los hay. | `"OK"` |
 | `data.operacion` | texto | En una respuesta correcta o parcial | Operación ejecutada. | `"compensar"` |
 | `data.representado_cuit` | texto | En una respuesta correcta o parcial | CUIT consultado. | `"20123456786"` |
 | `data.compensar` | booleano | En una respuesta correcta o parcial | Indica si se intentó el paso de reafectación. | `true` |

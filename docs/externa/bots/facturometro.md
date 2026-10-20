@@ -56,18 +56,18 @@ Las tablas describen la respuesta pública del trabajo. Los ejemplos son JSON fi
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Siempre que el trabajo tenga resultado final. | Estado global de la consulta. | `"OK"` |
+| `result` | texto o `null` | Siempre que el trabajo tenga resultado final. | Estado global de la consulta. | `"OK"` |
 | `data.operacion` | texto | En una consulta completada con `data`. | Operación ejecutada. | `"consultar"` |
 | `data.representado_cuit` | texto | En una consulta completada con `data`. | CUIT normalizado consultado. | `"20123456786"` |
 | `data.monto` | texto o null | Siempre en `data` de una consulta completada. | Monto publicado por el servicio. Si la lectura no aporta el campo, se representa como `null`. | `"123456.78"` |
 | `data.tope` | texto o null | Siempre en `data` de una consulta completada. | Tope publicado por el servicio. Si la lectura no aporta el campo, se representa como `null`. | `null` |
 | `data.categoria` | texto o null | Siempre en `data` de una consulta completada. | Categoría publicada por el servicio. Si la lectura no aporta el campo, se representa como `null`. | `"B"` |
 | `data.screenshot_url` | texto o null | Siempre en `data` de una consulta completada. | `null` si no se generó y publicó una captura; si existe, contiene la referencia de objeto asignada al archivo, no una URL firmada ni una clave estable del portal. | `"valor-ficticio-no-estable"` |
-| `data.captura` | objeto | Solo si se generó y publicó la captura. Se omite si se desactivó la captura o el panel no estuvo disponible. | Metadatos del PNG: `archivo`, `sha256` y `size_bytes`. | `{"archivo":"captura-ejemplo.png","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size_bytes":800}` |
+| `data.captura` | objeto | Solo si se generó y publicó una captura. Se omite si la captura está desactivada o si no se obtuvo una captura publicable. | Metadatos del PNG: `archivo`, `sha256` y `size_bytes`. | `{"archivo":"captura-ejemplo.png","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size_bytes":800}` |
 | `data.captura.archivo` | texto | Dentro de `data.captura`. | Nombre del PNG publicado. | `"captura-ejemplo.png"` |
 | `data.captura.sha256` | texto | Dentro de `data.captura`. | Huella del PNG publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
 | `data.captura.size_bytes` | entero | Dentro de `data.captura`. | Tamaño del PNG publicado, en bytes. | `800` |
-| `data.warnings` | lista de textos | Solo si se solicitó captura y no estuvo disponible el panel para generarla. Si no hay esa condición, la propiedad se omite. | Aviso incluido dentro de `data`; no hay una propiedad independiente de avisos en la respuesta. | `["aviso-ficticio-sobre-captura"]` |
-| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye el PNG si se generó y publicó; de lo contrario es `[]`. | Archivos adjuntos del trabajo. | `[{"name":"captura-ejemplo.png","url":"","size":800,"artifact_id":"id-ficticio","filename":"captura-ejemplo.png","content_type":"image/png","size_bytes":800,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
+| `data.warnings` | lista de textos | Solo si se solicitó captura y no se obtuvo una captura publicable, por panel ausente, fallo de captura o archivo vacío. Si no hay esa condición, la propiedad se omite. | Aviso incluido dentro de `data`; no hay una propiedad independiente de avisos en la respuesta. | `["aviso-ficticio-sobre-captura"]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye el PNG si se generó y publicó; de lo contrario es `[]`. | Archivos adjuntos del trabajo. | `[{"name":"captura-ejemplo.png","url":"","size":800,"artifact_id":"0190f0c0-7f5b-7b2e-9f7e-123456789abd","filename":"captura-ejemplo.png","content_type":"image/png","size_bytes":800,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
 
-`incluir_captura=false` deja `screenshot_url=null`, omite `captura` y no adjunta un PNG. Si la captura fue solicitada pero no se encontró el panel, la consulta de datos puede terminar correctamente, `screenshot_url` permanece `null`, `captura` se omite y `data.warnings` informa esa ausencia.
+`incluir_captura=false` deja `screenshot_url=null`, omite `captura` y no adjunta un PNG. Si la captura fue solicitada pero no se obtuvo una imagen publicable, la consulta de datos puede terminar correctamente, `screenshot_url` permanece `null`, `captura` se omite y `data.warnings` informa la ausencia.

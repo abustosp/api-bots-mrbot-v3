@@ -62,7 +62,7 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el trabajo | `OK` si se genera el VEP y concluyen las descargas/publicaciones solicitadas; `ERROR` si falla una fase. No se devuelve un resultado `PARCIAL`. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el trabajo | `OK` si se genera el VEP y concluyen las descargas/publicaciones solicitadas; `ERROR` si falla una fase. No se devuelve un resultado `PARCIAL`. | `"OK"` |
 | `data.detalle` | texto | En todo resultado de operación disponible, también con `incluir_json=false` | Nombre del PDF de detalle generado. | `"20123456786 - VEP - internet_banking.pdf"` |
 | `data.operacion`, `data.representado_cuit`, `data.medio_pago` | texto | Solo con `incluir_json=true` (predeterminado) | Operación, CUIT y medio de pago elegido. | `{"operacion":"generar","representado_cuit":"20123456786","medio_pago":"qr"}` |
 | `data.registros` | entero | Solo con `incluir_json=true` | Cantidad de registros del archivo de entrada. | `2` |
@@ -72,4 +72,4 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 | `data.sha256_qr` | texto | Solo con `incluir_json=true`, `subir_pdf=true` y publicación exitosa del QR disponible | Huella del PNG QR publicado. | `"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"` |
 | `files[]` | lista de archivos | Siempre en la respuesta del trabajo; contiene el PDF y, si está disponible, el QR cuando se publican | Referencias públicas de los archivos. Sin publicaciones, el valor es `[]`. | `[{"name":"20123456786 - VEP - internet_banking.pdf","url":"","filename":"20123456786 - VEP - internet_banking.pdf","size":24576,"size_bytes":24576}]` |
 
-Con `incluir_json=false`, `data` contiene únicamente `detalle`; por ello no incluye los otros campos ni las huellas aunque los archivos sí se publiquen y aparezcan en `files`. El QR solo se descarga para el medio `qr` y puede no estar disponible. Un fallo posterior a la generación puede producir `ERROR` aunque el VEP ya exista.
+Con `incluir_json=false`, `data` contiene `detalle` y el sobre común `schema_version`; no incluye los otros campos ni las huellas aunque los archivos sí se publiquen y aparezcan en `files`. El QR solo se descarga para el medio `qr` y puede no estar disponible. Un fallo posterior a la generación puede producir `ERROR` aunque el VEP ya exista.

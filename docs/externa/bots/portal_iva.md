@@ -105,7 +105,7 @@ Las tablas describen los campos de la respuesta pública del trabajo. En un resu
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Siempre que el trabajo tenga resultado final. | Estado global de la operación. | `"OK"` |
+| `result` | texto o `null` | Siempre que el trabajo tenga resultado final. | Estado global de la operación. | `"OK"` |
 | `data.operacion` | texto | Siempre que se produzca `data`. | `descargar`, `importar` o `gestionar`. | `"gestionar"` |
 | `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado consultado o gestionado. | `"20123456786"` |
 | `data.periodo` | texto | Siempre que se produzca `data`. | Período normalizado `AAAAMM`. | `"202605"` |
@@ -123,7 +123,7 @@ Las tablas describen los campos de la respuesta pública del trabajo. En un resu
 | `data.ventas.size_bytes`, `data.compras.size_bytes` | entero | Solo si `subir_csv=true` y se publicó el CSV. Si no se publica, la propiedad se omite. | Tamaño del archivo publicado, en bytes. | `1200` |
 | `data.ventas.muestra`, `data.compras.muestra` | lista de objetos | Solo con `incluir_json=true`; puede ser `[]` si el CSV no contiene filas. | Hasta cinco filas. Los nombres de columna corresponden a la cabecera recibida y pueden variar. | `[{"columna-ilustrativa":"valor-ficticio"}]` |
 | `data.avisos` | lista de textos | Solo si falla el intento de descartar el borrador tras completarse las descargas. | Aviso incluido dentro de `data`; si no hay avisos, la propiedad se omite en lugar de devolver `[]`. | `["aviso-ficticio-sobre-borrador"]` |
-| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye los CSV publicados; es `[]` si `subir_csv=false` o no se generó un archivo. | Archivos descargables del trabajo, separados de `data`. | `[{"name":"ventas-ejemplo.csv","url":"","size":1200,"artifact_id":"id-ficticio","filename":"ventas-ejemplo.csv","content_type":"text/csv","size_bytes":1200,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":"/api/v3/jobs/{job_id}/artifacts/{artifact_id}/download","url_expires_in":3600}]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye los CSV publicados; es `[]` si `subir_csv=false` o no se generó un archivo. | Archivos descargables del trabajo, separados de `data`. | `[{"name":"ventas-ejemplo.csv","url":"","size":1200,"artifact_id":"0190f0c0-7f5b-7b2e-9f7e-123456789abd","filename":"ventas-ejemplo.csv","content_type":"text/csv","size_bytes":1200,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":"/api/v3/jobs/{job_id}/artifacts/{artifact_id}/download","url_expires_in":null}]` |
 
 Si un resumen se genera correctamente con `incluir_json=false`, `muestra` se omite. Con `subir_csv=false`, el nombre `archivo` permanece en `data`, mientras `sha256`, `size_bytes` y el adjunto `files` se omiten o quedan vacíos. La descarga conserva los efectos configurados en la entrada, incluidos la actualización desde el organismo y la limpieza posterior.
 

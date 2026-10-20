@@ -55,7 +55,7 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el trabajo | `OK` si no hubo fallos por comprobante; `PARCIAL` si se registraron fallos procesables; `ERROR` si falla el trabajo completo. | `"PARCIAL"` |
+| `result` | texto o `null` | Al finalizar el trabajo | `OK` si no hubo fallos por comprobante; `PARCIAL` si se registraron fallos procesables; `ERROR` si falla el trabajo completo. | `"PARCIAL"` |
 | `data.operacion` | texto | En un resultado de operación disponible | Nombre de la operación. | `"descargar"` |
 | `data.representado_cuit` | texto | En un resultado de operación disponible | CUIT consultado, normalizado a 11 dígitos. | `"20123456786"` |
 | `data.fecha_desde`, `data.fecha_hasta` | texto | En un resultado de operación disponible | Límites del rango consultado, en `DD/MM/AAAA`. | `{"fecha_desde":"01/01/2026","fecha_hasta":"31/01/2026"}` |

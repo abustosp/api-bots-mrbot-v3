@@ -60,7 +60,7 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el trabajo | `OK` sin errores no fatales; `PARCIAL` si falla una o más consultas individuales y se completa el trabajo; `ERROR` ante una falla que interrumpe la operación. | `"PARCIAL"` |
+| `result` | texto o `null` | Al finalizar el trabajo | `OK` sin errores no fatales; `PARCIAL` si falla una o más consultas individuales y se completa el trabajo; `ERROR` ante una falla que interrumpe la operación. | `"PARCIAL"` |
 | `data.operacion`, `data.representado_cuit`, `data.periodo` | texto | En un resultado de operación disponible | Operación, CUIT y período consultados. | `{"operacion":"consultar","representado_cuit":"20123456786","periodo":"202601"}` |
 | `data.jurisdicciones` | lista de objetos | Con `incluir_json=true`; se omite si es `false` | Una entrada por método y jurisdicción consultados. Si la entrada `jurisdicciones` fue `[]`, esta salida es `[]`. | `[{"jurisdiccion":901,"metodo":"retencion","etiqueta":"Retenciones","archivos":[]}]` |
 | `data.jurisdicciones[].archivos` | lista de objetos | En cada entrada de `data.jurisdicciones` | Archivos disponibles para esa jurisdicción y método. Puede ser `[]`. | `[{"archivo":"sircar-demo.xlsx","tipo":"xlsx"}]` |

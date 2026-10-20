@@ -58,7 +58,7 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el trabajo | `OK` si terminan las capturas y la extracción solicitada; `PARCIAL` si falla la extracción de campos tras producir capturas; `ERROR` si falla una captura o la operación completa. | `"PARCIAL"` |
+| `result` | texto o `null` | Al finalizar el trabajo | `OK` si terminan las capturas y la extracción solicitada; `PARCIAL` si falla la extracción de campos tras producir capturas; `ERROR` si falla una captura o la operación completa. | `"PARCIAL"` |
 | `data.operacion`, `data.representado_cuit` | texto | En un resultado de operación disponible | Operación y CUIT consultado. | `{"operacion":"consultar","representado_cuit":"20123456786"}` |
 | `data.vistas` | lista de objetos | Con `incluir_json=true`; se omite si es `false` | Una entrada por captura incluida, con nombre de vista, archivo y dimensiones. | `[{"vista":"detalle","archivo":"siper-detalle.png","ancho":1280,"alto":900}]` |
 | `data.vistas[].sha256`, `data.vistas[].size_bytes` | texto, entero | Solo con `incluir_json=true` y si la captura se publicó | Huella y tamaño de la imagen publicada. Si `subir=false`, estas propiedades no aparecen. | `{"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size_bytes":24576}` |

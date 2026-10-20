@@ -53,7 +53,7 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el trabajo | `OK` cuando se generan los dos reportes y termina la operación; `ERROR` si falla una fase obligatoria. No se devuelve un resultado `PARCIAL`. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el trabajo | `OK` cuando se generan los dos reportes y termina la operación; `ERROR` si falla una fase obligatoria. No se devuelve un resultado `PARCIAL`. | `"OK"` |
 | `data.operacion` | texto | En un resultado de operación disponible | Nombre de la operación. | `"consultar"` |
 | `data.representado_cuit` | texto | En un resultado de operación disponible | CUIT consultado, normalizado a 11 dígitos. | `"20123456786"` |
 | `data.periodo_desde`, `data.periodo_hasta` | texto | En un resultado de operación disponible | Primer y último período consultados. | `{"periodo_desde":"202601","periodo_hasta":"202603"}` |

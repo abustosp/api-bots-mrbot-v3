@@ -89,6 +89,8 @@ La respuesta del job incluye `files` como lista, incluso cuando está vacía. Ca
 - Si está disponible, `download_url` es una dirección autenticada para solicitar la descarga. La respuesta puede redirigir a una dirección temporal. Siga la redirección y no guarde la dirección temporal como permanente.
 - Los enlaces directos tienen vencimiento; cuando `url_expires_in` indica un valor, expresa su vigencia en segundos. Si la descarga responde `404` o `410`, el archivo no está disponible para esa solicitud.
 
+Una publicación completada no garantiza por sí sola que `files` incluya una referencia en toda configuración del servicio. Si `files` está vacío, no concluya que la operación no generó el archivo, especialmente en operaciones con efectos. Verifique el estado en el organismo antes de repetir el pedido.
+
 Ejemplo ficticio:
 
 ```json

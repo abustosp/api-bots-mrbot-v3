@@ -55,7 +55,7 @@ Las rutas de compatibilidad históricas, cuando aparecen en el catálogo, usan c
 - `GET /api/v3/usuarios/me` consulta la identidad y el estado de la cuenta.
 - `POST /api/v3/jobs/estado:lote` consulta hasta 200 identificadores. La respuesta HTTP puede ser `200` aunque algún elemento tenga error; revise cada entrada de `items`.
 
-Estados que puede encontrar: `PENDIENTE`, `ASIGNADO`, `CORRIENDO`, `COMPLETO`, `FALLIDO` y `CANCELADO`. En la vista compatible, `ASIGNADO` puede aparecer como `PENDIENTE` y un fallo puede aparecer como `COMPLETO` con `result: "ERROR"`. No infiera éxito a partir de `COMPLETO`: revise siempre `result` y `status_detail`. El resultado final puede ser `OK`, `PARCIAL` o `ERROR`; no está disponible mientras la ejecución sigue activa.
+Estados que puede encontrar: `PENDIENTE`, `ASIGNADO`, `CORRIENDO`, `COMPLETO`, `FALLIDO` y `CANCELADO`. En la vista compatible, `ASIGNADO` puede aparecer como `PENDIENTE` y un fallo puede aparecer como `COMPLETO` con `result: "ERROR"`. No infiera éxito a partir de `COMPLETO`: revise siempre `result` y `status_detail`. El resultado final puede ser `OK`, `PARCIAL` o `ERROR`; no está disponible mientras la ejecución sigue activa. Una ejecución cancelada puede terminar con `result: null`, sin resultado de la operación.
 
 Ejemplo estrictamente ilustrativo del envoltorio genérico de estado, no de la salida de una operación concreta:
 

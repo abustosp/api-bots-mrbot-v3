@@ -37,7 +37,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | `OK` cuando el servicio devuelve un objeto JSON válido; los errores de conexión, HTTP o formato terminan con error. La operación no produce resultado parcial. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | `OK` cuando el servicio devuelve un objeto JSON válido; los errores de conexión, HTTP o formato terminan con error. La operación no produce resultado parcial. | `"OK"` |
 | `data` | objeto JSON | Cuando la consulta termina correctamente | Copia la respuesta objeto del servicio. No se garantiza un conjunto fijo de campos fiscales. | `{"<clave del servicio>": "<valor>"}` |
 | `files` | lista de archivos | En la respuesta final | Siempre vacía. Esta operación no produce archivos. | `[]` |
 

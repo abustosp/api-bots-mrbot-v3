@@ -37,7 +37,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | En una consulta válida es `OK`. Si no se puede consultar la base, la ejecución falla. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | En una consulta válida es `OK`. Si no se puede consultar la base, la ejecución falla. | `"OK"` |
 | `data.cuit` | texto | Cuando la consulta termina correctamente | CUIT consultado. | `"20123456786"` |
 | `data.apoc` | booleano | Cuando la consulta termina correctamente | `true` indica coincidencia y `false` indica que no se encontró el CUIT en la base consultada. | `false` |
 | `data.fecha_condicion` | texto o `null` | Cuando la consulta termina correctamente | Fecha asociada a la condición si hay coincidencia; `null` si no la hay. | `null` |

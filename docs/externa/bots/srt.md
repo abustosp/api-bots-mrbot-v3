@@ -47,7 +47,7 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el trabajo | `OK` si no hubo consultas fallidas; `PARCIAL` si uno o más CUIT fallan y el lote continúa; `ERROR` si falla el trabajo completo. | `"PARCIAL"` |
+| `result` | texto o `null` | Al finalizar el trabajo | `OK` si no hubo consultas fallidas; `PARCIAL` si uno o más CUIT fallan y el lote continúa; `ERROR` si falla el trabajo completo. | `"PARCIAL"` |
 | `data.operacion` | texto | En un resultado de operación disponible | Nombre de la operación. | `"consultar_alicuotas"` |
 | `data.cantidad`, `data.consultas_ok`, `data.consultas_error` | enteros | En un resultado de operación disponible | Cantidad total de CUIT únicos procesados, cantidad exitosa y cantidad con estado `ERROR`. `SIN_AFILIACION_VIGENTE` cuenta como consulta exitosa. | `{"cantidad":2,"consultas_ok":1,"consultas_error":1}` |
 | `data.consultas` | lista de objetos | Con `incluir_json=true`; se omite si es `false` | Una entrada por CUIT procesado. | `[{"cuit":"20123456786","status":"SIN_AFILIACION_VIGENTE","message":"No se encontraron datos de alícuotas","data":null}]` |

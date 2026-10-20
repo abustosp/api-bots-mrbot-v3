@@ -47,7 +47,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | `OK` si se descarga y procesa el certificado; los fallos terminan con error. No se define resultado parcial. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | `OK` si se descarga y procesa el certificado; los fallos terminan con error. No se define resultado parcial. | `"OK"` |
 | `data.operacion` | texto | En una descarga correcta | Operación ejecutada. | `"descargar"` |
 | `data.representado_cuit` | texto | En una descarga correcta | CUIT seleccionado para la descarga. | `"20123456786"` |
 | `data.archivo` | texto | En una descarga correcta | Nombre del PDF descargado. | `"certificado.pdf"` |

@@ -63,7 +63,7 @@ Las tablas describen el resultado público del trabajo. Los ejemplos son JSON fi
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si se encontró al menos una DDJJ, incluso si algunos períodos no tienen DDJJ; `ERROR` si no se encontró ninguna. No se emite `PARCIAL` por períodos sin DDJJ. | `"OK"` |
+| `result` | texto o `null` | Siempre que el trabajo tenga resultado final. | `OK` si se encontró al menos una DDJJ, incluso si algunos períodos no tienen DDJJ; `ERROR` si no se encontró ninguna. No se emite `PARCIAL` por períodos sin DDJJ. | `"OK"` |
 | `data.operacion` | texto | En resultados públicos con `data`. | Operación ejecutada. | `"consultar"` |
 | `data.representado_cuit` | texto | En resultados públicos con `data`. | CUIT normalizado consultado. | `"20123456786"` |
 | `data.periodo_desde` | texto | En resultados públicos con `data`. | Primer período normalizado del rango procesado. | `"202601"` |
@@ -84,6 +84,6 @@ Las tablas describen el resultado público del trabajo. Los ejemplos son JSON fi
 | `data.detalle[].sha256_vep` | texto | Solo si `subir_archivos=true` y el PDF VEP existe, no está vacío y se publicó; en caso contrario se omite. | Huella del PDF VEP publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
 | `data.detalle[].sha256_nomina` | texto | Solo si `subir_archivos=true` y la planilla de nómina existe, no está vacía y se publicó; en caso contrario se omite. | Huella de la planilla de nómina publicada. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
 | `data.detalle[].sha256_json` | texto | Solo si `subir_archivos=true` y el JSON DDJJ existe, no está vacío y se publicó; en caso contrario se omite. | Huella del JSON DDJJ publicado. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
-| `files` | lista de archivos | Siempre en la respuesta del trabajo. Puede estar vacía o contener los archivos existentes y publicados para cada período. | Archivos adjuntos: PDF de DDJJ, PDF de VEP, planilla de nómina y JSON de DDJJ. | `[{"name":"ddjj-ejemplo.pdf","url":"","size":900,"artifact_id":"id-ficticio","filename":"ddjj-ejemplo.pdf","content_type":"application/pdf","size_bytes":900,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Puede estar vacía o contener los archivos existentes y publicados para cada período. | Archivos adjuntos: PDF de DDJJ, PDF de VEP, planilla de nómina y JSON de DDJJ. | `[{"name":"ddjj-ejemplo.pdf","url":"","size":900,"artifact_id":"0190f0c0-7f5b-7b2e-9f7e-123456789abd","filename":"ddjj-ejemplo.pdf","content_type":"application/pdf","size_bytes":900,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
 
 `subir_archivos=false` deja `files=[]` y omite las huellas, pero no evita las descargas temporales. `incluir_json=false` omite `data.detalle`, pero no impide publicar en `files` el JSON de DDJJ si `subir_archivos=true` y el archivo existe.

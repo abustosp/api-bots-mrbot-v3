@@ -55,7 +55,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | `OK` si la consulta y la exportación terminan correctamente; los fallos de sesión, consulta o exportación terminan con error. No se define resultado parcial. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | `OK` si la consulta y la exportación terminan correctamente; los fallos de sesión, consulta o exportación terminan con error. No se define resultado parcial. | `"OK"` |
 | `data.operacion` | texto | En una respuesta correcta | Operación ejecutada. | `"consultar"` |
 | `data.representado_cuit` | texto | En una respuesta correcta | CUIT consultado. | `"20123456786"` |
 | `data.periodo` | texto | En una respuesta correcta | Período en meses usado en la consulta. | `"72"` |
@@ -63,7 +63,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 | `data.archivo` | texto | En una respuesta correcta | Nombre del CSV generado, incluso cuando `subir_csv=false`. | `"pagos_vep_<cuit>_<periodo>.csv"` |
 | `data.sha256` | texto hexadecimal | Si `subir_csv=true` y la publicación termina correctamente | Huella del CSV publicado. | `"<64 caracteres hexadecimales>"` |
 | `data.size_bytes` | entero | Si `subir_csv=true` y la publicación termina correctamente | Tamaño del CSV publicado en bytes. | `12345` |
-| `data.muestra` | lista de objetos | Si `incluir_json=true` | Muestra de filas del CSV; puede ser vacía. Cada valor de fila se representa como texto. | `[]` |
+| `data.muestra` | lista de objetos | Si `incluir_json=true` | Muestra de filas del CSV; puede ser vacía. Los valores se toman del lector CSV sin normalización: un campo faltante puede ser `null` y uno repetido puede ser una lista. | `[]` |
 | `files` | lista de archivos | En la respuesta final | Contiene el CSV publicado si `subir_csv=true`; queda vacía si `subir_csv=false`. | `[]` |
 
 Con `subir_csv=true`, el CSV se obtiene en `files`; con `false`, no hay archivo descargable aunque se haya generado para procesar las filas. `incluir_json=false` omite `data.muestra`. La consulta no crea ni paga un VEP.

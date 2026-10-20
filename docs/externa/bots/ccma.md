@@ -53,7 +53,7 @@ La respuesta final del job expone `result`, `data` y `files`. Los ejemplos son i
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el job | Una consulta completada devuelve `OK`. Un corte de lectura de movimientos no cambia por sí solo este resultado a parcial. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el job | Una consulta completada devuelve `OK`. Un corte de lectura de movimientos no cambia por sí solo este resultado a parcial. | `"OK"` |
 | `data.operacion` | texto | En una consulta correcta | Operación ejecutada. | `"consultar"` |
 | `data.representado_cuit` | texto | En una consulta correcta | CUIT consultado. | `"20123456786"` |
 | `data.periodo_desde` | texto | En una consulta correcta | Período inicial aplicado, incluido el default cuando se omitió en la solicitud. | `"04/2000"` |

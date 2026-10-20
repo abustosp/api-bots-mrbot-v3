@@ -80,7 +80,7 @@ La respuesta pública del trabajo contiene `result` y `data`. En un resultado `E
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si no hay secciones fallidas, `PARCIAL` si fallan algunas y `ERROR` si fallan todas. | `"PARCIAL"` |
+| `result` | texto o `null` | Siempre que el trabajo tenga resultado final. | `OK` si no hay secciones fallidas, `PARCIAL` si fallan algunas y `ERROR` si fallan todas. | `"PARCIAL"` |
 | `data.operacion` | texto | Siempre que se produzca `data`. | Nombre de la operación. | `"cargar"` |
 | `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado del representado. | `"20123456786"` |
 | `data.periodo` | texto | Siempre que se produzca `data`. | Período normalizado `AAAAMM`. | `"202401"` |
@@ -91,7 +91,7 @@ La respuesta pública del trabajo contiene `result` y `data`. En un resultado `E
 | `data.secciones.CF Restitucion` | texto | Si se envió `csv_cf_restitucion_key`. | Estado de la restitución de crédito fiscal. | `"CF Restitucion: cargado"` |
 | `data.secciones.DF` | texto | Si se envió `csv_df_key`. | Estado de la apertura de débito fiscal. | `"DF: cargado"` |
 | `data.secciones.DF Restitucion` | texto | Si se envió `csv_df_restitucion_key`. | Estado de la restitución de débito fiscal. | `"DF Restitucion: cargado"` |
-| `data.secciones.credito_fiscal_compras` | texto | Si se envió `csv_cf_key`, la apertura `CF` terminó correctamente y `prorrateo_global` es `true`. | Resultado de la actualización del crédito fiscal computable de compras: `ok`, `sin_modal` o un valor de error que comienza con `error:`. | `"ok"` |
+| `data.secciones.credito_fiscal_compras` | texto | Si se envió `csv_cf_key`, la apertura `CF` terminó correctamente, `prorrateo_global` es `true` y se pudo interpretar el total de crédito fiscal del CSV. | Resultado de la actualización del crédito fiscal computable de compras: `ok`, `sin_modal` o un valor de error que comienza con `error:`. | `"ok"` |
 | `data.periodos_seleccionables` | lista de objetos | Solo cuando la preparación devuelve una lista no vacía; si devuelve `[]`, la propiedad se omite, no se devuelve como `null`. | Opciones de período comunicadas durante la preparación. Los nombres de las propiedades pueden variar y no se documenta un conjunto estable de claves. | `[{"campo-ilustrativo":"valor-ficticio"}]` |
 | `data.total_credito_fiscal_computable_cf` | texto | Si se incluyó `csv_cf_key` y se pudo interpretar un total. Si no hay total interpretable, la propiedad se omite. | Total leído del CSV de apertura CF. | `"12345.67"` |
 | `files` | lista de archivos | Siempre en la respuesta del trabajo; queda vacía porque esta operación no publica archivos de salida. | Archivos disponibles para descargar desde el resultado del trabajo. | `[]` |

@@ -74,7 +74,7 @@ Las tablas describen la respuesta pública del trabajo. Los ejemplos son JSON fi
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si la operación terminó, incluso si una o más descargas por período fallaron; los fallos del trabajo se informan como `ERROR`. | `"OK"` |
+| `result` | texto o `null` | Siempre que el trabajo tenga resultado final. | `OK` si la operación terminó, incluso si una o más descargas por período fallaron; los fallos del trabajo se informan como `ERROR`. | `"OK"` |
 | `data.operacion` | texto | Siempre que se produzca `data`. | Operación solicitada. | `"descargar"` |
 | `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado del representado. | `"20123456786"` |
 | `data.periodo_desde` | texto | Siempre que se produzca `data`. | Primer período normalizado del rango. | `"202501"` |
@@ -91,14 +91,14 @@ Las tablas describen la respuesta pública del trabajo. Los ejemplos son JSON fi
 | `data.libros.detalle[].error`, `data.ddjj.detalle[].error` | texto | En el elemento de detalle de un período fallido, solo con `incluir_json=true`. | Tipo de error de descarga. No se incluye en el resumen de períodos descargados. | `"TargetUnavailableError"` |
 | `data.periodos_descargados` | lista de textos | Siempre en `descargar`; puede ser `[]`. | Concatenación de los períodos descargados en las dos categorías. Un mismo período puede aparecer una vez por categoría. | `["202501","202501"]` |
 | `data.periodos_error` | lista de textos | Siempre en `descargar`; puede ser `[]`. | Concatenación de los períodos con error en las dos categorías. Un mismo período puede aparecer una vez por categoría. | `["202502"]` |
-| `files` | lista de archivos | Siempre en la respuesta del trabajo. Vacía si `subir_archivos=false` o no se publicó ningún archivo. | Adjuntos producidos para períodos descargados. No se garantiza un adjunto por cada mes solicitado. | `[{"name":"archivo-ejemplo.bin","url":"","size":1200,"artifact_id":"id-ficticio","filename":"archivo-ejemplo.bin","content_type":"application/octet-stream","size_bytes":1200,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Vacía si `subir_archivos=false` o no se publicó ningún archivo. | Adjuntos producidos para períodos descargados. No se garantiza un adjunto por cada mes solicitado. | `[{"name":"archivo-ejemplo.bin","url":"","size":1200,"artifact_id":"0190f0c0-7f5b-7b2e-9f7e-123456789abd","filename":"archivo-ejemplo.bin","content_type":"application/octet-stream","size_bytes":1200,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
 
 ### `descargar_libros` y `descargar_ddjj`
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
 | `data.operacion` | texto | Siempre que se produzca `data`. | `descargar_libros` o `descargar_ddjj`. | `"descargar_libros"` |
-| `result` | texto | Siempre que la operación tenga resultado final. | `OK` al terminar, incluidos los resultados con fallos limitados a algunos períodos; un fallo de operación produce `ERROR`. | `"OK"` |
+| `result` | texto o `null` | Siempre que la operación tenga resultado final. | `OK` al terminar, incluidos los resultados con fallos limitados a algunos períodos; un fallo de operación produce `ERROR`. | `"OK"` |
 | `data.representado_cuit` | texto | Siempre que se produzca `data`. | CUIT normalizado del representado. | `"20123456786"` |
 | `data.periodo_desde` | texto | Siempre que se produzca `data`. | Primer período normalizado del rango. | `"202501"` |
 | `data.periodo_hasta` | texto | Siempre que se produzca `data`. | Último período normalizado del rango. | `"202502"` |

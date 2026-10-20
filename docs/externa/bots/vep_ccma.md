@@ -66,7 +66,7 @@ En la respuesta de `GET /api/v3/jobs/{job_id}`, `result` indica el estado final,
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Al finalizar el trabajo | `OK` si concluye la operación; `ERROR` si falla una fase. No se devuelve un resultado `PARCIAL`. | `"OK"` |
+| `result` | texto o `null` | Al finalizar el trabajo | `OK` si concluye la operación; `ERROR` si falla una fase. No se devuelve un resultado `PARCIAL`. | `"OK"` |
 | `data.operacion`, `data.representado_cuit`, `data.medio_pago` | texto | En un resultado de operación disponible | Operación, CUIT consultado y medio elegido. | `{"operacion":"generar","representado_cuit":"20123456786","medio_pago":"link"}` |
 | `data.total_impuestos`, `data.total_intereses`, `data.total_seleccionado` | enteros | En un resultado de operación disponible | Cantidades de obligaciones consultadas por categoría y seleccionadas. Si se genera el volante, `total_seleccionado` coincide con el número de filas de `volante`. | `{"total_impuestos":2,"total_intereses":1,"total_seleccionado":2}` |
 | `data.volante` | lista de objetos | Solo si `generar_volante=true` | Filas seleccionadas que forman el VEP, con `tipo`, período, impuesto, concepto, subconcepto, categoría e importe. No aparece si solo se consultan obligaciones. | `[{"tipo":"capital","periodo":"01/2026","impuesto":"FICTICIO","concepto":"1","subconcepto":"0","categoria":"A","importe":100.0,"checkbox_index":1}]` |

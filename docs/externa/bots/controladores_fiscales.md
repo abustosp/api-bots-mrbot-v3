@@ -55,7 +55,7 @@ Las tablas describen los campos de la respuesta pública del trabajo. Los ejempl
 
 | Ruta | Tipo | Condición de presencia | Descripción | Ejemplo |
 |---|---|---|---|---|
-| `result` | texto | Siempre que el trabajo tenga resultado final. | `OK` si no hubo fallos por archivo, `PARCIAL` si al menos uno se presentó y otro falló, `ERROR` si fallaron todos. | `"PARCIAL"` |
+| `result` | texto o `null` | Siempre que el trabajo tenga resultado final. | `OK` si no hubo fallos por archivo, `PARCIAL` si al menos uno se presentó y otro falló, `ERROR` si fallaron todos. | `"PARCIAL"` |
 | `data.operacion` | texto | Cuando `data` está disponible. | Nombre de operación. | `"presentar"` |
 | `data.archivos_presentados` | entero | Cuando `data` está disponible. | Cantidad de archivos cuyo procesamiento produjo un registro de resultado, incluidos los fallidos. | `2` |
 | `data.total_archivos` | entero | Cuando `data` está disponible. | Cantidad de archivos del lote después de eliminar duplicados. | `2` |
@@ -67,6 +67,6 @@ Las tablas describen los campos de la respuesta pública del trabajo. Los ejempl
 | `data.detalle[].constancia` | texto o null | En cada registro de `detalle`. | Nombre de la constancia exitosa; `null` cuando la presentación de ese archivo falló. | `null` |
 | `data.detalle[].sha256` | texto | Solo en presentaciones exitosas con `subir_constancia=true` y publicación completada. Si no se sube la constancia, se omite. | Huella de la constancia publicada. | `"0000000000000000000000000000000000000000000000000000000000000000"` |
 | `data.detalle[].size_bytes` | entero | Solo en presentaciones exitosas con `subir_constancia=true` y publicación completada. Si no se sube la constancia, se omite. | Tamaño de la constancia publicada, en bytes. | `500` |
-| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye constancias exitosas publicadas; puede ser `[]`. | Adjuntos del trabajo. `subir_constancia=false` deja la lista vacía, pero no cambia la presentación. | `[{"name":"constancia-ejemplo.pdf","url":"","size":500,"artifact_id":"id-ficticio","filename":"constancia-ejemplo.pdf","content_type":"application/pdf","size_bytes":500,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
+| `files` | lista de archivos | Siempre en la respuesta del trabajo. Incluye constancias exitosas publicadas; puede ser `[]`. | Adjuntos del trabajo. `subir_constancia=false` deja la lista vacía, pero no cambia la presentación. | `[{"name":"constancia-ejemplo.pdf","url":"","size":500,"artifact_id":"0190f0c0-7f5b-7b2e-9f7e-123456789abd","filename":"constancia-ejemplo.pdf","content_type":"application/pdf","size_bytes":500,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","download_url":null,"url_expires_in":null}]` |
 
 Los estados por archivo y los contadores permiten distinguir el lote parcial. La respuesta no incluye una propiedad independiente de advertencias.
