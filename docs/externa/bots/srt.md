@@ -17,11 +17,11 @@ Se requiere clave fiscal y CUIT representante para iniciar la sesión; las conve
 
 ## Campos del payload
 
-| Campo | Tipo, requerido y default | Efecto y tratamiento de omisión/null/vacío/false |
-|---|---|---|
-| `cuits_consulta` | lista requerida, 1–50 textos | Cada valor se normaliza quitando espacios, guiones, puntos y `/`, y debe resultar en 11 dígitos. Duplicados se eliminan conservando el primer orden. Omitir/null/lista vacía/elemento inválido rechaza. |
-| `incluir_json` | booleano, default `true` | `false` omite `consultas` del JSON inline, no cambia las consultas. Omitir = `true`; `null` inválido. |
-| `subir_json` | booleano, default `true` | `true` publica el consolidado JSON; `false` no lo publica. Omitir = `true`; `null` inválido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `cuits_consulta` | lista de textos | Sí | ninguno | Lista de 1–50 CUIT. Cada valor se normaliza quitando espacios, guiones, puntos y `/`, y debe resultar en 11 dígitos. Los duplicados se eliminan conservando el primer orden. Omitir, `null`, lista vacía o elemento inválido rechaza. | `["20-12345678-6","27-11122233-4"]` |
+| `incluir_json` | booleano | No | `true` | `false` omite `consultas` del JSON inline, no cambia las consultas. Omitir equivale a `true`; `null` inválido. | `true` |
+| `subir_json` | booleano | No | `true` | `true` publica el consolidado JSON; `false` no lo publica. Omitir equivale a `true`; `null` inválido. | `true` |
 
 Se requiere al menos una salida (`incluir_json=true` o `subir_json=true`). No se aceptan otros campos del payload. El catálogo de entrada omite erróneamente `cuits_consulta` de la lista `required`, pero la validación efectiva sí la exige; envíela siempre.
 

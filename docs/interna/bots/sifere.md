@@ -19,12 +19,12 @@
 - `data` contiene `operacion`, CUIT, período y `jurisdicciones` cuando `incluir_json=true`. Cada jurisdicción tiene `jurisdiccion`, `metodo`, `etiqueta`, `archivos`; cada archivo, `archivo`, `tipo`, y con publicación, `sha256`/`size_bytes`. Con `incluir_json=true` puede incluir `consolidados`, una lista de archivos de consolidado con nombre y metadatos de publicación (`plugin.py:224-304,306-369`).
 - `subir=false` evita referencias y archivos finales, no la descarga interna. `incluir_json=false` quita listas estructuradas de jurisdicciones/consolidados, pero la validación exige que alguna salida permanezca activa. Errores individuales SIRCAR y consolidados se agregan a `errors`; éxitos de otras jurisdicciones se retienen y estado es `PARCIAL` si existe cualquier error (`plugin.py:201-208,282-303,315-369`).
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-1. **Validación efectiva más estricta que OpenAPI.** El JSON Schema manifest requiere solo operación, aunque el modelo exige CUIT y período (`schema.py:69-129,139-164`). El espejo de catálogo `services/central-api/src/central_api/api/bot_payloads.py:283-288` enumera campos básicos, no el rango de jurisdicciones. **Propuesta:** compartir/derivar schema del modelo y publicar límites, defaults y nullable.
-2. **Jurisdicciones inválidas se silencian.** Los elementos fuera de 901–924 desaparecen, pudiendo resultar lista vacía sin error (`schema.py:115-126`). **Propuesta:** rechazar fuera de rango o devolver advertencia explícita y códigos ignorados.
-3. **Default de consolidado no visible de forma completa en espejo público.** `consolidados=true` genera consultas/archivos adicionales incluso si la lista de jurisdicciones es `[]` (`schema.py:92-94`, `plugin.py:302-303`). **Propuesta:** hacer explícito este efecto y ofrecer modos con propósito claro.
-4. **No atomicidad y errores de publicación.** Los reportes anteriores pueden descargarse/publicarse antes de un fallo posterior que eleva excepción; no todo fallo se representa como resultado parcial (`plugin.py:257-303,345-369`). **Propuesta:** manejar los fallos de cada archivo como error acumulado y probar el estado final con artefactos ya publicados.
+1. **Validación efectiva más estricta que OpenAPI.** El JSON Schema manifest requiere solo operación, aunque el modelo exige CUIT y período (`schema.py:69-129,139-164`). El espejo de catálogo `services/central-api/src/central_api/api/bot_payloads.py:283-288` enumera campos básicos, no el rango de jurisdicciones.
+2. **Jurisdicciones inválidas se silencian.** Los elementos fuera de 901–924 desaparecen, pudiendo resultar lista vacía sin error (`schema.py:115-126`).
+3. **Default de consolidado no visible de forma completa en espejo público.** `consolidados=true` genera consultas/archivos adicionales incluso si la lista de jurisdicciones es `[]` (`schema.py:92-94`, `plugin.py:302-303`).
+4. **No atomicidad y errores de publicación.** Los reportes anteriores pueden descargarse/publicarse antes de un fallo posterior que eleva excepción; no todo fallo se representa como resultado parcial (`plugin.py:257-303,345-369`).
 
 ## Pruebas consultadas
 

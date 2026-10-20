@@ -11,37 +11,37 @@ Importa comprobantes de ventas/compras y/o datos de apertura en el libro IVA del
 
 ## Payload
 
-| Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`. | Omitir, `null`, vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. |
-| `periodo` | Texto, requerido, formato `AAAAMM`. | Omitir, `null`, vacío o `false`: rechazo. Mes 01–12; no se admite período futuro al validar. |
-| `denominacion` | Texto, opcional, default `""`, máximo 128 caracteres. | Omitir: queda vacío. `null` o `false`: rechazo. Cadena vacía permitida; no altera la carga. |
-| `operaciones_ng_o_e` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `false`: desactivado. |
-| `prorrateo_global` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `true` puede hacer que, tras cargar con éxito el CSV de crédito fiscal, se actualice el importe global computable. |
-| `prorrateo_asignacion_directa` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `true`: declara esa modalidad al preparar el período. |
-| `prorrateo_ambos` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `true`: declara ambas modalidades al preparar el período. |
-| `importacion_definitiva_bienes` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. |
-| `importacion_servicios` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. |
-| `regimen_turiva` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. |
-| `bienes_usados` | Booleano, default `false`. | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. |
-| `ninguna_anteriores` | Booleano, default `true`. | Omitir: `true`. `null` o vacío: rechazo. `false`: indica que no se selecciona esa alternativa; use las opciones aplicables. |
-| `liv_cbte_key` | Texto, opcional: clave del TXT de comprobantes de ventas. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `liv_alicuota_key`. |
-| `liv_alicuota_key` | Texto, opcional: clave del TXT de alícuotas de ventas. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `liv_cbte_key`. |
-| `lic_cbte_key` | Texto, opcional: clave del TXT de comprobantes de compras. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `lic_alicuota_key`. |
-| `lic_alicuota_key` | Texto, opcional: clave del TXT de alícuotas de compras. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `lic_cbte_key`. |
-| `csv_cf_key` | Texto, opcional: clave del CSV de apertura de crédito fiscal. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Por sí solo cumple la alternativa de CSV de apertura. |
-| `csv_cf_restitucion_key` | Texto, opcional: clave del CSV de restitución de crédito fiscal. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. |
-| `csv_df_key` | Texto, opcional: clave del CSV de apertura de débito fiscal. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. |
-| `csv_df_restitucion_key` | Texto, opcional: clave del CSV de restitución de débito fiscal. | Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | Alias: `cuit`. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. Omitir, `null`, vacío o `false`: rechazo. | `"20123456786"` |
+| `periodo` | texto | Sí | ninguno | Formato `AAAAMM`; mes 01–12; no se admite período futuro al validar. Omitir, `null`, vacío o `false`: rechazo. | `"202401"` |
+| `denominacion` | texto | No | `""` | Máximo 128 caracteres. Omitir: queda vacío. `null` o `false`: rechazo. Cadena vacía permitida; no altera la carga. | `"EMPRESA DE EJEMPLO"` |
+| `operaciones_ng_o_e` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `false`: desactivado. | `false` |
+| `prorrateo_global` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `true` puede hacer que, tras cargar con éxito el CSV de crédito fiscal, se actualice el importe global computable. | `false` |
+| `prorrateo_asignacion_directa` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `true`: declara esa modalidad al preparar el período. | `false` |
+| `prorrateo_ambos` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `true`: declara ambas modalidades al preparar el período. | `false` |
+| `importacion_definitiva_bienes` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. | `false` |
+| `importacion_servicios` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. | `false` |
+| `regimen_turiva` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. | `false` |
+| `bienes_usados` | booleano | No | `false` | Omitir: `false`. `null` o vacío: rechazo. `true`: marca esa opción del período. | `false` |
+| `ninguna_anteriores` | booleano | No | `true` | Omitir: `true`. `null` o vacío: rechazo. `false`: indica que no se selecciona esa alternativa; use las opciones aplicables. | `true` |
+| `liv_cbte_key` | texto | No | ninguno | Clave del TXT de comprobantes de ventas. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `liv_alicuota_key`. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/liv_cbte.txt"` |
+| `liv_alicuota_key` | texto | No | ninguno | Clave del TXT de alícuotas de ventas. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `liv_cbte_key`. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/liv_alicuota.txt"` |
+| `lic_cbte_key` | texto | No | ninguno | Clave del TXT de comprobantes de compras. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `lic_alicuota_key`. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/lic_cbte.txt"` |
+| `lic_alicuota_key` | texto | No | ninguno | Clave del TXT de alícuotas de compras. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Si se usa, requiere también `lic_cbte_key`. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/lic_alicuota.txt"` |
+| `csv_cf_key` | texto | No | ninguno | Clave del CSV de apertura de crédito fiscal. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. Por sí solo cumple la alternativa de CSV de apertura. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/csv_cf.csv"` |
+| `csv_cf_restitucion_key` | texto | No | ninguno | Clave del CSV de restitución de crédito fiscal. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/csv_cf_restitucion.csv"` |
+| `csv_df_key` | texto | No | ninguno | Clave del CSV de apertura de débito fiscal. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/csv_df.csv"` |
+| `csv_df_restitucion_key` | texto | No | ninguno | Clave del CSV de restitución de débito fiscal. Omitir, `null` o `""`: no se envía archivo. `false`: rechazo. | `"550e8400-e29b-41d4-a716-446655440000/carga_portal_iva/20123456786/csv_df_restitucion.csv"` |
 
 Debe incluir al menos un par completo de TXT (ventas o compras) o un CSV de apertura. Un par TXT incompleto se rechaza. No se aceptan archivos inline en Base64. Cada referencia debe apuntar a un archivo no vacío, con extensión TXT/CSV según el campo y tamaño máximo de 20 MiB.
 
 ## Credenciales
 
-| Campo | Tipo y necesidad efectiva | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `credentials.cuit_representante` | Texto; CUIT de la cuenta fiscal que inicia sesión. | Si falta, el acceso no puede completarse. `null` o `""` se tratan como ausentes. `false`: tipo inválido. |
-| `credentials.clave` | Texto; clave fiscal. | Requerida para completar el acceso. `null` o `""` se tratan como ausentes. `false`: tipo inválido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `credentials.cuit_representante` | texto | Sí | ninguno | CUIT de la cuenta fiscal que inicia sesión. Si falta, el acceso no puede completarse. `null` o `""` se tratan como ausentes. `false`: tipo inválido. | `"20123456786"` |
+| `credentials.clave` | texto | Sí | ninguno | Clave fiscal. Requerida para completar el acceso. `null` o `""` se tratan como ausentes. `false`: tipo inválido. | `"CLAVE_FICTICIA_NO_USAR"` |
 
 Se aceptan nombres compatibles para las credenciales de CUIT y clave, además de `clave_encriptada` cuando el valor cifrado sea válido para el servicio. No envíe credenciales ficticias a un entorno real.
 

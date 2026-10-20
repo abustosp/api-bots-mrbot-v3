@@ -17,12 +17,6 @@ La consulta devuelve `cuit`, `apoc`, `fecha_condicion` y `fecha_publicacion`; `a
 - El esquema operativo también incluye `operacion`, aunque en el endpoint anidado la ruta ya fija la operación. El plugin conserva `consultar` como default (`services/bot-worker/src/bot_worker/bots/apoc/plugin.py:105-115`).
 - La falta de base es un error explícito para evitar interpretar fuente ausente como resultado negativo (`services/bot-worker/src/bot_worker/bots/apoc/plugin.py:118-137`).
 
-## Propuestas, sin implementar
-
-- Alinear explícitamente la regla CUIT entre ruta canónica y aliases planos. Si la primera debe aceptar separadores, no copiar al endpoint anidado el regex digit-only del DTO de compatibilidad. No añadir checksum sin decisión de contrato.
-- Mantener la falta de fuente como error y documentar esa diferencia frente a búsqueda sin coincidencia.
-- Separar el esquema de operación interno (incluye `operacion`) del cuerpo V3 anidado, cuyo verbo ya está en la ruta.
-
 ## Evidencia revisada
 
 - Catálogo y ruta: `services/central-api/src/central_api/api/bots.py:194-208,329-339,378-386,748-817`.

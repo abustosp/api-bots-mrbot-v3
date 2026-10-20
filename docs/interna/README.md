@@ -6,8 +6,7 @@
 
 - [API y recorrido de los datos](api.md): rutas, autenticación, validación, normalización, persistencia y consulta de resultados.
 - [Workers](workers.md): admisión, ejecución, capacidad, leases, archivos, cancelación, limpieza y reporte.
-- [Schemas y models](schemas-models.md): discrepancias y propuestas concretas de mejora. No son cambios ya implementados.
-- [Auditoría priorizada](auditoria.md): casos de fallo comprobados, corrección mínima propuesta e impacto. El informe utiliza inglés sencillo conforme al formato de auditoría solicitado.
+- [Auditoría priorizada](auditoria.md): casos de fallo comprobados, corrección mínima e impacto. El informe utiliza inglés sencillo conforme al formato de auditoría solicitado.
 - [Validaciones realizadas](validacion.md): comandos, resultados y límites de la revisión.
 
 ## Fuente de verdad y carga asumida

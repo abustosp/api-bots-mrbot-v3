@@ -20,13 +20,13 @@ La familia pública `services/central-api/src/central_api/api/bot_payloads.py:30
 - `data` siempre incluye operación, CUIT y medio; contiene totales y `volante` cuando se genera; con `incluir_json=true`, listas `impuestos` e `intereses`. PDF publicado agrega `sha256`/`size_bytes`; QR disponible agrega `nombre_qr` y hash (`plugin.py:213-267`).
 - `generar_volante=true` por default genera VEP con efecto fiscal, no paga. El click final no se reintenta ante confirmación ambigua (`runtime/portals/vep_ccma.py:317-364`). Una falla posterior de descarga/publicación puede coexistir con un volante ya creado.
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-1. **Rechazo de aliases prometido demasiado ampliamente.** El modelo directo sí comprueba contradicciones, pero central elimina `cuit_representado` y convierte aliases de subida con precedencia (`credentials.py:85-103,227-263`). **Propuesta:** detectar discrepancias en el payload original antes de canonicalizar; añadir tests separados para ruta canónica y alias plano.
-2. **Filtros omitidos del catálogo de familia.** Schema/plugin/runtime los aceptan y aplican, pero `bot_payloads.py:304-310` no los declara; la superficie histórica sí (`:434-438,510`). El runtime contiene comentario obsoleto sobre ausencia de filtros (`runtime/portals/vep_ccma.py:1-16`). **Propuesta:** publicar los campos y enumerar claves/tipos; actualizar comentario y añadir tests de contrato.
-3. **Coerción booleana ambigua.** `_unificar_subida` usa `bool` antes de comparar (`schema.py:116-132`), así que `"false"` se toma como verdadero. **Propuesta:** exigir booleanos JSON y rechazar strings/números antes de comparar.
-4. **Schema público no sincronizado.** La familia central omite filtros que sí afectan obligaciones, con riesgo de que el catálogo sugiera que son ignorados. **Propuesta:** derivar OpenAPI de `VepCcmaGenerarInput` y comprobar paridad con la solicitud central normalizada.
-5. **Ambigüedad del efecto final.** El click no tiene reintento seguro; error posterior no demuestra que el VEP no se creó (`runtime/portals/vep_ccma.py:317-364`). **Propuesta:** reflejar explícitamente etapa/resultado incierto y no reintentar generación automáticamente.
+1. **Rechazo de aliases prometido demasiado ampliamente.** El modelo directo sí comprueba contradicciones, pero central elimina `cuit_representado` y convierte aliases de subida con precedencia (`credentials.py:85-103,227-263`).
+2. **Filtros omitidos del catálogo de familia.** Schema/plugin/runtime los aceptan y aplican, pero `bot_payloads.py:304-310` no los declara; la superficie histórica sí (`:434-438,510`). El runtime contiene comentario obsoleto sobre ausencia de filtros (`runtime/portals/vep_ccma.py:1-16`).
+3. **Coerción booleana ambigua.** `_unificar_subida` usa `bool` antes de comparar (`schema.py:116-132`), así que `"false"` se toma como verdadero.
+4. **Schema público no sincronizado.** La familia central omite filtros que sí afectan obligaciones, con riesgo de que el catálogo sugiera que son ignorados.
+5. **Ambigüedad del efecto final.** El click no tiene reintento seguro; error posterior no demuestra que el VEP no se creó (`runtime/portals/vep_ccma.py:317-364`).
 
 ## Pruebas consultadas
 

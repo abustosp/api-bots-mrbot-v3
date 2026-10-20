@@ -8,14 +8,18 @@ Ruta canónica: `POST /api/v3/bots/libro_sueldos_digital/descargar`. El alias pl
 
 ## Campos de `payload`
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `periodo_desde`, `periodo_hasta` | strings requeridos `AAAAMM` | Seis dígitos, mes 01–12. Nulo/vacío inválido; período inicial posterior al final se rechaza. Se genera mes a mes, con tope de 1200 períodos. |
-| `representado_cuit` | string nullable, opcional; aliases `cuit`, `cuit_representado` | Si se omite, es nulo o vacío, se usa el CUIT de sesión. Si se informa, se quitan separadores y se valida con el empleador seleccionado. |
-| `incluir_json` | boolean, default `true` | `false` omite el detalle por liquidación, pero deja contadores/listas de períodos. `null` explícito se rechaza. |
-| `subir_archivos` | boolean, default `true` | `false` no publica PDF en `files[]`; el portal todavía se consulta y los archivos se descargan durante el trabajo. `null` explícito se rechaza. |
-| `cuit_representante`, `cuit_inicio_sesion`, `cuit_login` | CUIT de sesión/contexto heredado, normalmente en `credentials` | No se repite en `payload` si la sesión va en `credentials`. `null`/vacío se omite. |
-| `proxy_request`, `headless` | boolean nullable opcional, legado | No cambian selección/resultado; `null` es válido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `periodo_desde` | texto | Sí | ninguno | Seis dígitos en formato `AAAAMM`, mes `01`–`12`. Nulo o vacío: inválido. Un período inicial posterior al final se rechaza. Se genera mes a mes, con tope de 1200 períodos. | `"202601"` |
+| `periodo_hasta` | texto | Sí | ninguno | Seis dígitos en formato `AAAAMM`, mes `01`–`12`. Nulo o vacío: inválido. El rango es inclusivo y ascendente; si es anterior a `periodo_desde` se rechaza. Se genera mes a mes, con tope de 1200 períodos. | `"202603"` |
+| `representado_cuit` | texto | No | `null` | CUIT del empleador. Alias: `cuit`, `cuit_representado`. Si se omite, es `null` o vacío, se usa el CUIT de sesión. Si se informa, se quitan los separadores y se valida con el empleador seleccionado. | `"20123456786"` |
+| `incluir_json` | booleano | No | `true` | `false` omite el detalle por liquidación, pero deja contadores y listas de períodos. `null` explícito se rechaza. | `true` |
+| `subir_archivos` | booleano | No | `true` | `false` no publica PDF en `files[]`; el portal todavía se consulta y los archivos se descargan durante el trabajo. `null` explícito se rechaza. | `true` |
+| `cuit_representante` | texto | No | ninguno | CUIT de sesión o contexto heredado, normalmente en `credentials`. No se repite en `payload` si la sesión va en `credentials`. `null` o vacío se omite. | `"20123456786"` |
+| `cuit_inicio_sesion` | texto | No | ninguno | Alias de `cuit_representante` para el CUIT de sesión o contexto heredado, normalmente en `credentials`. No se repite en `payload` si la sesión va en `credentials`. `null` o vacío se omite. | `"20123456786"` |
+| `cuit_login` | texto | No | ninguno | Alias de `cuit_representante` para el CUIT de sesión o contexto heredado, normalmente en `credentials`. No se repite en `payload` si la sesión va en `credentials`. `null` o vacío se omite. | `"20123456786"` |
+| `proxy_request` | booleano | No | `null` | Campo nullable opcional legado. No cambia la selección ni el resultado; `null` es válido. | `false` |
+| `headless` | booleano | No | `null` | Campo nullable opcional legado. No cambia la selección ni el resultado; `null` es válido. | `false` |
 
 El esquema de ejecución tolera campos adicionales; se recomienda enviar solo los documentados. La operación la fija la ruta. El esquema del catálogo es descriptivo y el alias HTTP plano tiene su propio modelo de entrada.
 
@@ -23,11 +27,14 @@ El esquema de ejecución tolera campos adicionales; se recomienda enviar solo lo
 
 El objeto `credentials` puede omitirse en el envelope, pero la descarga requiere una sesión fiscal. La identidad y la contraseña no tienen default; si faltan, normalmente falla la autenticación. El servicio comprueba el empleador efectivo y detiene la descarga si no coincide con el CUIT solicitado.
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
-| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
-| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `cuit_representante` | texto | Condicional | ninguno | Identidad de sesión. Se necesita una identidad para iniciar sesión, salvo que se use el alias `cuit_inicio_sesion`. Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `cuit_inicio_sesion` | texto | No | ninguno | Alias de `cuit_representante`. Aporta la identidad de sesión. Si se omite, es `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `clave` | texto | Condicional | ninguno | Contraseña en texto. Se necesita una contraseña, salvo que se aporte `clave_encriptada`; `clave_representante` y `contrasena` son alias. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_representante` | texto | No | ninguno | Alias de `clave`. Aporta la contraseña en texto. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `contrasena` | texto | No | ninguno | Alias de `clave`. Aporta la contraseña en texto. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_encriptada` | texto | No | ninguno | Alternativa cifrada. Omitida, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. | `"Q0xBVkUtRklDVElDSUE="` |
 
 No usar credenciales reales en el ejemplo.
 

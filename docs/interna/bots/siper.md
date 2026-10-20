@@ -19,12 +19,12 @@ La ruta canónica pasa por `normalize_v2_payload` también: `services/central-ap
 - `data` incluye `operacion`, `representado_cuit`, `vistas` si JSON está activo, y `campos` si extracción está activa. Cada vista incluye nombre (`detalle`/`categorias`), archivo, ancho/alto, y metadatos hash/tamaño cuando se publica. `campos` posibles: contribuyente, categoría SIPER, motivo, fecha de última categoría y estado del trámite de disconformidad (`plugin.py:224-281`).
 - Error de extracción se conserva como `PARCIAL` junto a las capturas producidas. El fallo de captura aborta; la extracción puede seguir consultando detalle aun con `incluir_detalle=false` si `extraer_campos=true` (`plugin.py:231-281`).
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-1. **Fallback de CUIT falla con credencial anidada.** Central normaliza payload antes de extraer credentials, y no combina los mappings (`api/bots.py:574,608-618,793-817`; `credentials.py:138-158`). El modelo requiere `representado_cuit`, pero catálogo `services/central-api/src/central_api/api/bot_payloads.py:289-293` no expresa bien el requerido. **Propuesta:** hacer CUIT representado requerido explícito en contrato público; no inferirlo de identidad autenticadora, o añadir una regla de composición explícita con tests.
-2. **Default de subida diferente según entrada.** Schema/modelo declara `subir=true`, normalizador API establece `false` sin flags legacy (`schema.py:18-82`; `credentials.py:143-158`). **Propuesta:** alinear defaults documentados y publicados, añadir tests de API canónica con flags ausentes y ambos valores explícitos.
-3. **`extraer_campos` omitido del manifest/familia pública.** El modelo lo admite para operaciones con consultas de detalle aun si la vista no se incluye (`schema.py:18-82`, `plugin.py:263-280`), pero el espejo `bot_payloads.py:289-293` no lo ofrece. **Propuesta:** añadirlo al schema del manifest y catálogo o quitarlo de la interfaz, con prueba `incluir_detalle=false` combinada con `extraer_campos`.
-4. **`incluir_json` no controla `campos`.** El flag suprime `vistas` y conserva `campos` (`plugin.py:259-268`). **Propuesta:** definir por separado `incluir_vistas` y `extraer_campos` o aclarar un contrato de datos consistente.
+1. **Fallback de CUIT falla con credencial anidada.** Central normaliza payload antes de extraer credentials, y no combina los mappings (`api/bots.py:574,608-618,793-817`; `credentials.py:138-158`). El modelo requiere `representado_cuit`, pero catálogo `services/central-api/src/central_api/api/bot_payloads.py:289-293` no expresa bien el requerido.
+2. **Default de subida diferente según entrada.** Schema/modelo declara `subir=true`, normalizador API establece `false` sin flags legacy (`schema.py:18-82`; `credentials.py:143-158`).
+3. **`extraer_campos` omitido del manifest/familia pública.** El modelo lo admite para operaciones con consultas de detalle aun si la vista no se incluye (`schema.py:18-82`, `plugin.py:263-280`), pero el espejo `bot_payloads.py:289-293` no lo ofrece.
+4. **`incluir_json` no controla `campos`.** El flag suprime `vistas` y conserva `campos` (`plugin.py:259-268`).
 
 ## Pruebas consultadas
 

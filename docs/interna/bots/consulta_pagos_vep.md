@@ -16,13 +16,11 @@ Salida: resumen con CUIT/período/filas/nombre; hash/tamaño ligados al archivo 
 - Credenciales runtime: `services/bot-worker/src/bot_worker/runtime/context.py:17-25`; login ARCA `services/bot-worker/src/bot_worker/runtime/arca_login.py:25`.
 - Pruebas leídas: `services/bot-worker/tests/test_consulta_pagos_vep_plugin.py`, `services/bot-worker/tests/test_portal_vep_archivo.py`, `tests/test_paridad_catalogo_registry.py` y `services/central-api/tests/test_catalog_seed.py`.
 
-## Discrepancias concretas y propuestas
+## Discrepancias observadas
 
-1. `esquema_entrada()` documenta `subir_csv` y `minio_upload`, pero omite `subir_a_minio`, aunque el validador lo acepta (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:19-20,81-93,111-123`). Añadirlo al esquema descriptivo generado o retirar el alias en un cambio compatible.
-2. `subir_csv` y `incluir_json` no pueden ser ambos false (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:95-100`), aunque el esquema del catálogo central los describe como booleanos independientes (`services/central-api/src/central_api/api/bot_payloads.py:156-160`). La ruta genérica no aplica ese DTO antes del esquema real, por lo que la combinación puede encolarse y fallar durante la validación del bot. Publicar la regla cruzada.
-3. El esquema del catálogo describe el CUIT con patrón estricto `^\\d{11}$` (`services/central-api/src/central_api/api/bot_payloads.py:71-73,157`), más estrecho que la normalización efectiva que acepta separadores (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:47-58`). La ruta canónica genérica no aplica el DTO del catálogo; la diferencia corresponde a la descripción publicada y potencialmente al alias plano, no a un rechazo canónico previo. Hacer patrón y documentación coherentes.
-4. `bool(valor)` en aliases de upload considera la cadena no vacía `"false"` como verdadera (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:84-92`). El contrato debe rechazar coerciones textuales y admitir solamente booleanos JSON.
-5. El nombre técnico de portal y el nombre de servicio ARCA deben seguir documentados como servicio de consulta, no como una operación de generación/pago de VEP. No hay efecto irreversible observado.
-6. `proxy_request` se elimina del payload; la entrada pública V3 tampoco lo expone. Mantenerlo fuera del contrato de cliente, o deprecarlo formalmente en la compatibilidad antigua.
-
-Propuestas limitadas a schema/modelos/pruebas; no se implementan aquí.
+1. `esquema_entrada()` documenta `subir_csv` y `minio_upload`, pero omite `subir_a_minio`, aunque el validador lo acepta (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:19-20,81-93,111-123`).
+2. `subir_csv` y `incluir_json` no pueden ser ambos false (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:95-100`), aunque el esquema del catálogo central los describe como booleanos independientes (`services/central-api/src/central_api/api/bot_payloads.py:156-160`). La ruta genérica no aplica ese DTO antes del esquema real, por lo que la combinación puede encolarse y fallar durante la validación del bot.
+3. El esquema del catálogo describe el CUIT con patrón estricto `^\\d{11}$` (`services/central-api/src/central_api/api/bot_payloads.py:71-73,157`), más estrecho que la normalización efectiva que acepta separadores (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:47-58`). La ruta canónica genérica no aplica el DTO del catálogo; la diferencia corresponde a la descripción publicada y potencialmente al alias plano, no a un rechazo canónico previo.
+4. `bool(valor)` en aliases de upload considera la cadena no vacía `"false"` como verdadera (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:84-92`).
+5. El nombre técnico de portal y el nombre de servicio ARCA corresponden a un servicio de consulta, no a una operación de generación/pago de VEP. No hay efecto irreversible observado.
+6. `proxy_request` se elimina del payload; la entrada pública V3 tampoco lo expone.

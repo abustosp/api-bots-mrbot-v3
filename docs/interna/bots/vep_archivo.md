@@ -20,13 +20,13 @@
 - `data` normal incluye operación, CUIT representado, medio, número de registros, lote y nombre PDF; al publicar suma huella/tamaño. Puede incluir nombre/huella del PNG QR en el medio `qr`. Con `incluir_json=false`, el objeto queda solo con `detalle`, aunque la generación del VEP sigue (`plugin.py:273-319`).
 - El click de generación es un efecto fiscal. Los archivos temporales se eliminan siempre aunque `eliminar_descargas=false`; una falla al descargar/subir puede ocurrir después de generado el volante (`schema.py:82-131`, `plugin.py:267-319`).
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-1. **Comentario de QR obsoleto.** `runtime/portals/vep_archivo.py:8-13` afirma que QR no está activo/no se admite, mientras schema acepta `qr` (`schema.py:18`) y plugin descarga el QR (`plugin.py:300-316`). **Propuesta:** actualizar comentario y añadir prueba que cruce medio, existencia QR y flag de publicación.
-2. **`eliminar_descargas` es no-op observable.** La entrada acepta el booleano, pero el flujo de archivos del portal hace cleanup siempre (`schema.py:105-123`, `runtime/portals/vep_archivo.py:243-318`). **Propuesta:** retirar el campo si cleanup debe ser incondicional, o respetarlo solamente si hay política documentada de retención segura.
-3. **Aliases contradictorios pueden ser descartados antes de validación.** El validador interno detecta diferencias en CUIT/subida si recibe ambos (`schema.py:28-43,64-80`), pero normalización central puede convertir y retirar alias antes de que los helpers los comparen (`credentials.py:85-103,227-263`). **Propuesta:** hacer que central rechace duplicados discrepantes antes de normalizar y probar las dos rutas de entrada.
-4. **JSON Schema incompleto.** Requiere nombres internos de `archivo_path`, publica una lista de flags parcial y omite varios aliases/modelos (`schema.py:141-164`); la superficie pública se describe como `archivo_key` tras el mapeo de archivo (`input_files.py:20-23`). **Propuesta:** publicar contrato de API (no ruta interna) generado y referenciar formato/límites del archivo.
-5. **No idempotencia/ambigüedad de efecto.** Un error remoto tras click final no permite saber si el VEP fue creado (`plugin.py:267-319`, portal `:114-173`). **Propuesta:** registrar etapa antes/después del click, exponer incertidumbre en error y no reintentar automáticamente.
+1. **Comentario de QR obsoleto.** `runtime/portals/vep_archivo.py:8-13` afirma que QR no está activo/no se admite, mientras schema acepta `qr` (`schema.py:18`) y plugin descarga el QR (`plugin.py:300-316`).
+2. **`eliminar_descargas` es no-op observable.** La entrada acepta el booleano, pero el flujo de archivos del portal hace cleanup siempre (`schema.py:105-123`, `runtime/portals/vep_archivo.py:243-318`).
+3. **Aliases contradictorios pueden ser descartados antes de validación.** El validador interno detecta diferencias en CUIT/subida si recibe ambos (`schema.py:28-43,64-80`), pero normalización central puede convertir y retirar alias antes de que los helpers los comparen (`credentials.py:85-103,227-263`).
+4. **JSON Schema incompleto.** Requiere nombres internos de `archivo_path`, publica una lista de flags parcial y omite varios aliases/modelos (`schema.py:141-164`); la superficie pública se describe como `archivo_key` tras el mapeo de archivo (`input_files.py:20-23`).
+5. **No idempotencia/ambigüedad de efecto.** Un error remoto tras click final no permite saber si el VEP fue creado (`plugin.py:267-319`, portal `:114-173`).
 
 ## Pruebas consultadas
 

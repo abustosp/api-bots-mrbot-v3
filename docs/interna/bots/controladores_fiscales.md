@@ -19,12 +19,9 @@ La presentación es efecto externo no reversible por la API. En lotes, cada arch
 - Credenciales y secretos: `services/central-api/src/central_api/security/credentials.py:74-115,303-370`; parser de alias plano `services/central-api/src/central_api/api/bot_routes.py:491-529`.
 - Pruebas leídas: `services/bot-worker/tests/test_controladores_fiscales_plugin.py` (éxito, parciales, flags, referencias ausentes), `services/bot-worker/tests/test_portal_controladores_fiscales.py`; central `tests/test_paridad_catalogo_registry.py`, `services/central-api/tests/test_catalog_seed.py`.
 
-## Discrepancias y propuestas de schema/model
+## Discrepancias observadas
 
-1. El JSON Schema del bot describe `archivos` como strings con longitud, pero no limita sufijo ni representa la regla de nombre sin ruta; el validador deduplica repetidos conservando el primero (`services/bot-worker/src/bot_worker/bots/controladores_fiscales/schema.py:31-86,77-85,102-119`). Añadir patrón/descripción suficiente al esquema público o validar el conjunto en central antes de encolar.
-2. `bool()` en aliases de subida admite strings numéricos/textuales con semántica accidental; en la ruta canónica `subir_constancia:null` también se convierte a false, mientras `incluir_json:null` se rechaza. El alias plano aplica su propio DTO y limpieza de nulls. Restringir a booleanos JSON y unificar ambas rutas.
-3. La referencia de carga es un `object_key`, pero el plugin valida la extensión del nombre resuelto. El contrato debe decir explícitamente que el nombre original/cargado debe conservar `.pem` o `.zip`, no basta una clave arbitraria con extensión.
-4. `incluir_json` controla detalle, no presentación. El nombre `subir_constancia` puede interpretarse como habilitación de la acción cuando solo gobierna la publicación de resultado; aclarar o renombrar en versión futura.
-5. Mantener pruebas de idempotencia/no reenvío después del botón de confirmación, además de una prueba de resultado parcial con dos archivos donde el primero queda presentado.
-
-No se cambió schema ni comportamiento; solo quedan propuestas.
+1. El JSON Schema del bot describe `archivos` como strings con longitud, pero no limita sufijo ni representa la regla de nombre sin ruta; el validador deduplica repetidos conservando el primero (`services/bot-worker/src/bot_worker/bots/controladores_fiscales/schema.py:31-86,77-85,102-119`).
+2. `bool()` en aliases de subida admite strings numéricos/textuales con semántica accidental; en la ruta canónica `subir_constancia:null` también se convierte a false, mientras `incluir_json:null` se rechaza. El alias plano aplica su propio DTO y limpieza de nulls.
+3. La referencia de carga es un `object_key`, pero el plugin valida la extensión del nombre resuelto; el nombre original/cargado debe conservar `.pem` o `.zip`, no basta una clave arbitraria con extensión.
+4. `incluir_json` controla detalle, no presentación. El nombre `subir_constancia` puede interpretarse como habilitación de la acción cuando solo gobierna la publicación de resultado.

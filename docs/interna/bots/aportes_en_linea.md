@@ -18,13 +18,6 @@ CUIT elimina separadores comunes, requiere once dígitos y no calcula checksum (
 - JSON Schema operativo declara sólo operación, representado y subir, omitiendo Base64, proxy y aliases que el modelo sí acepta (`services/bot-worker/src/bot_worker/bots/aportes_en_linea/schema.py:110-120`). El test confirma que `incluir_base64=true` no devuelve contenido (`services/bot-worker/tests/test_aportes_en_linea_plugin.py:326-341`).
 - El límite de 50 MiB es del artefacto producido y no equivale a validación previa del contenido de descarga (`services/bot-worker/src/bot_worker/bots/aportes_en_linea/plugin.py:90-112,197-220`).
 
-## Propuestas, sin implementar
-
-- Retirar o hacer cumplir explícitamente el requisito obsoleto de salida, según contrato esperado cuando `subir=false`.
-- Marcar `incluir_base64` y `proxy_request` como compatibilidad ignorada; que esquema operativo y espejo de alias describan lo mismo.
-- Mantener V3 recomendado con credenciales en bloque separado, con traducción documentada sólo para las formas antiguas.
-- Si se garantiza recuperación del XLS, requerir subida en la solicitud o añadir salida explícita compatible, sin prometer Base64 inexistente.
-
 ## Evidencia revisada
 
 - Catálogo y ruta: `services/central-api/src/central_api/api/bots.py:194-208,329-339,378-386,748-817`.

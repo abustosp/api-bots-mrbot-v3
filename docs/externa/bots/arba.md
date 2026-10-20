@@ -10,20 +10,20 @@ Descarga el archivo ZIP de retenciones/percepciones de Ingresos Brutos para un C
 
 ## Payload
 
-| Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Si se omite o es `null`, se rechaza. Vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. |
-| `periodo` | Texto, requerido, formato `AAAAMM`. | Omitir, `null`, vacío o `false`: rechazo. Mes 01–12 y el período no puede ser futuro al validar. |
-| `representado_nombre` | Texto, requerido, 1–128 caracteres. Alias: `denominacion`. | Omitir, `null`, vacío o `false`: rechazo. Se limpia para formar el nombre del archivo, no cambia datos del portal. |
-| `subir` | Booleano, opcional, default `true`. | Omitir: publica el ZIP como archivo descargable. `null`, vacío o texto no booleano: rechazo. `false`: no publica archivo descargable ni agrega huella/tamaño. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | Alias: `cuit`, `cuit_representado`. Si se omite o es `null`, se rechaza. Vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. | `"20123456786"` |
+| `periodo` | texto | Sí | ninguno | Formato `AAAAMM`. Omitir, `null`, vacío o `false`: rechazo. Mes `01`–`12` y el período no puede ser futuro al validar. | `"202401"` |
+| `representado_nombre` | texto | Sí | ninguno | Longitud de 1 a 128 caracteres. Alias: `denominacion`. Omitir, `null`, vacío o `false`: rechazo. Se limpia para formar el nombre del archivo, no cambia datos del portal. | `"EJEMPLO FICTICIO SA"` |
+| `subir` | booleano | No | `true` | Omitir: publica el ZIP como archivo descargable. `null`, vacío o texto no booleano: rechazo. `false`: no publica archivo descargable ni agrega huella ni tamaño. | `true` |
 
 La fecha máxima permitida depende del mes en que se valide la solicitud. Los alias de un mismo dato no deben tener valores contradictorios.
 
 ## Credenciales
 
-| Campo | Tipo y necesidad efectiva | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `credentials.clave` | Texto, requerida para completar el acceso. | Omitida, `null` o `""`: la solicitud puede encolarse pero falla al ejecutar por falta de clave. `false`: tipo inválido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `credentials.clave` | texto | Condicional | ninguno | Clave fiscal. Se requiere para completar el acceso; sin ella la solicitud puede encolarse pero falla al ejecutar por falta de clave. Omitida, `null` o `""`: falta de clave. `false`: tipo inválido. | `"CLAVE_FICTICIA_NO_USAR"` |
 
 El CUIT de inicio de sesión se toma del CUIT representado de este pedido. No se requiere otro campo de CUIT en `credentials`. También puede usarse un nombre de campo de clave compatible, por ejemplo `clave_representante` o `contrasena`; una clave cifrada requiere un valor aceptado por el servicio.
 

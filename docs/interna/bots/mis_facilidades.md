@@ -14,11 +14,11 @@ Catálogo central: operación única `consultar` (`services/central-api/src/cent
 
 Resultado incluye `cuits_disponibles`, planes/procesados y errores por plan o sección. Cada PDF se produce por vista disponible; las tablas se ensamblan en XLSX. Si falla una parte, se conserva el resto y estado se vuelve `PARCIAL`; sin errores, `OK` (`plugin.py:L207-L229`, `L242-L361`). `subir_archivos=false` deja generación/localización temporal pero sin `files[]`. `situacion_excluyente=[]` no filtra. Un campo vacío de CUIT no es `None`, pasa por limpieza y falla.
 
-## Discrepancias y propuestas, no implementadas
+## Discrepancias observadas
 
-- La documentación/modelo público V3 expresa CUIT representado como regex estricto de 11 dígitos (`services/central-api/src/central_api/api/bot_payloads.py:L213-L219`), pero el validador real acepta separadores al limpiarlos (`worker schema.py:L31-L42`). **Propuesta:** alinear validación pública y ejecución, o declarar el formato estricto de forma efectiva.
-- Los defaults V2 y V3 para `subir_archivos` no son equivalentes en todas las rutas: V2 usa `carga_minio=true`, V3 schema usa `true`; el comportamiento queda consistente para falta de entrada, pero la llave/contracto público difiere (`central-api/api/bot_payloads.py:L556-L578`, worker `schema.py:L61-L67`). **Propuesta:** documentar alias/default por endpoint y cubrir requests mínimos.
-- El catálogo de credenciales no expone propiedades requeridas (`central-api/api/bots.py:L820-L845`), pese al guard del plugin (`plugin.py:L183-L190`). **Propuesta:** publicar CUIT y clave operativamente requeridos.
+- La documentación/modelo público V3 expresa CUIT representado como regex estricto de 11 dígitos (`services/central-api/src/central_api/api/bot_payloads.py:L213-L219`), pero el validador real acepta separadores al limpiarlos (`worker schema.py:L31-L42`).
+- Los defaults V2 y V3 para `subir_archivos` no son equivalentes en todas las rutas: V2 usa `carga_minio=true`, V3 schema usa `true`; el comportamiento queda consistente para falta de entrada, pero la llave/contracto público difiere (`central-api/api/bot_payloads.py:L556-L578`, worker `schema.py:L61-L67`).
+- El catálogo de credenciales no expone propiedades requeridas (`central-api/api/bots.py:L820-L845`), pese al guard del plugin (`plugin.py:L183-L190`).
 
 ## Referencias y pruebas revisadas
 
@@ -29,5 +29,3 @@ Resultado incluye `cuits_disponibles`, planes/procesados y errores por plan o se
 - `services/central-api/src/central_api/api/bot_compat.py:L73`
 - `services/central-api/src/central_api/api/bot_payloads.py:L213-L219`, `L556-L578`
 - Revisados: `services/bot-worker/tests/test_portal_mis_facilidades.py` y tests del plugin. No se ejecutó ninguna sesión real.
-
-Las referencias indican líneas del árbol actual. Las propuestas son exclusivamente de documentación/modelo, sin modificaciones de implementación.

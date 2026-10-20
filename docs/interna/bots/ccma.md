@@ -20,12 +20,6 @@ Con movimientos, `data.movimientos` es lista de objetos con valores texto `perio
 - El portal fija rango `48` para cuenta corriente mientras `periodo_desde` controla cálculo de deuda (`services/bot-worker/src/bot_worker/bots/ccma/plugin.py:197-207`).
 - `movimientos_completos` sólo aparece falso en cortes concretos. La ausencia no equivale a un `true` explícito.
 
-## Propuestas, sin implementar
-
-- Reproducir restricciones de forma y mes, implicación PDF→movimientos y defaults en el DTO de rutas flat; documentar validación posterior del job en la ruta anidada.
-- Tipar salida: ocho saldos, lista typed de movimientos, `movimientos_corte`, campo completitud nullable con semántica clara.
-- Publicar límite fijo de recorrido o convertirlo en parámetro; definir si truncamiento esperado sigue siendo `OK` o pasa a `PARCIAL`.
-
 ## Evidencia revisada
 
 - Catálogo/ruta: `services/central-api/src/central_api/api/bots.py:194-208,329-339,378-386,748-817`.

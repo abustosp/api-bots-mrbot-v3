@@ -14,13 +14,13 @@ El catálogo publica solo `consultar` (`services/central-api/src/central_api/api
 
 Las fechas se parsean/serializan a formato uniforme. `subir_archivos: null` y cualquier alias de subida en `null` se eliminan antes de validar, por lo que se aplica el default `true` (`schema.py:L115-L127`). El alias de subida se normaliza con `bool(valor)` y los aliases presentes deben coincidir después de esa conversión (`schema.py:L107-L127`). Consecuencia: la cadena no vacía `"false"` se vuelve `True`, no un booleano falso. El flujo emite `data.secciones`, con nombre/tamaño de planilla y cantidades/nombres de comprobantes; si se adjuntó, añade hash/tamaño. `subir_archivos=false` conserva la consulta y los resúmenes, pero no retorna referencias de archivo. El resultado normal es `OK`; una excepción no capturada aborta el trabajo, no existe degradación por sección a `PARCIAL` (`plugin.py:L179-L221`, `L223-L288`, `L290-L312`).
 
-## Discrepancias y propuestas, no implementadas
+## Discrepancias observadas
 
-- El V3 canónico acepta normalización de `minio_upload`, `carga_minio` y `archivo_historico_minio`, pero no traduce `subir_a_minio`; `schema.py` sí lo reconoce si llega directamente. Como el modelo prohíbe extras, el alias `subir_a_minio` recibido por la API central queda sin quitar y falla (`central-api/security/credentials.py:L44-L45`, `L227-L275`; `schema.py:L27-L28`, `L115-L127`). **Propuesta:** retirar el alias interno no documentado o incorporarlo a normalización central y contrato público.
-- `bool("false")` activa subida; también afecta a aliases múltiples (`schema.py:L118-L126`). **Propuesta:** parseo estricto de booleanos y pruebas para cadenas incompatibles.
-- En el modelo legado V2, `minio_upload` default `false`, mientras el contrato de ejecución V3 tiene `subir_archivos=true` (`central-api/api/bot_payloads.py:L556-L573`; `schema.py:L100-L105`). **Propuesta:** elegir y documentar un default común o mantener diferencia explícita por ruta.
-- El schema público lista la ruta canónica y defaults de las secciones, pero el patrón CUIT no describe separadores admitidos por validación real (`central-api/api/bot_payloads.py:L195-L203`). **Propuesta:** alinear el contrato generado con normalización real.
-- Contrato de credenciales se publica genérico, aunque el plugin necesita ambas credenciales (`central-api/api/bots.py:L820-L845`, plugin `L179-L185`). **Propuesta:** publicar campos requeridos.
+- El V3 canónico acepta normalización de `minio_upload`, `carga_minio` y `archivo_historico_minio`, pero no traduce `subir_a_minio`; `schema.py` sí lo reconoce si llega directamente. Como el modelo prohíbe extras, el alias `subir_a_minio` recibido por la API central queda sin quitar y falla (`central-api/security/credentials.py:L44-L45`, `L227-L275`; `schema.py:L27-L28`, `L115-L127`).
+- `bool("false")` activa subida; también afecta a aliases múltiples (`schema.py:L118-L126`).
+- En el modelo legado V2, `minio_upload` default `false`, mientras el contrato de ejecución V3 tiene `subir_archivos=true` (`central-api/api/bot_payloads.py:L556-L573`; `schema.py:L100-L105`).
+- El schema público lista la ruta canónica y defaults de las secciones, pero el patrón CUIT no describe separadores admitidos por validación real (`central-api/api/bot_payloads.py:L195-L203`).
+- Contrato de credenciales se publica genérico, aunque el plugin necesita ambas credenciales (`central-api/api/bots.py:L820-L845`, plugin `L179-L185`).
 
 ## Referencias y pruebas revisadas
 
@@ -31,5 +31,3 @@ Las fechas se parsean/serializan a formato uniforme. `subir_archivos: null` y cu
 - `services/central-api/src/central_api/security/credentials.py:L44-L45`, `L227-L275`
 - `services/central-api/src/central_api/api/bot_payloads.py:L195-L203`, `L556-L573`
 - Revisados: `services/bot-worker/tests/test_liquidacion_granos_plugin.py` y contrato público. No se ejecutó el portal.
-
-No se implementaron cambios.

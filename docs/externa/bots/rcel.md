@@ -17,15 +17,15 @@ Se necesita clave fiscal y CUIT representante en `credentials.clave` y `credenti
 
 ## Campos del payload
 
-| Campo | Tipo, requerido y default | Efecto y tratamiento de omisión/null/vacío/false |
-|---|---|---|
-| `representado_cuit` | texto, requerido; alias `cuit` | CUIT de 11 dígitos; se quitan espacios, guiones, puntos y `/`. Vacío/null inválidos. Identifica la cuenta cuyos comprobantes se buscan. |
-| `representado_nombre` | texto, requerido, 1–128 caracteres; aliases V3 compatibles `denominacion` y `nombre_rcel` | Se usa para seleccionar y verificar la cuenta activa. Vacío/null inválidos. El portal no continúa sin el nombre, aunque el CUIT sea correcto. |
-| `fecha_desde` | texto, requerido; alias `desde` | Fecha real `DD/MM/AAAA`; se valida el calendario. Vacío/null/formato inválidos. |
-| `fecha_hasta` | texto, requerido; alias `hasta` | Fecha real `DD/MM/AAAA`; debe ser igual o posterior a `fecha_desde`. Vacío/null inválidos. |
-| `incluir_json` | booleano, default `true` | `true` incluye listado resumido de facturas en `data`; `false` omite la lista, sin impedir descargas. Omitir = `true`; `null` inválido. |
-| `subir_pdf` | booleano, default `true` | `true` publica cada PDF en los resultados; `false` conserva la descarga solo durante el trabajo y no publica el archivo. Omitir = `true`; `null` inválido. |
-| `extraer_campos` | booleano, default `true` | `true` intenta extraer campos del PDF; `false` devuelve solo el nombre/tamaño de cada comprobante aceptado. Omitir = `true`; `null` inválido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT de 11 dígitos; se quitan espacios, guiones, puntos y `/`. Alias: `cuit`. Vacío o `null` inválidos. Identifica la cuenta cuyos comprobantes se buscan. | `"20-12345678-6"` |
+| `representado_nombre` | texto | Sí | ninguno | Nombre de 1–128 caracteres; alias V3 compatibles `denominacion` y `nombre_rcel`. Se usa para seleccionar y verificar la cuenta activa. Vacío o `null` inválidos. El portal no continúa sin el nombre, aunque el CUIT sea correcto. | `"Comercial Ficticia SA"` |
+| `fecha_desde` | texto | Sí | ninguno | Fecha real `DD/MM/AAAA`; se valida el calendario. Alias: `desde`. Vacío, `null` o formato inválido se rechazan. | `"01/01/2026"` |
+| `fecha_hasta` | texto | Sí | ninguno | Fecha real `DD/MM/AAAA`; debe ser igual o posterior a `fecha_desde`. Alias: `hasta`. Vacío o `null` inválidos. | `"31/01/2026"` |
+| `incluir_json` | booleano | No | `true` | `true` incluye el listado resumido de facturas en `data`; `false` omite la lista sin impedir las descargas. Omitir equivale a `true`; `null` inválido. | `true` |
+| `subir_pdf` | booleano | No | `true` | `true` publica cada PDF en los resultados; `false` conserva la descarga solo durante el trabajo y no publica el archivo. Omitir equivale a `true`; `null` inválido. | `true` |
+| `extraer_campos` | booleano | No | `true` | `true` intenta extraer campos del PDF; `false` devuelve solo el nombre y tamaño de cada comprobante aceptado. Omitir equivale a `true`; `null` inválido. | `true` |
 
 No se aceptan otros campos del payload. Las fechas invertidas se rechazan. Se exige al menos una salida: `incluir_json=true` o `subir_pdf=true`.
 

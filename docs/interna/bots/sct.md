@@ -14,10 +14,10 @@ Central `services/central-api/src/central_api/api/bots.py:415`: `sct/consultar`,
 
 `data.operacion`, `representado_cuit`, `reportes`; cada reporte normal trae `seccion`, `formato`, `archivo`, `sha256`/`size_bytes` si se publica. Si la sección tiene insignia explícita cero, puede aparecer `{seccion, omitido: true, motivo: "sin_registros"}`. `errores` lista sección/formato/mensaje. Resultados por sección/formato se conservan aunque otro falle y resultado `PARCIAL` (`plugin.py:205-208, 229-317`).
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-- **Schema de entrada incompleto:** el modelo incluye `omitir_vacias` (`schema.py:50-51`) pero JSON Schema del manifest no lo publica (`:85-105`); catálogo público de familia tampoco (`central-api/api/bot_payloads.py:278-282`). **Propuesta:** incluir el campo/default o quitarlo si no se quiere exponer.
-- **Forma antigua y moderna difieren:** normalización central traduce banderas con nombres `excel`, `xlsx`, `csv`, `pdf`, también en la ruta canónica; repetición `excel`/`xlsx` puede añadir la misma sección/formato, deduplicada al final. La condición «todas ausentes/falsas» activa tres secciones XLSX y desactiva publicación, aunque el modelo directo exija `secciones`/`formatos` y default de `subir=true` (`schema.py:38-75`). **Propuesta:** separar de verdad la compatibilidad de la ruta canónica o alinear sus defaults/documentación, y cubrir ambos contratos.
+- **Schema de entrada incompleto:** el modelo incluye `omitir_vacias` (`schema.py:50-51`) pero JSON Schema del manifest no lo publica (`:85-105`); catálogo público de familia tampoco (`central-api/api/bot_payloads.py:278-282`).
+- **Forma antigua y moderna difieren:** normalización central traduce banderas con nombres `excel`, `xlsx`, `csv`, `pdf`, también en la ruta canónica; repetición `excel`/`xlsx` puede añadir la misma sección/formato, deduplicada al final. La condición «todas ausentes/falsas» activa tres secciones XLSX y desactiva publicación, aunque el modelo directo exija `secciones`/`formatos` y default de `subir=true` (`schema.py:38-75`).
 - **Flag `incluir_json`:** controla la presencia de `reportes`/errores de sección en el resultado, pero no las descargas ni artefactos. Con `false`, una falla puede seguir influyendo en estado `PARCIAL` sin que el detalle de `errores` quede en `data`; errors array del job remains separate.
 - **Pruebas leídas:** `services/bot-worker/tests/test_portal_sct.py:105-168` cubre redirect, iframe y contadores cero/desconocidos; `:195-489` prueba omisión y fallos parciales simulados.
 

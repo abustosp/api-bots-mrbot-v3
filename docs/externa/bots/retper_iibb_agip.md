@@ -17,16 +17,16 @@ Se requiere la clave de acceso y CUIT representante. Usar `credentials.clave` y 
 
 ## Campos del payload
 
-| Campo | Tipo, requerido y default | Efecto y tratamiento de omisión/null/vacío/false |
-|---|---|---|
-| `representado_cuit` | texto, requerido; aliases `cuit`, `cuit_representado` | CUIT de 11 dígitos; elimina espacios, guiones, puntos y `/`. Vacío/null inválidos. Identifica la cuenta para el reporte. |
-| `usuario` | texto nullable, opcional; default `null`, 1–256 caracteres si se informa | Usuario ClaveCiudad. Omitir/null recurre al CUIT representante. Vacío inválido. |
-| `denominacion` | texto, requerido, 1–256 caracteres | Razón social requerida para buscar/nombrar los reportes. Vacío/null inválidos. No se traduce automáticamente desde `representado_nombre`. |
-| `periodo_desde` | texto, requerido; alias `desde` | Se eliminan caracteres no numéricos, se toman los primeros seis dígitos como `AAAAMM` y se valida mes 01–12. Puede aceptar separadores. Vacío, menos de seis dígitos o mes inválido se rechazan. |
-| `periodo_hasta` | texto, requerido; alias `hasta` | Misma normalización; no puede preceder a `periodo_desde`. |
-| `incluir_json` | booleano, default `true` | Se valida y participa en la regla de al menos una salida, pero actualmente no controla qué datos JSON se devuelven. `false` no quita los campos de respuesta; omitido = `true`; `null` inválido. |
-| `subir_archivo` | booleano, default `true` | `true` publica un archivo ZIP; `false` evita su publicación y no cambia la consulta. Omitido = `true`; `null` inválido. |
-| `pv` | booleano, default `false` | `true` selecciona la variante alternativa de presentación; `false` o ausente usa la modalidad habitual. `null` equivale a `false`. En esta entrada, textos como `"true"`, `"1"`, `"si"`, `"yes"`, `"on"` (ignorando mayúsculas/espacios) son verdaderos; otros textos falsos. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT de 11 dígitos; elimina espacios, guiones, puntos y `/`. Alias: `cuit`, `cuit_representado`. Vacío o `null` inválidos. Identifica la cuenta para el reporte. | `"20-12345678-6"` |
+| `usuario` | texto | No | `null` | Usuario ClaveCiudad de 1–256 caracteres si se informa. Omitir o `null` recurre al CUIT representante. Vacío inválido. | `"20123456786"` |
+| `denominacion` | texto | Sí | ninguno | Razón social de 1–256 caracteres requerida para buscar y nombrar los reportes. Vacío o `null` inválidos. No se traduce automáticamente desde `representado_nombre`. | `"Comercial Ficticia SA"` |
+| `periodo_desde` | texto | Sí | ninguno | Se eliminan caracteres no numéricos, se toman los primeros seis dígitos como `AAAAMM` y se valida mes 01–12. Puede aceptar separadores. Alias: `desde`. Vacío, menos de seis dígitos o mes inválido se rechazan. | `"202601"` |
+| `periodo_hasta` | texto | Sí | ninguno | Misma normalización que `periodo_desde`; no puede preceder a `periodo_desde`. Alias: `hasta`. | `"202603"` |
+| `incluir_json` | booleano | No | `true` | Se valida y participa en la regla de al menos una salida, pero actualmente no controla qué datos JSON se devuelven. `false` no quita los campos de respuesta; omitido equivale a `true`; `null` inválido. | `true` |
+| `subir_archivo` | booleano | No | `true` | `true` publica un archivo ZIP; `false` evita su publicación y no cambia la consulta. Omitido equivale a `true`; `null` inválido. | `true` |
+| `pv` | booleano | No | `false` | `true` selecciona la variante alternativa de presentación; `false` o ausente usa la modalidad habitual. `null` equivale a `false`. En esta entrada, textos como `"true"`, `"1"`, `"si"`, `"yes"`, `"on"` (ignorando mayúsculas y espacios) son verdaderos; otros textos son falsos. | `false` |
 
 No se aceptan campos adicionales. `clave`, `clave_representante`, `clave_encriptada`, `cuit_representante`, `cuit_inicio_sesion`, `proxy` y `proxy_request` dentro del payload se descartan por compatibilidad y no reemplazan las credenciales separadas. Debe elegirse al menos una salida (`incluir_json=true` o `subir_archivo=true`).
 

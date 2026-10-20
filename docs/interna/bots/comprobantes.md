@@ -24,15 +24,7 @@ Credenciales centrales aceptadas: `clave`, `clave_representante`, `contrasena` y
 
 1. **Alias catalogado pero plugin independiente.** El catálogo marca `comprobantes` alias/deprecated de `mis_comprobantes`, pero existe plugin registrado con ese nombre y un grupo separado de operaciones/rutas. No equivale a una ruta inexistente. La API canónica recomienda `mis_comprobantes`; la ruta antigua sigue apareciendo en catálogo.
 2. **Diferencia de default por entrada.** El DTO del alias plano de `mis_comprobantes` serializa `carga_minio=false,carga_json=false` para `consulta/consultar` (`services/central-api/src/central_api/api/bot_payloads.py:573-576`), mientras el esquema efectivo del bot parte de `subir_csv=true,incluir_json=true` (`services/bot-worker/src/bot_worker/bots/comprobantes/schema.py:178-187`). El catálogo describe defaults V3 en true (`services/central-api/src/central_api/api/bot_payloads.py:140-150`), pero la ruta canónica no valida ese DTO: aplica el esquema efectivo del bot. Por eso el alias plano y la ruta canónica pueden producir salidas distintas al omitir flags.
-3. `solicitar` no tiene flags de salida en su modelo; `cookies_header` solo está en `historial`, pero el esquema amplio puede inducir a tratarlos como campos comunes. Asociarlos a la operación correcta.
+3. `solicitar` no tiene flags de salida en su modelo; `cookies_header` solo está en `historial`, pero el esquema amplio puede inducir a tratarlos como campos comunes.
 4. El esquema conserva `carga_b64`, `proxy_request`, `eliminar_descargas`, `verbose` y `cookies_header` sin efecto visible; su presencia sugiere controles que no existen.
 5. `historial` no genera la solicitud. Confundir su CSV de consultas existentes con `consultar` puede inducir a esperar una consulta nueva.
-6. El validador de la operación exige listas (`services/bot-worker/src/bot_worker/bots/comprobantes/schema.py:146-161`); su helper aislado puede envolver un escalar, pero la validación lo rechaza antes de ejecutarlo. El esquema de catálogo anuncia arrays sin publicar el máximo 200 ni que se normalizan a texto conservando ceros (`services/central-api/src/central_api/api/bot_payloads.py:145-148`). Documentar la lista, no un escalar aceptado.
-
-## Propuestas, sin implementar
-
-- Aclarar si `comprobantes` debe seguir teniendo plugin/rutas o ser una redirección única; mantener explícita la deprecación y paridad de operaciones mientras coexista.
-- Definir por operación modelos distintos (solicitud sin flags de salida, historial con `cookies_header` legado) y publicar límites/normalización real de puntos de venta.
-- Retirar controles ignorados en una versión mayor o marcarlos formalmente como ignorados/deprecados.
-- Unificar defaults V2/V3 o documentar en catálogo el cambio de comportamiento de publicación y muestra.
-- Añadir tests de contrato de ambas entradas para evitar divergencia de flags y rutas.
+6. El validador de la operación exige listas (`services/bot-worker/src/bot_worker/bots/comprobantes/schema.py:146-161`); su helper aislado puede envolver un escalar, pero la validación lo rechaza antes de ejecutarlo. El esquema de catálogo anuncia arrays sin publicar el máximo 200 ni que se normalizan a texto conservando ceros (`services/central-api/src/central_api/api/bot_payloads.py:145-148`).

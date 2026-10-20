@@ -14,12 +14,12 @@ Catálogo central: `consultar` (`services/central-api/src/central_api/api/bots.p
 
 Se genera CSV con una fila por despacho y columnas aplanadas `caratula_*` y `estado_*`; columnas estables incluyen `despacho`, `metodo`, `timestamp`, `error` (`plugin.py:L101-L115`, `L245-L300`, `L302-L316`). Un fallo por despacho se acumula en `errores` y en la fila, y el loop continúa. `incluir_json=false` limpia `data.datos` pero no contadores/errores/CSV. `subir_csv=false` conserva el resumen CSV sin añadir artefacto. El estado global es siempre `OK` al completar el bucle, incluso con `despachos_con_error>0` (`plugin.py:L183-L217`, `L252-L300`).
 
-## Discrepancias y propuestas, no implementadas
+## Discrepancias observadas
 
-- El modelo central no declara defaults para `tipo_agente` y `rol`, mientras el validador efectivo tiene defaults V2 específicos (`services/central-api/src/central_api/api/bot_payloads.py:L236-L243`; worker `schema.py:L26-L28`, `L51-L65`). **Propuesta:** trasladar los defaults exactos al contrato público.
-- Errores parciales por despacho no degradan el status `OK` (`plugin.py:L252-L300`). **Propuesta:** devolver `PARCIAL` al haber errores no fatales, conservando detalle por despacho.
-- El campo `despachos` público solo tipa como lista texto, mientras la validación efectiva stringifica elementos de lista de cualquier tipo antes de validar (`central-api/api/bot_payloads.py:L236-L243`; schema `L67-L86`). **Propuesta:** optar por strings estrictos o declarar coerción con pruebas.
-- El modelo central de credenciales es genérico sin propiedades requeridas (`central-api/api/bots.py:L820-L845`), mientras `execute` exige credenciales fiscales (`plugin.py:L183-L190`). **Propuesta:** publicar el contrato de acceso.
+- El modelo central no declara defaults para `tipo_agente` y `rol`, mientras el validador efectivo tiene defaults V2 específicos (`services/central-api/src/central_api/api/bot_payloads.py:L236-L243`; worker `schema.py:L26-L28`, `L51-L65`).
+- Errores parciales por despacho no degradan el status `OK` (`plugin.py:L252-L300`).
+- El campo `despachos` público solo tipa como lista texto, mientras la validación efectiva stringifica elementos de lista de cualquier tipo antes de validar (`central-api/api/bot_payloads.py:L236-L243`; schema `L67-L86`).
+- El modelo central de credenciales es genérico sin propiedades requeridas (`central-api/api/bots.py:L820-L845`), mientras `execute` exige credenciales fiscales (`plugin.py:L183-L190`).
 
 ## Referencias y pruebas revisadas
 

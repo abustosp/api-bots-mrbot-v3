@@ -2,7 +2,7 @@
 
 ## Catálogo, rutas y discrepancia de operación
 
-El catálogo central anuncia `consulta`, `consultar`, `solicitar` e `historial` (`services/central-api/src/central_api/api/bots.py:L404-L405`). El plugin registra solo `consultar`, `solicitar`, `historial` (`services/bot-worker/src/bot_worker/bots/mis_comprobantes/plugin.py:L133-L165`; `schema.py:L202-L208`). La ruta histórica `/api/v3/mis_comprobantes/consulta` mapea correctamente a `consultar`, y `/solicitar_consulta`/`/historial` mapean a las otras (`central-api/api/bot_compat.py:L58-L60`). En cambio, la ruta genérica `/api/v3/bots/mis_comprobantes/consulta` se registra en catálogo y puede aceptar job, pero el validador de ejecución rechaza `consulta` como operación desconocida (`plugin.py:L193-L205`). Recomendar `consultar` hasta reconciliar catálogo y ejecutor.
+El catálogo central anuncia `consulta`, `consultar`, `solicitar` e `historial` (`services/central-api/src/central_api/api/bots.py:L404-L405`). El plugin registra solo `consultar`, `solicitar`, `historial` (`services/bot-worker/src/bot_worker/bots/mis_comprobantes/plugin.py:L133-L165`; `schema.py:L202-L208`). La ruta histórica `/api/v3/mis_comprobantes/consulta` mapea correctamente a `consultar`, y `/solicitar_consulta`/`/historial` mapean a las otras (`central-api/api/bot_compat.py:L58-L60`). En cambio, la ruta genérica `/api/v3/bots/mis_comprobantes/consulta` se registra en catálogo y puede aceptar job, pero el validador de ejecución rechaza `consulta` como operación desconocida (`plugin.py:L193-L205`).
 
 ## Flujo esquema → plugin → portal
 
@@ -14,14 +14,14 @@ El catálogo central anuncia `consulta`, `consultar`, `solicitar` e `historial` 
 
 `consultar` produce `operacion`, representado, rango y objeto por tipo con filas/archivo, hash/tamaño si subido y muestra si `incluir_json=true`. `solicitar` produce `ids_consulta`; historial produce `consultas`, `faltantes` y resúmenes descargados. Historial resulta `ERROR` si faltan todos los tipos pedidos, `PARCIAL` si faltan algunos y `OK` si están todos (`plugin.py:L415-L445`). `cookies_header` existe solo en el modelo historial, pero no se usa para autenticar. `carga_b64`, `proxy_request`, `eliminar_descargas` y `verbose` son incompatibles/deprecados o sin efecto; la API descarta controles de retención y proxy en la frontera (`central-api/api/bots.py:L541-L574`, `security/credentials.py:L277-L280`).
 
-## Discrepancias y propuestas, no implementadas
+## Discrepancias observadas
 
-- El catálogo V3 anuncia operación `consulta`, ausente de `ENTRADAS`; el alias histórico, por contraste, está bien mapeado (`central-api/api/bots.py:L404-L405`; `bot_compat.py:L58-L60`; schema `L202-L208`). **Propuesta:** quitar `consulta` del catálogo o convertirla en alias efectivo antes de encolar, y añadir prueba de integración de la ruta genérica.
-- Modelo público central de `mis_comprobantes` hace `representado_nombre` opcional y puntos de venta `list[int]`, mientras validación de ejecución exige nombre y admite texto con ceros (`central-api/api/bot_payloads.py:L204-L212`; worker schema `L117-L123`, `L145-L160`). La representación V2 del catálogo es otra frontera con PV `list[str]` (`central-api/tests/test_bot_schemas.py:L92-L101`). **Propuesta:** unificar el DTO por ruta y declarar exactamente los requisitos de ejecución.
-- `timeout_mc` sí es consumido por plugin pero no está en el modelo público compacto V3 (`bot_payloads.py:L204-L212`; worker schema `L145-L147`). **Propuesta:** publicarlo con rango/default real o retirarlo de ejecución pública.
-- Normalizador de puntos acepta escalares antes de convertir a lista, pero el campo Pydantic se valida como lista antes del validador `mode="after"` (`schema.py:L41-L62`, `L145-L160`). **Propuesta:** quitar la rama escalar o mover normalización a etapa anterior; no documentar scalar como aceptado.
-- Defaults de payload legado marcan `carga_minio=false`, `carga_json=false` para consulta, en tanto worker V3 usa ambos en `true` (`central-api/api/bot_payloads.py:L556-L577`; schema `L177-L185`). **Propuesta:** explicitar diferencias por endpoint y tests sobre body efectivo.
-- Campos de credenciales en el catálogo aparecen como objeto genérico sin `required` (`central-api/api/bots.py:L820-L845`), aunque la ejecución exige credenciales (`plugin.py:L207-L214`). **Propuesta:** describir CUIT de inicio y clave requeridos y sus aliases.
+- El catálogo V3 anuncia operación `consulta`, ausente de `ENTRADAS`; el alias histórico, por contraste, está bien mapeado (`central-api/api/bots.py:L404-L405`; `bot_compat.py:L58-L60`; schema `L202-L208`).
+- Modelo público central de `mis_comprobantes` hace `representado_nombre` opcional y puntos de venta `list[int]`, mientras validación de ejecución exige nombre y admite texto con ceros (`central-api/api/bot_payloads.py:L204-L212`; worker schema `L117-L123`, `L145-L160`). La representación V2 del catálogo es otra frontera con PV `list[str]` (`central-api/tests/test_bot_schemas.py:L92-L101`).
+- `timeout_mc` sí es consumido por plugin pero no está en el modelo público compacto V3 (`bot_payloads.py:L204-L212`; worker schema `L145-L147`).
+- Normalizador de puntos acepta escalares antes de convertir a lista, pero el campo Pydantic se valida como lista antes del validador `mode="after"` (`schema.py:L41-L62`, `L145-L160`).
+- Defaults de payload legado marcan `carga_minio=false`, `carga_json=false` para consulta, en tanto worker V3 usa ambos en `true` (`central-api/api/bot_payloads.py:L556-L577`; schema `L177-L185`).
+- Campos de credenciales en el catálogo aparecen como objeto genérico sin `required` (`central-api/api/bots.py:L820-L845`), aunque la ejecución exige credenciales (`plugin.py:L207-L214`).
 
 ## Referencias y pruebas revisadas
 

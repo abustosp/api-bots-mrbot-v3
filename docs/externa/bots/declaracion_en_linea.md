@@ -8,14 +8,16 @@ Ruta canónica: `POST /api/v3/bots/declaracion_en_linea/consultar`. El alias pla
 
 ## Campos de `payload`
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `representado_cuit` | string nullable, opcional; aliases `cuit`, `cuit_representado` | Si se omite, es `null` o vacío, se consulta el CUIT de la sesión. Si se informa, se limpian separadores y debe quedar en 11 dígitos. |
-| `representado_nombre` | string máximo 128; default `""` | Nombre de referencia para los nombres de archivos. Omitido queda vacío; cadena vacía es válida; `null` explícito se rechaza. |
-| `periodo_desde`, `periodo_hasta` | strings requeridos; período válido normalizado a `AAAAMM`, mes `01`–`12` | Rango inclusivo. Se aceptan `AAAAMM`, `MM/AAAA`, `AAAA/MM`, `MM-AAAA`, `AAAA-MM`; invertidos se intercambian. `null`/vacío se rechaza. Se generan hasta 1200 períodos y el resto se trunca sin error explícito. |
-| `incluir_json` | boolean, default `true` | `false` omite `detalle`, no resumen ni archivos. Omitido aplica `true`; `null` explícito se rechaza. |
-| `subir_archivos` | boolean, default `true` | `false` evita publicar PDFs/XLS/JSON en `files[]`, aunque se consultan y descargan. Omitido aplica `true`; `null` explícito se rechaza. |
-| `proxy_request`, `proxy` | boolean/string nullable, opcional, legado | Se descartan/no permiten elegir conexión. `null` permitido; no cambian el resultado. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | No | ninguno | Identifica el CUIT consultado; alias `cuit` y `cuit_representado`. Si se omite, es `null` o vacío, se consulta el CUIT de la sesión. Si se informa, se limpian los separadores comunes y debe quedar en 11 dígitos. | `"20123456786"` |
+| `representado_nombre` | texto | No | `""` | Nombre de referencia para los nombres de archivos, de hasta 128 caracteres. Omitido queda vacío; cadena vacía es válida; `null` explícito se rechaza. | `"Empleador Ejemplo"` |
+| `periodo_desde` | texto | Sí | ninguno | Primer período del rango inclusivo; se normaliza a `AAAAMM` y el mes debe ser `01` a `12`. Se aceptan `AAAAMM`, `MM/AAAA`, `AAAA/MM`, `MM-AAAA` y `AAAA-MM`. `null`, vacío o inválido: rechazo. Si el rango está invertido, se intercambia con `periodo_hasta`. Se generan hasta 1200 períodos y el resto se trunca sin error explícito. | `"202601"` |
+| `periodo_hasta` | texto | Sí | ninguno | Último período del rango inclusivo; se normaliza a `AAAAMM` y el mes debe ser `01` a `12`. Se aceptan `AAAAMM`, `MM/AAAA`, `AAAA/MM`, `MM-AAAA` y `AAAA-MM`. `null`, vacío o inválido: rechazo. Si el rango está invertido, se intercambia con `periodo_desde`. | `"202603"` |
+| `incluir_json` | booleano | No | `true` | `false` omite `detalle`, no el resumen ni los archivos. Omitido aplica `true`; `null` explícito se rechaza. | `true` |
+| `subir_archivos` | booleano | No | `true` | `false` evita publicar PDFs, XLS y JSON en `files[]`, aunque se consultan y descargan. Omitido aplica `true`; `null` explícito se rechaza. | `true` |
+| `proxy_request` | booleano | No | ninguno | Campo legado: se descarta y no permite elegir conexión. `null` permitido; no cambia el resultado. | `true` |
+| `proxy` | texto | No | ninguno | Campo legado: se descarta y no permite elegir conexión. `null` permitido; no cambia el resultado. | `"proxy-ficticio"` |
 
 Se requiere al menos una salida: `incluir_json=true` o `subir_archivos=true`. Campos desconocidos se rechazan por la validación de esta operación. El schema del catálogo es descriptivo y no debe confundirse con el DTO del alias plano.
 
@@ -23,11 +25,14 @@ Se requiere al menos una salida: `incluir_json=true` o `subir_archivos=true`. Ca
 
 El objeto `credentials` puede omitirse en el envelope, pero se necesita una sesión fiscal. Si `representado_cuit` no se informa, el CUIT de sesión se usa como representado. La falta de identidad o contraseña normalmente causa fallo de autenticación; no se aplican defaults.
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
-| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
-| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `cuit_representante` | texto | Condicional | ninguno | Identidad para iniciar sesión; alias `cuit_inicio_sesion`. Se necesita una identidad, aportada por cualquiera de los dos nombres; si se omiten ambos, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `cuit_inicio_sesion` | texto | Condicional | ninguno | Identidad para iniciar sesión; alias de `cuit_representante`. Se necesita una identidad, aportada por cualquiera de los dos nombres; si se omiten ambos, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `clave` | texto | Condicional | ninguno | Contraseña en texto; alias `clave_representante` y `contrasena`. Se necesita una contraseña, aportada por cualquiera de estos nombres o por `clave_encriptada`. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_representante` | texto | Condicional | ninguno | Contraseña en texto; alias de `clave`. Se necesita una contraseña, aportada por cualquiera de estos nombres o por `clave_encriptada`. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `contrasena` | texto | Condicional | ninguno | Contraseña en texto; alias de `clave`. Se necesita una contraseña, aportada por cualquiera de estos nombres o por `clave_encriptada`. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_encriptada` | texto | No | ninguno | Alternativa cifrada en Base64. Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. | `"Q0xBVkUtRklDVElDSUEtTk8tVVRJTElaQUJMRQ=="` |
 
 No usar datos reales en ejemplos.
 

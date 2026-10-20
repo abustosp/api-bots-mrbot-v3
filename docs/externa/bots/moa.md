@@ -8,15 +8,15 @@ Ruta V3: `POST /api/v3/bots/moa/consultar`. Alias compatible: `POST /api/v3/moa/
 
 ## Payload
 
-| Campo | Tipo; requerido; default | Efecto y comportamiento al omitir, enviar `null`, vacío o `false` |
-|---|---|---|
-| `representado_cuit` | texto de 11 dígitos; requerido | CUIT del titular del árbol MOA; alias `cuit`. Se quitan espacios, guiones, puntos y `/`. Omitido, `null`, vacío o inválido: rechazo. |
-| `despachos` | lista de textos; requerida; 1–100 elementos | Identificadores a consultar. Elementos se recortan y se convierten a texto; cada uno debe quedar no vacío y medir hasta 64 caracteres. Duplicados se eliminan conservando el primer orden. Omitida, `null`, lista vacía, valor vacío o más de 100 elementos: rechazo. |
-| `tipo_agente` | texto 1–128; opcional; `"IMEX-IMEX-IMPORTADOR/EXPORT."` | Perfil de agente con el que se navega el árbol. Omitido: usa el valor indicado. `null`, vacío o más de 128 caracteres: rechazo. |
-| `rol` | texto 1–128; opcional; `"IMEX-Rol Importador Exportador"` | Rol para abrir el árbol de empresa. Omitido: usa el valor indicado. `null`, vacío o más de 128 caracteres: rechazo. |
-| `metodo` | `"url"` o `"form"`; opcional; `"url"` | Forma de abrir cada despacho. `null`, cadena vacía u otro valor: rechazo. |
-| `incluir_json` | booleano; opcional; `true` | Incluye registros detallados por despacho en `data.datos`. `false` vacía esa lista; los contadores, errores y resumen CSV se mantienen. `null` se rechaza. |
-| `subir_csv` | booleano; opcional; `true` | Adjunta el CSV consolidado en `files[]`. `false` no adjunta el archivo. `null` se rechaza. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT del titular del árbol MOA; alias `cuit`. Se quitan espacios, guiones, puntos y `/` y debe quedar en 11 dígitos. Omitido, `null`, vacío o inválido: rechazo. | `"30876543210"` |
+| `despachos` | lista de textos | Sí | ninguno | Identificadores a consultar, de 1 a 100 elementos. Los elementos se recortan y se convierten a texto; cada uno debe quedar no vacío y medir hasta 64 caracteres. Los duplicados se eliminan conservando el primer orden. Omitida, `null`, lista vacía, valor vacío o más de 100 elementos: rechazo. | `["DESPACHO-DEMO-0001", "DESPACHO-DEMO-0002"]` |
+| `tipo_agente` | texto | No | `"IMEX-IMEX-IMPORTADOR/EXPORT."` | Perfil de agente con el que se navega el árbol, de 1 a 128 caracteres. Omitido: usa el valor indicado. `null`, vacío o más de 128 caracteres: rechazo. | `"IMEX-IMEX-IMPORTADOR/EXPORT."` |
+| `rol` | texto | No | `"IMEX-Rol Importador Exportador"` | Rol para abrir el árbol de empresa, de 1 a 128 caracteres. Omitido: usa el valor indicado. `null`, vacío o más de 128 caracteres: rechazo. | `"IMEX-Rol Importador Exportador"` |
+| `metodo` | texto | No | `"url"` | Forma de abrir cada despacho; admite `url` o `form`. Omitido: usa `url`. `null`, cadena vacía u otro valor: rechazo. | `"url"` |
+| `incluir_json` | booleano | No | `true` | Incluye registros detallados por despacho en `data.datos`. `false` vacía esa lista; los contadores, errores y resumen CSV se mantienen. Omitido equivale a `true`; `null` se rechaza. | `true` |
+| `subir_csv` | booleano | No | `true` | Adjunta el CSV consolidado en `files[]`. `false` no adjunta el archivo. Omitido equivale a `true`; `null` se rechaza. | `true` |
 
 Debe estar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaza. Los campos desconocidos se rechazan.
 
@@ -24,15 +24,15 @@ Debe estar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaza
 
 Se requieren credenciales fiscales válidas y autorización sobre el CUIT indicado.
 
-| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
-|---|---|---|
-| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
-| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
-| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
-| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
-| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
+| Sección | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `sobre` | `credentials` | objeto | No | `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. | `{}` |
+| `credentials` | `cuit_representante` | texto | Condicional | ninguno | Requerido junto con una clave, salvo alias. Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. | `"20123456786"` |
+| `credentials` | `cuit_inicio_sesion` | texto | No | ninguno | Alias opcional de `cuit_representante`; aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. | `"20123456786"` |
+| `credentials` | `clave` | texto | Condicional | ninguno | Requerida junto con una identidad, salvo alias o alternativa cifrada. Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials` | `clave_representante` | texto | No | ninguno | Alias opcional de `clave`; aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials` | `contrasena` | texto | No | ninguno | Alias opcional de `clave`; aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials` | `clave_encriptada` | texto | No | ninguno | Alternativa cifrada en Base64 que se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. | `"Q0xBVkUtRklDVElDSUEtRkFDVElCSUxFLU5PLVVUSUxJWkFCTEU="` |
 
 No envíe credenciales en `payload`; los alias de contraseña no deben discrepar.
 

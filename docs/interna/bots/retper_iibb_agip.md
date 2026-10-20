@@ -20,13 +20,13 @@ El catálogo central publica `retper_iibb_agip/consultar` en `services/central-a
 - El resultado contiene `operacion`, CUIT representado, `periodo_desde`, `periodo_hasta`, `tipo_reporte`, `archivo` y `archivos_internos`; subida agrega huella/tamaño y el ZIP a `files`. El portal puede emitir cinco familias de reportes con hojas de cálculo/texto SIFERE. No hay filas normalizadas por documento en `data` (`plugin.py:330-379`, `session.py:39-88`).
 - El plugin no declara un contrato de éxito parcial: fallas de descarga/paquete/subida pueden dejar trabajo fallido aunque el portal ya haya generado los informes (`plugin.py:220-379`).
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-1. **Manifest menos estricto que el modelo.** El JSON Schema solo marca operación como requerida mientras el modelo requiere CUIT representado, denominación y rango (`schema.py:62-120,130-151`). La familia central tampoco publica todos los campos: `services/central-api/src/central_api/api/bot_payloads.py:266-271` omite `usuario` y `pv`, aunque el modelo histórico de operación los incluye en `:503`. **Propuesta:** generar el esquema de operación desde el modelo real y reflejar nullable/default/alias sin duplicar reglas.
-2. **`incluir_json` no controla el JSON prometido.** Se valida y participa en el guard de salida, pero no suprime los datos que se ensamblan (`plugin.py:330-379`). **Propuesta:** implementar la semántica en la salida o retirar el campo/regla, con tests de cada combinación de publicación.
-3. **Período excesivamente permisivo.** Se eliminan todos los caracteres no numéricos y se toman seis dígitos, no se verifica que la representación original sea una fecha prevista (`schema.py:50-59`). **Propuesta:** aceptar una lista explícita de formatos e invalidar residuos/dígitos extra.
-4. **`pv` expresa implementación en un dato de entrada.** Cambia modalidad de presentación/registro de variante, sin cambiar período ni contenido solicitado (`schema.py:62-91`, registro alternativo citado arriba). **Propuesta:** modelar selección de entorno fuera del payload fiscal o documentar su valor contractual y probar ambas variantes.
-5. **No atomicidad ante errores remotos.** La sesión hace login/selección y puede generar archivos antes de fallar el paquete o la publicación (`plugin.py:297-379`, `session.py:174-603`). **Propuesta:** devolver resultado parcial con etapa/archivos completos o advertencia de posible efecto ya ocurrido.
+1. **Manifest menos estricto que el modelo.** El JSON Schema solo marca operación como requerida mientras el modelo requiere CUIT representado, denominación y rango (`schema.py:62-120,130-151`). La familia central tampoco publica todos los campos: `services/central-api/src/central_api/api/bot_payloads.py:266-271` omite `usuario` y `pv`, aunque el modelo histórico de operación los incluye en `:503`.
+2. **`incluir_json` no controla el JSON prometido.** Se valida y participa en el guard de salida, pero no suprime los datos que se ensamblan (`plugin.py:330-379`).
+3. **Período excesivamente permisivo.** Se eliminan todos los caracteres no numéricos y se toman seis dígitos, no se verifica que la representación original sea una fecha prevista (`schema.py:50-59`).
+4. **`pv` expresa implementación en un dato de entrada.** Cambia modalidad de presentación/registro de variante, sin cambiar período ni contenido solicitado (`schema.py:62-91`, registro alternativo citado arriba).
+5. **No atomicidad ante errores remotos.** La sesión hace login/selección y puede generar archivos antes de fallar el paquete o la publicación (`plugin.py:297-379`, `session.py:174-603`).
 
 ## Pruebas consultadas
 

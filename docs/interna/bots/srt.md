@@ -18,12 +18,12 @@ La familia de payloads del catálogo es `services/central-api/src/central_api/ap
 - Se escribe un consolidado `{"consultas": [...]}` en JSON y se trunca la serialización a 1.048.576 caracteres antes de publicar. Si `subir_json=true`, se agrega referencia de archivo/huella/tamaño (`plugin.py:272-292`). La truncación puede cortar JSON en mitad de estructura.
 - Un CUIT puede fallar y el resto continúa. Cualquier fila error produce `PARCIAL` con errores por CUIT (`plugin.py:205-219,235-270`). Sin `incluir_json`, se omite lista en `data`, pero el archivo aún puede incluir el lote completo truncado.
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-1. **Manifest y modelo difieren en campos requeridos.** El manifiesto requiere solo operación aunque el modelo exige lista de CUIT (`schema.py:18-87`). La familia central publica lista de entrada y flags, pero no sustituye la validación (`bot_payloads.py:294-297`). **Propuesta:** generar schema del modelo para publicarlo con required, min/max y defaults.
-2. **Truncamiento no conserva JSON válido.** Se corta una cadena JSON serializada por longitud (`plugin.py:272-275`), dejando archivo potencialmente inválido. **Propuesta:** limitar cantidad de filas/bytes antes de serializar con metadata de truncamiento, o particionar el resultado.
-3. **Semántica de estados.** `SIN_AFILIACION_VIGENTE` cuenta como consulta correcta (`plugin.py:266-270`), mientras estados de error pueden provenir de portal no disponible. **Propuesta:** publicar enums documentados y distinguir “sin afiliación” de éxito con resultado regulatorio.
-4. **Credenciales humanas/captcha son dependencias del servicio.** La sesión ARCA y captcha de formulario SRT son pasos separados (`plugin.py:187-203`). **Propuesta:** telemetría no sensible por etapa y pruebas contractuales de timeouts/fallo captcha sin exponer datos.
+1. **Manifest y modelo difieren en campos requeridos.** El manifiesto requiere solo operación aunque el modelo exige lista de CUIT (`schema.py:18-87`). La familia central publica lista de entrada y flags, pero no sustituye la validación (`bot_payloads.py:294-297`).
+2. **Truncamiento no conserva JSON válido.** Se corta una cadena JSON serializada por longitud (`plugin.py:272-275`), dejando archivo potencialmente inválido.
+3. **Semántica de estados.** `SIN_AFILIACION_VIGENTE` cuenta como consulta correcta (`plugin.py:266-270`), mientras estados de error pueden provenir de portal no disponible.
+4. **Credenciales humanas/captcha son dependencias del servicio.** La sesión ARCA y captcha de formulario SRT son pasos separados (`plugin.py:187-203`).
 
 ## Pruebas consultadas
 

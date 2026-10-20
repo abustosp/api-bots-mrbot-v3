@@ -108,7 +108,7 @@ Las cachés de admisiones y reportes viven en memoria sin purga observada. Crece
 
 Fuentes: `reporting/results.py:16-78`; `main.py:1504-1535`; `scheduler/supervisor.py:68-70`, `:107-120`, `:183-197`.
 
-## Comprobaciones locales recomendadas
+## Comprobaciones locales
 
 1. Validar cada ejemplo público tanto con la central como con el plugin, sin ejecutar el portal.
 2. Probar ausente, `null`, `""`, espacios, `false`, lista vacía y límites para cada campo, sin asumir que son equivalentes.
@@ -118,4 +118,4 @@ Fuentes: `reporting/results.py:16-78`; `main.py:1504-1535`; `scheduler/superviso
 6. Probar ZIP con nombres repetidos y descarga lenta antes de `execute()`.
 7. Ejecutar suites por paquete para evitar la colisión actual de nombres de módulos de test.
 
-Las propuestas para contratos están en [schemas y models](schemas-models.md). Las fichas individuales están en [el índice interno](README.md).
+Las fichas individuales están en [el índice interno](README.md).

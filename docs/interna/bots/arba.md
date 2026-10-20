@@ -19,13 +19,6 @@ Período acepta separadores no numéricos al limpiar; no se limita a validar el 
 - `denominacion` se remapea a `representado_nombre` por normalización de compatibilidad (`services/central-api/src/central_api/security/credentials.py:116-125`). `representado_cuit` y `representado_nombre` canonical son los usados por ejecución.
 - La sesión ARBA usa el CUIT del representado como CUIT de login (`services/bot-worker/src/bot_worker/bots/arba/plugin.py:163-169`), aunque el contenedor de credenciales también puede contener otro CUIT representante.
 
-## Propuestas, sin implementar
-
-- Declarar nombre requerido, min 1/max 128 en el modelo flat y mantener validación de negocio equivalente en la ruta anidada.
-- Unificar en ambos tipos de ruta el rango de período, no futuro, y documentar si la normalización de separadores de fecha es deliberada.
-- Aclarar si ARBA debe iniciar sesión con CUIT representado o credencial representante antes de alterar selección; no inferirlo del resto de bots.
-- Mantener aliases con lista única y separar en documentación los contratos anidado V3 y flat de compatibilidad.
-
 ## Evidencia revisada
 
 - Registro/catalog/ruta: `services/bot-worker/src/bot_worker/bots/_plugins.py:90-100`; `services/central-api/src/central_api/api/bots.py:194-208,329-339,378-386,748-817`.

@@ -22,11 +22,5 @@ El estado superior es `result` (`OK`/`PARCIAL`/`ERROR`); `data` contiene CUIT, d
 1. **Default dependiente de ruta:** el descriptor V3 publica `subir_excel=true` (`services/central-api/src/central_api/api/bot_payloads.py:179`) y el esquema efectivo también default a true (`services/bot-worker/src/bot_worker/bots/hacienda/schema.py:83-86`, `services/bot-worker/src/bot_worker/bots/hacienda/plugin.py:395-409`). En el alias plano, `minio_upload` default a false (`services/central-api/src/central_api/api/bot_payloads.py:568`) y el normalizador lo transforma a `subir_excel` (`services/central-api/src/central_api/security/credentials.py:227-274`). La ruta canónica usa el default del esquema real; el alias plano puede producir distinto al omitir el flag.
 2. **PDF no descrito por el catálogo:** la ejecución descarga PDFs por defecto (`services/bot-worker/src/bot_worker/bots/hacienda/schema.py:87-88`, `services/bot-worker/src/bot_worker/bots/hacienda/plugin.py:420-444`) y los publica individualmente; el esquema descriptivo del catálogo no enumera `descargar_pdf` (`services/central-api/src/central_api/api/bot_payloads.py:173-180`). La ruta genérica no valida contra ese DTO, pero la omisión pública dificulta descubrir y controlar esta salida.
 3. El esquema efectivo valida la regla cruzada de al menos una consulta y una salida, pero el catálogo describe booleanos independientes sin `anyOf`/validador (`services/bot-worker/src/bot_worker/bots/hacienda/schema.py:30-167`, `services/central-api/src/central_api/api/bot_payloads.py:173-180`). La solicitud puede encolarse y fallar después al validarse para ejecución.
-4. `eliminar_descargas`, `proxy_request`, `headless` aparecen en esquema sin efecto del cliente. Conviene marcarlos legacy/ignorados y no listarlos como controles activos.
-5. Aunque llamada `descargar_pdf` desactive archivos PDF, la consulta de filas sigue siendo lectura y la planilla se crea localmente incluso si no se publica. Mantener en pruebas el caso de ambas salidas no publicadas pero `incluir_json=true` para fijar significado.
-
-## Propuestas sin implementar
-
-- Unificar default de subida entre V3 y alias V2 o dejar la diferencia explícita en el catálogo/compatibilidad.
-- Publicar `descargar_pdf` y validaciones cruzadas en el modelo central; decidir si los PDF individuales deben tener una bandera de publicación separada de descarga.
-- Sustituir los campos de control inactivos por un contrato explícito de compatibilidad.
+4. `eliminar_descargas`, `proxy_request`, `headless` aparecen en esquema sin efecto del cliente.
+5. Aunque llamada `descargar_pdf` desactive archivos PDF, la consulta de filas sigue siendo lectura y la planilla se crea localmente incluso si no se publica.

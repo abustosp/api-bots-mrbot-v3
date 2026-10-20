@@ -16,14 +16,14 @@
 
 ## Normalizaciones y validación efectiva
 
-| Campo | Tipo / requerido / default activo | Omisión, `null`, vacío y `false` |
-|---|---|---|
-| `representado_cuit` | string, requerido; aliases `cuit`, `cuit_representado`; longitud validada 11–14 antes de limpieza. | Omisión/null fallan; limpia espacio, `-`, `.`, `/`, exige 11 dígitos; aliases con valores distintos fallan. |
-| `compensar` | bool, default `true`. | En el pre-validador, `null` se borra y reaparece default `true`; vacío inválido; `false` omite `compensar_saldos_a_favor`. |
-| `confirmar` | bool, default `false`. | `null` se borra y reaparece `false`; vacío inválido; `true` es el control de confirmación remota. |
-| `incluir_movimientos` | bool, default `false`, alias `movimientos`. | `null`/vacío inválidos; `false` omite movimiento salvo que `incluir_pdf` lo cambie. |
-| `incluir_pdf` | bool, default `false`, alias `pdf`. | `null`/vacío inválidos; true fuerza `incluir_movimientos=True`. |
-| `subir` | bool, default `true`, aliases `carga_minio`, `minio_upload`. | `null`/vacío inválidos; `false` crea PDF local si se pidió, sin subida ni artefacto. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | Alias: `cuit`, `cuit_representado`. Longitud validada de 11 a 14 antes de limpiar espacios, `-`, `.` y `/`; debe quedar en 11 dígitos. Omitirlo o `null` falla. Alias con valores distintos falla. | `"20123456786"` |
+| `compensar` | booleano | No | `true` | En el pre-validador, `null` se borra y reaparece el default `true`. Vacío inválido. `false` omite `compensar_saldos_a_favor`. | `true` |
+| `confirmar` | booleano | No | `false` | `null` se borra y reaparece `false`. Vacío inválido. `true` es el control de confirmación remota. | `false` |
+| `incluir_movimientos` | booleano | No | `false` | Alias: `movimientos`. `null` o vacío inválidos. `false` omite movimientos salvo que `incluir_pdf` lo cambie. | `false` |
+| `incluir_pdf` | booleano | No | `false` | Alias: `pdf`. `null` o vacío inválidos. `true` fuerza `incluir_movimientos=true`. | `true` |
+| `subir` | booleano | No | `true` | Alias: `carga_minio`, `minio_upload`. `null` o vacío inválidos. `false` crea el PDF local si se pidió, sin subida ni artefacto. | `true` |
 
 El wrapper central permite `credentials` como objeto genérico, acepta varios nombres de clave, ignora `null`/`""`, requiere que duplicados no vacíos coincidan y puede descifrar `clave_encriptada`; no valida por operación la presencia de clave antes de aceptar el job: `services/central-api/src/central_api/api/bots.py:194-208`, `793-817`; `services/central-api/src/central_api/security/credentials.py:288-370`. En ejecución, el plugin exige objeto de credenciales; la sesión CCMA consume CUIT representante y clave: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:141-158`; `services/bot-worker/src/bot_worker/runtime/context.py:17-25`; `services/bot-worker/src/bot_worker/runtime/arca_login.py:233-250`.
 
@@ -31,12 +31,12 @@ El wrapper central permite `credentials` como objeto genérico, acepta varios no
 
 `data`: `operacion`, `representado_cuit`, `compensar`, `confirmar`, campos del resumen CCMA, opcionales `movimientos`/`movimientos_corte`, opcional PDF y `compensaciones`. `PARCIAL` depende de avisos o `compensaciones.errores`. PDF subido se registra como artefacto; sin subida solo queda `archivo` en data: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:174-227`, `228-247`. El manifiesto declara `ccma_compensacion.pdf` opcional, PDF hasta 10 MiB: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:83-108`.
 
-## Discrepancias concretas y propuestas (no implementadas)
+## Discrepancias observadas
 
-1. **Contrato público incompleto.** `services/central-api/src/central_api/api/bot_payloads.py:124-128` modela `representado_cuit`, `compensar`, `confirmar`, `incluir_movimientos`, pero omite `incluir_pdf` y `subir`. El esquema operativo los acepta; las pruebas de plugin usan `pdf` y comprueban `subir`: `services/bot-worker/tests/test_ccma_compensacion_plugin.py:124-147`, `278-294`. Propuesta: completar el DTO V3 de la operación con ambos campos, alias y sus defaults, y derivar `credentials_schema` por bot/operación en vez de `additionalProperties: true` genérico (`services/central-api/src/central_api/api/bots.py:820-845`).
-2. **Alto riesgo con defaults implícitos.** `compensar` default true y `confirmar` default false es seguro respecto de confirmación, pero solicita igualmente una propuesta y acciones de formulario; para una API de efecto conviene requerir `confirmar` explícito o exigir una segunda operación de aprobación/token. No cambiar el comportamiento hasta decisión de producto y revisión de idempotencia.
-3. **Efecto e idempotencia.** El manifiesto marca `EFECTO` y el catálogo central default de operación es `EFECTO`, coherente con la confirmación remota; confirmar exige no reintentar ciegamente (`services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:83-108`; `services/central-api/src/central_api/models/catalog.py:72-90`). Mantener una política de replay que nunca convierta un job confirmado en una nueva confirmación.
-4. **Nombre heredado divergente.** `bots_dev/ccma_compenscion/` vs catálogo y registro `ccma_compensacion`. Propuesta: normalizar el nombre de la carpeta de fixtures/documentación heredados o registrar la discrepancia como alias histórico, sin crear un segundo bot.
+1. **Contrato público incompleto.** `services/central-api/src/central_api/api/bot_payloads.py:124-128` modela `representado_cuit`, `compensar`, `confirmar`, `incluir_movimientos`, pero omite `incluir_pdf` y `subir`. El esquema operativo los acepta; las pruebas de plugin usan `pdf` y comprueban `subir`: `services/bot-worker/tests/test_ccma_compensacion_plugin.py:124-147`, `278-294`.
+2. **Alto riesgo con defaults implícitos.** `compensar` default true y `confirmar` default false es seguro respecto de confirmación, pero solicita igualmente una propuesta y acciones de formulario.
+3. **Efecto e idempotencia.** El manifiesto marca `EFECTO` y el catálogo central default de operación es `EFECTO`, coherente con la confirmación remota; confirmar exige no reintentar ciegamente (`services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:83-108`; `services/central-api/src/central_api/models/catalog.py:72-90`).
+4. **Nombre heredado divergente.** `bots_dev/ccma_compenscion/` vs catálogo y registro `ccma_compensacion`.
 
 ## Tests leídos
 

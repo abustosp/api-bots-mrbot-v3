@@ -18,13 +18,6 @@ CUIT elimina separadores comunes y exige once dígitos, sin checksum (`services/
 - El modelo worker tiene lista de campos históricos que elimina, pero JSON Schema operativo sólo declara operación, subir y CUIT (`services/bot-worker/src/bot_worker/bots/certificado_mipyme/schema.py:18-19,88-98`).
 - La salvaguarda exacta de representado es más estricta que flujos anteriores que podían escoger primera opción; no se debe degradar ese invariant.
 
-## Propuestas, sin implementar
-
-- Mantener match exacto de CUIT; conservar tests para selector paginado, múltiple coincidencia, CUIT ausente y error de selector.
-- Especificar en DTO plano si los separadores son válidos; dejar la ruta anidada documentada con normalización del plugin.
-- Tipar la respuesta distinguiendo PDF generado, publicado y recuperable; describir `subir=false` sin ocultar `data.archivo`.
-- Reducir campos legacy descartados y mantener sólo aliases soportados de forma explícita.
-
 ## Evidencia revisada
 
 - Catálogo/ruta: `services/central-api/src/central_api/api/bots.py:329-339,378-386,748-817`; `services/central-api/src/central_api/api/bot_payloads.py:129-132`.

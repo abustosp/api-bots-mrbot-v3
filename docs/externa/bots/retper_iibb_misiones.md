@@ -17,14 +17,14 @@ La extranet exige CUIT representante y clave fiscal: `credentials.cuit_represent
 
 ## Campos del payload
 
-| Campo | Tipo, requerido y default | Efecto y tratamiento de omisión/null/vacío/false |
-|---|---|---|
-| `representado_cuit` | texto, requerido; aliases `cuit`, `cuit_representante`, `cuit_representado` | CUIT de 11 dígitos; se quitan espacios, guiones, puntos y `/`. Vacío/null inválidos. El alias `cuit_representante` tiene además significado histórico como CUIT a consultar. |
-| `denominacion` | texto, requerido, 1–256 caracteres; alias `representado_nombre` | Nombre utilizado para consulta y reportes. Vacío/null inválidos. |
-| `periodo_desde` | texto, requerido, exactamente seis dígitos `AAAAMM`; alias `desde` | Mes 01–12. No admite separadores. Vacío/null/formato inválidos. |
-| `periodo_hasta` | texto, requerido, exactamente seis dígitos `AAAAMM`; alias `hasta` | Mes 01–12 y no anterior a `periodo_desde`. |
-| `incluir_json` | booleano, default `true` | Se valida, pero no suprime actualmente los datos JSON que se devuelven. `false` no altera esa salida; omitido = `true`; `null` inválido. |
-| `subir_archivo` | booleano, default `true` | `true` publica XLSX y PDF; `false` evita publicarlos. Omitido = `true`; `null` inválido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT de 11 dígitos; se quitan espacios, guiones, puntos y `/`. Alias: `cuit`, `cuit_representante`, `cuit_representado`. Vacío o `null` inválidos. El alias `cuit_representante` tiene además significado histórico como CUIT a consultar. | `"20-12345678-6"` |
+| `denominacion` | texto | Sí | ninguno | Nombre de 1–256 caracteres utilizado para la consulta y los reportes. Alias: `representado_nombre`. Vacío o `null` inválidos. | `"Contribuyente Ficticio SRL"` |
+| `periodo_desde` | texto | Sí | ninguno | Exactamente seis dígitos `AAAAMM`, mes 01–12. No admite separadores. Alias: `desde`. Vacío, `null` o formato inválido se rechazan. | `"202601"` |
+| `periodo_hasta` | texto | Sí | ninguno | Exactamente seis dígitos `AAAAMM`, mes 01–12 y no anterior a `periodo_desde`. Alias: `hasta`. | `"202603"` |
+| `incluir_json` | booleano | No | `true` | Se valida, pero no suprime actualmente los datos JSON que se devuelven. `false` no altera esa salida; omitido equivale a `true`; `null` inválido. | `true` |
+| `subir_archivo` | booleano | No | `true` | `true` publica XLSX y PDF; `false` evita publicarlos. Omitido equivale a `true`; `null` inválido. | `true` |
 
 No se aceptan campos adicionales. Los campos históricos de secreto/sesión/proxy (`clave`, `clave_representante`, `clave_encriptada`, `cuit_inicio_sesion`, `proxy`, `proxy_request`) dentro del payload se eliminan y no sustituyen `credentials`. Se necesita al menos una salida según validación (`incluir_json=true` o `subir_archivo=true`).
 

@@ -10,28 +10,28 @@ Consulta compensaciones y afectaciones para un CUIT en un rango de fechas y pued
 
 ## Payload
 
-| Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Omitir, `null`, vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. |
-| `fecha_desde` | Texto, requerido, fecha real `dd/mm/aaaa`. Alias: `desde`. | Omitir, `null`, vacío o `false`: rechazo. |
-| `fecha_hasta` | Texto, requerido, fecha real `dd/mm/aaaa`. Alias: `hasta`. | Omitir, `null`, vacío o `false`: rechazo. No puede ser anterior a `fecha_desde`. |
-| `excel` | Booleano, default `false`. | Omitir: no solicita Excel. `null` o vacío: rechazo. `false`: desactivado. |
-| `csv` | Booleano, default `false`. | Omitir: no solicita CSV. `null` o vacío: rechazo. `false`: desactivado. |
-| `pdf` | Booleano, default `false`. | Omitir: no solicita PDF. `null` o vacío: rechazo. `false`: desactivado. |
-| `subir` | Booleano, default `true`. | Omitir: publica archivos generados. `null` o vacío: rechazo. `false`: no publica archivos descargables ni informa huellas/tamaños. |
-| `cuit_representante` | Texto o `null`, opcional, default `null`; compatibilidad antigua, no se usa para iniciar sesión. Alias: `cuit_inicio_sesion`, `cuit_login`. | Se acepta y se ignora. `null` permitido; `false` inválido. Use `credentials` para credenciales. |
-| `clave_representante` | Texto o `null`, opcional, default `null`; compatibilidad antigua, no se usa para iniciar sesión. Alias: `contrasena`, `clave`. | Se acepta y se ignora. `null` permitido; `false` inválido. Use `credentials` para la clave. |
-| `proxy_request` | Booleano o `null`, opcional, default `null`; compatibilidad antigua. | Se acepta y se ignora; `null` permitido. `false` no cambia el acceso. |
-| `headless` | Booleano o `null`, opcional, default `null`; compatibilidad antigua. | Se acepta y se ignora; `null` permitido. `false` no cambia la ejecución. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT del contribuyente consultado. Aliases: `cuit`, `cuit_representado`. Se eliminan espacios, guiones, puntos y barras y deben quedar exactamente 11 dígitos. Omitir, `null`, vacío o `false`: rechazo. | `"20123456786"` |
+| `fecha_desde` | texto | Sí | ninguno | Fecha real `dd/mm/aaaa`. Alias: `desde`. Omitir, `null`, vacío o `false`: rechazo. | `"01/01/2024"` |
+| `fecha_hasta` | texto | Sí | ninguno | Fecha real `dd/mm/aaaa`. Alias: `hasta`. No puede ser anterior a `fecha_desde`. Omitir, `null`, vacío o `false`: rechazo. | `"31/01/2024"` |
+| `excel` | booleano | No | `false` | `true` solicita la exportación Excel. Omitir: no solicita Excel. `null` o vacío: rechazo. `false`: desactivado. | `true` |
+| `csv` | booleano | No | `false` | `true` solicita la exportación CSV. Omitir: no solicita CSV. `null` o vacío: rechazo. `false`: desactivado. | `true` |
+| `pdf` | booleano | No | `false` | `true` solicita la exportación PDF. Omitir: no solicita PDF. `null` o vacío: rechazo. `false`: desactivado. | `false` |
+| `subir` | booleano | No | `true` | `true` publica los archivos generados. Omitir: publica archivos generados. `null` o vacío: rechazo. `false`: no publica archivos descargables ni informa huellas/tamaños. | `true` |
+| `cuit_representante` | texto | No | `null` | Compatibilidad antigua, no se usa para iniciar sesión. Aliases: `cuit_inicio_sesion`, `cuit_login`. Se acepta y se ignora. `null` permitido; `false` inválido. Use `credentials` para credenciales. | `"20123456786"` |
+| `clave_representante` | texto | No | `null` | Compatibilidad antigua, no se usa para iniciar sesión. Aliases: `contrasena`, `clave`. Se acepta y se ignora. `null` permitido; `false` inválido. Use `credentials` para la clave. | `"CLAVE_FICTICIA_NO_USAR"` |
+| `proxy_request` | booleano | No | `null` | Compatibilidad antigua. Se acepta y se ignora; `null` permitido. `false` no cambia el acceso. | `false` |
+| `headless` | booleano | No | `null` | Compatibilidad antigua. Se acepta y se ignora; `null` permitido. `false` no cambia la ejecución. | `false` |
 
 Debe activarse al menos uno de `excel`, `csv` o `pdf`. Enviar alias y campo canónico simultáneamente puede producir un pedido inválido; use un solo nombre por dato.
 
 ## Credenciales
 
-| Campo | Tipo y necesidad efectiva | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `credentials.cuit_representante` | Texto; titular que inicia sesión. | Sin valor no puede completarse el acceso. `null` o `""` se consideran ausentes. `false`: tipo inválido. |
-| `credentials.clave` | Texto; clave fiscal. | Necesaria para completar el acceso. `null` o `""` se consideran ausentes. `false`: tipo inválido. |
+| Sección | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `credentials` | `cuit_representante` | texto | Condicional | ninguno | Titular que inicia sesión. Condicional: sin valor no puede completarse el acceso. Se aceptan alias `cuit_inicio_sesion` y `cuit_login`. `null` o `""` se consideran ausentes. `false`: tipo inválido. | `"20123456786"` |
+| `credentials` | `clave` | texto | Condicional | ninguno | Clave fiscal. Condicional: necesaria para completar el acceso. Se aceptan alias `clave_representante` y `contrasena`, y una clave cifrada válida para el servicio. `null` o `""` se consideran ausentes. `false`: tipo inválido. | `"CLAVE_FICTICIA_NO_USAR"` |
 
 Se aceptan nombres compatibles como `cuit_inicio_sesion`, `cuit_login`, `clave_representante` o `contrasena`, y una clave cifrada válida para el servicio. El CUIT representado puede ser distinto del de inicio de sesión.
 

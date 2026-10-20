@@ -19,15 +19,9 @@ El estado superior `result` es `OK`/`PARCIAL`/`ERROR`; `data` incorpora CUIT del
 
 ## Discrepancias concretas
 
-1. La clase usa `extra=allow` (`services/bot-worker/src/bot_worker/bots/libro_sueldos_digital/schema.py:20-22`), a diferencia de otros bots estrictos; entradas no declaradas se conservan y pueden ocultar errores tipográficos. Propuesta: pasar a `extra=forbid` tras catalogar alias que realmente necesita.
-2. `esquema_entrada()` requiere períodos, pero no lista `operacion` entre `required` (`services/bot-worker/src/bot_worker/bots/libro_sueldos_digital/schema.py:138-151`); la operación sí queda fijada por la ruta y se incorpora antes de validar. Aclarar que operación es parte de transporte, no campo del payload.
-3. El rango se trunca a 1200 meses (`services/bot-worker/src/bot_worker/bots/libro_sueldos_digital/schema.py:49-66`) sin reflejar cantidad truncada. Añadir máximo explícito o error antes de iniciar sesión.
-4. El comentario del portal dice que se seleccionan 5 períodos por página (`services/bot-worker/src/bot_worker/runtime/portals/libro_sueldos_digital.py:10-12,26`), pero la constante es 10 y se usa en los enlaces de páginas (`services/bot-worker/src/bot_worker/runtime/portals/libro_sueldos_digital.py:27,268,325`). Corroborar el valor real del sitio y corregir comentario o constante.
+1. La clase usa `extra=allow` (`services/bot-worker/src/bot_worker/bots/libro_sueldos_digital/schema.py:20-22`), a diferencia de otros bots estrictos; entradas no declaradas se conservan y pueden ocultar errores tipográficos.
+2. `esquema_entrada()` requiere períodos, pero no lista `operacion` entre `required` (`services/bot-worker/src/bot_worker/bots/libro_sueldos_digital/schema.py:138-151`); la operación sí queda fijada por la ruta y se incorpora antes de validar.
+3. El rango se trunca a 1200 meses (`services/bot-worker/src/bot_worker/bots/libro_sueldos_digital/schema.py:49-66`) sin reflejar cantidad truncada.
+4. El comentario del portal dice que se seleccionan 5 períodos por página (`services/bot-worker/src/bot_worker/runtime/portals/libro_sueldos_digital.py:10-12,26`), pero la constante es 10 y se usa en los enlaces de páginas (`services/bot-worker/src/bot_worker/runtime/portals/libro_sueldos_digital.py:27,268,325`).
 5. Catálogo central clasifica `descargar` como `EFECTO` por no empezar con `consulta/consultar/historial`, pero manifest marca `LECTURA`; es una diferencia concreta de semántica de riesgo, no un cambio en el portal.
-6. Aunque credenciales se requieren en ejecución, el schema interno de entrada no incluye `clave`; los campos viven en el sobre/contexto de autenticación. No añadir secretos a `payload` documentado.
-
-## Propuestas sin implementar
-
-- Alinear el clasificador de efecto con el manifiesto o declarar una política explícita para descargas de solo lectura.
-- Rechazar rangos superiores a 1200, endurecer extras tras validar compatibilidad y clarificar operación de ruta.
-- Revisar la paginación del portal y agregar prueba que afirme el número de resultados por página sin depender del comentario.
+6. Aunque credenciales se requieren en ejecución, el schema interno de entrada no incluye `clave`; los campos viven en el sobre/contexto de autenticación.

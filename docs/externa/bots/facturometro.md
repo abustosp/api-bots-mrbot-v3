@@ -8,12 +8,13 @@ Ruta canónica: `POST /api/v3/bots/facturometro/consultar`. El alias plano `/fac
 
 ## Campos de `payload`
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `representado_cuit` | string nullable, opcional; aliases `cuit`, `cuit_representado` | Identifica el CUIT consultado. Si se omite o es `null`, se usa el CUIT de sesión. Si se envía vacío o inválido, se rechaza. Se quitan separadores y se requieren 11 dígitos. |
-| `incluir_captura` | boolean, default `true` | `false` evita la captura PNG y su entrada en `files[]`; no cambia los datos consultados. Omitido aplica `true`; `null` explícito se rechaza. |
-| `cuit_representante` | CUIT opcional de sesión/contexto, alias `cuit_inicio_sesion`/`cuit_login` | La sesión fiscal se envía en `credentials`. Si se informa aquí, se normaliza como CUIT; `null` se omite y vacío se rechaza. No enviar secretos en este campo. |
-| `proxy_request`, `headless` | boolean nullable opcional, legado | No cambian el resultado. `null` es válido; si se omiten no tienen efecto. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | No | ninguno | Identifica el CUIT consultado; alias `cuit` y `cuit_representado`. Si se omite o es `null`, se usa el CUIT de sesión. Si se envía vacío o inválido, se rechaza. Se quitan los separadores comunes y se requieren 11 dígitos. | `"20123456786"` |
+| `incluir_captura` | booleano | No | `true` | `false` evita la captura PNG y su entrada en `files[]`; no cambia los datos consultados. Omitido aplica `true`; `null` explícito se rechaza. | `true` |
+| `cuit_representante` | texto | No | ninguno | CUIT opcional de sesión o contexto; alias `cuit_inicio_sesion` y `cuit_login`. La sesión fiscal se envía en `credentials`. Si se informa aquí, se normaliza como CUIT; `null` se omite y vacío se rechaza. No enviar secretos en este campo. | `"20123456786"` |
+| `proxy_request` | booleano | No | ninguno | Campo legado: no cambia el resultado. `null` es válido; si se omite no tiene efecto. | `false` |
+| `headless` | booleano | No | ninguno | Campo legado: no cambia el resultado. `null` es válido; si se omite no tiene efecto. | `false` |
 
 Los campos ajenos al contrato se rechazan al procesar la solicitud. La publicación de la captura puede no producir archivo si el servicio no muestra el panel, aunque los datos se hayan consultado.
 
@@ -21,11 +22,14 @@ Los campos ajenos al contrato se rechazan al procesar la solicitud. La publicaci
 
 El objeto `credentials` puede omitirse en el envelope, pero la consulta requiere sesión fiscal. La identidad y la contraseña no tienen default; si faltan, normalmente falla la autenticación.
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
-| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
-| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `cuit_representante` | texto | Condicional | ninguno | Identidad para iniciar sesión; alias `cuit_inicio_sesion`. Se necesita una identidad, aportada por cualquiera de los dos nombres; si se omiten ambos, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `cuit_inicio_sesion` | texto | Condicional | ninguno | Identidad para iniciar sesión; alias de `cuit_representante`. Se necesita una identidad, aportada por cualquiera de los dos nombres; si se omiten ambos, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `clave` | texto | Condicional | ninguno | Contraseña en texto; alias `clave_representante` y `contrasena`. Se necesita una contraseña, aportada por cualquiera de estos nombres o por `clave_encriptada`. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_representante` | texto | Condicional | ninguno | Contraseña en texto; alias de `clave`. Se necesita una contraseña, aportada por cualquiera de estos nombres o por `clave_encriptada`. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `contrasena` | texto | Condicional | ninguno | Contraseña en texto; alias de `clave`. Se necesita una contraseña, aportada por cualquiera de estos nombres o por `clave_encriptada`. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios alias, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_encriptada` | texto | No | ninguno | Alternativa cifrada en Base64. Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. | `"Q0xBVkUtRklDVElDSUEtTk8tVVRJTElaQUJMRQ=="` |
 
 No usar credenciales reales en el ejemplo.
 

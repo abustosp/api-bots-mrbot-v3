@@ -8,17 +8,17 @@ Ruta canónica: `POST /api/v3/bots/mis_retenciones/consultar`. Alias compatible:
 
 ## Payload
 
-| Campo | Tipo; requerido; default | Efecto y comportamiento al omitir, enviar `null`, vacío o `false` |
-|---|---|---|
-| `representado_cuit` | texto de 11 dígitos; requerido | CUIT consultado; alias `cuit`. Se quitan espacios, guiones, puntos y `/`. Omitido, `null`, vacío o inválido: rechazo. |
-| `representado_nombre` | texto 1–128; requerido | Nombre para la consulta y los archivos. `denominacion` es alias compatible. Omitido, `null` o vacío: rechazo. |
-| `fecha_desde` | fecha `dd/mm/aaaa`; requerida | Inicio del período. Alias `desde`. Debe ser fecha real. Omitida, `null`, vacía o inválida: rechazo. |
-| `fecha_hasta` | fecha `dd/mm/aaaa`; requerida | Fin inclusive, no anterior a `fecha_desde`. Alias `hasta`. Omitida, `null`, vacía o inválida: rechazo. Si queda en el futuro, el portal limita la fecha final a hoy. |
-| `impuestos` | lista de textos; opcional; `null`; máximo 6 | Códigos admitidos: `216`, `217`, `219`, `353`, `767`, `787`. Omitido, `null` o `[]`: consulta el conjunto predeterminado (los seis códigos en exportación normal; en modo aplicativo se limita al conjunto disponible para ese formato). Elementos se convierten a texto y se recortan; código desconocido o más de 6 elementos: rechazo. |
-| `tipos` | lista de `"Retencion"` y/o `"Percepcion"`; opcional; [`"Retencion"`, `"Percepcion"`] | Selecciona tipos. Debe tener al menos un valor; `null`, `[]` o cualquier otra etiqueta: rechazo. Los códigos `216` y `787` solo admiten `Retencion`; los demás admiten ambos tipos. Una selección incompatible con cualquier impuesto elegido se rechaza. |
-| `exportar_para_aplicativo` | booleano; opcional; `false` | `true` produce las variantes de exportación para aplicativo, usando los códigos admitidos en ese modo; el código `787` se rechaza si se solicita expresamente. `false` genera la salida CSV estándar. `null` se rechaza. |
-| `incluir_json` | booleano; opcional; `true` | Incluye muestra/resumen de filas. `false` omite la muestra, no la consulta. `null` se rechaza. |
-| `subir_csv` | booleano; opcional; `true` | Adjunta archivos producidos. `false` evita los adjuntos, no la consulta ni la generación necesaria. `null` se rechaza. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT consultado; alias `cuit`. Se quitan espacios, guiones, puntos y `/`; deben quedar 11 dígitos. Omitido, `null`, vacío o inválido: rechazo. | `"30876543210"` |
+| `representado_nombre` | texto | Sí | ninguno | Nombre para la consulta y los archivos. Alias: `denominacion`. Longitud de 1 a 128 caracteres. Omitido, `null` o vacío: rechazo. | `"Comercio Ejemplo SA"` |
+| `fecha_desde` | texto | Sí | ninguno | Fecha `dd/mm/aaaa` de inicio del período. Alias `desde`. Debe ser una fecha real. Omitida, `null`, vacía o inválida: rechazo. | `"01/01/2025"` |
+| `fecha_hasta` | texto | Sí | ninguno | Fecha `dd/mm/aaaa`, fin inclusive y no anterior a `fecha_desde`. Alias `hasta`. Omitida, `null`, vacía o inválida: rechazo. Si queda en el futuro, el portal limita la fecha final a hoy. | `"31/01/2025"` |
+| `impuestos` | lista de textos | No | `null` | Máximo 6 elementos. Códigos admitidos: `216`, `217`, `219`, `353`, `767`, `787`. Omitido, `null` o `[]`: consulta el conjunto predeterminado (los seis códigos en exportación normal; en modo aplicativo se limita al conjunto disponible para ese formato). Los elementos se convierten a texto y se recortan; código desconocido o más de 6 elementos: rechazo. | `["217"]` |
+| `tipos` | lista de textos | No | `["Retencion", "Percepcion"]` | Selecciona tipos; valores admitidos `"Retencion"` y `"Percepcion"`. Debe tener al menos un valor; `null`, `[]` o cualquier otra etiqueta: rechazo. Los códigos `216` y `787` solo admiten `Retencion`; los demás admiten ambos tipos. Una selección incompatible con cualquier impuesto elegido se rechaza. | `["Retencion", "Percepcion"]` |
+| `exportar_para_aplicativo` | booleano | No | `false` | `true` produce las variantes de exportación para aplicativo, usando los códigos admitidos en ese modo; el código `787` se rechaza si se solicita expresamente. `false` genera la salida CSV estándar. `null` se rechaza. | `false` |
+| `incluir_json` | booleano | No | `true` | Incluye muestra y resumen de filas. `false` omite la muestra, no la consulta. `null` se rechaza. | `true` |
+| `subir_csv` | booleano | No | `true` | Adjunta los archivos producidos. `false` evita los adjuntos, no la consulta ni la generación necesaria. `null` se rechaza. | `true` |
 
 Debe quedar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaza. Los valores de `tipos` distinguen exactamente `Retencion` y `Percepcion`. Se aceptan claves de payload adicionales, pero no se documenta ni garantiza efecto alguno para ellas.
 
@@ -26,15 +26,15 @@ Debe quedar activo `incluir_json` o `subir_csv`; si ambos son `false`, se rechaz
 
 Se requieren credenciales fiscales válidas y autorización sobre el representado.
 
-| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
-|---|---|---|
-| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
-| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
-| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
-| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
-| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
+| Sección | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `sobre` | `credentials` | objeto | No | `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. | `{}` |
+| `credentials` | `cuit_representante` | texto | Condicional | ninguno | Identifica la cuenta que inicia sesión. Se requiere junto con una clave, salvo que se use el alias `cuit_inicio_sesion`; si se envía con el otro nombre, los valores deben coincidir. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. | `"20123456786"` |
+| `credentials` | `cuit_inicio_sesion` | texto | No | ninguno | Alias opcional de `cuit_representante`. Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. | `"20123456786"` |
+| `credentials` | `clave` | texto | Condicional | ninguno | Clave fiscal en texto. Se requiere junto con una identidad, salvo que se use un alias o `clave_encriptada`. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `clave_representante` | texto | No | ninguno | Alias opcional de `clave`. Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `contrasena` | texto | No | ninguno | Alias opcional de `clave`. Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `clave_encriptada` | texto | No | ninguno | Alternativa cifrada en Base64. Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. | `"Q0xBVkUtRklDVElDSUE="` |
 
 No envíe credenciales en `payload`. Los nombres alternativos repetidos deben contener el mismo valor.
 

@@ -8,18 +8,18 @@ Ruta V3: `POST /api/v3/bots/liquidacion_granos/consultar`. Ruta compatible: `POS
 
 ## Payload
 
-| Campo | Tipo; requerido; default | Efecto y comportamiento al omitir, enviar `null`, vacío o `false` |
-|---|---|---|
-| `representado_cuit` | texto de 11 dígitos; requerido | Identifica el representado. Acepta `cuit` o `cuit_representado`; se quitan espacios, guiones, puntos y `/`. Omitido, `null`, vacío o CUIT inválido: rechazo. |
-| `representado_nombre` | texto, 1–128 caracteres; requerido | Nombre con el que se elige el representado en el portal. `denominacion` es alias compatible. Omitido, `null` o vacío: rechazo. Debe corresponder a una relación visible para la cuenta. |
-| `fecha_desde` | fecha `dd/mm/aaaa`; requerida | Inicio del rango. Alias `desde`. Debe ser una fecha real. Omitida, `null`, vacía o inválida: rechazo. |
-| `fecha_hasta` | fecha `dd/mm/aaaa`; requerida | Fin inclusive del rango. Alias `hasta`. Debe ser igual o posterior a `fecha_desde`. Omitida, `null`, vacía o inválida: rechazo. |
-| `lpg_emitidas` | booleano; opcional; `true` | Incluye LPG emitidas. `false` excluye esa categoría; `null` se rechaza. |
-| `lpg_recibidas` | booleano; opcional; `true` | Incluye LPG recibidas. `false` excluye esa categoría; `null` se rechaza. |
-| `lsg_emitidas` | booleano; opcional; `true` | Incluye LSG emitidas. `false` excluye esa categoría; `null` se rechaza. |
-| `lsg_recibidas` | booleano; opcional; `true` | Incluye LSG recibidas. `false` excluye esa categoría; `null` se rechaza. |
-| `certificados_deposito` | booleano; opcional; `true` | Incluye certificados de depósito. `false` excluye esa categoría; `null` se rechaza. |
-| `subir_archivos` | booleano; opcional; `true` | Si es `true`, adjunta las planillas y comprobantes producidos. `false` evita adjuntarlos al resultado, pero no evita consultar ni generar los archivos durante el trabajo. Omitido o `null` equivale al default `true`; un booleano `false` desactiva la subida. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | Identifica el representado. Alias: `cuit`, `cuit_representado`. Se quitan espacios, guiones, puntos y `/`; deben quedar 11 dígitos. Omitido, `null`, vacío o CUIT inválido: rechazo. | `"30876543210"` |
+| `representado_nombre` | texto | Sí | ninguno | Nombre con el que se elige el representado en el portal. Alias: `denominacion`. Longitud de 1 a 128 caracteres. Omitido, `null` o vacío: rechazo. Debe corresponder a una relación visible para la cuenta. | `"Productora Ejemplo SA"` |
+| `fecha_desde` | texto | Sí | ninguno | Fecha `dd/mm/aaaa` de inicio del rango. Alias: `desde`. Debe ser una fecha real. Omitida, `null`, vacía o inválida: rechazo. | `"01/01/2025"` |
+| `fecha_hasta` | texto | Sí | ninguno | Fecha `dd/mm/aaaa`, fin inclusive del rango. Alias: `hasta`. Debe ser igual o posterior a `fecha_desde`. Omitida, `null`, vacía o inválida: rechazo. | `"31/01/2025"` |
+| `lpg_emitidas` | booleano | No | `true` | Incluye LPG emitidas. `false` excluye esa categoría. `null` se rechaza. | `true` |
+| `lpg_recibidas` | booleano | No | `true` | Incluye LPG recibidas. `false` excluye esa categoría. `null` se rechaza. | `false` |
+| `lsg_emitidas` | booleano | No | `true` | Incluye LSG emitidas. `false` excluye esa categoría. `null` se rechaza. | `false` |
+| `lsg_recibidas` | booleano | No | `true` | Incluye LSG recibidas. `false` excluye esa categoría. `null` se rechaza. | `false` |
+| `certificados_deposito` | booleano | No | `true` | Incluye certificados de depósito. `false` excluye esa categoría. `null` se rechaza. | `false` |
+| `subir_archivos` | booleano | No | `true` | Si es `true`, adjunta las planillas y comprobantes producidos. `false` evita adjuntarlos al resultado, pero no evita consultar ni generar los archivos durante el trabajo. Omitido o `null` equivale al default `true`; un booleano `false` desactiva la subida. | `true` |
 
 Los campos booleanos de sección en `null` se rechazan. La opción de subida es excepción: `subir_archivos: null` se trata como omitido y recupera el default `true`. Debe quedar al menos una de las cinco categorías en `true`; si todas son `false`, se rechaza. Los campos desconocidos se rechazan.
 
@@ -27,15 +27,15 @@ Los campos booleanos de sección en `null` se rechazan. La opción de subida es 
 
 Se requieren credenciales fiscales funcionales y autorización de ARCA sobre el CUIT consultado.
 
-| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
-|---|---|---|
-| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
-| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
-| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
-| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
-| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
+| Sección | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `sobre` | `credentials` | objeto | No | `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. | `{}` |
+| `credentials` | `cuit_representante` | texto | Condicional | ninguno | Identifica la cuenta que inicia sesión. Se requiere junto con una clave, salvo que se use el alias `cuit_inicio_sesion`; si se envía con el otro nombre, los valores deben coincidir. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. | `"20123456786"` |
+| `credentials` | `cuit_inicio_sesion` | texto | No | ninguno | Alias opcional de `cuit_representante`. Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. | `"20123456786"` |
+| `credentials` | `clave` | texto | Condicional | ninguno | Clave fiscal en texto. Se requiere junto con una identidad, salvo que se use un alias o `clave_encriptada`. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `clave_representante` | texto | No | ninguno | Alias opcional de `clave`. Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `contrasena` | texto | No | ninguno | Alias opcional de `clave`. Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `clave_encriptada` | texto | No | ninguno | Alternativa cifrada en Base64. Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. | `"Q0xBVkUtRklDVElDSUE="` |
 
 Si se envían alias repetidos con valores distintos, la solicitud se rechaza. Mantenga las credenciales fuera de `payload`.
 

@@ -14,12 +14,12 @@ El catálogo declara `consultar` (`services/central-api/src/central_api/api/bots
 
 Se consultan tres categorías de operación y dos alternativas de formato (`iva_simple`, `xls`) por categoría (`plugin.py:L221-L275`). Los errores por combinación se registran con conteo cero y mensaje/código, se continúa el loop y el estado exterior permanece `OK` salvo fallo fatal (`plugin.py:L213-L275`). CSV se adjunta únicamente con `subir_csv=true`; `incluir_json=false` omite muestras pero no evita exportar. El portal recorta rango futuro durante la selección de fechas (`runtime/portals/mis_retenciones_iva_simple.py:L181-L209`).
 
-## Discrepancias y propuestas, no implementadas
+## Discrepancias observadas
 
-- `required_result_marker` es aceptado por el validador y usado por la exportación, pero falta en el modelo central público de la operación (`central-api/api/bot_payloads.py:L229-L235`; worker `schema.py:L97-L100`). **Propuesta:** incorporarlo con default, efecto y regla para cadena vacía, o retirarlo del contrato efectivo.
-- `extra="allow"` acepta otros campos que no son consumidos (`schema.py:L27-L28`). El modelo público V3 no declara ese marcador ni extras (`central-api/api/bot_payloads.py:L229-L235`). **Propuesta:** cerrar el modelo y publicar todos los campos de comportamiento.
-- La consulta puede devolver estado `OK` con errores particulares, sin un `PARCIAL` derivado de `datos.errores` (`plugin.py:L213-L275`). **Propuesta:** derivar estado de resultado en errores de categorías y probar la agregación.
-- Las credenciales del catálogo son genéricas, sin requiredness (`central-api/api/bots.py:L820-L845`), aunque el plugin requiere acceso fiscal (`plugin.py:L174-L181`). **Propuesta:** especificar CUIT/clave requeridos.
+- `required_result_marker` es aceptado por el validador y usado por la exportación, pero falta en el modelo central público de la operación (`central-api/api/bot_payloads.py:L229-L235`; worker `schema.py:L97-L100`).
+- `extra="allow"` acepta otros campos que no son consumidos (`schema.py:L27-L28`). El modelo público V3 no declara ese marcador ni extras (`central-api/api/bot_payloads.py:L229-L235`).
+- La consulta puede devolver estado `OK` con errores particulares, sin un `PARCIAL` derivado de `datos.errores` (`plugin.py:L213-L275`).
+- Las credenciales del catálogo son genéricas, sin requiredness (`central-api/api/bots.py:L820-L845`), aunque el plugin requiere acceso fiscal (`plugin.py:L174-L181`).
 
 ## Referencias y pruebas revisadas
 
@@ -31,5 +31,3 @@ Se consultan tres categorías de operación y dos alternativas de formato (`iva_
 - `services/central-api/src/central_api/api/bot_compat.py:L75-L79`
 - `services/central-api/src/central_api/api/bot_payloads.py:L229-L235`
 - Revisados: `services/bot-worker/tests/test_portal_mis_retenciones_iva_simple.py` y contrato de entrada. Prueban regla de fechas, modo y fallback de formato. No se abrió el portal real.
-
-Las propuestas son recomendaciones, no cambios ejecutados.

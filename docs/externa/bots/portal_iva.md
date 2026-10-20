@@ -20,32 +20,32 @@ El acceso requiere clave fiscal y CUIT representante para iniciar sesión. Envia
 
 Tipos y valores siguientes reflejan validación efectiva. Campos de descarga son aplicables a `descargar` y `gestionar`; archivos de entrada a `importar` y `gestionar`; las opciones de preparación se aceptan en las tres operaciones.
 
-| Campo | Tipo, requerido y default | Carga, omisión, `null`, vacío o `false` |
-|---|---|---|
-| `periodo` | texto, requerido | Acepta `MM/AAAA`, `MM-AAAA`, `AAAA/MM`, `AAAA-MM` o `AAAAMM`; se normaliza a `AAAAMM`, mes 01–12. `null`/vacío inválidos. |
-| `representado_cuit` | texto nullable, opcional; default `null`; alias `cuit` | CUIT de 11 dígitos; admite espacios, guiones, puntos y `/`, que se quitan. Omitir o `null` usa el CUIT representante. Vacío inválido. |
-| `representado_nombre` | texto nullable, opcional; default `null`; máximo 128 caracteres | Nombre opcional. `null`/omitir no agrega nombre; cadena vacía no cumple mínimo de 1. |
-| `descarga_ventas` | booleano; default `false`; alias `descarga_CSV_ventas` | `true` solicita libro ventas; `false` no lo descarga. Omitir equivale a `false`; `null` inválido. |
-| `descarga_compras` | booleano; default `false`; alias `descarga_CSV_compras` | `true` solicita libro compras; `false` no lo descarga. Omitir equivale a `false`; `null` inválido. Debe activarse ventas y/o compras. |
-| `incluir_json` | booleano; default `true` | Incluye resúmenes y muestras de filas en el resultado. `false` los omite; no afecta la consulta. Omitir equivale a `true`; `null` inválido. |
-| `subir_csv` | booleano; default `true` | Solicita que los CSV queden disponibles como archivos de resultado. `false` no los publica; omitir equivale a `true`; `null` inválido. Envíe este nombre canónico para controlar la publicación. |
-| `refrescar_desde_arca` | booleano; default `true` | Antes de cada descarga solicita importar datos desde el organismo fiscal al libro. `false` evita esa actualización. Omitir activa la actualización; `null` inválido. |
-| `limpiar_despues` | booleano; default `true` | Después de cada descarga intenta borrar los registros del libro. `false` evita ese borrado. Omitir lo activa; `null` inválido. |
-| `descartar_borrador` | booleano; default `true` | Tras completar las descargas intenta descartar el borrador de declaración. `false` evita el intento. Omitir lo activa; `null` inválido. |
-| `operaciones_ng_o_e` | booleano; default `false` | Marca la opción de operaciones no gravadas/exentas al preparar el período. `false` la desmarca; omitir equivale a `false`; `null` inválido. |
-| `prorrateo_global` | booleano; default `false` | Selecciona opción de prorrateo global cuando corresponde. `false` no la selecciona; `null` inválido. |
-| `prorrateo_asignacion_directa` | booleano; default `false` | Selecciona prorrateo de asignación directa cuando corresponde. `false` no lo selecciona; `null` inválido. |
-| `prorrateo_ambos` | booleano; default `false` | Selecciona ambas opciones de prorrateo cuando corresponde. `false` no las selecciona; `null` inválido. Si varias opciones de prorrateo son `true`, el portal recibe la prioridad «ambos», luego global y luego directa. |
-| `importacion_definitiva_bienes` | booleano; default `false` | Marca la opción declarativa correspondiente; `false` la desmarca; `null` inválido. |
-| `importacion_servicios` | booleano; default `false` | Marca importación de servicios; `false` la desmarca; `null` inválido. |
-| `regimen_turiva` | booleano; default `false` | Marca el régimen TURIVA; `false` la desmarca; `null` inválido. |
-| `bienes_usados` | booleano; default `false` | Marca bienes usados/material reciclable; `false` la desmarca; `null` inválido. |
-| `ninguna_anteriores` | booleano; default `true` | Marca «ninguna de las anteriores» salvo que se indique `false`; `null` inválido. |
-| `periodos_seleccionables` | lista de objetos `{string:string}`; default `[]` | Se acepta, pero no determina el período consultado. El portal devuelve su propia lista al preparar el período y puede reemplazar este valor. `null` inválido. |
-| `ventas_txt_key` | texto, opcional, solo importar/gestionar | Referencia a TXT ya cargado. `null` se interpreta como ausencia; vacío inválido. Debe enviarse junto con `ventas_alicuotas_txt_key`. |
-| `ventas_alicuotas_txt_key` | texto, opcional, solo importar/gestionar | Referencia al TXT de alícuotas de ventas. `null` equivale a ausencia; vacío inválido. Se exige junto con `ventas_txt_key`. |
-| `compras_txt_key` | texto, opcional, solo importar/gestionar | Referencia a TXT ya cargado. `null` equivale a ausencia; vacío inválido. Debe enviarse junto con `compras_alicuotas_txt_key`. |
-| `compras_alicuotas_txt_key` | texto, opcional, solo importar/gestionar | Referencia al TXT de alícuotas de compras. `null` equivale a ausencia; vacío inválido. Se exige junto con `compras_txt_key`. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `periodo` | texto | Sí | ninguno | Acepta `MM/AAAA`, `MM-AAAA`, `AAAA/MM`, `AAAA-MM` o `AAAAMM`; se normaliza a `AAAAMM`, mes 01–12. `null` o vacío inválidos. | `"05/2026"` |
+| `representado_cuit` | texto | No | `null` | CUIT de 11 dígitos; admite espacios, guiones, puntos y `/`, que se quitan. Alias: `cuit`. Omitir o `null` usa el CUIT representante. Vacío inválido. | `"20-12345678-6"` |
+| `representado_nombre` | texto | No | `null` | Nombre opcional, máximo 128 caracteres. `null` u omitir no agrega nombre; cadena vacía no cumple mínimo de 1. | `"Comercial Ficticia SA"` |
+| `descarga_ventas` | booleano | No | `false` | `true` solicita libro ventas; `false` no lo descarga. Alias: `descarga_CSV_ventas`. Omitir equivale a `false`; `null` inválido. | `true` |
+| `descarga_compras` | booleano | No | `false` | `true` solicita libro compras; `false` no lo descarga. Alias: `descarga_CSV_compras`. Omitir equivale a `false`; `null` inválido. Debe activarse ventas y/o compras. | `false` |
+| `incluir_json` | booleano | No | `true` | Incluye resúmenes y muestras de filas en el resultado. `false` los omite; no afecta la consulta. Omitir equivale a `true`; `null` inválido. | `true` |
+| `subir_csv` | booleano | No | `true` | Solicita que los CSV queden disponibles como archivos de resultado. `false` no los publica; omitir equivale a `true`; `null` inválido. Envíe este nombre canónico para controlar la publicación. | `true` |
+| `refrescar_desde_arca` | booleano | No | `true` | Antes de cada descarga solicita importar datos desde el organismo fiscal al libro. `false` evita esa actualización. Omitir activa la actualización; `null` inválido. | `false` |
+| `limpiar_despues` | booleano | No | `true` | Después de cada descarga intenta borrar los registros del libro. `false` evita ese borrado. Omitir lo activa; `null` inválido. | `true` |
+| `descartar_borrador` | booleano | No | `true` | Tras completar las descargas intenta descartar el borrador de declaración. `false` evita el intento. Omitir lo activa; `null` inválido. | `false` |
+| `operaciones_ng_o_e` | booleano | No | `false` | Marca la opción de operaciones no gravadas/exentas al preparar el período. `false` la desmarca; omitir equivale a `false`; `null` inválido. | `false` |
+| `prorrateo_global` | booleano | No | `false` | Selecciona opción de prorrateo global cuando corresponde. `false` no la selecciona; `null` inválido. | `false` |
+| `prorrateo_asignacion_directa` | booleano | No | `false` | Selecciona prorrateo de asignación directa cuando corresponde. `false` no lo selecciona; `null` inválido. | `false` |
+| `prorrateo_ambos` | booleano | No | `false` | Selecciona ambas opciones de prorrateo cuando corresponde. `false` no las selecciona; `null` inválido. Si varias opciones de prorrateo son `true`, el portal recibe la prioridad «ambos», luego global y luego directa. | `false` |
+| `importacion_definitiva_bienes` | booleano | No | `false` | Marca la opción declarativa correspondiente; `false` la desmarca; `null` inválido. | `false` |
+| `importacion_servicios` | booleano | No | `false` | Marca importación de servicios; `false` la desmarca; `null` inválido. | `false` |
+| `regimen_turiva` | booleano | No | `false` | Marca el régimen TURIVA; `false` la desmarca; `null` inválido. | `false` |
+| `bienes_usados` | booleano | No | `false` | Marca bienes usados/material reciclable; `false` la desmarca; `null` inválido. | `false` |
+| `ninguna_anteriores` | booleano | No | `true` | Marca «ninguna de las anteriores» salvo que se indique `false`; `null` inválido. | `true` |
+| `periodos_seleccionables` | lista de objetos | No | `[]` | Objetos `{string:string}`. Se acepta, pero no determina el período consultado. El portal devuelve su propia lista al preparar el período y puede reemplazar este valor. `null` inválido. | `[]` |
+| `ventas_txt_key` | texto | No | ninguno | Referencia a TXT ya cargado; solo aplicable a `importar` y `gestionar`. `null` se interpreta como ausencia; vacío inválido. Debe enviarse junto con `ventas_alicuotas_txt_key`. | `"uploads/demo/ventas.txt"` |
+| `ventas_alicuotas_txt_key` | texto | No | ninguno | Referencia al TXT de alícuotas de ventas; solo aplicable a `importar` y `gestionar`. `null` equivale a ausencia; vacío inválido. Se exige junto con `ventas_txt_key`. | `"uploads/demo/ventas-alicuotas.txt"` |
+| `compras_txt_key` | texto | No | ninguno | Referencia a TXT ya cargado; solo aplicable a `importar` y `gestionar`. `null` equivale a ausencia; vacío inválido. Debe enviarse junto con `compras_alicuotas_txt_key`. | `"uploads/demo/compras.txt"` |
+| `compras_alicuotas_txt_key` | texto | No | ninguno | Referencia al TXT de alícuotas de compras; solo aplicable a `importar` y `gestionar`. `null` equivale a ausencia; vacío inválido. Se exige junto con `compras_txt_key`. | `"uploads/demo/compras-alicuotas.txt"` |
 
 Cada referencia de archivo debe provenir de `POST /api/v3/uploads`. El contenido debe ser un TXT existente, no vacío, menor o igual a 5 MB. No enviar el contenido del archivo dentro del JSON ni usar los nombres locales terminados en `_path`.
 

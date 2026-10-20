@@ -8,12 +8,12 @@ Ruta canónica: `POST /api/v3/bots/consulta_pagos_vep/consultar`. Cuerpo: `{"pay
 
 ## Campos de `payload`
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `representado_cuit` | string, requerido; aliases `cuit`, `cuit_representado` | Se quitan espacios, guiones, puntos y barras y se requieren 11 dígitos. Si se mandan varios aliases, deben representar el mismo CUIT. Nulo/vacío inválido. |
-| `periodo` | string de 1–3 dígitos; default `"72"` | Cantidad de meses. Debe ser numérico y mayor que cero (`"000"` se rechaza; `"001"` vale). Omitido usa 72; `null` explícito se rechaza. |
-| `incluir_json` | boolean; default `true` | `false` elimina la muestra de filas del resultado, no el resumen. Omitido o `null` explícito aplica el default `true`. |
-| `subir_csv` | boolean; default `true` | `false` evita publicar archivo en `files[]`, pero el CSV se sigue obteniendo para procesar filas. Omitido o `null` explícito aplica `true`. Si también se envía el alias histórico, el campo canónico prevalece y el alias puede descartarse durante la normalización. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | Se quitan espacios, guiones, puntos y barras y se requieren 11 dígitos. Alias: `cuit`, `cuit_representado`. Si se mandan varios aliases, deben representar el mismo CUIT. `null` o vacío inválidos. | `"20-12345678-6"` |
+| `periodo` | texto | No | `"72"` | Cantidad de meses en 1 a 3 dígitos. Debe ser numérico y mayor que cero (`"000"` se rechaza; `"001"` vale). Omitido usa `"72"`; `null` explícito se rechaza. | `"72"` |
+| `incluir_json` | booleano | No | `true` | `false` elimina la muestra de filas del resultado, no el resumen. Omitido o `null` explícito aplica el default `true`. | `true` |
+| `subir_csv` | booleano | No | `true` | `false` evita publicar archivo en `files[]`, pero el CSV se sigue obteniendo para procesar filas. Omitido o `null` explícito aplica `true`. Si también se envía el alias histórico, el campo canónico prevalece y el alias puede descartarse durante la normalización. | `true` |
 
 Campos adicionales son rechazados por la validación de la operación. Los booleanos deben enviarse como booleanos, no como cadenas. No se aplica a esta ruta el DTO de los aliases HTTP planos.
 
@@ -21,11 +21,14 @@ Campos adicionales son rechazados por la validación de la operación. Los boole
 
 El objeto `credentials` puede omitirse en el envelope, pero la operación requiere una sesión fiscal. La identidad puede diferir de `representado_cuit`. La falta de identidad o contraseña normalmente causa fallo de autenticación; no se aplican defaults.
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
-| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
-| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `cuit_representante` | texto | Condicional | ninguno | Identidad de la sesión fiscal; requerida si no se envía `cuit_inicio_sesion`. Alias: `cuit_inicio_sesion`. Omitido, `null` o vacío no deja identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `cuit_inicio_sesion` | texto | Condicional | ninguno | Alias de `cuit_representante`; requerido si no se envía `cuit_representante` y aporta la misma identidad de sesión. Omitido, `null` o vacío no deja identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. | `"20123456786"` |
+| `clave` | texto | Condicional | ninguno | Contraseña de la sesión fiscal. Alias: `clave_representante`, `contrasena`. Se necesita una contraseña salvo que se aporte `clave_encriptada`; sin default. Omitir, `null` o vacío equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_representante` | texto | Condicional | ninguno | Alias de `clave`; aporta la misma contraseña. Se necesita una contraseña salvo que se aporte `clave_encriptada`. Omitir, `null` o vacío equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `contrasena` | texto | Condicional | ninguno | Alias de `clave`; aporta la misma contraseña. Se necesita una contraseña salvo que se aporte `clave_encriptada`. Omitir, `null` o vacío equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. | `"CLAVE-FICTICIA-NO-UTILIZABLE"` |
+| `clave_encriptada` | texto | Condicional | ninguno | Alternativa cifrada de la contraseña. Omitido, `null` o vacío se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. | `"Q0xBVkVfRklDVElDSUFfTk9fVVNFRw=="` |
 
 No usar valores reales en ejemplos.
 

@@ -18,13 +18,6 @@
 - Las URLs `*_minio_url` se crean con `null` antes de subir y se rellenan sólo al publicar; `files` del job es vía de recuperación (`services/bot-worker/src/bot_worker/bots/compensaciones/plugin.py:247-264`).
 - Si un formato falla y otro no, `result` sigue `OK` con warning, no `PARCIAL` (`services/bot-worker/src/bot_worker/bots/compensaciones/plugin.py:265-283`).
 
-## Propuestas, sin implementar
-
-- Validar fechas reales, rango ascendente y un formato mínimo en el DTO flat antes de job; mantener al worker como autoridad para canonical.
-- Modelar respuesta con los campos estables, objetos opcionales por formato, URLs nullable y warnings; evitar imponer esquema a filas contenidas en exportaciones.
-- Decidir semántica de fallo parcial (`OK` con warning o `PARCIAL`) y documentar consistente.
-- Marcar campos legacy de credenciales/proxy/headless como compatibilidad en desuso y usar sólo `credentials` en solicitudes nuevas.
-
 ## Evidencia revisada
 
 - Catálogo/ruta: `services/central-api/src/central_api/api/bots.py:194-208,329-339,378-386,748-817`.

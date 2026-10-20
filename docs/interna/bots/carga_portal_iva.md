@@ -21,13 +21,6 @@ CUIT quita separadores y exige once dígitos, sin checksum; período elimina sep
 - OpenAPI por campo no expresa grupos TXT, alternativa CSV, rechazo de Base64, límite 20 MiB ni extensión (esquema `services/bot-worker/src/bot_worker/bots/carga_portal_iva/schema.py:133-166`; upload `services/central-api/src/central_api/input_files.py:47-82`; plugin `services/bot-worker/src/bot_worker/bots/carga_portal_iva/plugin.py:180-199`).
 - `secciones` puede ser parcial aunque operaciones previas hayan mutado el portal. La clasificación de `ERROR` mira todas las secciones fallidas; no hay compensación/rollback al fallar una sección (`services/bot-worker/src/bot_worker/bots/carga_portal_iva/plugin.py:363-422`).
 
-## Propuestas, sin implementar
-
-- Añadir validación cruzada declarativa para parejas ventas/compras, CSV alternativo y prohibición de Base64 antes de crear el job.
-- Conservar nombres públicos `_key`, pero tipar mapping de upload a `_path` con pruebas de contrato para cada campo, extensión y tamaño.
-- Presentar borrado previo de libro como efecto destructivo y diferenciar en metadata una carga con riesgo de reintento incierto. No promover retry automático tras un efecto no confirmado.
-- Definir exclusión entre flags de prorrateo y justificar/quitar `denominacion` no consumida.
-
 ## Evidencia revisada
 
 - Catálogo/ruta: `services/central-api/src/central_api/api/bots.py:194-208,329-339,378-386,748-817`.

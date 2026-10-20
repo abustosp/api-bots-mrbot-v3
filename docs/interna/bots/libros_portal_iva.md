@@ -14,11 +14,11 @@ El catálogo central declara `descargar`, `descargar_libros`, `descargar_ddjj` (
 
 `generar_rango_periodos` trunca silenciosamente el rango a 1.200 periodos (`schema.py:L51-L68`). `_descargar` itera períodos, registra éxitos y errores separados, y solo publica `detalle` cuando `incluir_json` aplica; `subir_archivos=false` deja el archivo fuera de `files[]` (`plugin.py:L222-L288`). En la operación compuesta las ramas quedan bajo `libros` y `ddjj` y se agregan `periodos_descargados`/`periodos_error` (`plugin.py:L184-L220`). Los nombres de archivo de plugin son `descargar_libros_{cuit}_{periodo}.bin` y `descargar_ddjj_{cuit}_{periodo}.bin`; son contenedores opacos de archivos, aunque el primer contenido es ZIP y el segundo PDF. Los errores por periodo no degradan por sí solos el estado global.
 
-## Discrepancias y propuestas, no implementadas
+## Discrepancias observadas
 
-- El modelo público V3 de central expresa `representado_cuit` con patrón de 11 dígitos sin separadores, mientras el validador efectivo limpia puntos, guiones, espacios y `/` (`central-api/api/bot_payloads.py:L188-L194`, schema `L26-L37`). **Propuesta:** alinear el patrón/documentación pública con normalización o rechazar explícitamente separadores antes de ejecución.
-- El generador corta en 1.200 meses sin devolver advertencia y sin límite equivalente visible en el modelo (`schema.py:L51-L68`). **Propuesta:** exponer máximo y rechazar o informar truncamiento.
-- El `credentials_schema` publicado por operación es objeto genérico con `additionalProperties=true`, sin nombres ni requiredness (`central-api/api/bots.py:L820-L845`). En ejecución se requieren cuenta/clave. **Propuesta:** emitir propiedades y requiredness específicas.
+- El modelo público V3 de central expresa `representado_cuit` con patrón de 11 dígitos sin separadores, mientras el validador efectivo limpia puntos, guiones, espacios y `/` (`central-api/api/bot_payloads.py:L188-L194`, schema `L26-L37`).
+- El generador corta en 1.200 meses sin devolver advertencia y sin límite equivalente visible en el modelo (`schema.py:L51-L68`).
+- El `credentials_schema` publicado por operación es objeto genérico con `additionalProperties=true`, sin nombres ni requiredness (`central-api/api/bots.py:L820-L845`). En ejecución se requieren cuenta/clave.
 
 ## Referencias y pruebas revisadas
 

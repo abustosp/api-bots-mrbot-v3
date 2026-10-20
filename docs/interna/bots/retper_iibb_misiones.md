@@ -18,11 +18,11 @@ Schema limpia CUIT separadores y conserva período AAAAMM estricto. Plugin adapt
 
 El plugin retorna siempre `data.operacion`, `representado_cuit`, `periodo_desde`, `periodo_hasta`, `archivos` con nombres XLSX/PDF; con subida exitosa agrega `sha256_xlsx`, `sha256_pdf`, y produce dos artefactos (`plugin.py:232-284`). PDF se valida por firma antes de publicar (`:254-258`). No crea detalle por fila.
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-- **`incluir_json` es no-op:** el modelo lo valida y rechaza `incluir_json=false` junto con `subir_archivo=false` (`schema.py:81-116`), pero el plugin no consulta ese flag al construir `data` (`plugin.py:259-284`). **Propuesta:** retirar campo y validación del modelo o hacer que controle una parte de `data` de forma explícita; no conservar una restricción de salida que no puede desactivar.
-- **Nombre público vs modelo:** normalización central solo traslada `denominacion` a `representado_nombre` para Misiones, mientras el modelo usa `denominacion` como alias de `representado_nombre` (`credentials.py:119-126`, schema `:66-70`). En payload directo el campo interno canonical `denominacion` sí pasa, pero la forma `representado_nombre` depende de la transformación/ruta. **Propuesta:** una sola propiedad canonical (`representado_nombre` o `denominacion`) y documentar alias consistentemente en OpenAPI/validación.
-- **Manifest insuficiente:** `schema.py:126-145` declara requerido solo `operacion`, y no publica máximo 256 de denominación en `:136`; el modelo requiere CUIT, nombre y períodos. El catálogo `bot_payloads.py:272-277` refleja solo campos base y no prueba `required` real. **Propuesta:** derivar JSON Schema y tests de contrato del modelo.
+- **`incluir_json` es no-op:** el modelo lo valida y rechaza `incluir_json=false` junto con `subir_archivo=false` (`schema.py:81-116`), pero el plugin no consulta ese flag al construir `data` (`plugin.py:259-284`).
+- **Nombre público vs modelo:** normalización central solo traslada `denominacion` a `representado_nombre` para Misiones, mientras el modelo usa `denominacion` como alias de `representado_nombre` (`credentials.py:119-126`, schema `:66-70`). En payload directo el campo interno canonical `denominacion` sí pasa, pero la forma `representado_nombre` depende de la transformación/ruta.
+- **Manifest insuficiente:** `schema.py:126-145` declara requerido solo `operacion`, y no publica máximo 256 de denominación en `:136`; el modelo requiere CUIT, nombre y períodos. El catálogo `bot_payloads.py:272-277` refleja solo campos base y no prueba `required` real.
 - **Resultado no parcial:** plugin realiza XLSX, luego PDF, luego upload de dos archivos; una falla posterior levanta error, sin `PARCIAL` (`plugin.py:247-284`). Si el primer archivo ya se descargó o publicó antes de fallo del segundo, el resultado no describe la parcialidad.
 - **Pruebas leídas:** `services/bot-worker/tests/test_portal_retper_iibb_misiones.py:24-52` verifica acceso separado y credenciales obligatorias; `:53-77` valida mensajes de rechazo; pruebas de descarga/exportación están más adelante en el mismo archivo.
 

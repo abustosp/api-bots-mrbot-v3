@@ -14,11 +14,11 @@ Catálogo central: operación `consultar` (`services/central-api/src/central_api
 
 Sin impuestos (omitido, `null` o `[]`) el plugin usa los seis códigos, o cinco disponibles en modo aplicativo (`plugin.py:L227-L231`). En ausencia de lista explícita, omite combinaciones no admitidas por cada código dentro del loop, sin error de validación (`L241-L248`). Cada combinación con fallo deja `filas: 0`, mensaje y código diagnóstico, y el loop sigue (`L263-L280`). Resultado `data.impuestos[código][tipo][formato]` resume filas, archivo, opcionalmente `sha256`, `size_bytes` y muestra; `data.errores` acumula fallos. El estado global permanece `OK` salvo error fatal fuera del loop (`L286-L298`, `L213-L217`). `incluir_json=false` quita muestras; `subir_csv=false` evita adjuntos, no la consulta.
 
-## Discrepancias y propuestas, no implementadas
+## Discrepancias observadas
 
-- El modelo público de central declara impuestos/tipos como listas de texto sin enumeraciones ni dependencias entre valores (`services/central-api/src/central_api/api/bot_payloads.py:L220-L228`), mientras la entrada efectiva aplica códigos, etiquetas, rangos y reglas de cruce. **Propuesta:** reflejar enums, máximo, defaults y restricciones condicionales en el contrato publicado.
-- `extra="allow"` deja pasar y conservar nombres desconocidos, aunque el flujo solo consume campos conocidos (`schema.py:L42-L44`, `plugin.py:L219-L298`). **Propuesta:** pasar a rechazo de extras o documentar expresamente que los extras se ignoran.
-- El esquema V3 de credenciales es genérico (`central-api/api/bots.py:L820-L845`), frente al requisito práctico de acceso fiscal (`plugin.py:L175-L182`). **Propuesta:** publicar campos y requiredness.
+- El modelo público de central declara impuestos/tipos como listas de texto sin enumeraciones ni dependencias entre valores (`services/central-api/src/central_api/api/bot_payloads.py:L220-L228`), mientras la entrada efectiva aplica códigos, etiquetas, rangos y reglas de cruce.
+- `extra="allow"` deja pasar y conservar nombres desconocidos, aunque el flujo solo consume campos conocidos (`schema.py:L42-L44`, `plugin.py:L219-L298`).
+- El esquema V3 de credenciales es genérico (`central-api/api/bots.py:L820-L845`), frente al requisito práctico de acceso fiscal (`plugin.py:L175-L182`).
 
 ## Referencias y pruebas revisadas
 
@@ -29,5 +29,3 @@ Sin impuestos (omitido, `null` o `[]`) el plugin usa los seis códigos, o cinco 
 - `services/central-api/src/central_api/api/bot_compat.py:L73-L74`
 - `services/central-api/src/central_api/api/bot_payloads.py:L220-L228`
 - Revisados: `services/bot-worker/tests/test_portal_mis_retenciones.py` y contrato de payload. El test de fechas confirma el recorte a hoy. No se ejecutó el portal.
-
-Propuestas anotadas para seguimiento, no aplicadas.

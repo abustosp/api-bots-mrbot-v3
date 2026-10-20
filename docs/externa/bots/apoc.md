@@ -12,9 +12,9 @@ La ruta fija la operación. En el cuerpo V3, los datos del bot van dentro de `pa
 
 ## Payload
 
-| Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `cuit` | Texto, requerido. | Omitir, `null` o vacío: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. `false` no es un CUIT y se rechaza. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `cuit` | texto | Sí | ninguno | Omitir, `null` o vacío: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. `false` no es un CUIT y se rechaza. | `"20123456786"` |
 
 No se requiere objeto de credenciales: use `credentials: {}`. No envíe claves fiscales para esta consulta.
 

@@ -26,7 +26,7 @@ Los campos marcados `consultar/historial` no se usan por `solicitar`; los campos
 | `subir_csv` | booleano | No | `true` | Adjunta los CSV al trabajo en `consultar` y `historial`. `false` evita adjuntar, sin evitar la descarga o lectura. En `solicitar` no aplica. `null` se rechaza. | `true` |
 | `cookies_header` | texto | No | `null` | Campo de compatibilidad, de hasta 8.192 caracteres, solo para `historial`. No se utiliza para autenticar ni altera la consulta. Omitido o `null`: sin efecto; `""` no aporta valor. | `""` |
 | `carga_b64` | booleano | No | `false` | Campo legado aceptado y sin efecto; los archivos no se devuelven en Base64. Omitido equivale a `false`; `false` no cambia la respuesta; `null` se rechaza. | `false` |
-| `proxy_request` | booleano | No | `null` | Se descarta en V3 y no controla el acceso ni la ruta de red; cualquier valor se ignora antes de la validación específica. | `null` |
+| `proxy_request` | booleano | No | `null` | Se descarta en V3 y no controla el acceso ni la ruta de red; cualquier valor se ignora antes de la validación específica. | `false` |
 | `eliminar_descargas` | booleano | No | `true` | Campo legado descartado; la retención temporal no se configura con este parámetro. `false`, `null` o `""` no cambia la retención efectiva. | `true` |
 | `verbose` | booleano | No | `false` | Se acepta en la validación pero no cambia el resultado. Omitido equivale a `false`; `null` se rechaza. | `false` |
 

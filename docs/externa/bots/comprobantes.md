@@ -12,21 +12,24 @@ Cuerpo canónico: `{"payload": {...}, "credentials": {...}}`. La identidad de se
 
 ## Campos de `payload`
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `representado_cuit` | string, requerido; alias `cuit` | Se quitan separadores y se exigen 11 dígitos. Identifica al contribuyente consultado. `null` o vacío no satisfacen el requisito. |
-| `representado_nombre` | string 1–128, requerido | Nombre que se selecciona/valida en el portal. Vacío o `null` inválidos. |
-| `fecha_desde`, `fecha_hasta` | strings, requeridos, `DD/MM/AAAA`; aliases `desde`, `hasta` | Rango inclusivo y `fecha_desde <= fecha_hasta`. Fechas inválidas, vacías o nulas se rechazan. |
-| `emitidos`, `recibidos` | boolean, ambos default `false`; aliases `descarga_emitidos`, `descarga_recibidos` | Debe ser `true` al menos uno. `false` omite ese tipo. Si se omite se aplica `false`; `null` explícito se rechaza. |
-| `puntos_venta_emitidos`, `puntos_venta_recibidos` | lista de strings o enteros, opcional, hasta 200 elementos | Se conservan ceros iniciales y cada elemento debe contener solo dígitos. Omitido, `null` o lista vacía significa sin filtro. Debe enviarse una lista, no un valor escalar. |
-| `timeout_mc` | entero 1–86400, opcional; default efectivo 30 segundos | Omitido o `null` usa el valor efectivo de 30 segundos. Controla la espera del servicio. Cero y otros valores fuera del rango se rechazan. |
-| `incluir_json` | boolean, default `true`; alias `carga_json` | `false` omite la muestra de filas, no el resumen. Omitido aplica `true`; `null` explícito se rechaza. |
-| `subir_csv` | boolean, default `true` | `false` no publica CSV en `files[]`, pero el archivo aún se procesa. Omitido aplica `true`; `null` explícito se rechaza. |
-| `carga_b64` | boolean, default `false`, obsoleto | Se acepta y se ignora: los archivos se entregan como archivos, nunca como base64. `null` explícito se rechaza. |
-| `eliminar_descargas` | boolean, default `true` | Se elimina antes de procesar la operación, por lo que no tiene efecto. En la ruta canónica también se ignoran `null` y valores no booleanos. |
-| `proxy_request` | boolean nullable, default `null` | Aceptado por compatibilidad y sin efecto de selección de conexión; `null` es válido. |
-| `verbose` | boolean, default `false` | Aceptado sin cambiar el resultado. `null` explícito se rechaza. |
-| `cookies_header` | string nullable, máximo 8192, solo para `historial` | Campo legado sin efecto de autenticación. Omitido o `null` no modifica la sesión; cadena vacía se acepta sin efecto. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT del contribuyente consultado. Alias: `cuit`. Se quitan espacios, guiones, puntos y barras y deben quedar 11 dígitos. No se valida el dígito verificador. Omitido, `null` o vacío: rechazo. | `"20123456786"` |
+| `representado_nombre` | texto | Sí | ninguno | Nombre que se selecciona y valida en el portal. Longitud de 1 a 128 caracteres. Vacío o `null` inválidos. | `"Comercial Ejemplo SRL"` |
+| `fecha_desde` | texto | Sí | ninguno | Fecha `DD/MM/AAAA`. Alias: `desde`. Rango inclusivo y debe ser menor o igual a `fecha_hasta`. Fecha inválida, vacía o nula se rechaza. | `"01/09/2026"` |
+| `fecha_hasta` | texto | Sí | ninguno | Fecha `DD/MM/AAAA`. Alias: `hasta`. Rango inclusivo y debe ser mayor o igual a `fecha_desde`. Fecha inválida, vacía o nula se rechaza. | `"30/09/2026"` |
+| `emitidos` | booleano | No | `false` | Incluye comprobantes emitidos. Alias: `descarga_emitidos`. `false` omite ese tipo. Debe ser `true` al menos uno de `emitidos` o `recibidos`. Omitido aplica `false`; `null` explícito se rechaza. Debe ser booleano JSON, no texto como `"false"`. | `true` |
+| `recibidos` | booleano | No | `false` | Incluye comprobantes recibidos. Alias: `descarga_recibidos`. `false` omite ese tipo. Debe ser `true` al menos uno de `emitidos` o `recibidos`. Omitido aplica `false`; `null` explícito se rechaza. Debe ser booleano JSON, no texto como `"false"`. | `true` |
+| `puntos_venta_emitidos` | lista de textos | No | `ninguno` | Puntos de venta emitidos, hasta 200 elementos. Cada elemento puede ser texto o entero, se conservan ceros iniciales y debe contener solo dígitos. Omitido, `null` o lista vacía significa sin filtro. Debe enviarse una lista, no un valor escalar. | `["0001", "0007"]` |
+| `puntos_venta_recibidos` | lista de textos | No | `ninguno` | Puntos de venta recibidos, hasta 200 elementos. Cada elemento puede ser texto o entero, se conservan ceros iniciales y debe contener solo dígitos. Omitido, `null` o lista vacía significa sin filtro. Debe enviarse una lista, no un valor escalar. | `["0002"]` |
+| `timeout_mc` | entero | No | `30` | Controla la espera del servicio, rango 1 a 86400. Omitido o `null` usa el valor efectivo de 30 segundos. Cero y otros valores fuera del rango se rechazan. | `30` |
+| `incluir_json` | booleano | No | `true` | `true` incluye la muestra de filas. Alias: `carga_json`. `false` omite la muestra de filas, no el resumen. No forma parte del modelo de `solicitar`. Omitido aplica `true`; `null` explícito se rechaza. | `true` |
+| `subir_csv` | booleano | No | `true` | `true` publica el CSV en `files[]`. `false` no publica CSV en `files[]`, pero el archivo aún se procesa. No forma parte del modelo de `solicitar`. Omitido aplica `true`; `null` explícito se rechaza. | `true` |
+| `carga_b64` | booleano | No | `false` | Obsoleto. Se acepta y se ignora: los archivos se entregan como archivos, nunca como base64. `null` explícito se rechaza. | `false` |
+| `eliminar_descargas` | booleano | No | `true` | Se elimina antes de procesar la operación, por lo que no tiene efecto. En la ruta canónica también se ignoran `null` y valores no booleanos. | `true` |
+| `proxy_request` | booleano | No | `null` | Aceptado por compatibilidad y sin efecto de selección de conexión. `null` es válido. | `false` |
+| `verbose` | booleano | No | `false` | Aceptado sin cambiar el resultado. `null` explícito se rechaza. | `false` |
+| `cookies_header` | texto | No | `null` | Solo para `historial`. Campo legado sin efecto de autenticación, máximo 8192 caracteres. Omitido o `null` no modifica la sesión; cadena vacía se acepta sin efecto. | `"sesion=ficticia"` |
 
 Para `solicitar`, `incluir_json` y `subir_csv` no forman parte del modelo. `cookies_header` solo corresponde a `historial`. La validación rechaza campos desconocidos y requiere `emitidos=true` o `recibidos=true`. Los valores booleanos deben ser booleanos, no texto como `"false"`. En la ruta canónica se aplican estas reglas del bot; el alias HTTP plano tiene un DTO separado y puede tratar `null` de forma distinta.
 
@@ -34,11 +37,14 @@ Para `solicitar`, `incluir_json` y `subir_csv` no forman parte del modelo. `cook
 
 El objeto `credentials` puede omitirse en el envelope, pero se necesita una sesión fiscal para completar la operación. La identidad de sesión y la contraseña no tienen default; su falta normalmente causa un fallo de autenticación. La normalización central de credenciales no exige un patrón numérico para la identidad.
 
-| Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|
-| `cuit_representante`, `cuit_inicio_sesion` | strings; se necesita una identidad para iniciar sesión; sin default | Si se omiten, son `null` o `""`, no queda identidad y falla la autenticación. `false` y otros tipos no textuales se rechazan. Si se envían ambos, deben coincidir. |
-| `clave`, `clave_representante`, `contrasena` | strings; se necesita una contraseña, salvo que se aporte `clave_encriptada`; sin default | Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. |
-| `clave_encriptada` | string opcional; sin default | Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. |
+| Sección | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `credentials` | `cuit_representante` | texto | Condicional | ninguno | Condicional: se necesita una identidad para completar la operación, porque `credentials` puede omitirse en el envelope pero sin identidad falla la autenticación. Alias: `cuit_inicio_sesion`. Si se envían ambos, deben coincidir. Omitido, `null` o `""` dejan sin identidad. `false` y otros tipos no textuales se rechazan. La normalización central no exige patrón numérico. | `"20123456786"` |
+| `credentials` | `cuit_inicio_sesion` | texto | Condicional | ninguno | Condicional: alias de `cuit_representante` con la misma necesidad de identidad. Si se envían ambos, deben coincidir. Omitido, `null` o `""` dejan sin identidad. `false` y otros tipos no textuales se rechazan. | `"20123456786"` |
+| `credentials` | `clave` | texto | Condicional | ninguno | Condicional: se necesita una contraseña salvo que se aporte `clave_encriptada`. Aliases: `clave_representante`, `contrasena`. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. Si se envían varios aliases, deben coincidir. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials` | `clave_representante` | texto | Condicional | ninguno | Condicional: alias de `clave` con la misma necesidad de contraseña. Si se envían varios aliases, deben coincidir. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials` | `contrasena` | texto | Condicional | ninguno | Condicional: alias de `clave` con la misma necesidad de contraseña. Si se envían varios aliases, deben coincidir. Omitir, `null` o `""` equivale a no aportar esa alternativa. `false` y otros tipos no textuales se rechazan. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials` | `clave_encriptada` | texto | No | ninguno | Alternativa cifrada a la contraseña en texto claro. Omitido, `null` o `""` se ignora. `false` y otros tipos no textuales se rechazan. Si se informa, debe poder descifrarse; si también hay texto claro, ambos deben coincidir. | `"CADENA_CIFRADA_FICTICIA"` |
 
 No incluir credenciales reales en ejemplos.
 

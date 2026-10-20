@@ -69,12 +69,12 @@ Este resultado pertenece a los ejemplos **generados por el código previo**, no 
 
 ## Aceptación de la documentación nueva
 
-La carpeta contiene 78 páginas Markdown: 34 fichas externas, 34 internas y las guías generales. El inventario de ambas carpetas de bots coincide con el catálogo activo y las fichas nombran las 45 operaciones públicas.
+La carpeta contiene 77 páginas Markdown: 34 fichas externas, 34 internas y las guías generales. El inventario de ambas carpetas de bots coincide con el catálogo activo y las fichas nombran las 45 operaciones públicas.
 
 La revisión focalizada comprueba:
 
 - Parseo de los bloques JSON y sintaxis de los tres bloques de terminal con `bash -n`, sin ejecutar sus comandos.
-- Resolución de enlaces relativos y anchors. Ningún enlace del paquete externo requiere salir de `docs/externa/`.
+- Resolución de enlaces relativos. Ningún enlace del paquete externo requiere salir de `docs/externa/`.
 - Columnas de las tablas, ausencia de em dashes y ausencia de nombres de tecnologías, rutas fuente o terminología de ejecución interna en el paquete externo. Los aliases tecnológicos heredados quedan solo en la documentación interna.
 - Existencia de las fuentes citadas y límites de los rangos completos de líneas. Esta comprobación no demuestra por sí sola que cada frase esté contenida en ese rango, por lo que también se contrastó el flujo por bot.
 - Ejemplos de solicitud mediante normalizadores reales, traducción local de referencias y `plugin.validate()`. Se excluyen fragmentos señalados como incompletos y respuestas ilustrativas. No se llama a `execute()`, no se cargan archivos ni se comprueba la pertenencia o existencia de referencias ficticias.
@@ -84,10 +84,11 @@ Los sondeos son comprobaciones locales del contrato de entrada, no una prueba ex
 
 Resultado del cierre local del 20 de octubre de 2026:
 
-- 78 páginas, 122 enlaces relativos y 16 anchors comprobados, sin errores de destino o escapes del paquete público.
-- 49 bloques JSON parseables y 39 cuerpos completos de solicitud que pasan la normalización y validación local correspondientes.
+- 77 páginas y 102 enlaces relativos comprobados, sin errores de destino ni escapes del paquete público.
+- 46 bloques JSON parseables y 39 cuerpos completos de solicitud que pasan la normalización y validación local correspondientes.
 - Las 45 operaciones tienen al menos un cuerpo compatible entre los ejemplos de su ficha. Algunos cuerpos sirven para más de una operación, por lo que no son 45 ejemplos distintos ni 45 ejecuciones reales.
-- 92 tablas con columnas consistentes y tres bloques de terminal con sintaxis válida.
+- 90 tablas con columnas consistentes y tres bloques de terminal con sintaxis válida. De ellas, 61 son tablas de campos con 384 filas; cada fila declara Tipo, Requerido, Default, Descripción y un Ejemplo JSON que coincide con el tipo. La comparación con la versión anterior confirmó que no se perdió ningún campo.
+- No quedan secciones ni lenguaje de propuestas en la documentación, y se eliminó el documento que solo contenía propuestas de modelos.
 - Las referencias completas a fuentes se comprobaron por existencia y límites de líneas, sin rangos abiertos pendientes. No se encontraron nombres de tecnologías internas en el paquete externo.
 - `git diff --check` sin errores. Los cambios de esta entrega se limitan a `README.md` y documentación Markdown bajo `docs/`.
 

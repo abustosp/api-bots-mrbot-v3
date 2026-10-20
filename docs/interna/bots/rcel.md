@@ -16,9 +16,9 @@ CUIT: se quitan espacios, guiones, puntos y `/`; fechas se parsean y se normaliz
 
 `data`: `operacion`, `representado_cuit`, `fecha_desde`, `fecha_hasta`, `cantidad`, y opcional `facturas`. Cada elemento contiene `archivo`, opcional `campos`, y (si subida) `sha256`/`size_bytes`; sin subida entrega el tamaño local. `campos` contiene las claves definidas en `CAMPOS_FACTURA`, inicializadas vacías si faltan: AUX, emisor/receptor, domicilio/condición, fechas, importes/IVA, CAE y vencimiento (`runtime/portals/rcel.py:24-60, 63-104`). El PDF nunca se devuelve en base64. Resultados/artifacts se construyen por cada éxito (`plugin.py:224-283`).
 
-## Discrepancias concretas y propuestas (sin implementar)
+## Discrepancias observadas
 
-- **Manifest frente a JSON Schema:** `schema.py:47-74` exige `representado_cuit`, `representado_nombre`, `fecha_desde`, `fecha_hasta`, pero `esquema_entrada()` marca requerido solo `operacion` y omite `extraer_campos` (`:108-122`). La central publica forma propia (`central-api/api/bot_payloads.py:260-265`) y también omite `extraer_campos`. **Propuesta:** generar `required` desde el mismo modelo y sumar el flag a OpenAPI.
+- **Manifest frente a JSON Schema:** `schema.py:47-74` exige `representado_cuit`, `representado_nombre`, `fecha_desde`, `fecha_hasta`, pero `esquema_entrada()` marca requerido solo `operacion` y omite `extraer_campos` (`:108-122`). La central publica forma propia (`central-api/api/bot_payloads.py:260-265`) y también omite `extraer_campos`.
 - **Estado de catálogo:** la acción `descargar` se marca `EFECTO` por nombre, pese a que aquí la acción es lectura/descarga, sin cambios fiscales observados; advertencia de clasificación central `bots.py:428-438`.
 - **Error por factura se acumula antes que el procesamiento:** el portal registra `errores_descarga` al descargar (`plugin.py:215-223`), y el plugin continúa con los nombres recibidos; un archivo inválido puede desaparecer del `facturas` final pero aún quedar en directorio temporal. La política de `PARCIAL` no comunica exactamente qué bytes locales quedaron, aunque no se consideran salida.
 - **Pruebas leídas:** `services/bot-worker/tests/test_portal_rcel.py:92-125` valida registro, selección por nombre y rechazo CUIT distinto; `:128-152` valida cero resultados; `:154-220` prueba extracción de AUX/importes y que no se entrega base64.

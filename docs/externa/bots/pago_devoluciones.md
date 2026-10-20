@@ -8,11 +8,11 @@ Ruta V3: `POST /api/v3/bots/pago_devoluciones/consultar`. Alias compatible: `POS
 
 ## Payload
 
-| Campo | Tipo; requerido; default | Efecto y comportamiento al omitir, enviar `null`, vacío o `false` |
-|---|---|---|
-| `representado_cuit` | texto de 11 dígitos; opcional; `null` | CUIT cuyos pagos se consultan. Aliases `cuit` y `cuit_representado`. Se quitan espacios, guiones, puntos y `/`. Omitido, `null` o `""`: usa `credentials.cuit_representante`. Valor no vacío inválido: rechazo. |
-| `incluir_json` | booleano; opcional; `true` | Incluye el nombre del archivo en `data.archivo`. `false` establece ese campo en `null`, pero conserva `data.detalle_archivo`. `null` se rechaza. |
-| `subir_archivo` | booleano; opcional; `true` | Adjunta la hoja de cálculo al trabajo. `false` evita el adjunto, no la consulta ni la exportación. `null` se rechaza. |
+| Sección | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `payload` | `representado_cuit` | texto | No | `null` | CUIT cuyos pagos se consultan. Alias: `cuit`, `cuit_representado`. Se quitan espacios, guiones, puntos y `/` y se exigen 11 dígitos. Omitido, `null` o `""`: usa `credentials.cuit_representante`. Valor no vacío inválido: rechazo. | `"30876543210"` |
+| `payload` | `incluir_json` | booleano | No | `true` | Incluye el nombre del archivo en `data.archivo`. `false` establece ese campo en `null`, pero conserva `data.detalle_archivo`. `null` se rechaza. | `true` |
+| `payload` | `subir_archivo` | booleano | No | `true` | Adjunta la hoja de cálculo al trabajo. `false` evita el adjunto, no la consulta ni la exportación. `null` se rechaza. | `true` |
 
 Debe estar activo `incluir_json` o `subir_archivo`; ambos en `false` se rechazan. Los campos desconocidos se rechazan. Los nombres `clave`, `clave_representante`, `clave_encriptada`, `cuit_representante`, `cuit_inicio_sesion`, `proxy_request` y `proxy` no son datos de consulta: no los envíe en `payload`.
 
@@ -20,15 +20,15 @@ Debe estar activo `incluir_json` o `subir_archivo`; ambos en `false` se rechazan
 
 Se necesitan credenciales fiscales funcionales y acceso al servicio de pagos de devoluciones.
 
-| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
-|---|---|---|
-| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
-| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
-| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
-| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
-| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
+| Sección | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `envelope` | `credentials` | objeto | No | `{}` | Objeto de credenciales del sobre. Omitirlo usa `{}`. Un objeto vacío pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. | `{}` |
+| `credentials` | `cuit_representante` | texto | Condicional | ninguno | Identifica la cuenta que inicia sesión; requerido junto con una clave, salvo que se use un alias. Omitido, `null` o vacío no aporta identidad; el booleano `false` se rechaza por tipo. | `"20123456786"` |
+| `credentials` | `cuit_inicio_sesion` | texto | No | ninguno | Alias opcional de `cuit_representante`; aporta la misma identidad. Omitido, `null` o vacío equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. | `"20123456786"` |
+| `credentials` | `clave` | texto | Condicional | ninguno | Clave fiscal en texto; requerida junto con una identidad, salvo alias o alternativa cifrada. Omitida, `null` o vacío no aporta clave; `false` se rechaza por tipo. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `clave_representante` | texto | No | ninguno | Alias opcional de `clave`; aporta la clave fiscal. Omitida, `null` o vacío equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, los valores deben coincidir. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `contrasena` | texto | No | ninguno | Alias opcional de `clave`; aporta la clave fiscal. Omitida, `null` o vacío equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, los valores deben coincidir. | `"Clave-Ficticia-No-Usar-2026"` |
+| `credentials` | `clave_encriptada` | texto | No | ninguno | Alternativa cifrada en Base64; se descifra mediante el mecanismo admitido por la API. Omitida, `null` o vacío equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. | `"Q0xBVkVfRklDVElDSUFfTk9fVVNFRw=="` |
 
 No envíe credenciales en `payload`. Si se repiten aliases, sus valores deben coincidir.
 

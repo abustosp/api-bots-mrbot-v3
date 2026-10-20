@@ -10,10 +10,10 @@ Cuerpo: `{"payload": {...}}`. No se necesitan `credentials` del usuario.
 
 ## Campos de `payload`
 
-| Operación | Campo | Tipo; requerido/default | Omisión, `null`, vacío o `false`; efecto |
-|---|---|---|---|
-| `consultar` | `cuit` | string requerido; tras normalización, 11 dígitos | Se quitan espacios, guiones, puntos y barras; no se valida el dígito verificador. Omitido, `null`, vacío o valor que no normaliza a 11 dígitos se rechaza. |
-| `consultar_masivo` | `cuits` | lista requerida de 1–100 valores, normalmente strings | Debe ser lista, no un scalar. Cada elemento se convierte a texto, se normaliza igual que el CUIT individual y debe quedar en 11 dígitos. Duplicados se eliminan conservando el primer orden. `null`, vacío o lista vacía inválidos. |
+| Operación | Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|---|
+| `consultar` | `cuit` | texto | Sí | ninguno | Se quitan espacios, guiones, puntos y barras; deben quedar 11 dígitos. No se valida el dígito verificador. Omitido, `null`, vacío o valor que no normaliza a 11 dígitos se rechaza. | `"20123456786"` |
+| `consultar_masivo` | `cuits` | lista de textos | Sí | ninguno | Lista de 1 a 100 valores, normalmente textos; debe ser lista y no un escalar. Cada elemento se convierte a texto, se normaliza igual que el CUIT individual y debe quedar en 11 dígitos. Duplicados se eliminan conservando el primer orden. `null`, vacío o lista vacía inválidos. | `["20123456786", "30876543210"]` |
 
 No hay campos con default ni filtros. Los campos desconocidos se rechazan. Para la consulta masiva el máximo se aplica a la lista recibida antes de deduplicar.
 
