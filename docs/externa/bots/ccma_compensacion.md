@@ -14,23 +14,23 @@ Consulta la cuenta corriente de Monotributistas y Autónomos, prepara una propue
 
 ## Payload
 
-| Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Omitir o `null`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. Vacío o `false`: inválido. |
-| `compensar` | Booleano, default `true`. | Omitir: intenta preparar reafectaciones. `null`: se trata como omitido, por tanto `true`. Vacío: inválido. `false`: no ejecuta el paso de reafectación. |
-| `confirmar` | Booleano, default `false`. | Omitir o `null`: `false`. Vacío: inválido. `false`: cancela las propuestas, sin modificación confirmada. `true`: confirma las reafectaciones aplicadas y puede cambiar la cuenta corriente. |
-| `incluir_movimientos` | Booleano, default `false`. Alias: `movimientos`. | Omitir: no solicita movimientos. `null` o vacío: inválido. `false`: omite la lista, salvo que `incluir_pdf` active los movimientos automáticamente. |
-| `incluir_pdf` | Booleano, default `false`. Alias: `pdf`. | Omitir: no genera PDF. `null` o vacío: inválido. `false`: no genera PDF. `true`: genera PDF y activa también `incluir_movimientos`. |
-| `subir` | Booleano, default `true`. | Omitir: publica el PDF si se pidió. `null` o vacío: inválido. `false`: no publica el PDF; no afecta la reafectación. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT del representado. Alias: `cuit`, `cuit_representado`. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. Omitir o `null`: rechazo. Vacío o `false`: inválido. | `"20123456786"` |
+| `compensar` | booleano | No | `true` | Prepara las reafectaciones de pagos con saldo a favor y mantiene la consulta del resumen. Omitir o `null`: se trata como `true`. Vacío: inválido. `false`: no ejecuta el paso de reafectación y no aparece `data.compensaciones`. | `true` |
+| `confirmar` | booleano | No | `false` | Confirma en ARCA las reafectaciones aplicadas y puede modificar la cuenta corriente. Omitir o `null`: `false`. Vacío: inválido. `false`: cancela las propuestas, sin modificación confirmada. `true`: confirma las reafectaciones aplicadas. | `false` |
+| `incluir_movimientos` | booleano | No | `false` | Solicita la lista de movimientos. Alias: `movimientos`. Omitir: no solicita movimientos. `null` o vacío: inválido. `false`: omite la lista, salvo que `incluir_pdf` active los movimientos automáticamente. | `false` |
+| `incluir_pdf` | booleano | No | `false` | Genera un PDF del resumen. Alias: `pdf`. Omitir: no genera PDF. `null` o vacío: inválido. `false`: no genera PDF. `true`: genera PDF y activa también `incluir_movimientos`. | `false` |
+| `subir` | booleano | No | `true` | Publica el PDF si se pidió. Omitir: publica el PDF solicitado. `null` o vacío: inválido. `false`: no publica el PDF; no afecta la reafectación. | `true` |
 
 ## Credenciales
 
 `credentials` es un objeto separado. Para completar el acceso fiscal, incluya el CUIT de inicio de sesión y una clave fiscal no vacía. Si faltan, el job podrá ser aceptado, pero el inicio de sesión no podrá completarse.
 
-| Campo | Tipo y necesidad efectiva | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `cuit_representante` | Texto; CUIT de la cuenta que inicia sesión. | Sin valor, `null` o `""`: falta el CUIT de acceso. `false` no es texto válido. |
-| `clave` | Texto; clave fiscal. | Sin valor, `null` o `""`: falta la clave. `false` no es texto válido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `cuit_representante` | texto | Condicional | ninguno | CUIT de la cuenta que inicia sesión; se requiere para completar el acceso fiscal. Sin valor, `null` o `""`: falta el CUIT de acceso. `false` no es texto válido. | `"20123456786"` |
+| `clave` | texto | Condicional | ninguno | Clave fiscal; se requiere junto con el CUIT para completar el acceso. Sin valor, `null` o `""`: falta la clave. `false` no es texto válido. | `"CLAVE_FISCAL_FICTICIA"` |
 
 Se reconocen `clave_representante` y `contrasena` como nombres compatibles de `clave`, y `clave_encriptada` como alternativa cifrada. Si se envían varias formas de clave no vacías, sus valores deben coincidir. Credenciales ficticias solo sirven para ilustrar la forma del objeto, no para iniciar sesión.
 

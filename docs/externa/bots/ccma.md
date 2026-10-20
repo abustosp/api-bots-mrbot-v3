@@ -10,20 +10,20 @@ Consulta saldos y estados de obligaciones del CUIT representado. Puede pedir mov
 
 ## Payload
 
-| Campo | Tipo, requerido y default | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `representado_cuit` | Texto, requerido. Alias: `cuit`, `cuit_representado`. | Omitir, `null`, vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. Si se proporcionan varios alias, deben coincidir. |
-| `periodo_desde` | Texto, opcional, default `04/2000`, formato `MM/AAAA`. | Omitir o `null`: conserva el default. Vacío, formato incorrecto o mes fuera de 01–12: rechazo. `false`: rechazo. |
-| `incluir_movimientos` | Booleano, opcional, default `false`. Alias: `movimientos`. | Omitir: no solicita movimientos. `null` o vacío: rechazo. `false`: no incluir. |
-| `incluir_pdf` | Booleano, opcional, default `false`. Alias: `pdf`. | Omitir: no solicita PDF. `null` o vacío: rechazo. `false`: no incluir. `true`: también activa movimientos, aun si `incluir_movimientos` se omitió o es `false`. |
-| `subir` | Booleano, opcional, default `true`. | Omitir: publica artefactos generados. `null` o vacío: rechazo. `false`: no publica archivos descargables ni agrega sus huellas/tamaños. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT representado. Alias: `cuit`, `cuit_representado`. Omitir, `null`, vacío o `false`: rechazo. Se eliminan espacios, guiones, puntos y barras; deben quedar exactamente 11 dígitos. Si se proporcionan varios alias, deben coincidir. | `"20123456786"` |
+| `periodo_desde` | texto | No | `"04/2000"` | Primer período consultado, con formato `MM/AAAA`. Omitir o `null`: conserva el default. Vacío, formato incorrecto o mes fuera de 01 a 12: rechazo. `false`: rechazo. | `"04/2000"` |
+| `incluir_movimientos` | booleano | No | `false` | Solicita los movimientos de la cuenta. Alias: `movimientos`. Omitir: no solicita movimientos. `null` o vacío: rechazo. `false`: no incluir. | `true` |
+| `incluir_pdf` | booleano | No | `false` | Solicita un PDF del resumen. Alias: `pdf`. Omitir: no solicita PDF. `null` o vacío: rechazo. `false`: no incluir. `true`: también activa movimientos, aun si `incluir_movimientos` se omitió o es `false`. | `false` |
+| `subir` | booleano | No | `true` | Publica los artefactos generados. Omitir: publica artefactos generados. `null` o vacío: rechazo. `false`: no publica archivos descargables ni agrega sus huellas o tamaños. | `true` |
 
 ## Credenciales
 
-| Campo | Tipo y necesidad efectiva | Omitir / `null` / vacío / `false` |
-|---|---|---|
-| `credentials.cuit_representante` | Texto; cuenta fiscal con la que se inicia sesión. | Sin valor no puede realizarse el acceso. `null` o `""` se consideran ausentes. `false`: tipo inválido. |
-| `credentials.clave` | Texto; clave fiscal. | Requerida para completar el acceso. `null` o `""` se consideran ausentes. `false`: tipo inválido. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `credentials.cuit_representante` | texto | Condicional | ninguno | Cuenta fiscal con la que se inicia sesión; se requiere para completar el acceso. Sin valor, `null` o `""` se consideran ausentes. `false`: tipo inválido. | `"20123456786"` |
+| `credentials.clave` | texto | Condicional | ninguno | Clave fiscal; se requiere para completar el acceso. `null` o `""` se consideran ausentes. `false`: tipo inválido. | `"CLAVE_FISCAL_FICTICIA"` |
 
 También se aceptan los nombres compatibles de credenciales como `cuit_inicio_sesion`, `cuit_login`, `clave_representante` o `contrasena`; la forma cifrada requiere un valor válido para el servicio. CUIT y clave de acceso pueden ser distintos del CUIT consultado cuando hay representación.
 

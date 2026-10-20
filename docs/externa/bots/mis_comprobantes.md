@@ -11,24 +11,24 @@ Rutas canónicas V3 publicadas por el catálogo: `POST /api/v3/bots/mis_comproba
 
 Los campos marcados `consultar/historial` no se usan por `solicitar`; los campos marcados `todas` aplican a las tres operaciones.
 
-| Campo | Tipo; requerido; default | Efecto y comportamiento al omitir, enviar `null`, vacío o `false` |
-|---|---|---|
-| `representado_cuit` | texto; requerido; sin default | CUIT de quien posee los comprobantes. Alias `cuit`. Se quitan espacios, guiones, puntos y `/`, y se exigen 11 dígitos. Omitido, `null`, vacío o inválido: rechazo. |
-| `representado_nombre` | texto 1–128; requerido operativamente | Nombre del representado, usado al identificarlo/nombrar la salida. Omitido, `null` o vacío: rechazo. El catálogo público lo presenta como opcional, pero la validación efectiva de las tres operaciones lo exige. |
-| `fecha_desde` | fecha `dd/mm/aaaa`; requerida; sin default | Inicio del rango inclusive. Alias `desde`. Omitida, `null`, vacía o inválida: rechazo. |
-| `fecha_hasta` | fecha `dd/mm/aaaa`; requerida; sin default | Fin inclusive, igual o posterior a `fecha_desde`. Alias `hasta`. Omitida, `null`, vacía o inválida: rechazo. |
-| `emitidos` | booleano; opcional; `false` | Solicita comprobantes emitidos. Alias `descarga_emitidos`. `false` excluye ese tipo; `null` se rechaza. |
-| `recibidos` | booleano; opcional; `false` | Solicita comprobantes recibidos. Alias `descarga_recibidos`. `false` excluye ese tipo; `null` se rechaza. Debe quedar `emitidos` o `recibidos` en `true`. |
-| `puntos_venta_emitidos` | lista de enteros o textos; opcional; `null` | Filtro de puntos de venta para emitidos. Hasta 200 elementos; cada uno debe contener solo dígitos. Se conservan ceros iniciales de los textos. Omitido o `null`: sin filtro. Lista vacía: ningún filtro adicional. Texto vacío, elemento vacío/no numérico, más de 200 elementos o valor no listado: rechazo. |
-| `puntos_venta_recibidos` | lista de enteros o textos; opcional; `null` | Igual que el campo anterior, aplicado a recibidos. Omitido o `null`: sin filtro. Lista vacía: sin filtro. |
-| `timeout_mc` | entero de 1 a 86.400 segundos; opcional; efectivo por defecto 30 | Tiempo de espera de la descarga/consulta. Omitido o `null`: 30 segundos. `0`, vacío, decimal o fuera del rango: rechazo. |
-| `incluir_json` | booleano; opcional; `true` en `consultar` y `historial` | En `consultar`/`historial` incluye muestra de filas en el resultado. Alias `carga_json`. En `solicitar` no aplica. `false` omite la muestra; `null` se rechaza. |
-| `subir_csv` | booleano; opcional; `true` en `consultar` y `historial` | Adjunta los CSV al trabajo en `consultar`/`historial`. `false` evita adjuntar, sin evitar la descarga/lectura. En `solicitar` no aplica. `null` se rechaza. |
-| `cookies_header` | texto hasta 8.192 caracteres; solo `historial`; opcional; `null` | Campo de compatibilidad. No se utiliza para autenticar ni altera la consulta. Omitido o `null`: sin efecto; `""` no aporta valor. No lo envíe. |
-| `carga_b64` | booleano; opcional; `false` | Campo legado aceptado y sin efecto; los archivos no se devuelven en Base64. Omitido equivale a `false`; `false` no cambia la respuesta; `null` se rechaza. |
-| `proxy_request` | booleano o `null`; opcional; `null` | Se descarta en V3 y no controla el acceso ni la ruta de red; cualquier valor se ignora antes de la validación específica. |
-| `eliminar_descargas` | booleano; opcional; valor declarado `true` | Campo legado descartado; la retención temporal no se configura con este parámetro. `false`, `null` o `""` no cambia la retención efectiva. |
-| `verbose` | booleano; opcional; `false` | Se acepta en la validación pero no cambia el resultado. Omitido equivale a `false`; `null` se rechaza. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `representado_cuit` | texto | Sí | ninguno | CUIT de quien posee los comprobantes. Alias: `cuit`. Se quitan espacios, guiones, puntos y `/`, y se exigen 11 dígitos. Omitido, `null`, vacío o inválido: rechazo. | `"30876543210"` |
+| `representado_nombre` | texto | Sí | ninguno | Nombre del representado, usado al identificarlo y nombrar la salida. Longitud de 1 a 128 caracteres. Omitido, `null` o vacío: rechazo. El catálogo público lo presenta como opcional, pero la validación efectiva de las tres operaciones lo exige. | `"Comercio Ejemplo SA"` |
+| `fecha_desde` | texto | Sí | ninguno | Inicio del rango inclusive, con formato `dd/mm/aaaa`. Alias: `desde`. Omitida, `null`, vacía o inválida: rechazo. | `"01/01/2025"` |
+| `fecha_hasta` | texto | Sí | ninguno | Fin del rango inclusive, con formato `dd/mm/aaaa`, igual o posterior a `fecha_desde`. Alias: `hasta`. Omitida, `null`, vacía o inválida: rechazo. | `"31/01/2025"` |
+| `emitidos` | booleano | No | `false` | Solicita comprobantes emitidos. Alias: `descarga_emitidos`. `false` excluye ese tipo; `null` se rechaza. | `true` |
+| `recibidos` | booleano | No | `false` | Solicita comprobantes recibidos. Alias: `descarga_recibidos`. `false` excluye ese tipo; `null` se rechaza. Debe quedar `emitidos` o `recibidos` en `true`. | `false` |
+| `puntos_venta_emitidos` | lista de textos | No | `null` | Filtro de puntos de venta para emitidos. Acepta enteros o textos; hasta 200 elementos; cada uno debe contener solo dígitos. Se conservan ceros iniciales de los textos. Omitido o `null`: sin filtro. Lista vacía: ningún filtro adicional. Texto vacío, elemento vacío o no numérico, más de 200 elementos o valor no listado: rechazo. | `["0001", "0002"]` |
+| `puntos_venta_recibidos` | lista de textos | No | `null` | Filtro de puntos de venta para recibidos, con las mismas reglas que `puntos_venta_emitidos`. Omitido o `null`: sin filtro. Lista vacía: sin filtro. | `["0003"]` |
+| `timeout_mc` | entero | No | `30` | Tiempo de espera de la descarga o consulta, en segundos, de 1 a 86.400. Omitido o `null`: 30 segundos. `0`, vacío, decimal o fuera del rango: rechazo. | `30` |
+| `incluir_json` | booleano | No | `true` | En `consultar` y `historial` incluye una muestra de filas en el resultado. Alias: `carga_json`. En `solicitar` no aplica. `false` omite la muestra; `null` se rechaza. | `true` |
+| `subir_csv` | booleano | No | `true` | Adjunta los CSV al trabajo en `consultar` y `historial`. `false` evita adjuntar, sin evitar la descarga o lectura. En `solicitar` no aplica. `null` se rechaza. | `true` |
+| `cookies_header` | texto | No | `null` | Campo de compatibilidad, de hasta 8.192 caracteres, solo para `historial`. No se utiliza para autenticar ni altera la consulta. Omitido o `null`: sin efecto; `""` no aporta valor. | `""` |
+| `carga_b64` | booleano | No | `false` | Campo legado aceptado y sin efecto; los archivos no se devuelven en Base64. Omitido equivale a `false`; `false` no cambia la respuesta; `null` se rechaza. | `false` |
+| `proxy_request` | booleano | No | `null` | Se descarta en V3 y no controla el acceso ni la ruta de red; cualquier valor se ignora antes de la validación específica. | `null` |
+| `eliminar_descargas` | booleano | No | `true` | Campo legado descartado; la retención temporal no se configura con este parámetro. `false`, `null` o `""` no cambia la retención efectiva. | `true` |
+| `verbose` | booleano | No | `false` | Se acepta en la validación pero no cambia el resultado. Omitido equivale a `false`; `null` se rechaza. | `false` |
 
 En `solicitar`, `incluir_json` y `subir_csv` no forman parte de sus opciones; su envío no debe usarse para cambiar la solicitud. Los tipos desconocidos de `payload` se rechazan salvo los campos de compatibilidad expresamente indicados.
 
@@ -36,15 +36,15 @@ En `solicitar`, `incluir_json` y `subir_csv` no forman parte de sus opciones; su
 
 Se requieren credenciales fiscales válidas y acceso a Mis Comprobantes para la cuenta y el representado.
 
-| Campo en el sobre/`credentials` | Tipo; requisito; default | Efecto al enviarlo; omisión, `null`, vacío o `false` |
-|---|---|---|
-| `credentials` | objeto JSON; opcional; default `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. |
-| `credentials.cuit_representante` | texto; requerido junto con una clave, salvo alias; sin default | Identifica la cuenta que inicia sesión. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. |
-| `credentials.cuit_inicio_sesion` | texto; alias opcional de `cuit_representante`; sin default | Aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. |
-| `credentials.clave` | texto; requerida junto con una identidad, salvo alias o alternativa cifrada; sin default | Clave fiscal en texto. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. |
-| `credentials.clave_representante` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.contrasena` | texto; alias opcional de `clave`; sin default | Aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, deben coincidir. |
-| `credentials.clave_encriptada` | texto Base64 cifrado; alternativa opcional; sin default | Se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. |
+| Campo | Tipo | Requerido | Default | Descripción | Ejemplo |
+|---|---|---|---|---|---|
+| `credentials` | objeto | No | `{}` | Omitirlo usa `{}`. `{}` pasa el sobre pero no aporta acceso. `null`, `""` o el booleano `false` se rechazan por tipo. | `{}` |
+| `credentials.cuit_representante` | texto | Condicional | ninguno | Identifica la cuenta que inicia sesión. Se requiere junto con una clave, salvo que se use un alias. Omitido, `null` o `""` no aporta identidad; el booleano `false` se rechaza por tipo. | `"20123456786"` |
+| `credentials.cuit_inicio_sesion` | texto | No | ninguno | Alias opcional de `cuit_representante`; aporta la misma identidad. Omitido, `null` o `""` equivale a no enviarlo; `false` se rechaza. Si se envía con el otro nombre, los valores deben coincidir. | `"20123456786"` |
+| `credentials.clave` | texto | Condicional | ninguno | Clave fiscal en texto. Se requiere junto con una identidad, salvo que se use un alias o la alternativa cifrada. Omitida, `null` o `""` no aporta clave; `false` se rechaza por tipo. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials.clave_representante` | texto | No | ninguno | Alias opcional de `clave`; aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, los valores deben coincidir. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials.contrasena` | texto | No | ninguno | Alias opcional de `clave`; aporta la clave fiscal. Omitida, `null` o `""` equivale a no enviarla; `false` se rechaza. Si se repite con otro alias de clave, los valores deben coincidir. | `"CLAVE_FISCAL_FICTICIA"` |
+| `credentials.clave_encriptada` | texto | No | ninguno | Alternativa cifrada en Base64; se descifra mediante el mecanismo admitido por la API. Omitida, `null` o `""` equivale a ausencia; `false` o cifrado inválido se rechaza. Si se envía con una clave en texto, ambas deben coincidir. | `"Q0xBVkVfRklDVElDSUFfTk9fVVNBUg=="` |
 
 Los alias de credenciales con valores distintos se rechazan. No envíe secretos en `payload`.
 
