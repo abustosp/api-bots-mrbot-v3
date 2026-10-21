@@ -639,9 +639,9 @@ async def submit_job(
         )
     if logger_activo:
         normalized_payload = {**normalized_payload, "logger": True}
-        if logger_script_valor is False:
-            # Solo el booleano explícito false se conserva: pide el plugin real instrumentado.
-            normalized_payload["logger_script"] = False
+        if logger_script_valor is True:
+            # Solo el booleano explícito true se conserva: pide el script _logger de bots_dev.
+            normalized_payload["logger_script"] = True
     fingerprint_payload_data = dict(normalized_payload)
     if credential_fingerprint:
         fingerprint_payload_data["_credential_fingerprint"] = credential_fingerprint

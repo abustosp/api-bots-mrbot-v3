@@ -132,8 +132,8 @@ def test_no_copia_material_criptografico_al_tar(tmp_path):
 def test_logger_script_exige_ambas_claves_true_y_mapea_entorno():
     from bot_worker.runtime.logger_script import SCRIPTS, entorno, script_solicitado, CARPETA
 
-    assert script_solicitado({"logger": True}) and script_solicitado({"logger": True, "logger_script": True})
-    assert not script_solicitado({"logger": True, "logger_script": False})
+    assert script_solicitado({"logger": True, "logger_script": True})
+    assert not script_solicitado({"logger": True}) and not script_solicitado({"logger": True, "logger_script": False})
     assert not script_solicitado({"logger_script": True}) and not script_solicitado({})
     env = entorno("ccma", {"representado_cuit": "20111", "incluir_pdf": True}, "20222", "k")
     assert env["CCMA_CUIT_REPRESENTADO"] == "20111" and env["CCMA_PDF"] == "true"

@@ -552,7 +552,7 @@ def _create_handler(
                 )
         if logger_solicitado is not None:
             normalized_body["logger"] = logger_solicitado
-        if logger_script_solicitado is not None:
+        if logger_script_solicitado is True:
             normalized_body["logger_script"] = logger_script_solicitado
         credentials = dict(credentials)
         for field in _SECRET_FIELDS:

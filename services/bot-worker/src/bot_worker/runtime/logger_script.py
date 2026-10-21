@@ -1,8 +1,9 @@
 """Versión ``_logger`` de un bot: ejecuta el script logger de ``bots_dev`` dentro del worker.
 
 Es el comportamiento por defecto de ``logger: true`` en los bots listados en ``SCRIPTS``
-(``logger_script: false`` fuerza el plugin real instrumentado; ambas claves son ocultas y
-solo se aceptan booleanos). En ese caso el plugin normal NO se ejecuta: corre el script
+(solo con ``logger_script: true``; por defecto ``logger: true`` ejecuta el plugin real
+instrumentado y la respuesta del job no cambia; ambas claves son ocultas y solo se aceptan
+booleanos). En ese caso el plugin normal NO se ejecuta: corre el script
 ``bots_dev/<bot>/*_logger.py`` (copia sin cambios del de la raíz ``bots_dev``) como
 subproceso, con las credenciales y parámetros del job mapeados a las variables de
 entorno que ese script lee. Su carpeta ``temp/{bot}_{ts}/`` (logs, screenshots, html,
@@ -40,11 +41,12 @@ CARPETA = Path(__file__).resolve().parent.parent / "bots_dev"
 
 
 def script_solicitado(payload: dict[str, Any]) -> bool:
-    """Con ``logger: true`` los bots con variante usan la versión ``_logger``.
+    """La versión ``_logger`` solo corre si se pide explícitamente (``logger_script: true``).
 
-    ``logger_script: false`` (booleano explícito) fuerza el plugin real instrumentado.
+    Por defecto ``logger: true`` ejecuta el plugin real instrumentado, de modo que la
+    respuesta del job es idéntica a la de ``logger`` ausente o ``false``.
     """
-    return payload.get("logger") is True and payload.get("logger_script") is not False
+    return payload.get("logger") is True and payload.get("logger_script") is True
 
 
 def _tf(valor: Any) -> str:
