@@ -185,3 +185,50 @@ def test_el_panel_incluye_los_botones(flota) -> None:
     html = flota.get("/admin/").text
     assert 'id="fleet-update-all"' in html
     assert 'data-action="worker-update"' in html
+
+
+def _fila(cliente, nodo):
+    return next(f for f in cliente.get("/admin/fleet", headers=ADMIN).json()["manuales"] if f["node"] == nodo)
+
+
+def test_solicitud_sin_updater_vence_y_el_panel_deja_de_mostrar_actualizando(flota) -> None:
+    from central_api.store import utcnow
+    from central_api.worker_updates import UPDATE_REQUESTS
+
+    flota.post("/admin/workers/viejo-a:8080/update", json={"motivo": "sin updater en el host"}, headers=ADMIN)
+    assert _fila(flota, "viejo-a:8080")["estado"] == "ACTUALIZANDO"
+    UPDATE_REQUESTS["viejo-a:8080"].created_at = utcnow() - timedelta(hours=2)
+    fila = _fila(flota, "viejo-a:8080")
+    assert fila["estado"] != "ACTUALIZANDO"
+    assert fila["actualizacion"]["estado"] == "FALLIDO"
+    assert "worker-updater" in fila["actualizacion"]["error"]
+
+
+def test_solicitud_se_cierra_sola_si_el_worker_ya_esta_en_la_version_objetivo(flota) -> None:
+    from central_api.store import WORKERS
+
+    flota.post("/admin/workers/viejo-a:8080/update", json={"motivo": "se actualiza a mano"}, headers=ADMIN)
+    WORKERS["viejo-a:8080"].app_version = "2.0.0"  # el operador lo actualizó por compose
+    fila = _fila(flota, "viejo-a:8080")
+    assert fila["estado"] != "ACTUALIZANDO"
+    assert fila["actualizacion"]["estado"] == "HECHO"
+
+
+def test_cancelar_una_solicitud_encolada(flota) -> None:
+    from central_api.store import PAUSED_NODES
+
+    assert flota.delete("/admin/workers/viejo-a:8080/update").status_code in (401, 403)
+    assert flota.delete("/admin/workers/viejo-a:8080/update", headers=ADMIN).status_code == 409  # nada que cancelar
+    flota.post("/admin/workers/viejo-a:8080/update", json={"motivo": "cancelar después"}, headers=ADMIN)
+    r = flota.delete("/admin/workers/viejo-a:8080/update", headers=ADMIN)
+    assert r.status_code == 200
+    assert r.json()["actualizacion"]["estado"] == "FALLIDO" and "cancelada" in r.json()["actualizacion"]["error"]
+    assert "viejo-a:8080" not in PAUSED_NODES
+    # y se puede pedir otra
+    assert flota.post("/admin/workers/viejo-a:8080/update", json={"motivo": "reintentar la subida"}, headers=ADMIN).status_code == 200
+
+
+def test_no_se_puede_cancelar_una_actualizacion_que_el_updater_ya_ejecuta(flota) -> None:
+    flota.post("/admin/workers/viejo-a:8080/update", json={"motivo": "ya en ejecución"}, headers=ADMIN)
+    assert _comando(flota, "viejo-a:8080")["action"] == "update"  # pasa a ACTUALIZANDO
+    assert flota.delete("/admin/workers/viejo-a:8080/update", headers=ADMIN).status_code == 409

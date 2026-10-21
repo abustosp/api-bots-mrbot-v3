@@ -65,8 +65,27 @@ def _version_sort_key(version: str, digest: str = "") -> tuple:
     )
 
 
+def _latest_origen() -> str:
+    """De dónde sale la latest: ``registry`` (automática), ``config`` o ``flota``."""
+    from central_api import registry
+
+    if registry.latest():
+        return "registry"
+    return "config" if get_settings().worker_latest_version.strip() else "flota"
+
+
 def _latest_version() -> tuple[str | None, str | None, str | None]:
-    """Retorna (latest, digest, versión de app) desde settings o flota activa."""
+    """Retorna (latest, digest, versión de app).
+
+    Precedencia: la última versión publicada en el registry (si ``WORKER_IMAGE_REPO``
+    está definido y responde), luego ``WORKER_LATEST_VERSION`` y por último la mayor
+    versión reportada por la flota. Solo lee la caché: no consulta la red.
+    """
+    from central_api import registry
+
+    publicada = registry.latest()
+    if publicada:
+        return publicada, None, publicada
     expected = get_settings().worker_latest_version.strip()
     if expected:
         if expected.startswith("sha256:"):
@@ -118,6 +137,7 @@ def _version_summary(filas: list[dict]) -> dict:
     return {
         "latest_version": latest,
         "latest_digest": latest_digest,
+        "origen": _latest_origen(),
         "total": len(filas),
         "outdated": sum(1 for fila in filas if fila.get("outdated") is True),
         "unknown": sum(1 for fila in filas if not fila.get("version")),
@@ -506,6 +526,9 @@ _ERROR_VALIDACION = {
 def ver_flota(authorization: str | None = Header(default=None)) -> dict:
     """Entrega el inventario consolidado, el estado y las métricas de cada worker."""
     require_admin(authorization)
+    from central_api import registry
+
+    registry.refrescar()  # no-op si está vigente o sin WORKER_IMAGE_REPO; nunca lanza
     settings = get_settings()
     nodos = merge_nodes(settings.worker_node_list, _admin_nodes())
     # ``flota`` mantiene el contrato previo, incluyendo nodos efímeros que el

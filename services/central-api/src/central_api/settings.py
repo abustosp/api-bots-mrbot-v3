@@ -103,6 +103,15 @@ class Settings(BaseSettings):
     # Referencia completa de imagen (repo:tag o repo@sha256:...) que el botón
     # "Actualizar" ordena desplegar a los workers manuales. Vacío = deshabilitado.
     worker_image_ref: str = Field(default="", alias="WORKER_IMAGE_REF")
+    # Repositorio del worker en el registry (p. ej. registry.local/abustosp/mrbot-bot-worker).
+    # Si se define, la central consulta sus tags (API v2) para identificar sola la última
+    # versión (tags AAAAMMDD_HHMMSS) y ofrecer versiones puntuales en el panel.
+    worker_image_repo: str = Field(default="", alias="WORKER_IMAGE_REPO")
+    registry_user: str = Field(default="", alias="REGISTRY_USER")
+    registry_password: str = Field(default="", alias="REGISTRY_PASSWORD")
+    # Vigencia de la lista de tags consultada (segundos) y verificación TLS del registry.
+    worker_registry_cache_seconds: int = Field(default=60, ge=5, le=3600, alias="WORKER_REGISTRY_CACHE_SECONDS")
+    worker_registry_verify_tls: bool = Field(default=True, alias="WORKER_REGISTRY_VERIFY_TLS")
     # Token compartido con los updaters de los hosts (GET/POST /internal/v1/updater).
     updater_token: str = Field(default="", alias="UPDATER_TOKEN")
     # Cuántos workers se actualizan a la vez en una actualización masiva.

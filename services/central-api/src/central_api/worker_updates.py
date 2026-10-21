@@ -76,15 +76,62 @@ UPDATE_REQUESTS: dict[str, UpdateRequest] = {}  # clave: nodo; la última solici
 
 
 def solicitud_activa(node: str) -> UpdateRequest | None:
+    """Solicitud vigente del nodo, tras reconciliarla con la realidad.
+
+    Una solicitud deja de estar activa sola cuando (a) el worker ya reporta la versión
+    objetivo (p. ej. se actualizó a mano) o (b) nadie la tomó en
+    ``WORKER_UPDATE_TIMEOUT_SECONDS`` (no hay updater en el host): así el panel no queda
+    en "Actualizando" indefinidamente.
+    """
     req = UPDATE_REQUESTS.get(node)
-    return req if req is not None and req.status in ACTIVOS else None
+    if req is None or req.status not in ACTIVOS:
+        return None
+    entrada = WORKERS.get(node)
+    version = str(getattr(entrada, "app_version", "") or "").strip()
+    if req.app_version and version == req.app_version:
+        _cerrar(req, "HECHO")
+        return None
+    if req.status in ("ENCOLADA", "DRENANDO"):
+        limite = timedelta(seconds=get_settings().worker_update_timeout_seconds)
+        if utcnow() - req.created_at > limite:
+            _cerrar(
+                req, "FALLIDO",
+                "ningún updater tomó la solicitud: verifique que el host tenga el worker-updater",
+            )
+            return None
+    return req
 
 
-def objetivo() -> tuple[str, str, str]:
-    """(imagen, app_version, digest) objetivo; imagen vacía si no hay configurada."""
+class VersionNoDisponible(ValueError):
+    """La versión pedida no se puede aplicar (sin registry, no publicada o inválida)."""
+
+
+def objetivo(version: str | None = None) -> tuple[str, str, str]:
+    """(imagen, app_version, digest) objetivo; imagen vacía si no hay configurada.
+
+    Con ``WORKER_IMAGE_REPO`` la imagen es ``<repo>:<versión>`` (la última del registry o
+    la ``version`` pedida, validada contra los tags publicados). Sin repo se usa
+    ``WORKER_IMAGE_REF`` como antes, y no admite elegir versión.
+    """
+    from central_api import registry
     from central_api.admin.fleet import _latest_version
 
     settings = get_settings()
+    if version is not None:
+        if not registry.habilitado():
+            raise VersionNoDisponible("elegir versión requiere WORKER_IMAGE_REPO")
+        if not registry.TAG_VERSION.match(version):
+            raise VersionNoDisponible("la versión debe tener el formato AAAAMMDD_HHMMSS")
+        publicadas = registry.versiones()
+        if not publicadas:
+            raise VersionNoDisponible("no hay lista de versiones del registry disponible")
+        if version not in publicadas:
+            raise VersionNoDisponible(f"la versión {version} no está publicada en el registry")
+        return f"{registry.repo()}:{version}", version, ""
+    if registry.habilitado():
+        ultima = registry.latest()
+        if ultima:
+            return f"{registry.repo()}:{ultima}", ultima, ""
     image = settings.worker_image_ref.strip()
     if not image:
         return "", "", ""
@@ -124,8 +171,10 @@ def _vencer_atascadas(ahora: datetime) -> None:
             _cerrar(req, "FALLIDO", "el updater no reportó el resultado a tiempo")
 
 
-def crear_solicitud(node: str, *, solicitud_id: str, actor: str, motivo: str) -> UpdateRequest:
-    image, app_version, digest = objetivo()
+def crear_solicitud(
+    node: str, *, solicitud_id: str, actor: str, motivo: str, version: str | None = None
+) -> UpdateRequest:
+    image, app_version, digest = objetivo(version)
     req = UpdateRequest(
         id=solicitud_id, node=node, image=image, app_version=app_version,
         image_digest=digest, requested_by=actor, motivo=motivo,
@@ -175,4 +224,13 @@ def registrar_resultado(node: str, request_id: str, estado: str, error: str) -> 
     if req is None or req.id != request_id or req.status not in ACTIVOS:
         return None
     _cerrar(req, estado, error[:500])
+    return req
+
+
+def cancelar_solicitud(node: str, actor: str) -> UpdateRequest | None:
+    """Cancela la solicitud activa del nodo (nunca interrumpe un ``ACTUALIZANDO`` ya enviado)."""
+    req = solicitud_activa(node)
+    if req is None or req.status == "ACTUALIZANDO":
+        return None
+    _cerrar(req, "FALLIDO", f"cancelada por {actor}")
     return req
