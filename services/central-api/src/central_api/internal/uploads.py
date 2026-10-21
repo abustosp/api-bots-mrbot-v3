@@ -64,9 +64,25 @@ async def _job_para_presign(job_id: str):
         return SimpleNamespace(
             id=str(fila.id), worker_node=None, status=str(fila.status),
             assignment_attempt=int(fila.attempts or 0), _origen_db=True,
+            payload=fila.request_payload if isinstance(fila.request_payload, dict) else {},
         )
     except Exception:  # noqa: BLE001 - sin base, 404
         return None
+
+
+async def _job_vivo(job_id: str, worker_node: str):
+    """Job con asignación viva para este worker (404/403 si no)."""
+    job = await _job_para_presign(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job no encontrado")
+    if getattr(job, "_origen_db", False):
+        # Fila PG sin caché: el dueño por nodo no está disponible; se exige
+        # asignación viva y el borde interno ya autenticó al worker.
+        if job.status not in ("ASIGNADO", "CORRIENDO"):
+            raise HTTPException(status_code=403, detail="sin asignación viva para el job")
+    elif job.worker_node != worker_node or job.status not in ("ASIGNADO", "CORRIENDO"):
+        raise HTTPException(status_code=403, detail="sin asignación viva para el job")
+    return job
 
 
 class PresignBody(BaseModel):
@@ -85,6 +101,25 @@ class PresignBody(BaseModel):
         description="Tamaño previsto del archivo en bytes. El máximo permitido es 100 MiB.",
         examples=[184320],
     )
+
+
+def _responder(job, respuesta: dict) -> dict:
+    """Entrega la URL prefirmada, sellada para el worker si publicó clave."""
+    # La URL prefirmada es un bearer efectivo: si el worker publicó clave,
+    # viaja cifrada con ella (igual que el sobre de asignación) y solo ese
+    # worker puede abrirla. Sin pubkey, en claro con bandera visible.
+    from central_api.security.sealed import encrypt_sealed_section
+    from central_api.store import WORKERS
+
+    entrada = WORKERS.get(getattr(job, "worker_node", None) or "")
+    pubkey = entrada.sealed_pubkey_pem if entrada is not None else ""
+    if pubkey:
+        return {
+            "sealed": True,
+            "sealed_section": encrypt_sealed_section(pubkey, respuesta),
+        }
+    respuesta["sealed"] = False
+    return respuesta
 
 
 @router.post(
@@ -122,16 +157,7 @@ async def presign_artifact(
     job_id: str, body: PresignBody, worker_node: str = Depends(require_worker)
 ) -> dict:
     """Crea una autorización temporal de subida para un job activo."""
-    job = await _job_para_presign(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job no encontrado")
-    if getattr(job, "_origen_db", False):
-        # Fila PG sin caché: el dueño por nodo no está disponible; se exige
-        # asignación viva y el borde interno ya autenticó al worker.
-        if job.status not in ("ASIGNADO", "CORRIENDO"):
-            raise HTTPException(status_code=403, detail="sin asignación viva para el job")
-    elif job.worker_node != worker_node or job.status not in ("ASIGNADO", "CORRIENDO"):
-        raise HTTPException(status_code=403, detail="sin asignación viva para el job")
+    job = await _job_vivo(job_id, worker_node)
     # Sufijo único por subida: un mismo artifact_id puede cubrir varios
     # archivos (un libro por período, un PDF por plan). Con clave fija cada
     # archivo pisaría al anterior en el bucket y el resultado chocaría con
@@ -163,21 +189,60 @@ async def presign_artifact(
         "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
         "required_headers": {"Content-Type": body.content_type},
     }
-    # La URL prefirmada es un bearer efectivo: si el worker publicó clave,
-    # viaja cifrada con ella (igual que el sobre de asignación) y solo ese
-    # worker puede abrirla. Sin pubkey, en claro con bandera visible.
-    from central_api.security.sealed import encrypt_sealed_section
-    from central_api.store import WORKERS
+    return _responder(job, respuesta)
 
-    entrada = WORKERS.get(getattr(job, "worker_node", None) or "")
-    pubkey = entrada.sealed_pubkey_pem if entrada is not None else ""
-    if pubkey:
-        return {
-            "sealed": True,
-            "sealed_section": encrypt_sealed_section(pubkey, respuesta),
-        }
-    respuesta["sealed"] = False
-    return respuesta
+
+LOGGER_MAX_BYTES = 1_073_741_824
+
+
+class LoggerPresignBody(BaseModel):
+    path: str = Field(min_length=1, max_length=128)
+    content_type: str = Field(min_length=1, max_length=128)
+    size_bytes: int = Field(ge=1, le=LOGGER_MAX_BYTES)
+
+
+def clave_logger(job_id: str, path: str) -> str:
+    """Object key del bucket logger: solo ``{job_id}.tar.gz``; falla cerrado."""
+    esperado = f"{job_id}.tar.gz"
+    if path != esperado:
+        raise HTTPException(status_code=422, detail="ruta de logger inválida")
+    return esperado
+
+
+# Oculto del OpenAPI/Swagger a propósito: es una herramienta interna de debugging.
+@router.post(
+    "/jobs/{job_id}/logger/presign", status_code=201, include_in_schema=False
+)
+async def presign_logger(
+    job_id: str, body: LoggerPresignBody, worker_node: str = Depends(require_worker)
+) -> dict:
+    """URL de subida al bucket ``logger`` solo para jobs con ``logger`` activo."""
+    job = await _job_vivo(job_id, worker_node)
+    payload = getattr(job, "payload", None)
+    if not (isinstance(payload, dict) and payload.get("logger") is True):
+        raise HTTPException(status_code=403, detail="job sin logger activo")
+    object_key = clave_logger(job_id, body.path)
+    ajustes = get_settings()
+    firmado = firmar_subida(
+        object_key=object_key,
+        content_type=body.content_type,
+        ttl_seconds=ARTIFACT_URL_TTL_SECONDS,
+        endpoint=ajustes.object_storage_endpoint,
+        region=ajustes.object_storage_region,
+        bucket=ajustes.object_storage_logger_bucket,
+        access_key=ajustes.object_storage_access_key,
+        secret_key=ajustes.object_storage_secret_key,
+    )
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=ARTIFACT_URL_TTL_SECONDS
+    )
+    return _responder(job, {
+        "upload_id": str(uuid.uuid4()),
+        "object_key": object_key,
+        "upload_url": firmado["upload_url"],
+        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        "required_headers": {"Content-Type": body.content_type},
+    })
 
 
 @router.post(

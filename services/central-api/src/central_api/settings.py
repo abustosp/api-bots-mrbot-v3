@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     object_storage_uploads_bucket: str = Field(
         default="uploads", alias="OBJECT_STORAGE_UPLOADS_BUCKET"
     )
+    # Bucket de depuración: la versión "logger" de un job (clave ``logger`` en
+    # la solicitud) guarda ahí logs, HAR, capturas, HTML y descargas bajo
+    # ``{job_id}/``. Solo la usa el borde interno; no figura en la API pública.
+    object_storage_logger_bucket: str = Field(
+        default="logger", alias="OBJECT_STORAGE_LOGGER_BUCKET"
+    )
     # Vigencia de un archivo subido para poder reutilizarlo en varios jobs.
     uploads_retention_seconds: int = Field(
         default=86_400, alias="UPLOADS_RETENTION_SECONDS"

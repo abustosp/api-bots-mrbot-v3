@@ -472,6 +472,9 @@ def _create_handler(
                 }},
                 headers=exc.headers,
             )
+        # ``logger`` (modo depuración, no documentado) viaja aparte del esquema.
+        logger_solicitado = payload.pop("logger", None)
+        logger_script_solicitado = payload.pop("logger_script", None)
         # Validate and coerce the operation-specific flat body. Error details
         # are intentionally generic so Pydantic cannot echo a submitted secret.
         input_body = dict(payload)
@@ -547,6 +550,10 @@ def _create_handler(
                 normalized_body["cuit_representado"] = normalized_body.get(
                     "cuit_representante"
                 )
+        if logger_solicitado is not None:
+            normalized_body["logger"] = logger_solicitado
+        if logger_script_solicitado is not None:
+            normalized_body["logger_script"] = logger_script_solicitado
         credentials = dict(credentials)
         for field in _SECRET_FIELDS:
             if field in normalized_body:

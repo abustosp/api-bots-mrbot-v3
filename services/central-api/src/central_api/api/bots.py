@@ -514,6 +514,11 @@ def _canonical_body_openapi() -> dict:
     }
 
 
+def _logger_activo(valor: Any) -> bool:
+    """``logger`` habilita el modo depuración solo si es el booleano ``true``."""
+    return valor is True
+
+
 async def submit_job(
     *,
     bot: str,
@@ -571,6 +576,10 @@ async def submit_job(
         name: value for name, value in payload.items()
         if name not in retired_request_fields
     }
+    # ``logger`` (modo depuración) no es un campo del bot: se aparta antes de
+    # normalizar y se reincorpora ya como booleano. No figura en OpenAPI.
+    logger_activo = _logger_activo(accepted_payload.pop("logger", None))
+    logger_script_valor = accepted_payload.pop("logger_script", None)
     normalized_payload = normalize_v2_payload(bot, operacion, accepted_payload)
     campo_archivos = campo_de_archivos(bot, operacion)
     claves_ref = claves_referenciadas(bot, operacion, normalized_payload)
@@ -628,6 +637,11 @@ async def submit_job(
             },
             headers={"X-Correlation-ID": corr},
         )
+    if logger_activo:
+        normalized_payload = {**normalized_payload, "logger": True}
+        if logger_script_valor is False:
+            # Solo el booleano explícito false se conserva: pide el plugin real instrumentado.
+            normalized_payload["logger_script"] = False
     fingerprint_payload_data = dict(normalized_payload)
     if credential_fingerprint:
         fingerprint_payload_data["_credential_fingerprint"] = credential_fingerprint
