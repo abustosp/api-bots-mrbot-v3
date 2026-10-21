@@ -32,7 +32,11 @@ UNMIGRATED_LEGACY_PROJECTS = {
 
 
 def test_bots_dev_directories_match_registered_plugins() -> None:
-    fixture_bots = {path.name for path in BOTS_DEV.iterdir() if path.is_dir()}
+    # ``shared`` es soporte de los scripts _logger, no un bot.
+    fixture_bots = {
+        path.name for path in BOTS_DEV.iterdir()
+        if path.is_dir() and path.name not in {"shared", "__pycache__"}
+    }
     assert fixture_bots == set(REGISTRY)
 
 

@@ -1222,9 +1222,17 @@ details > .details-body { padding: 0 14px 14px; }
     const digest = worker.image_digest ? `<br><span class="muted" title="${esc(worker.image_digest)}">digest ${esc(short(worker.image_digest, 20))}</span>` : "";
     return `<span class="status ${kind}" title="${esc(latest)}">${label}</span><br><code title="${esc(version || "Sin versión reportada")}">${esc(version ? short(version, 24) : "Sin versión")}</code>${digest}`;
   }
+  function versionPicker(worker) {
+    const lista = state.versiones?.versiones || [];
+    if (!lista.length) return "";
+    const actual = worker.app_version || "";
+    const opciones = lista.map((item) => `<option value="${esc(item.version)}"${item.es_latest ? " selected" : ""}>${esc(item.version)}${item.es_latest ? " (latest)" : ""}${item.version === actual ? " (actual)" : ""}</option>`).join("");
+    return `<select class="version-select" aria-label="Versión a aplicar en ${esc(worker.node)}">${opciones}</select><button class="button small" data-action="worker-apply-version" data-id="${esc(worker.node)}">Aplicar versión</button>`;
+  }
   async function loadFleet() {
     try {
       const data = await api("/admin/fleet");
+      state.versiones = await api("/admin/fleet/versions").catch(() => null);
       const legacy = data.flota || [];
       const manuales = data.manuales || legacy.filter((worker) => worker.origen !== "efimero");
       const efimeros = data.efimeros || legacy.filter((worker) => worker.origen === "efimero");
@@ -1235,13 +1243,13 @@ details > .details-body { padding: 0 14px 14px; }
       const latestVersion = versionSummary.latest_version ?? data.latest_version;
       const latestDigest = versionSummary.latest_digest ?? data.latest_digest;
       const unknownCount = Number(versionSummary.unknown ?? workers.filter((worker) => !worker.version).length);
-      $("#fleet-version-summary").textContent = `${outdatedCount} de ${totalVersions} desactualizados · Latest: ${latestVersion || "sin versión reportada"}${latestDigest ? ` · digest ${short(latestDigest, 20)}` : ""}${unknownCount ? ` · ${unknownCount} sin versión` : ""}`;
+      $("#fleet-version-summary").textContent = `${outdatedCount} de ${totalVersions} desactualizados · Latest${versionSummary.origen === "registry" ? " (registry)" : ""}: ${latestVersion || "sin versión reportada"}${state.versiones?.error ? " · registry sin respuesta" : ""}${latestDigest ? ` · digest ${short(latestDigest, 20)}` : ""}${unknownCount ? ` · ${unknownCount} sin versión` : ""}`;
       const outdatedOnly = $("#fleet-outdated-only").checked;
       const manualesVisibles = outdatedOnly ? manuales.filter((worker) => worker.outdated === true) : manuales;
       const efimerosVisibles = outdatedOnly ? efimeros.filter((worker) => worker.outdated === true) : efimeros;
       $("#fleet-manual-count").textContent = String(data.resumen?.manuales?.total ?? manuales.length);
       $("#fleet-ephemeral-count").textContent = String(data.resumen?.efimeros?.total ?? efimeros.length);
-      $("#fleet-manual-table").innerHTML = manualesVisibles.length ? manualesVisibles.map((worker) => `<tr><td><strong>${esc(worker.alias || "—")}</strong></td><td><code>${esc(worker.node)}</code></td><td><code>${esc(worker.ip || "—")}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><div class="actions-inner">${worker.outdated === true && worker.estado !== "ACTUALIZANDO" ? `<button class="button small" data-action="worker-update" data-id="${esc(worker.node)}">Actualizar</button>` : ""}${worker.actualizacion && ["FALLIDO", "REVERTIDO"].includes(worker.actualizacion.estado) ? `<span class="status status-bad" title="${esc(worker.actualizacion.error || "")}">Última actualización: ${esc(worker.actualizacion.estado)}</span>` : ""}<button class="button secondary small" data-action="${worker.estado === "PAUSADO" ? "worker-resume" : "worker-pause"}" data-id="${esc(worker.node)}">${worker.estado === "PAUSADO" ? "Reanudar" : "Pausar"}</button><button class="button secondary small" data-action="worker-alias" data-id="${esc(worker.node)}" data-alias="${esc(worker.alias || "")}">Editar alias</button><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></div></td></tr>`).join("") : `<tr><td colspan="12" class="empty">${outdatedOnly ? "No hay workers manuales desactualizados." : "No hay workers manuales inventariados. Agrega uno arriba."}</td></tr>`;
+      $("#fleet-manual-table").innerHTML = manualesVisibles.length ? manualesVisibles.map((worker) => `<tr><td><strong>${esc(worker.alias || "—")}</strong></td><td><code>${esc(worker.node)}</code></td><td><code>${esc(worker.ip || "—")}</code></td><td><span class="pill">${esc(worker.origen || "—")}</span></td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.capacidad ?? 0)}</td><td>${esc(worker.protocolo || "—")} <span class="pill">${esc(worker.protocolo_estado || "—")}</span></td><td>${esc((worker.bots || []).join(", ") || "—")}</td><td>${esc(((worker.muestra_error || {}).fallidos || 0))}/${esc(((worker.muestra_error || {}).total || 0))}</td><td>${esc((worker.alertas || []).length)}</td><td class="actions"><div class="actions-inner">${worker.estado === "ACTUALIZANDO" ? `<button class="button small" data-action="worker-update-cancel" data-id="${esc(worker.node)}" title="Cancela una actualización en cola o en drenaje">Cancelar actualización</button>` : versionPicker(worker)}${worker.outdated === true && worker.estado !== "ACTUALIZANDO" ? `<button class="button small" data-action="worker-update" data-id="${esc(worker.node)}">Actualizar</button>` : ""}${worker.actualizacion && ["FALLIDO", "REVERTIDO"].includes(worker.actualizacion.estado) ? `<span class="status status-bad" title="${esc(worker.actualizacion.error || "")}">Última actualización: ${esc(worker.actualizacion.estado)}</span>` : ""}<button class="button secondary small" data-action="${worker.estado === "PAUSADO" ? "worker-resume" : "worker-pause"}" data-id="${esc(worker.node)}">${worker.estado === "PAUSADO" ? "Reanudar" : "Pausar"}</button><button class="button secondary small" data-action="worker-alias" data-id="${esc(worker.node)}" data-alias="${esc(worker.alias || "")}">Editar alias</button><button class="button danger small" data-action="worker-remove" data-id="${esc(worker.node)}">Dar de baja</button></div></td></tr>`).join("") : `<tr><td colspan="12" class="empty">${outdatedOnly ? "No hay workers manuales desactualizados." : "No hay workers manuales inventariados. Agrega uno arriba."}</td></tr>`;
       clearTimeout(state.fleetPoll); if (manuales.some((worker) => worker.estado === "ACTUALIZANDO")) state.fleetPoll = setTimeout(() => { if (state.view === "fleet") loadFleet(); }, 5000);
       $("#fleet-ephemeral-table").innerHTML = efimerosVisibles.length ? efimerosVisibles.map((worker) => `<tr><td><code>${esc(worker.instance_id || "—")}</code></td><td>${esc(worker.instance_type || "—")}</td><td>${esc(worker.ram_gib == null ? "—" : `${worker.ram_gib} GiB`)}</td><td>${esc(worker.concurrency ?? worker.capacidad ?? "—")}</td><td>${esc(formatAge(worker.edad))}</td><td><span class="status ${statusClass(worker.estado)}">${esc(worker.estado)}</span></td><td>${fleetVersionBadge(worker)}</td><td>${esc(worker.jobs_activos ?? worker.en_ejecucion ?? 0)}/${esc(worker.concurrency ?? worker.capacidad ?? 0)}</td><td class="actions"><div class="actions-inner"><button class="button danger small" data-action="ephemeral-terminate" data-id="${esc(worker.instance_id || "")}">Terminar</button></div></td></tr>`).join("") : `<tr><td colspan="9" class="empty">${outdatedOnly ? "No hay workers efímeros desactualizados." : "No hay workers efímeros (EC2)."}</td></tr>`;
     } catch (error) { flash(error.message, "error"); }
@@ -1265,6 +1273,18 @@ details > .details-body { padding: 0 14px 14px; }
     if (button.dataset.action === "worker-alias") {
       const nuevo = window.prompt(`Alias para ${button.dataset.id} (vacío para quitarlo):`, button.dataset.alias || ""); if (nuevo === null) return;
       try { await api(`/admin/workers/${encodeURIComponent(button.dataset.id)}/alias`, { method: "PUT", body: JSON.stringify({ alias: nuevo.trim() }) }); flash("Alias actualizado."); await loadFleet(); } catch (error) { flash(error.message, "error"); }
+      return;
+    }
+    if (button.dataset.action === "worker-apply-version") {
+      const select = button.parentElement.querySelector("select.version-select"); const version = select ? select.value : ""; if (!version) return;
+      const destino = version === state.versiones?.latest ? `la última versión (${version})` : `la versión ${version}`;
+      if (!window.confirm(`Aplicar ${destino} a ${button.dataset.id}? Se pausa, termina los jobs en curso y se recrea el contenedor.`)) return;
+      try { await api(`/admin/workers/${encodeURIComponent(button.dataset.id)}/update`, { method: "POST", body: JSON.stringify({ motivo: `aplicar versión ${version} desde el panel`, version }) }); flash(`Versión ${version} encolada.`); await loadFleet(); } catch (error) { flash(error.message, "error"); }
+      return;
+    }
+    if (button.dataset.action === "worker-update-cancel") {
+      if (!window.confirm(`Cancelar la actualización pendiente de ${button.dataset.id}?`)) return;
+      try { await api(`/admin/workers/${encodeURIComponent(button.dataset.id)}/update`, { method: "DELETE" }); flash("Actualización cancelada."); await loadFleet(); } catch (error) { flash(error.message, "error"); }
       return;
     }
     if (button.dataset.action === "worker-update") {

@@ -172,3 +172,13 @@ Los resultados conservan campos V2 `name`, `url`, `size` y añaden `artifact_id`
 - Cola/cancelación y categorías públicas de error (`services/central-api/tests/test_jobs_queue_cancel.py:47-185`; `services/central-api/tests/test_job_error_categories.py:6-22`).
 
 La existencia de un test de OpenAPI no demuestra que el runtime aplique el schema documentado.
+
+## 10. Modo logger (depuración, no público)
+
+Cualquier operación de bot acepta en el cuerpo la clave `logger`. Solo el booleano JSON `true` habilita la versión logger; cualquier otro valor (`"true"`, `1`, `false`, ausente) se ignora. La clave **no** figura en OpenAPI/Swagger ni en `docs/externa`: es una herramienta del equipo para acelerar el debugging.
+
+- Se extrae antes de la validación por esquema y se persiste como `request_payload.logger = true` (entra en la huella de idempotencia). El plugin nunca la recibe: el worker la quita en `validation_payload`.
+- No cambia costo, estados ni resultado público; el job se ejecuta con el mismo plugin.
+- Presign: `POST /internal/v1/jobs/{job_id}/logger/presign` (`include_in_schema=False`) entrega una URL PUT al bucket `OBJECT_STORAGE_LOGGER_BUCKET` (por defecto `logger`) con clave `{job_id}.tar.gz`. Falla con 403 si el job no tiene `logger: true` o no tiene asignación viva, y con 422 si la ruta pedida no es exactamente `{job_id}.tar.gz`.
+- `logger: true` ejecuta siempre el plugin real instrumentado: la respuesta del job (estado, resultado, archivos) es idéntica a la de `logger` ausente o `false`; solo se agrega el `{job_id}.tar.gz` en el bucket `logger`. La variante `_logger` de `bots_dev` solo corre con `logger_script: true` (ver [Workers](workers.md#versión-_logger-del-bot-logger_script)); solo se acepta el booleano `true` y no figura en OpenAPI.
+- El bucket `logger` debe existir en el object storage (igual que `uploads`). Los objetos no tienen retención automática: limpiar por política del bucket.

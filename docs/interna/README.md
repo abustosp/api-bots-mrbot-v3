@@ -6,6 +6,7 @@
 
 - [API y recorrido de los datos](api.md): rutas, autenticación, validación, normalización, persistencia y consulta de resultados.
 - [Workers](workers.md): admisión, ejecución, capacidad, leases, archivos, cancelación, limpieza y reporte.
+- Modo logger (depuración por job con `logger: true`): [API §10](api.md) y [Workers](workers.md#modo-logger).
 - [Auditoría priorizada](auditoria.md): casos de fallo comprobados, corrección mínima e impacto. El informe utiliza inglés sencillo conforme al formato de auditoría solicitado.
 - [Validaciones realizadas](validacion.md): comandos, resultados y límites de la revisión.
 

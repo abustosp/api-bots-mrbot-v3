@@ -37,3 +37,7 @@ Descarga devuelve `data.operacion`, `representado_cuit`, `periodo`; opcionalment
 - `services/central-api/src/central_api/input_files.py:20-76`
 - `services/central-api/src/central_api/api/bot_payloads.py:1-7, 248-258, 330-350, 501`
 - `services/bot-worker/tests/test_portal_portal_iva.py:137-229`; `services/central-api/tests/test_catalog_seed.py:33-41`
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

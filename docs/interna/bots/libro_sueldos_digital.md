@@ -25,3 +25,7 @@ El estado superior `result` es `OK`/`PARCIAL`/`ERROR`; `data` incorpora CUIT del
 4. El comentario del portal dice que se seleccionan 5 períodos por página (`services/bot-worker/src/bot_worker/runtime/portals/libro_sueldos_digital.py:10-12,26`), pero la constante es 10 y se usa en los enlaces de páginas (`services/bot-worker/src/bot_worker/runtime/portals/libro_sueldos_digital.py:27,268,325`).
 5. Catálogo central clasifica `descargar` como `EFECTO` por no empezar con `consulta/consultar/historial`, pero manifest marca `LECTURA`; es una diferencia concreta de semántica de riesgo, no un cambio en el portal.
 6. Aunque credenciales se requieren en ejecución, el schema interno de entrada no incluye `clave`; los campos viven en el sobre/contexto de autenticación.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

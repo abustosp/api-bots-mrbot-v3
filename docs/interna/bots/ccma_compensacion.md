@@ -5,7 +5,7 @@
 - Catálogo central: `ccma_compensacion`, operación `compensar`; `services/central-api/src/central_api/api/bots.py:329-339`, `378-386`.
 - Ruta de creación canónica: `POST /api/v3/bots/{bot}/{operacion}`; el cuerpo separa `payload` y `credentials` y despacha `submit_job`; `services/central-api/src/central_api/api/bots.py:194-208`, `748-817`.
 - Plugin activo y manifiesto `operaciones=("compensar",)`, clase de idempotencia `EFECTO`: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:80-108`.
-- Directorio activo coincide con catálogo: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/`. Discrepancia de nombre solo en árbol heredado de desarrollo: `bots_dev/ccma_compenscion/` (falta la segunda `a` de `compensacion`); el registro activo usa el nombre correcto, `services/bot-worker/src/bot_worker/bots/_plugins.py:90-100`.
+- Directorio activo coincide con catálogo: `services/bot-worker/src/bot_worker/bots/ccma_compensacion/`. El árbol de desarrollo usaba `bots_dev/ccma_compenscion/` (sin la segunda `a`) y se renombró a `bots_dev/ccma_compensacion/`; el registro activo usa el nombre correcto, `services/bot-worker/src/bot_worker/bots/_plugins.py:90-100`.
 
 ## Flujo esquema → plugin → portal
 
@@ -36,7 +36,7 @@ El wrapper central permite `credentials` como objeto genérico, acepta varios no
 1. **Contrato público incompleto.** `services/central-api/src/central_api/api/bot_payloads.py:124-128` modela `representado_cuit`, `compensar`, `confirmar`, `incluir_movimientos`, pero omite `incluir_pdf` y `subir`. El esquema operativo los acepta; las pruebas de plugin usan `pdf` y comprueban `subir`: `services/bot-worker/tests/test_ccma_compensacion_plugin.py:124-147`, `278-294`.
 2. **Alto riesgo con defaults implícitos.** `compensar` default true y `confirmar` default false es seguro respecto de confirmación, pero solicita igualmente una propuesta y acciones de formulario.
 3. **Efecto e idempotencia.** El manifiesto marca `EFECTO` y el catálogo central default de operación es `EFECTO`, coherente con la confirmación remota; confirmar exige no reintentar ciegamente (`services/bot-worker/src/bot_worker/bots/ccma_compensacion/plugin.py:83-108`; `services/central-api/src/central_api/models/catalog.py:72-90`).
-4. **Nombre heredado divergente.** `bots_dev/ccma_compenscion/` vs catálogo y registro `ccma_compensacion`.
+4. **Nombre heredado divergente (resuelto).** La carpeta de desarrollo `bots_dev/ccma_compenscion/` se renombró a `bots_dev/ccma_compensacion/` para coincidir con el catálogo y el registro.
 
 ## Tests leídos
 
@@ -54,3 +54,6 @@ El wrapper central permite `credentials` como objeto genérico, acepta varios no
 - `services/central-api/src/central_api/security/credentials.py:288-370`
 - `services/bot-worker/src/bot_worker/bots/_plugins.py:90-100`
 - `services/bot-worker/tests/test_ccma_compensacion_plugin.py:116-278`
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

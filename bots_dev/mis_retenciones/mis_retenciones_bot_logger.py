@@ -405,8 +405,8 @@ async def is_impuesto_selected(page, label: str, code: str) -> bool:
 async def ensure_date_range(page, desde: str, hasta: str) -> bool:
     if not desde or not hasta:
         return False
-    fecha_desde_input = page.locator("#datePickerFechasRetencionesDesde__input")
-    fecha_hasta_input = page.locator("#datePickerFechasRetencionesHasta__input")
+    fecha_desde_input = page.locator("#fechaRetencionDesde__input")
+    fecha_hasta_input = page.locator("#fechaRetencionHasta__input")
     try:
         await fecha_desde_input.wait_for(state="visible", timeout=5000)
         await fecha_hasta_input.wait_for(state="visible", timeout=5000)
@@ -659,22 +659,25 @@ async def download_csv(
 
     csv_clicked = False
     dropdown = page.locator(".dropdown-menu.show")
-    try:
-        await dropdown.wait_for(state="visible", timeout=5000)
-        csv_option = dropdown.get_by_text(".CSV", exact=False)
-        await csv_option.first.click(timeout=5000)
-        csv_clicked = True
-    except Exception:
-        pass
-
-    if not csv_clicked:
+    # El portal ofrece hoy ".xls" (antes ".CSV"): se prueba ".CSV" y luego ".xls",
+    # igual que el plugin de la API (runtime/portals/mis_retenciones.py).
+    for extension in (".CSV", ".xls"):
+        if csv_clicked:
+            break
         try:
-            fallback_csv = page.get_by_text(".CSV", exact=False)
-            if await fallback_csv.count() > 0 and await fallback_csv.first.is_visible(timeout=2000):
-                await fallback_csv.first.click(timeout=5000)
-                csv_clicked = True
+            await dropdown.wait_for(state="visible", timeout=5000)
+            await dropdown.get_by_text(extension, exact=False).first.click(timeout=5000)
+            csv_clicked = True
         except Exception:
             pass
+        if not csv_clicked:
+            try:
+                fallback = page.get_by_text(extension, exact=False)
+                if await fallback.count() > 0 and await fallback.first.is_visible(timeout=2000):
+                    await fallback.first.click(timeout=5000)
+                    csv_clicked = True
+            except Exception:
+                pass
 
     if not csv_clicked:
         error_logs.append(f"No se pudo seleccionar el formato CSV para {contexto}")
@@ -687,41 +690,87 @@ async def download_csv(
     except Exception:
         pass
 
+    # Flujo actual del portal (igual que runtime/portals/mis_retenciones.py de la API):
+    # confirmar el modal de exportación y bajar el archivo desde la tabla de exportaciones.
+    async def _fila_exportacion() -> str:
+        try:
+            return (await page.locator('#tablaExportarAplicativo .ag-row[row-index="0"]').first.inner_text(timeout=1500)).strip()
+        except Exception:
+            return ""
+
     exportar_archivo_clicked = False
-    ver_archivo = page.locator("#modal-sinresultados_btnOK")
+    ver_archivo = page.locator("#modal-exportar-consulta_btnOK, #modal-sinresultados_btnOK")
+    fila_previa = await _fila_exportacion()
     try:
-        await ver_archivo.wait_for(state="visible", timeout=10000)
-        await ver_archivo.click(timeout=5000)
+        await ver_archivo.first.wait_for(state="visible", timeout=10000)
+        await ver_archivo.first.click(timeout=5000)
         exportar_archivo_clicked = True
     except Exception:
         pass
+    if exportar_archivo_clicked:
+        # La tabla puede mostrar aún la exportación anterior: se espera la fila nueva
+        # para no bajar el archivo de otro impuesto.
+        for _ in range(30):
+            actual = await _fila_exportacion()
+            if actual and actual != fila_previa:
+                break
+            await asyncio.sleep(1)
 
     if not exportar_archivo_clicked:
         error_logs.append(f"No se pudo confirmar la descarga del CSV para {contexto}")
         return None
 
-    download_link = page.locator("a.boton_mt[download], a[download][href*='descarga']").first
-    try:
-        await download_link.wait_for(state="visible", timeout=20000)
-    except Exception:
+    download_link = None
+    for candidato in (
+        page.locator('#tablaExportarAplicativo .ag-row[row-index="0"] a[title="Descargar Archivo"]'),
+        page.locator("#tablaExportarAplicativo a[title='Descargar Archivo']"),
+        page.locator("a.boton_mt[download], a[download][href*='descarga']"),
+    ):
+        try:
+            await candidato.first.wait_for(state="visible", timeout=8000)
+            download_link = candidato.first
+            break
+        except Exception:
+            continue
+    if download_link is None:
         error_logs.append(f"No se encontro el link de descarga para {contexto}")
         return None
 
+    # La grilla puede abrir la descarga en una pestaña emergente.
+    loop = asyncio.get_running_loop()
+    recibida: asyncio.Future = loop.create_future()
+
+    def _al_descargar(d):
+        if not recibida.done():
+            recibida.set_result(d)
+
+    def _al_abrir(p):
+        p.on("download", _al_descargar)
+
+    page.on("download", _al_descargar)
+    page.context.on("page", _al_abrir)
     download = None
     try:
-        async with page.expect_download(timeout=20000) as download_info:
-            await download_link.click(timeout=5000)
-        download = await download_info.value
+        await download_link.click(timeout=5000)
+        download = await asyncio.wait_for(recibida, timeout=25)
     except Exception:
         pass
+    finally:
+        try:
+            page.remove_listener("download", _al_descargar)
+            page.context.remove_listener("page", _al_abrir)
+        except Exception:
+            pass
 
     if not download:
         error_logs.append(f"No se pudo descargar el CSV para {contexto}")
         return None
 
     filename = _sanitize_component(nombre_archivo) or f"retenciones_{safe_impuesto}_{safe_tipo}.csv"
-    if not filename.lower().endswith(".csv"):
-        filename = f"{filename}.csv"
+    sugerido = (download.suggested_filename or "").lower()
+    extension = ".xlsx" if sugerido.endswith(".xlsx") else ".xls" if sugerido.endswith(".xls") else ".csv"
+    if not filename.lower().endswith(extension):
+        filename = f"{os.path.splitext(filename)[0]}{extension}"
 
     base_dir.mkdir(parents=True, exist_ok=True)
     download_path = base_dir / filename

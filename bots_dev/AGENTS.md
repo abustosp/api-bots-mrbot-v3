@@ -144,3 +144,5 @@ Antes de considerar listo un bot:
 5. Ambos scripts ejecutan el mismo flujo funcional.
 6. (si aplica) Variantes extendidas viven como archivos hermanos en la misma carpeta plana (`{bot}_bot_mrbot.py`, `{bot}_bot_capmonster.py`, etc.), sin subcarpetas de variantes. Solo `samples/` y `__pycache__/` permitidas como subdirectorios.
 7. (si aplica) La variante `{bot}_bot_mrbot.py` es diff de `app/bot/{bot}_bot.py` solo en imports/stubs; incluye MinIO/S3 y tempfile igual que producción.
+8. El nombre de la carpeta del bot coincide con el del bot registrado en el worker (`retper_iibb_agip`, `retper_iibb_misiones`, `ccma_compensacion`, `consulta_pagos_vep`); una sola carpeta por bot (AGIP ya no tiene una segunda carpeta aparte). Los archivos con guion (`carga-931-*.py`) no se versionan: no son importables.
+9. (si el bot tiene variante `_logger` en el worker) El script `{bot}_bot_logger.py` de esta raíz es la fuente: `tools/sync_bots_dev_loggers.py` lo copia, sin cambios, a `services/bot-worker/src/bot_worker/bots_dev/{bot}/` y `shared/` a `bots_dev/shared/`; un test falla si la copia se desvía.

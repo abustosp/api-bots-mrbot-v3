@@ -23,3 +23,6 @@ La consulta devuelve `cuit`, `apoc`, `fecha_condicion` y `fecha_publicacion`; `a
 - Alias plano: `services/central-api/src/central_api/api/bot_routes.py:418-527,663-690`; espejo `services/central-api/src/central_api/api/bot_payloads.py:71-73,89-91`.
 - Esquema, plugin y manifiesto: `services/bot-worker/src/bot_worker/bots/apoc/schema.py:17-57`; `services/bot-worker/src/bot_worker/bots/apoc/plugin.py:71-146`.
 - Pruebas inspeccionadas: `services/bot-worker/tests/test_apoc_plugin.py:100-152` cubre validación, búsqueda y fuente ausente. Este análisis no ejecutó el portal; pruebas locales coordinadas en [validación](../validacion.md).
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

@@ -32,3 +32,7 @@ El catálogo declara `consultar` (`services/central-api/src/central_api/api/bots
 - Revisados: `services/bot-worker/tests/test_pago_devoluciones_errores.py` y `test_portal_pago_devoluciones.py`, incluyendo clasificación de errores y alias CUIT vacío.
 
 No se ejecutó el portal ni se usaron credenciales reales.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

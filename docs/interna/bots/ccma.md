@@ -26,3 +26,6 @@ Con movimientos, `data.movimientos` es lista de objetos con valores texto `perio
 - Esquema/plugin: `services/bot-worker/src/bot_worker/bots/ccma/schema.py:89-159`; `services/bot-worker/src/bot_worker/bots/ccma/plugin.py:159-260`.
 - Portal: `services/bot-worker/src/bot_worker/runtime/portals/ccma.py:60-69,74-103,135-206`.
 - Pruebas inspeccionadas: `services/bot-worker/tests/test_ccma_plugin.py:176-185,296-302` y `services/bot-worker/tests/test_portal_ccma.py`. Este análisis no ejecutó portal; pruebas locales coordinadas en [validación](../validacion.md).
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

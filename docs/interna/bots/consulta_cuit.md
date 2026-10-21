@@ -22,3 +22,7 @@ No produce archivos ni una respuesta parcial transformada. La configuración de 
 2. El schema del plugin incluye `operacion` como literal en las entradas, pero en V3 la operación viene de la ruta/sobre y el dispatcher la inyecta. El JSON Schema del body de central enumera por separado `cuit` y `cuits` sin expresar el requisito ligado a la ruta.
 3. El API central representa CUIT con regex de 11 dígitos, el plugin elimina separadores antes de validar. OpenAPI no comunica las formas con guiones/puntos/barras que realmente se normalizan.
 4. El endpoint responde con objeto libre remoto; no hay un contrato fiscal local fijo para el resultado.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

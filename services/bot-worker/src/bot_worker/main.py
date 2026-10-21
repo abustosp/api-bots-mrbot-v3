@@ -27,6 +27,7 @@ from bot_worker.config import PROTOCOL_VERSION, WorkerConfig, WorkerSettings, pa
 from bot_worker.schemas import BotSchemaDocument, get_schema_document
 from bot_worker.reporting.central import (
     PresignError,
+    request_logger_presign,
     request_presign,
     send_cancel_ack,
 )
@@ -55,12 +56,19 @@ from bot_worker.security.assignments import (
     verify_assignment,
 )
 from bot_worker.runtime.context import (
+    BotResult,
     ArtifactStore,
     BotRuntime,
     CancellationToken,
     DeadlineBudget,
     FiscalCredentials,
     JobCancelled,
+)
+from bot_worker.runtime import logger_script
+from bot_worker.runtime.logger_capture import (
+    EventSinkConLog,
+    LoggerCapture,
+    logger_solicitado,
 )
 from bot_worker.runtime.proxies import build_proxy_config
 from bot_worker.runtime.workdir import cleanup_workdir, new_workdir
@@ -238,6 +246,8 @@ class JobEnvelope(BaseModel):
     # Archivos de entrada (sección sellada): [{nombre, url}] con GET prefirmado.
     input_files: list[dict[str, Any]] = Field(default_factory=list)
     force: bool = False
+    # Solo modo logger: solicitud completa con credenciales ya cifradas (RSA).
+    logger_request: dict[str, Any] | None = None
 
 
 class CancelIn(BaseModel):
@@ -317,7 +327,11 @@ def validation_payload(env: JobEnvelope) -> dict[str, Any]:
     validaba contra el modelo individual) fallaba con ``ENVELOPE_INVALID``.
     El verbo admisionado del sobre manda sobre cualquier valor del cuerpo.
     """
-    return {**env.payload, "operacion": env.operation}
+    # ``logger`` (modo depuración) lo consume el worker; el plugin no lo ve.
+    return {
+        **{k: v for k, v in env.payload.items() if k not in ("logger", "logger_script")},
+        "operacion": env.operation,
+    }
 
 
 def envelope_errors(env: JobEnvelope) -> list[str]:
@@ -1206,6 +1220,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
         cancellation = CancellationToken()
         _cancel_tokens[job.key] = cancellation
         workdir = None
+        captura: LoggerCapture | None = None
         credentials: FiscalCredentials | None = None
         outcome = "fallido"
         renovacion_lease: asyncio.Task[None] | None = None
@@ -1309,6 +1324,23 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
             base_plugin = get_plugin_para_payload(env.plugin or env.bot, env.payload)
             assert base_plugin is not None  # validado en admision
             manifiesto = getattr(base_plugin, "manifest", None)
+            if logger_solicitado(env.payload):
+                try:
+                    captura = LoggerCapture(
+                        workdir.parent / f"{workdir.name}-logger",
+                        job.job_id, env.bot or env.plugin, env.operation,
+                        secrets,
+                    )
+                    captura.activar_log()
+                    captura.guardar_solicitud(env.logger_request, env.payload)
+                except OSError:
+                    log.warning("modo logger sin carpeta de evidencia; se ignora")
+                    captura = None
+            sink = _HttpEventSink(
+                client, settings.central_url, job.job_id,
+                attempt=job.attempt, worker_node=central_node,
+                service_token=service_token,
+            )
             runtime = BotRuntime(
                 job_id=job.job_id,
                 work_dir=workdir,
@@ -1325,10 +1357,8 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                     http_client=client,
                     declarados=declarados,
                 ),
-                event_sink=_HttpEventSink(
-                    client, settings.central_url, job.job_id,
-                    attempt=job.attempt, worker_node=central_node,
-                    service_token=service_token,
+                event_sink=(
+                    EventSinkConLog(sink, captura) if captura is not None else sink
                 ),
                 browser_factory=build_browser_factory(
                     proxy_cfg,
@@ -1336,6 +1366,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                     stealth=bool(getattr(manifiesto, "stealth", False)),
                     canal=str(getattr(manifiesto, "canal_navegador", "") or ""),
                     pantalla_virtual=bool(getattr(manifiesto, "pantalla_virtual", False)),
+                    capture=captura,
                 ),
                 cancellation=cancellation,
             )
@@ -1379,10 +1410,29 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                         )
                     env.payload = nuevo_payload
                 validated = await plugin.validate(validation_payload(env))
-                result = await asyncio.wait_for(
-                    plugin.execute(validated, runtime),  # type: ignore[arg-type]
-                    timeout=max(1.0, timeout),
-                )
+                bot_logger = env.bot or env.plugin
+                if (
+                    captura is not None
+                    and logger_script.script_solicitado(env.payload)
+                    and bot_logger in logger_script.SCRIPTS
+                    and credentials is not None
+                ):
+                    # Versión ``_logger`` del bot (ver runtime/logger_script.py): el plugin
+                    # normal no se ejecuta; corre el script de referencia de bots_dev.
+                    rc, cola = await logger_script.ejecutar(
+                        bot_logger, validation_payload(env), credentials.cuit_representante,
+                        credentials.clave, str(captcha_profile.get("arca_key") or ""),
+                        captura.root, max(1.0, timeout),
+                    )
+                    result = BotResult(
+                        result="OK" if rc == 0 else "ERROR",
+                        data={"logger_script": bot_logger, "rc": rc},
+                    )
+                else:
+                    result = await asyncio.wait_for(
+                        plugin.execute(validated, runtime),  # type: ignore[arg-type]
+                        timeout=max(1.0, timeout),
+                    )
                 category: str | None = None
                 bot_result = {
                     "result": result.result,
@@ -1461,6 +1511,12 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 outcome = "cancelado"
                 bot_result = {"result": "ERROR", "data": {}}
 
+            if captura is not None:
+                await _subir_logger(
+                    app, env, job, captura, workdir, outcome, category, central_node,
+                    bot_result,
+                )
+
             # Cuerpo que espera la central (ResultBody): resultado terminal
             # ("OK" completa, otro valor falla), datos, error y el intento
             # que la central usa para aplicar y deducir idempotencia.
@@ -1527,12 +1583,56 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                 with suppress(asyncio.CancelledError, Exception):
                     await renovacion_lease
             _cancel_tokens.pop(job.key, None)
+            if captura is not None:
+                captura.borrar_rastros(captura.root.parent / f"{job.job_id}.tar.gz")
             cleanup_workdir(workdir)
             credentials = None
             job.local_state = (
                 "CANCELADO" if outcome == "cancelado" else "TERMINADO"
             )
             supervisor.release(job, outcome)
+
+
+async def _subir_logger(
+    app: FastAPI, env: JobEnvelope, job: LocalJob, captura: LoggerCapture,
+    workdir: Any, outcome: str, category: str | None, central_node: str,
+    bot_result: dict[str, Any] | None = None,
+) -> None:
+    """Comprime y sube la evidencia del modo logger; borra todos los rastros.
+
+    Jamás altera el resultado. Va antes de reportar: el presign exige la
+    asignación viva. Haya o no subida, la evidencia local se elimina.
+    """
+    settings: WorkerConfig = app.state.settings
+    client = getattr(app.state, "http", None)
+    tar_gz = None
+    try:
+        captura.nota("fin outcome=%s categoria=%s", outcome, category)
+        captura.cerrar_log()
+        captura.copiar_artefactos(workdir)
+        if bot_result:
+            captura.guardar_resultado(bot_result)
+        captura.redactar()
+        captura.escribir_manifest({"outcome": outcome, "error_category": category})
+        tar_gz = captura.comprimir()
+        if client is None:
+            return
+
+        async def presign(path: str, content_type: str, size: int) -> dict[str, Any]:
+            return await request_logger_presign(
+                client, settings.central_url, job_id=job.job_id, path=path,
+                content_type=content_type, size_bytes=size, worker_node=central_node,
+                timeout_seconds=max(15.0, settings.callback_timeout_seconds),
+                service_token=getattr(app.state, "service_token", ""),
+                sealed_privkey=getattr(app.state, "sealed_privkey", None),
+            )
+
+        subido = await captura.subir(client, presign, tar_gz)
+        log.info("logger job=%s tar.gz subido=%s", job.job_id, subido)
+    except Exception:  # noqa: BLE001 - depuración best-effort
+        log.warning("logger: no se pudo subir la evidencia", exc_info=True)
+    finally:
+        captura.borrar_rastros(tar_gz)
 
 
 async def _drenar_al_apagar(

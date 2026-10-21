@@ -187,6 +187,35 @@ def artifact_upload_slots(job: Job) -> list[dict]:
     return slots
 
 
+def _logger_request(job: Job) -> dict:
+    """Solicitud completa para el modo logger (``request.json`` del bucket).
+
+    Las credenciales viajan solo cifradas con la clave pública de la central:
+    el CUIT de login no es secreto; todo otro campo se cifra o se omite, nunca
+    se entrega en claro.
+    """
+    from central_api.security.rsa_credentials import encrypt_configured_credential
+
+    credenciales: dict = {}
+    for nombre, valor in (job.credentials or {}).items():
+        if nombre.startswith("cuit"):
+            credenciales[nombre] = valor
+            continue
+        try:
+            credenciales[nombre] = encrypt_configured_credential(str(valor))
+        except Exception:  # noqa: BLE001 - sin clave pública no se filtra el valor
+            credenciales[nombre] = "<no_cifrado>"
+    return {
+        "job_id": job.id,
+        "bot": job.bot,
+        "operation": job.operation,
+        "attempt": job.assignment_attempt,
+        "payload": dict(job.payload or {}),
+        "credentials_encrypted_rsa_oaep": credenciales,
+        "credential_metadata": dict(job.credential_metadata or {}),
+    }
+
+
 def build_envelope(
     job: Job,
     worker: WorkerEntry,
@@ -250,6 +279,8 @@ def build_envelope(
         "assignment_expires_at": expires_at,
         "assignment_signature": "",
     }
+    if isinstance(job.payload, dict) and job.payload.get("logger") is True:
+        envelope["logger_request"] = _logger_request(job)
     if worker.sealed_pubkey_pem:
         envelope["sealed_section"] = encrypt_sealed_section(
             worker.sealed_pubkey_pem, sensitive

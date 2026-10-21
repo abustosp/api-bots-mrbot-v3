@@ -188,6 +188,7 @@ def test_admin_fleet_expone_latest_y_cuenta_workers_desactualizados(admin_fleet,
     assert cuerpo["resumen"]["versiones"] == {
         "latest_version": "3.10.0",
         "latest_digest": "sha256:bbb",
+        "origen": "flota",
         "total": 4,
         "outdated": 3,
         "unknown": 1,

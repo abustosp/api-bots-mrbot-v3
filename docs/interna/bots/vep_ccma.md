@@ -43,3 +43,7 @@ La familia pública `services/central-api/src/central_api/api/bot_payloads.py:30
 - `services/central-api/src/central_api/api/bot_payloads.py:304-310,434-438,510`
 - `services/bot-worker/tests/test_portal_vep_ccma.py:58-76,123-204,207-216`
 - `services/bot-worker/tests/test_vep_ccma_plugin.py`
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

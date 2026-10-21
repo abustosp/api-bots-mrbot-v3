@@ -1,6 +1,6 @@
-# retper_iibb_misiones_capmonster / samples
+# retper_iibb_misiones / samples
 
-Carpeta para el Excel de entrada del bot **retper_iibb_misiones_capmonster**.
+Carpeta para el Excel de entrada del bot **retper_iibb_misiones**.
 
 Los archivos reales contienen CUITs y datos fiscales, por lo que
 **no se commitean**: este directorio se preserva vía `.gitignore`

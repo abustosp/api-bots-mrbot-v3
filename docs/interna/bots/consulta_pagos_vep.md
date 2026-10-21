@@ -24,3 +24,7 @@ Salida: resumen con CUIT/período/filas/nombre; hash/tamaño ligados al archivo 
 4. `bool(valor)` en aliases de upload considera la cadena no vacía `"false"` como verdadera (`services/bot-worker/src/bot_worker/bots/consulta_pagos_vep/schema.py:84-92`).
 5. El nombre técnico de portal y el nombre de servicio ARCA corresponden a un servicio de consulta, no a una operación de generación/pago de VEP. No hay efecto irreversible observado.
 6. `proxy_request` se elimina del payload; la entrada pública V3 tampoco lo expone.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

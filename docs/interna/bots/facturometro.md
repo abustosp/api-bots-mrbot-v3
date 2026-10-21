@@ -24,3 +24,7 @@ Con el estado superior `result=OK`, `data` devuelve `operacion`, `representado_c
 2. El esquema descriptivo del catálogo central marca `representado_cuit` requerido y no lista `incluir_captura` (`services/central-api/src/central_api/api/bot_payloads.py:172`), mientras el esquema efectivo permite omitir el CUIT y habilita la captura por default (`services/bot-worker/src/bot_worker/bots/facturometro/schema.py:20-47,58-72`). La ruta genérica no valida contra el DTO del catálogo, así que esto es una discrepancia de descripción pública, no un rechazo canónico previo.
 3. El campo de resultado `data.screenshot_url` recibe un `object_key` (`services/bot-worker/src/bot_worker/bots/facturometro/plugin.py:198-220`), no URL.
 4. El manifest declara que se requieren credenciales fiscales (`services/bot-worker/src/bot_worker/bots/facturometro/plugin.py:70-96`), aunque el encabezado del esquema lo describe como solo lectura y el catálogo no enumera credenciales como propiedades de la familia (`services/central-api/src/central_api/api/bot_payloads.py:172`).
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

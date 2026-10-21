@@ -31,3 +31,7 @@ Las fechas se parsean/serializan a formato uniforme. `subir_archivos: null` y cu
 - `services/central-api/src/central_api/security/credentials.py:L44-L45`, `L227-L275`
 - `services/central-api/src/central_api/api/bot_payloads.py:L195-L203`, `L556-L573`
 - Revisados: `services/bot-worker/tests/test_liquidacion_granos_plugin.py` y contrato público. No se ejecutó el portal.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

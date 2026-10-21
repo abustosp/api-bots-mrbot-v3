@@ -290,6 +290,13 @@ async def save_vep_pdf_logger(
         extension=".pdf",
     )
     try:
+        # La impresión es de la página en vivo: se espera a que la grilla muestre su
+        # encabezado para que el PDF no dependa del momento del render.
+        try:
+            await page.get_by_text("Nro. de VEP").first.wait_for(state="visible", timeout=8000)
+            await page.wait_for_timeout(500)
+        except Exception:
+            pass
         await page.emulate_media(media="screen")
         await page.pdf(path=str(pdf_path), format="A4", print_background=True)
         debug.log(f"Guardado VEP PDF (print): {pdf_path}")
