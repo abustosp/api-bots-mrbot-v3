@@ -110,6 +110,55 @@ async def request_presign(
     return data
 
 
+async def request_logger_presign(
+    client: Any,
+    base_url: str,
+    *,
+    job_id: str,
+    path: str,
+    content_type: str,
+    size_bytes: int,
+    worker_node: str = "",
+    timeout_seconds: float = 3.0,
+    service_token: str = "",
+    sealed_privkey: bytes | None = None,
+) -> dict[str, Any]:
+    """URL prefirmada al bucket ``logger`` (``{job_id}/{path}``), modo logger."""
+    url = f"{base_url.rstrip('/')}/internal/v1/jobs/{job_id}/logger/presign"
+    try:
+        resp = await client.post(
+            url,
+            json={"path": path, "content_type": content_type, "size_bytes": size_bytes},
+            headers=_headers(worker_node, service_token),
+            timeout=timeout_seconds,
+        )
+    except Exception as exc:
+        raise PresignError("presign logger sin respuesta") from exc
+    if resp.status_code >= 400:
+        raise PresignError(f"presign logger rechazado: HTTP {resp.status_code}")
+    try:
+        data = resp.json()
+    except Exception as exc:
+        raise PresignError("presign logger con respuesta ilegible") from exc
+    if isinstance(data, dict) and data.get("sealed") and isinstance(
+        data.get("sealed_section"), dict
+    ):
+        if sealed_privkey is None:
+            raise PresignError("presign logger sellado sin clave")
+        from bot_worker.runtime.sealed import (
+            SealedEnvelopeError,
+            decrypt_sealed_section,
+        )
+
+        try:
+            data = decrypt_sealed_section(sealed_privkey, data["sealed_section"])
+        except SealedEnvelopeError as exc:
+            raise PresignError("presign logger sellado inválido") from exc
+    if not isinstance(data, dict) or not data.get("upload_url"):
+        raise PresignError("presign logger sin upload_url")
+    return data
+
+
 async def send_cancel_ack(
     client: Any,
     base_url: str,
@@ -152,4 +201,4 @@ async def send_cancel_ack(
         return False
 
 
-__all__ = ["PresignError", "request_presign", "send_cancel_ack"]
+__all__ = ["PresignError", "request_logger_presign", "request_presign", "send_cancel_ack"]

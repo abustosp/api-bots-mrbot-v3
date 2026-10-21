@@ -252,8 +252,11 @@ class PlaywrightBrowserFactory:
         stealth: bool = False,
         canal: str = "",
         pantalla_virtual: bool = False,
+        capture: Any = None,
     ) -> None:
         self._proxy = proxy
+        # ``LoggerCapture`` del modo logger (None = ejecución normal).
+        self._capture = capture
         # Headless por defecto para todos los bots; la variante ``_xvfb`` es la
         # única que pide explícitamente una pantalla virtual.
         self._headless = True if headless else True
@@ -313,9 +316,15 @@ class PlaywrightBrowserFactory:
                 contexto: dict[str, Any] = {"accept_downloads": True}
                 if self._stealth:
                     contexto.update(STEALTH_CONTEXT_DEFAULTS)
+                if self._capture is not None:
+                    # HAR completo desde la creación del contexto (se escribe al cerrarlo).
+                    contexto["record_har_path"] = self._capture.nueva_ruta_har()
+                    contexto["record_har_content"] = "embed"
                 context = await browser.new_context(**contexto)
                 if self._stealth:
                     await context.add_init_script(STEALTH_INIT_SCRIPT)
+                if self._capture is not None:
+                    self._capture.adjuntar(context)
             except Exception as exc:
                 raise BrowserCrashedError(
                     "no se pudo crear el contexto"
@@ -323,6 +332,8 @@ class PlaywrightBrowserFactory:
             yield browser, context
         finally:
             self.active_sessions = max(0, self.active_sessions - 1)
+            if context is not None and self._capture is not None:
+                await self._capture.antes_de_cerrar(context)
             if context is not None:
                 try:
                     await context.close()
@@ -514,6 +525,7 @@ def build_browser_factory(
     stealth: bool = False,
     canal: str = "",
     pantalla_virtual: bool = False,
+    capture: Any = None,
 ) -> Any:
     """Devuelve la fábrica real si hay Playwright, o el stub dev.
 
@@ -529,6 +541,7 @@ def build_browser_factory(
             stealth=stealth,
             canal=canal,
             pantalla_virtual=pantalla_virtual,
+            capture=capture,
         )
     log.warning(
         "sin playwright instalado: fábrica stub solo para desarrollo, "
