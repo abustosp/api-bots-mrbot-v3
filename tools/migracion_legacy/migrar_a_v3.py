@@ -359,11 +359,15 @@ def build_job(src: str, table: str, bot: str, op: str, row: dict, info: dict, ui
 
 
 # ------------------------------------------------------------------ central
+#: El dump lleva las credenciales cifradas Y en claro (depuración); ``--sin-claves-en-claro`` lo evita.
+DUMP_FLAGS = "--sin-claves-en-claro" if "--sin-claves-en-claro" in sys.argv else ""
+
+
 def dump_central(out: Path) -> None:
     log(f"volcando central -> {out.name}")
     tmp = "/tmp/central-dump.db"
     with open(LOADER, "rb") as fh:
-        ssh(f"docker exec -i {CENTRAL_CTR} python - dump {tmp}", stdin=fh)
+        ssh(f"docker exec -i {CENTRAL_CTR} python - dump {tmp} {DUMP_FLAGS}", stdin=fh)
     with open(out, "wb") as fh:
         ssh(f"docker exec {CENTRAL_CTR} cat {tmp}", stdout=fh)
     ssh(f"docker exec {CENTRAL_CTR} rm -f {tmp}")
@@ -453,6 +457,7 @@ def main() -> int:
     p.add_argument("--dbs-dir", type=Path, default=DEFAULT_DBS)
     p.add_argument("--out", type=Path, help="destino de dump-central")
     p.add_argument("--send-emails", action="store_true", help="enviar las claves nuevas por mail (apply/all)")
+    p.add_argument("--sin-claves-en-claro", action="store_true", help="dump-central: no agrega credential_plaintext/api_key_plaintext")
     p.add_argument("--yes", action="store_true", help="confirma operaciones sobre la central real")
     a = p.parse_args()
     d: Path = a.dbs_dir

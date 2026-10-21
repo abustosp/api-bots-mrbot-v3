@@ -6,8 +6,12 @@ custodia y el SMTP, y porque es el unico proceso con acceso a PostgreSQL.
 
 Modos (primer argumento):
 
-* ``dump <salida.db>``       vuelca todas las tablas de ``public`` y
-                             ``legacy.user_id_map`` a un SQLite.
+* ``dump <salida.db> [--sin-claves-en-claro]``
+                             vuelca todas las tablas COMPLETAS de ``public`` y
+                             ``legacy.user_id_map`` a un SQLite, con las
+                             credenciales cifradas tal cual y, para depurar,
+                             su texto plano (``credential_plaintext`` en jobs,
+                             ``api_key_plaintext`` en api_keys).
 * ``load <staging.db> <reporte.json> [--send-emails] [--dry-run]``
                              aplica ``bkp_local_v3.db`` a PostgreSQL en UNA
                              transaccion (todo o nada).
@@ -69,7 +73,33 @@ def _sqlite_value(value):
     return str(value)
 
 
-def do_dump(out_path: str) -> None:
+def _descifrador(columna: str):
+    """(``nueva_columna``, función) que agrega el texto plano de una columna cifrada.
+
+    Solo para depuración: el dump lleva el ciphertext original Y su texto plano.
+    Un valor que no descifra queda en NULL (nunca corta el volcado).
+    """
+    if columna == "credential_ciphertext":
+        from central_api.security.rsa_credentials import decrypt_configured_credential
+
+        return "credential_plaintext", decrypt_configured_credential
+    if columna == "encrypted_value":
+        from central_api.security.api_key_vault import decrypt_api_key
+
+        return "api_key_plaintext", decrypt_api_key
+    return None
+
+
+def _seguro(funcion, valor):
+    if valor in (None, ""):
+        return None
+    try:
+        return funcion(str(valor))
+    except Exception:  # noqa: BLE001 - clave rotada o dato legado: queda NULL
+        return None
+
+
+def do_dump(out_path: str, en_claro: bool = True) -> None:
     if os.path.exists(out_path):
         os.remove(out_path)
     out = sqlite3.connect(out_path)
@@ -92,8 +122,16 @@ def do_dump(out_path: str) -> None:
             ).fetchall()
             nombre = tabla if schema == "public" else f"{schema}_{tabla}"
             ddl = ", ".join(f'"{c}" {_SQLITE_TYPES.get(t, "TEXT")}' for c, t in cols)
+            # (posición de la columna cifrada, función) por cada plano a agregar.
+            planos = []
+            if en_claro:
+                for i, (c, _t) in enumerate(cols):
+                    d = _descifrador(c)
+                    if d:
+                        ddl += f', "{d[0]}" TEXT'
+                        planos.append((i, d[1]))
             out.execute(f'CREATE TABLE "{nombre}" ({ddl})')
-            qs = ",".join("?" * len(cols))
+            qs = ",".join("?" * (len(cols) + len(planos)))
             n = 0
             with pg.cursor(name=f"dump_{nombre}"[:60]) as cur:
                 cur.itersize = 2000
@@ -104,7 +142,11 @@ def do_dump(out_path: str) -> None:
                         break
                     out.executemany(
                         f'INSERT INTO "{nombre}" VALUES ({qs})',
-                        [[_sqlite_value(v) for v in f] for f in filas],
+                        [
+                            [_sqlite_value(v) for v in f]
+                            + [_seguro(fn, f[i]) for i, fn in planos]
+                            for f in filas
+                        ],
                     )
                     n += len(filas)
             summary[nombre] = n
@@ -342,7 +384,7 @@ def do_load(staging: str, report_path: str, send_emails: bool, dry_run: bool) ->
 def main() -> int:
     modo = sys.argv[1] if len(sys.argv) > 1 else ""
     if modo == "dump":
-        do_dump(sys.argv[2])
+        do_dump(sys.argv[2], en_claro="--sin-claves-en-claro" not in sys.argv)
         return 0
     if modo == "load":
         return do_load(
