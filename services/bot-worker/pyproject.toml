@@ -14,7 +14,7 @@ dependencies = [
   "httpx>=0.27",
   "cryptography>=41",
   "pdfplumber==0.11.4",
-  # Scripts _logger de bots_logger/ (declaracion_en_linea parsea HTML).
+  # Scripts _logger de bots_dev/ (declaracion_en_linea parsea HTML).
   "beautifulsoup4>=4.12",
   "python-dotenv>=1.0",
 ]

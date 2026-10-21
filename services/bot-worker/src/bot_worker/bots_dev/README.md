@@ -55,3 +55,13 @@ con efectos externos permanecen fuera del registro productivo V3 hasta migrar,
 probar sus fallos/efectos y completar una aceptación autorizada. Las carpetas
 `arca_login`, `bot_builder`, `proxy_login_tester`, `shared` y `tests` se
 clasifican aparte como herramientas/infraestructura, no plugins productivos.
+
+## Scripts `_logger` dentro de cada bot
+
+Para siete bots (`ccma`, `siper`, `facturometro`, `libro_sueldos_digital`,
+`declaracion_en_linea`, `mis_retenciones` y `retper_iibb_agip`) la carpeta del bot guarda,
+junto a `NOTA.md` y `payload_ejemplo.json`, una copia **sin modificar** del script
+`*_bot_logger.py` de la raíz `bots_dev/`, y `shared/` guarda la copia de `bots_dev/shared/`.
+Son los que ejecuta la variante `_logger` del worker (`runtime/logger_script.py`, con
+`PYTHONPATH` apuntando a esta carpeta). La raíz `bots_dev/` es la fuente: las copias se
+regeneran con `tools/sync_bots_dev_loggers.py` y un test falla si se desvían.

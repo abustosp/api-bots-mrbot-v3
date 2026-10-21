@@ -3,7 +3,7 @@
 Es el comportamiento por defecto de ``logger: true`` en los bots listados en ``SCRIPTS``
 (``logger_script: false`` fuerza el plugin real instrumentado; ambas claves son ocultas y
 solo se aceptan booleanos). En ese caso el plugin normal NO se ejecuta: corre el script
-``bots_logger/<bot>/*_logger.py`` (copia sin cambios del de ``bots_dev``) como
+``bots_dev/<bot>/*_logger.py`` (copia sin cambios del de la raíz ``bots_dev``) como
 subproceso, con las credenciales y parámetros del job mapeados a las variables de
 entorno que ese script lee. Su carpeta ``temp/{bot}_{ts}/`` (logs, screenshots, html,
 har, descargas) se vuelca a la evidencia del tar.gz. Sirve para conciliar el
@@ -19,14 +19,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-#: bot -> script relativo a ``bots_logger/``
+#: bot -> script relativo a ``bot_worker/bots_dev/`` (junto a NOTA.md y payload_ejemplo.json)
 SCRIPTS: dict[str, str] = {
     "ccma": "ccma/ccma_bot_logger.py",
     "siper": "siper/siper_bot_logger.py",
     "facturometro": "facturometro/facturometro_bot_logger.py",
     "libro_sueldos_digital": "libro_sueldos_digital/libro_sueldos_digital_bot_logger.py",
     "declaracion_en_linea": "declaracion_en_linea/declaracion_en_linea_bot_logger.py",
-    "retper_iibb_agip": "agip/agip_bot_logger.py",
+    "retper_iibb_agip": "retper_iibb_agip/agip_bot_logger.py",
     "mis_retenciones": "mis_retenciones/mis_retenciones_bot_logger.py",
 }
 
@@ -36,7 +36,7 @@ REINTENTOS_BLOQUEO: dict[str, tuple[int, ...]] = {"retper_iibb_agip": (0, 60, 12
 #: bots cuyo script necesita navegador con interfaz sobre pantalla virtual.
 PANTALLA_VIRTUAL = {"retper_iibb_agip"}
 
-CARPETA = Path(__file__).resolve().parent.parent / "bots_logger"
+CARPETA = Path(__file__).resolve().parent.parent / "bots_dev"
 
 
 def script_solicitado(payload: dict[str, Any]) -> bool:
