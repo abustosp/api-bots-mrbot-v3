@@ -54,3 +54,6 @@ El wrapper central permite `credentials` como objeto genérico, acepta varios no
 - `services/central-api/src/central_api/security/credentials.py:288-370`
 - `services/bot-worker/src/bot_worker/bots/_plugins.py:90-100`
 - `services/bot-worker/tests/test_ccma_compensacion_plugin.py:116-278`
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

@@ -119,3 +119,41 @@ Fuentes: `reporting/results.py:16-78`; `main.py:1504-1535`; `scheduler/superviso
 7. Ejecutar suites por paquete para evitar la colisión actual de nombres de módulos de test.
 
 Las fichas individuales están en [el índice interno](README.md).
+
+## Modo logger
+
+Si `payload.logger is True` (ver `api.md` §10) el worker arma una `LoggerCapture` (`runtime/logger_capture.py`) en `{work_dir}/{job}/{intento}-logger/` y la inyecta en la fábrica de navegador:
+
+- **HAR**: `record_har_path` + `record_har_content="embed"` desde la creación de cada contexto (`har/{bot}_{n}.har`, se escribe al cerrar el contexto).
+- **Capturas y HTML**: un par numerado por evento `load` de cada página y uno `final` por página abierta antes de cerrar (`screenshots/001_<paso>_<ruta>.png`, `html/001_...html`).
+- **Descargas**: cada `download` de Playwright se guarda con `save_as` en `descargas/`; además se copia todo lo que el bot dejó en su workdir a `descargas/workdir/`.
+- **Log completo**: `logs/{bot}.log` con todo log del worker emitido desde el job (filtrado por `ContextVar`), eventos de progreso, navegaciones, errores de consola/página, requests fallidos y respuestas HTTP >= 400 (URLs sin query).
+- **Pasos de negocio**: además de la captura por carga de página, se captura tras cada evento de progreso del plugin, tras cada acción visible (`click`, `goto`, `select_option`, `check`; tope 200, ≥1,2 s entre capturas) y cuando el DOM cambia sin navegar (vigía cada 1,5 s, tope 150). Equivale a los `debug.capture` por paso de los loggers de `bots_dev`, sin tocar el código del bot.
+- **Narración**: cada acción de Playwright (`goto`, `click`, `fill`, `press`, `select_option`...) y cada documento cargado se anota en el log; los valores de `fill`/`type`/`press` se omiten. Los INFO de los plugins quedan en el tar mientras dura el job. Las trazas son un envoltorio inerte fuera de un job logger: no alteran argumentos, resultados ni excepciones.
+- **Resultado del bot**: `descargas/resultado_bot.json` guarda los datos que devolvió el plugin (equivale a los `*_data.json` de `bots_dev`); no cambia la salida normal.
+- **Material criptográfico**: los archivos de entrada con extensión `.pem`, `.key`, `.pfx`, `.p12`, `.crt`, `.cer` o `.csr` (p. ej. los PEM de controladores fiscales) nunca se copian al tar; queda una nota en el log.
+- **Redacción**: antes de subir se reemplazan por `***` la clave fiscal y las claves de proxy/captcha del job (también en variantes JSON y URL-encoded) en logs, HTML y HAR. Las capturas no se pueden redactar.
+- **Ciclo de vida**: nada de esto persiste. Los archivos viven en una carpeta temporal solo mientras corre el bot; al terminar se redactan, se comprimen en un único `{job_id}.tar.gz` (raíz `{job_id}/` con `logs/`, `screenshots/`, `html/`, `har/`, `descargas/`, `request.json` y `manifest.json`), se sube y se borran carpeta y tar (incluso si la subida falla). Las notas de captura no pasan por el log del worker.
+- **request.json**: toda la solicitud usada (payload, operación, intento). La central cifra las claves con su clave pública RSA al armar el sobre (campo `logger_request`); el worker nunca escribe una clave en claro.
+- **Subida**: antes de reportar el resultado (el presign exige asignación viva) a `logger/{job_id}.tar.gz`, con 4 intentos, timeout propio de 300 s y tope de 1 GiB. Un fallo de captura o subida nunca cambia el resultado del job.
+
+### Versión `_logger` del bot (`logger_script`)
+
+Para los bots donde el plugin y el script de referencia de `bots_dev` producen distinta salida (`ccma`, `siper`, `facturometro`, `libro_sueldos_digital`, `declaracion_en_linea`, `mis_retenciones`, `retper_iibb_agip`) existe una variante que es el comportamiento por defecto de `logger: true` en esos bots; `logger_script: false` (booleano explícito, tampoco figura en OpenAPI) fuerza el plugin real instrumentado. Con la variante el plugin normal no se ejecuta: el worker corre como subproceso la copia sin cambios del script `*_logger.py` guardada en `bot_worker/bots_logger/` (con `PYTHONPATH` a esa carpeta y las credenciales y parámetros del job mapeados a las variables de entorno del script, `runtime/logger_script.py`) y vuelca su carpeta `temp/{bot}_{ts}/` (logs, screenshots, html, har, descargas) al tar.gz. Sirve para conciliar el comportamiento del plugin contra el del script de referencia. Los demás bots, sin variante, ejecutan siempre el plugin real con instrumentación.
+
+Notas: AGIP solo deja entrar con navegador completo sobre display virtual y bloquea la portada por ventanas; la variante usa el Xvfb del worker (`AGIP_HEADLESS=False`) y reintenta con espera creciente (0, 60, 120, 180, 240 s), igual que el plugin. Los scripts de `mis_retenciones` y `agip` se actualizaron frente al portal actual (ids de fecha, formato `.xls` y descarga desde la tabla de exportaciones). La imagen del worker necesita `beautifulsoup4` (lo usa el script de `declaracion_en_linea`; ya figura en `pyproject.toml`); las carpetas de `bots_logger/` deben mantenerse sincronizadas con `bots_dev`.
+
+### Criterio de conciliación logger de la API ↔ logger local
+
+Acordado el 2026-10-21, porque contra portales en vivo ni dos corridas del mismo script local coinciden al byte (los PDF y XLSX embeben fecha y hora, el portal cambia de estado y los errores de captura varían):
+
+1. **Igualdad exacta de conjuntos:** mismos pasos capturados (nombres de captura), mismos archivos descargados (por nombre normalizado) y mismos hosts propios en el HAR.
+2. **Contenido de archivos:** idéntico, o con tolerancia medida: PNG del mismo tamaño con hasta 5 % de píxeles distintos, PDF con hasta 2 % de diferencia de tamaño, CSV por columnas comunes ignorando `timestamp`.
+3. **Se excluyen:** hosts de terceros del HAR (Google, DoubleClick, YouTube; dominio de Google según geolocalización), conteo exacto de entradas HAR y líneas de log de errores de captura (`Page.screenshot: Protocol error`).
+
+Último resultado (24 bots con datos reales): pasos y archivos iguales en todos los bots con variante `_logger`, que son los que se compararon contra el logger local. Los bots sin variante comparan el plugin real instrumentado frente al script; allí las diferencias de salida son de diseño del plugin.
+
+**Ruido conocido (no atribuible al logger):**
+
+- **PDF y XLSX:** se comparan por contenido (texto del PDF y celdas del XLSX con fechas y horas normalizadas), no por tamaño ni por hash. Se normaliza además el contador de build del pie del portal ("V 2026.6.5-…:154"), que cambia en cada render.
+- **Scripts de referencia:** `mis_retenciones` espera ahora la fila nueva de la tabla de exportaciones antes de bajar el archivo (antes podía bajar la exportación anterior), y `declaracion_en_linea` espera el encabezado de la grilla antes de imprimir el VEP. Las copias de `bots_logger/` están sincronizadas con `bots_dev`.

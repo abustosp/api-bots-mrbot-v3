@@ -24,3 +24,6 @@ CUIT elimina separadores comunes y exige once dígitos, sin checksum (`services/
 - Esquema/plugin: `services/bot-worker/src/bot_worker/bots/certificado_mipyme/schema.py:18-98`; `services/bot-worker/src/bot_worker/bots/certificado_mipyme/plugin.py:93-216`.
 - Adaptador: `services/bot-worker/src/bot_worker/runtime/portals/certificado_mipyme.py:17-110`.
 - Pruebas inspeccionadas: `services/bot-worker/tests/test_certificado_mipyme_plugin.py:194-202` y `services/bot-worker/tests/test_portal_certificado_mipyme.py`. Este análisis no ejecutó portal; pruebas locales coordinadas en [validación](../validacion.md).
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

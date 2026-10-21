@@ -25,3 +25,7 @@ La presentación es efecto externo no reversible por la API. En lotes, cada arch
 2. `bool()` en aliases de subida admite strings numéricos/textuales con semántica accidental; en la ruta canónica `subir_constancia:null` también se convierte a false, mientras `incluir_json:null` se rechaza. El alias plano aplica su propio DTO y limpieza de nulls.
 3. La referencia de carga es un `object_key`, pero el plugin valida la extensión del nombre resuelto; el nombre original/cargado debe conservar `.pem` o `.zip`, no basta una clave arbitraria con extensión.
 4. `incluir_json` controla detalle, no presentación. El nombre `subir_constancia` puede interpretarse como habilitación de la acción cuando solo gobierna la publicación de resultado.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

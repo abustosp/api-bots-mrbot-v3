@@ -24,3 +24,7 @@ Retorna rango, CUIT, número de períodos con DDJJ y `periodos_sin_ddjj`. `detal
 3. El descriptor del catálogo no representa que el esquema efectivo acepta períodos invertidos y los intercambia (`services/bot-worker/src/bot_worker/bots/declaracion_en_linea/schema.py:72-93`). La ruta genérica no aplica ese DTO descriptivo antes de validar.
 4. La relación entre `incluir_json` y `subir_archivos` (al menos uno true) no está expresada por el esquema OpenAPI del catálogo, que lista ambos booleanos independientes (`services/central-api/src/central_api/api/bot_payloads.py:165-171`).
 5. Algunos alias upload existen en schema, pero OpenAPI central solo describe `subir_archivos`; los aliases son útiles en compatibilidad, no como campos canónicos V3.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

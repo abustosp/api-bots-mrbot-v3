@@ -24,3 +24,6 @@ CUIT elimina separadores comunes, requiere once dígitos y no calcula checksum (
 - Alias flat y credenciales: `services/central-api/src/central_api/api/bot_routes.py:418-527,663-690`; `services/central-api/src/central_api/security/credentials.py:303-370`.
 - Schema/plugin: `services/bot-worker/src/bot_worker/bots/aportes_en_linea/schema.py:32-120`; `services/bot-worker/src/bot_worker/bots/aportes_en_linea/plugin.py:90-220`.
 - Pruebas inspeccionadas: `services/bot-worker/tests/test_aportes_en_linea_plugin.py:223-244,287-311,326-341`. Este análisis no ejecutó el portal; pruebas locales coordinadas en [validación](../validacion.md).
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

@@ -31,3 +31,7 @@ Se consultan tres categorías de operación y dos alternativas de formato (`iva_
 - `services/central-api/src/central_api/api/bot_compat.py:L75-L79`
 - `services/central-api/src/central_api/api/bot_payloads.py:L229-L235`
 - Revisados: `services/bot-worker/tests/test_portal_mis_retenciones_iva_simple.py` y contrato de entrada. Prueban regla de fechas, modo y fallback de formato. No se abrió el portal real.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

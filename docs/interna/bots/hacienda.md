@@ -24,3 +24,7 @@ El estado superior es `result` (`OK`/`PARCIAL`/`ERROR`); `data` contiene CUIT, d
 3. El esquema efectivo valida la regla cruzada de al menos una consulta y una salida, pero el catálogo describe booleanos independientes sin `anyOf`/validador (`services/bot-worker/src/bot_worker/bots/hacienda/schema.py:30-167`, `services/central-api/src/central_api/api/bot_payloads.py:173-180`). La solicitud puede encolarse y fallar después al validarse para ejecución.
 4. `eliminar_descargas`, `proxy_request`, `headless` aparecen en esquema sin efecto del cliente.
 5. Aunque llamada `descargar_pdf` desactive archivos PDF, la consulta de filas sigue siendo lectura y la planilla se crea localmente incluso si no se publica.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

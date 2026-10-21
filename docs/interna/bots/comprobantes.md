@@ -28,3 +28,7 @@ Credenciales centrales aceptadas: `clave`, `clave_representante`, `contrasena` y
 4. El esquema conserva `carga_b64`, `proxy_request`, `eliminar_descargas`, `verbose` y `cookies_header` sin efecto visible; su presencia sugiere controles que no existen.
 5. `historial` no genera la solicitud. Confundir su CSV de consultas existentes con `consultar` puede inducir a esperar una consulta nueva.
 6. El validador de la operación exige listas (`services/bot-worker/src/bot_worker/bots/comprobantes/schema.py:146-161`); su helper aislado puede envolver un escalar, pero la validación lo rechaza antes de ejecutarlo. El esquema de catálogo anuncia arrays sin publicar el máximo 200 ni que se normalizan a texto conservando ceros (`services/central-api/src/central_api/api/bot_payloads.py:145-148`).
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

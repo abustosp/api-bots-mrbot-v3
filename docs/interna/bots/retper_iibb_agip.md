@@ -43,3 +43,7 @@ El catálogo central publica `retper_iibb_agip/consultar` en `services/central-a
 - `services/central-api/src/central_api/security/credentials.py:74-103,200-210,227-263,303-370`
 - `services/central-api/src/central_api/api/bot_payloads.py:266-271,503`
 - `services/bot-worker/tests/test_portal_retper_iibb_agip.py:25-69`; `services/bot-worker/tests/test_agip_xvfb.py`
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

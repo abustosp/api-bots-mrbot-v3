@@ -34,3 +34,7 @@ El catálogo central anuncia `consulta`, `consultar`, `solicitar` e `historial` 
 - Revisados: `services/bot-worker/tests/test_mis_comprobantes_operaciones.py`, `services/central-api/tests/test_bot_schemas.py:L92-L101`.
 
 No se hicieron llamadas al portal ni se usaron cookies/credenciales.
+
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

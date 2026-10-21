@@ -25,3 +25,6 @@ Período acepta separadores no numéricos al limpiar; no se limita a validar el 
 - Entrada declarativa y aliases: `services/central-api/src/central_api/api/bot_payloads.py:71-73,95-99`; `services/central-api/src/central_api/security/credentials.py:116-125`.
 - Esquema/plugin: `services/bot-worker/src/bot_worker/bots/arba/schema.py:39-149`; `services/bot-worker/src/bot_worker/bots/arba/plugin.py:127-261`.
 - Pruebas inspeccionadas: `services/bot-worker/tests/test_port_prov.py:446-495,535-568`. Este análisis no ejecutó el portal; pruebas locales coordinadas en [validación](../validacion.md).
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.

@@ -27,3 +27,6 @@ CUIT quita separadores y exige once dígitos, sin checksum; período elimina sep
 - DTO plano y puente: `services/central-api/src/central_api/api/bot_payloads.py:100-117`; `services/central-api/src/central_api/input_files.py:21-42,47-82,130-179`.
 - Schema/plugin/portal: `services/bot-worker/src/bot_worker/bots/carga_portal_iva/schema.py:95-199`; `services/bot-worker/src/bot_worker/bots/carga_portal_iva/plugin.py:180-422`; `services/bot-worker/src/bot_worker/runtime/portals/carga_portal_iva.py:231-313`.
 - Pruebas inspeccionadas: `services/bot-worker/tests/test_carga_portal_iva_plugin.py`. Este análisis no ejecutó carga real; pruebas locales coordinadas en [validación](../validacion.md).
+## Modo logger
+
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.
