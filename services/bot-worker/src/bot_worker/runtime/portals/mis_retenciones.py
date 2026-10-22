@@ -6,6 +6,7 @@ import csv
 import io
 import re
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,15 @@ def _patrones_impuesto(label: str, code: str) -> list[re.Pattern[str]]:
     if code:
         patrones.insert(0, re.compile(rf"\b{re.escape(code)}\b[\s\-./,]*{flexible}", re.I))
     return patrones
+
+
+def _fecha_mostrada_ok(mostrada: str, valor: str) -> bool:
+    """El datepicker de ARCA reescribe ``dd/mm/aaaa`` como ``mm/dd/aaaa``."""
+    mostrada = (mostrada or "").strip()
+    partes = valor.split("/")
+    if len(partes) != 3:
+        return mostrada == valor
+    return mostrada in {valor, f"{partes[1]}/{partes[0]}/{partes[2]}"}
 
 
 def _clave_fecha(valor: str) -> tuple[int, int, int]:
@@ -245,8 +255,74 @@ class MisRetencionesPortal(PortalArca):
         return Path(archivo)
 
     @staticmethod
+    def _xlsx_a_csv(destino: Path) -> None:
+        """Reescribe como CSV un XLSX (hoja 1, strings inline o compartidos) sin openpyxl."""
+
+        def local_name(tag: str) -> str:
+            return tag.rsplit("}", 1)[-1]
+
+        def textos(nodo: ET.Element) -> str:
+            return "".join(t.text or "" for t in nodo.iter() if local_name(t.tag) == "t")
+
+        def columna(ref: str) -> int:
+            indice = 0
+            for letra in re.match(r"[A-Za-z]*", ref).group().upper():
+                indice = indice * 26 + ord(letra) - 64
+            return max(indice - 1, 0)
+
+        try:
+            with zipfile.ZipFile(destino) as libro:
+                compartidos: list[str] = []
+                if "xl/sharedStrings.xml" in libro.namelist():
+                    raiz = ET.fromstring(libro.read("xl/sharedStrings.xml"))
+                    compartidos = [textos(si) for si in raiz if local_name(si.tag) == "si"]
+                hoja = ET.fromstring(libro.read("xl/worksheets/sheet1.xml"))
+        except (zipfile.BadZipFile, KeyError, ET.ParseError, OSError) as exc:
+            raise TargetUnavailableError(
+                "el archivo exportado no es CSV ni XLSX válido",
+                diagnostic_code="retenciones_export_format_invalid",
+            ) from exc
+
+        filas: list[list[str]] = []
+        for fila in (n for n in hoja.iter() if local_name(n.tag) == "row"):
+            celdas: list[str] = []
+            for celda in (n for n in fila if local_name(n.tag) == "c"):
+                posicion = columna(celda.get("r", ""))
+                while len(celdas) < posicion:
+                    celdas.append("")
+                tipo = celda.get("t")
+                if tipo == "inlineStr":
+                    valor = textos(celda)
+                else:
+                    v = next((n.text or "" for n in celda if local_name(n.tag) == "v"), "")
+                    valor = compartidos[int(v)] if tipo == "s" and v.isdigit() else v
+                celdas.append(valor.strip())
+            if any(celdas):
+                filas.append(celdas)
+        if not filas:
+            raise TargetUnavailableError(
+                "el XLSX de Mis Retenciones no contiene filas exportables",
+                diagnostic_code="retenciones_export_format_invalid",
+            )
+        salida = io.StringIO(newline="")
+        csv.writer(salida).writerows(filas)
+        try:
+            destino.write_text(salida.getvalue(), encoding="utf-8-sig")
+        except OSError as exc:
+            raise TargetUnavailableError(
+                "no se pudo guardar el CSV normalizado de Mis Retenciones",
+                diagnostic_code="retenciones_export_write_failed",
+            ) from exc
+
+    @staticmethod
     def _normalizar_exportacion_csv(destino: Path) -> None:
-        """Convierte el SpreadsheetML que ARCA puede entregar como CSV/XLS."""
+        """Convierte el SpreadsheetML o XLSX que ARCA puede entregar como CSV/XLS."""
+        try:
+            if destino.read_bytes()[:4] == b"PK\x03\x04":
+                MisRetencionesPortal._xlsx_a_csv(destino)
+                return
+        except OSError:
+            pass
         try:
             contenido = destino.read_bytes().decode("utf-8-sig")
         except (OSError, UnicodeDecodeError) as exc:
@@ -494,7 +570,7 @@ class MisRetencionesPortal(PortalArca):
         try:
             actual_desde = (await loc_desde.input_value()).strip()
             actual_hasta = (await loc_hasta.input_value()).strip()
-            if actual_desde == desde and actual_hasta == hasta:
+            if _fecha_mostrada_ok(actual_desde, desde) and _fecha_mostrada_ok(actual_hasta, hasta):
                 return True
         except Exception:
             pass
@@ -509,10 +585,10 @@ class MisRetencionesPortal(PortalArca):
         # invertido día/mes). Se verifica y se recarga una vez.
         await self._esperar(300)
         try:
-            if (await loc_desde.input_value()).strip() != desde:
+            if not _fecha_mostrada_ok(await loc_desde.input_value(), desde):
                 await self._setear_fecha(loc_desde, desde)
                 await self._esperar(300)
-                return (await loc_desde.input_value()).strip() == desde
+                return _fecha_mostrada_ok(await loc_desde.input_value(), desde)
         except Exception:
             pass
         return True
@@ -529,11 +605,12 @@ class MisRetencionesPortal(PortalArca):
             except Exception:
                 pass
             try:
-                await campo.fill("", force=True)
+                # Escribir sin vaciar antes: el datepicker normaliza el valor al
+                # recibir Enter y conserva la fecha ingresada como dd/mm.
                 await campo.fill(valor, force=True)
                 await campo.press("Enter")
                 await self._esperar(300)
-                if (await campo.input_value()).strip() == valor:
+                if _fecha_mostrada_ok(await campo.input_value(), valor):
                     return True
             except Exception:
                 pass
@@ -544,7 +621,7 @@ class MisRetencionesPortal(PortalArca):
                     await campo.type(valor, delay=50)
                     await campo.press("Enter")
                     await self._esperar(300)
-                    if (await campo.input_value()).strip() == valor:
+                    if _fecha_mostrada_ok(await campo.input_value(), valor):
                         return True
                 except Exception:
                     pass
@@ -560,7 +637,7 @@ class MisRetencionesPortal(PortalArca):
                             valor,
                         )
                         await self._esperar(300)
-                        if (await campo.input_value()).strip() == valor:
+                        if _fecha_mostrada_ok(await campo.input_value(), valor):
                             return True
                 except Exception:
                     pass
