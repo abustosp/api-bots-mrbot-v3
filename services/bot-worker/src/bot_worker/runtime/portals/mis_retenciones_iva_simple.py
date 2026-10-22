@@ -44,6 +44,19 @@ class MisRetencionesIvaSimplePortal(MisRetencionesPortal):
         super().__init__(page, **kwargs)
         self._iva_simple_activo = False
 
+    async def _asegurar_formulario(self) -> None:
+        # Con IVA Simple activo ARCA oculta ``#selectImpuestos``; recargar el
+        # formulario por eso desactivaría el modo recién elegido.
+        if self._iva_simple_activo:
+            try:
+                await self.page.locator("#selectTipoOperacionIvaSimple").wait_for(
+                    state="visible", timeout=3_000
+                )
+                return
+            except Exception:
+                self._iva_simple_activo = False
+        await super()._asegurar_formulario()
+
     async def activar_modo_iva_simple(self) -> None:
         """Activa IVA Simple y desactiva el formato SIAP (port exacto de V2)."""
         await self._asegurar_formulario()

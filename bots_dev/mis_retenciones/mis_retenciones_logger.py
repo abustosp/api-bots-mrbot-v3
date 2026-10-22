@@ -439,6 +439,14 @@ async def is_impuesto_selected(page, label: str, code: str) -> bool:
     return bool(normalized_label and normalized_label in current)
 
 
+def _fecha_mostrada_ok(mostrada: str, valor: str) -> bool:
+    """El datepicker de ARCA reescribe ``dd/mm/aaaa`` como ``mm/dd/aaaa``."""
+    mostrada = (mostrada or "").strip()
+    partes = valor.split("/")
+    if len(partes) != 3:
+        return mostrada == valor
+    return mostrada in {valor, f"{partes[1]}/{partes[0]}/{partes[2]}"}
+
 async def ensure_date_range(page, debug: DebugCapture, desde: str, hasta: str) -> bool:
     if not desde or not hasta:
         debug.log("fecha_range_missing")
@@ -457,7 +465,7 @@ async def ensure_date_range(page, debug: DebugCapture, desde: str, hasta: str) -
     except Exception:
         current_desde = ""
         current_hasta = ""
-    if current_desde.strip() == desde and current_hasta.strip() == hasta:
+    if _fecha_mostrada_ok(current_desde, desde) and _fecha_mostrada_ok(current_hasta, hasta):
         debug.log("fecha_range_already_set")
         return True
     try:
@@ -475,7 +483,13 @@ async def ensure_date_range(page, debug: DebugCapture, desde: str, hasta: str) -
         debug.log(f"fecha_hasta_set_failed error={str(exc)[:100]}")
         return False
     await debug.capture(page, "fecha_range_set")
-    return True
+    await asyncio.sleep(0.3)
+    try:
+        final_desde = (await fecha_desde_input.input_value()) or ""
+        final_hasta = (await fecha_hasta_input.input_value()) or ""
+    except Exception:
+        return True
+    return _fecha_mostrada_ok(final_desde, desde) and _fecha_mostrada_ok(final_hasta, hasta)
 
 
 async def ensure_inicio(

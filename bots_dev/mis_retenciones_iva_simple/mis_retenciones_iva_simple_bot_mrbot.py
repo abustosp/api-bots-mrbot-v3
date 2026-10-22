@@ -979,6 +979,33 @@ async def download_csv(
 
     return download_path
 
+def archivo_coincide_operacion(archivo: Path, operacion: str) -> bool:
+    """Falso si ``Descripcion Operacion`` trae filas de la otra operacion.
+
+    ARCA a veces entrega en Percepciones el mismo archivo de Retenciones. Los
+    archivos sin esa columna (formato fijo iva_simple) no se pueden validar.
+    """
+    esperado = "PERCEP" if "PERCEP" in operacion.upper() else "RETENC"
+    try:
+        if archivo.suffix.lower() == ".xlsx":
+            from openpyxl import load_workbook
+
+            filas = list(load_workbook(archivo, read_only=True).active.iter_rows(values_only=True))
+            encabezado, datos = (filas[0] if filas else ()), filas[1:]
+        else:
+            import csv
+
+            with open(archivo, encoding="utf-8-sig", newline="") as fh:
+                filas = list(csv.reader(fh))
+            encabezado, datos = (filas[0] if filas else ()), filas[1:]
+        if "Descripcion Operacion" not in encabezado:
+            return True
+        col = list(encabezado).index("Descripcion Operacion")
+        return all(str(f[col] or "").upper().startswith(esperado) for f in datos if len(f) > col)
+    except Exception:
+        return True
+
+
 async def bot_mis_retenciones_iva_simple(
     cuit_representante: str,
     clave_representante: str,
@@ -1136,6 +1163,12 @@ async def bot_mis_retenciones_iva_simple(
                         required_result_marker=IVA_SIMPLE_RESULT_LABEL,
                         export_option=export_option,
                     )
+                    if csv_path and not archivo_coincide_operacion(csv_path, operation):
+                        error_logs.append(
+                            f"El archivo {export_suffix} de {operation} no corresponde a esa operación; se descarta"
+                        )
+                        csv_path.unlink(missing_ok=True)
+                        csv_path = None
                     if csv_path:
                         url_minio = await subir_minio(csv_path, csv_path.name) if carga_minio else ""
                         results["archivos"].append(

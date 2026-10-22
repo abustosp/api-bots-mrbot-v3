@@ -180,3 +180,16 @@ def test_spreadsheetml_de_arca_se_normaliza_a_csv(tmp_path: Any) -> None:
     with archivo.open(encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.reader(stream))
     assert rows == [["Columna A", "", "Columna C"], ["valor", "", "dato"]]
+
+
+def test_operacion_coincide_detecta_archivo_de_otra_operacion(tmp_path: Any) -> None:
+    from bot_worker.bots.mis_retenciones_iva_simple.plugin import MisRetencionesIvaSimplePlugin as Plugin
+
+    archivo = tmp_path / "x.csv"
+    archivo.write_text("CUIT,Descripcion Operacion\n1,RETENCION\n", encoding="utf-8")
+    assert Plugin._operacion_coincide(archivo, "RETENCIONES IMPOSITIVAS")
+    assert not Plugin._operacion_coincide(archivo, "PERCEPCIONES IMPOSITIVAS")
+    assert Plugin._contar_filas(archivo) == 1
+    archivo.write_text("767;214;1;;2026-09-03;6;1;2;3,0\n767;214;1;;2026-09-10;6;1;2;3,0\n", encoding="utf-8")
+    assert Plugin._operacion_coincide(archivo, "PERCEPCIONES IMPOSITIVAS")
+    assert Plugin._contar_filas(archivo) == 2
