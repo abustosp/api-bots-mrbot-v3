@@ -95,6 +95,27 @@ async def _find_cuit_selector(page1) -> tuple[Optional[object], Optional[object]
 
     return None, None
 
+async def _representado_vigente(page1) -> Optional[str]:
+    """CUIT que el encabezado de COMARB muestra después de "representando a"."""
+    ambitos = [page1, *list(getattr(page1, "frames", []) or [])]
+    for ambito in ambitos:
+        try:
+            texto = await ambito.locator("body").inner_text(timeout=3000)
+        except Exception:
+            continue
+        match = re.search(r"representando\s+a\s+[^()]*\((\d{2}-?\d{8}-?\d)\)", texto or "", re.I)
+        if match:
+            return re.sub(r"\D", "", match.group(1))
+    return None
+
+
+async def _verificar_representado(page1, cuit_representado: str) -> None:
+    """Falla si el encabezado de COMARB no muestra al representado pedido (con o sin selector)."""
+    vigente = await _representado_vigente(page1)
+    if vigente != re.sub(r"\D", "", cuit_representado):
+        raise RuntimeError(f"No se seleccionó el representado {cuit_representado} en SIFERE (vigente: {vigente})")
+
+
 async def _wait_ready(page, timeout_ms: int = 10000, idle_timeout_ms: int = 5000) -> None:
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
@@ -134,6 +155,11 @@ async def _wait_first_visible(locator, timeout_ms: int = 20000, max_items: int =
 
 # Matchea el título recortado del portal ("... SIFERE WEB - Cons...") y excluye "SIFERE WEB - DDJJ".
 SIFERE_SERVICE_PATTERN = re.compile(r"CONVENIO\s+MULTILATERAL.*SIFERE\s+WEB(?!\s*(?:[-\u2013\u2014]\s*)?DD)", re.I)
+
+
+async def _hay_menu_sifere(page) -> bool:
+    """mainMenu con selector de CUIT o ya "representando a" (cuenta con un único CUIT: sin selector)."""
+    return await page.locator("#selectedCuit").count() > 0 or await _representado_vigente(page) is not None
 
 
 async def _abrir_servicio_sifere(page, context, error_logs):
@@ -206,7 +232,7 @@ async def _abrir_servicio_sifere(page, context, error_logs):
             if candidate.is_closed():
                 continue
             await _wait_ready(candidate, timeout_ms=8000, idle_timeout_ms=3000)
-            if await candidate.locator("#selectedCuit").count() > 0:
+            if await _hay_menu_sifere(candidate):
                 return candidate
         except Exception:
             continue
@@ -221,7 +247,7 @@ async def _abrir_servicio_sifere(page, context, error_logs):
             await asyncio.sleep(2)
             continue
         await asyncio.sleep(1)
-        if await page.locator("#selectedCuit").count() > 0:
+        if await _hay_menu_sifere(page):
             return page
         await asyncio.sleep(2)
 
@@ -329,17 +355,17 @@ async def sifere_consultas(
 
             await _wait_ready(page1)
             target_frame, select_cuit = await _find_cuit_selector(page1)
-            if select_cuit is None:
-                raise RuntimeError("Selector #selectedCuit no encontrado")
-
-            await select_cuit.select_option(cuit_representado)
-            action_target = target_frame if target_frame is not None else page1
-            await action_target.get_by_role("button", name="Seleccionar").click(timeout=8000, no_wait_after=True)
-            await asyncio.sleep(3)
-            await _wait_ready(page1, timeout_ms=8000)
+            if select_cuit is not None:
+                await select_cuit.select_option(cuit_representado)
+                action_target = target_frame if target_frame is not None else page1
+                await action_target.get_by_role("button", name="Seleccionar").click(timeout=8000, no_wait_after=True)
+                await asyncio.sleep(3)
+                await _wait_ready(page1, timeout_ms=8000)
+            # Sin selector (un único CUIT) COMARB ya entra "representando a" ese CUIT; en ambos casos se verifica.
+            await _verificar_representado(page1, cuit_representado)
         except Exception as exc:
             error_logs.append(safe_public_message(exc, context="query", stage="la consulta"))
-            # Try to recover/continue if possible, but likely fatal for this run
+            return saved_files, error_logs, False  # sin representado correcto no se consulta
 
         # ==================== SIRCREB ====================
         # SIRCREB: detalleMensual muestra el "Mes/Año" del mes siguiente al parámetro.
