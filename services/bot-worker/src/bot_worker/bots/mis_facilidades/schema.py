@@ -11,12 +11,16 @@ el navegador:
 - Filtro opcional ``situacion_excluyente`` (port de V2: excluye planes
   cuya situacion contenga alguno de esos textos, p. ej.
   "Plan Cancelado").
+- Filtro opcional por fecha de consolidacion del plan
+  (``fecha_consolidacion_desde`` / ``fecha_consolidacion_hasta``,
+  ``dd/mm/aaaa``, ambas inclusivas).
 - Al menos una salida (PDF por plan y/o Excel de tablas).
 - Aliases de compatibilidad V1/V2: ``cuit``.
 """
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -42,6 +46,19 @@ def limpiar_cuit(valor: Any) -> str:
     return texto
 
 
+def normalizar_fecha(valor: Any) -> str:
+    """Acepta ``dd/mm/aaaa`` y la devuelve normalizada en ese formato."""
+    texto = str(valor).strip()
+    try:
+        return datetime.strptime(texto, "%d/%m/%Y").strftime("%d/%m/%Y")
+    except ValueError:
+        raise ValueError(f"fecha debe tener formato dd/mm/aaaa: {texto!r}") from None
+
+
+def parsear_fecha(texto: str) -> date:
+    return datetime.strptime(texto, "%d/%m/%Y").date()
+
+
 class MisFacilidadesConsultarInput(_Base):
     """Operacion ``consultar``: planes, cuotas y obligaciones."""
 
@@ -58,6 +75,10 @@ class MisFacilidadesConsultarInput(_Base):
         max_length=20,
         validation_alias=AliasChoices("situacion_excluyente", "lista_exclusion_situacion"),
     )
+    # Solo se procesan los planes cuya fecha de consolidacion cae en el rango
+    # (extremos inclusivos); cada limite es opcional.
+    fecha_consolidacion_desde: str | None = Field(default=None, min_length=10, max_length=10)
+    fecha_consolidacion_hasta: str | None = Field(default=None, min_length=10, max_length=10)
     incluir_pdf: bool = True
     incluir_xlsx: bool = True
     # V1 usa ``carga_minio``: decide si los archivos se suben. Alias de ``subir_archivos``.
@@ -75,6 +96,19 @@ class MisFacilidadesConsultarInput(_Base):
                     datos = dict(datos)
                     datos[clave] = limpiar_cuit(datos[clave])
         return datos
+
+    @model_validator(mode="after")
+    def _rango_consolidacion(self) -> MisFacilidadesConsultarInput:
+        for campo in ("fecha_consolidacion_desde", "fecha_consolidacion_hasta"):
+            valor = getattr(self, campo)
+            if valor is not None:
+                object.__setattr__(self, campo, normalizar_fecha(valor))
+        desde, hasta = self.fecha_consolidacion_desde, self.fecha_consolidacion_hasta
+        if desde and hasta and parsear_fecha(desde) > parsear_fecha(hasta):
+            raise ValueError(
+                "fecha_consolidacion_desde no puede ser posterior a fecha_consolidacion_hasta"
+            )
+        return self
 
     @model_validator(mode="after")
     def _al_menos_una_salida(self) -> MisFacilidadesConsultarInput:
@@ -109,6 +143,8 @@ def esquema_entrada() -> dict[str, Any]:
                 "maxItems": 20,
                 "items": {"type": "string", "minLength": 1},
             },
+            "fecha_consolidacion_desde": {"type": "string", "pattern": r"^\d{2}/\d{2}/\d{4}$"},
+            "fecha_consolidacion_hasta": {"type": "string", "pattern": r"^\d{2}/\d{2}/\d{4}$"},
             "incluir_pdf": {"type": "boolean"},
             "incluir_xlsx": {"type": "boolean"},
             "subir_archivos": {"type": "boolean"},

@@ -1,7 +1,7 @@
 import asyncio
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -558,6 +558,17 @@ def extract_plan_entries(html_content: str) -> List[Dict[str, Optional[str]]]:
     return entries
 
 
+def parse_fecha(texto: Optional[str]) -> Optional[date]:
+    try:
+        return datetime.strptime((texto or "").strip(), "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+def extract_fecha_consolidacion_from_detail(html_content: str) -> Optional[date]:
+    soup = BeautifulSoup(html_content, "html.parser")
+    fecha = soup.select_one("#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_fechaConsolidacion")
+    return parse_fecha(normalize_text(fecha.get_text(" ", strip=True))) if fecha else None
+
 def extract_plan_num_from_detail(html_content: str) -> Optional[str]:
     soup = BeautifulSoup(html_content, "html.parser")
     plan_num = soup.select_one("#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_nroPlan")
@@ -786,12 +797,21 @@ async def bot_mis_facilidades(
     cuit_representado: Optional[str] = None,
     denominacion: Optional[str] = None,
     situacion_excluyente: Optional[List[str]] = None,
+    fecha_consolidacion_desde: Optional[str] = None,
+    fecha_consolidacion_hasta: Optional[str] = None,
 
     proxy_request: bool = False,
 ) -> tuple[dict[str, Any], list[str], bool]:
     results: dict[str, Any] = {"archivos": []}
     error_logs: list[str] = []
     success = True
+    fuera_de_rango = 0
+    fecha_desde = parse_fecha(fecha_consolidacion_desde)
+    fecha_hasta = parse_fecha(fecha_consolidacion_hasta)
+    if (fecha_consolidacion_desde and not fecha_desde) or (fecha_consolidacion_hasta and not fecha_hasta):
+        return results, ["Las fechas de consolidación deben tener formato dd/mm/aaaa"], False
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        return results, ["fecha_consolidacion_desde no puede ser posterior a fecha_consolidacion_hasta"], False
     found_plan: Optional[bool] = None
 
     proxy = get_proxy_config() if proxy_request else None
@@ -919,6 +939,23 @@ async def bot_mis_facilidades(
                     error_logs.append(f"Error al abrir detalle del plan {plan_num}: {exc}")
                     success = False
                     continue
+
+                if fecha_desde or fecha_hasta:
+                    fecha_consolidacion = extract_fecha_consolidacion_from_detail(await page1.content())
+                    if fecha_consolidacion is None:
+                        error_logs.append(f"No se pudo leer la fecha de consolidación del plan {plan_num}")
+                        success = False
+                    if fecha_consolidacion and (fecha_desde and fecha_consolidacion < fecha_desde or fecha_hasta and fecha_consolidacion > fecha_hasta):
+                        fuera_de_rango += 1
+                    if fecha_consolidacion is None or (fecha_desde and fecha_consolidacion < fecha_desde) or (
+                        fecha_hasta and fecha_consolidacion > fecha_hasta
+                    ):
+                        plan_dir.rmdir()
+                        if not await navigate_back_to_plan_list(page1):
+                            error_logs.append("No se pudo volver al listado de planes")
+                            success = False
+                            break
+                        continue
 
                 detail_plan_num = extract_plan_num_from_detail(await page1.content())
                 if detail_plan_num:
@@ -1080,7 +1117,7 @@ async def bot_mis_facilidades(
     finally:
         pass
 
-    if not results["archivos"] and found_plan is not False:
+    if not results["archivos"] and found_plan is not False and not fuera_de_rango:
         success = False
 
     return results, error_logs, success
@@ -1092,6 +1129,8 @@ async def mis_facilidades(
     cuit_representado: Optional[str] = None,
     denominacion: Optional[str] = None,
     situacion_excluyente: Optional[List[str]] = None,
+    fecha_consolidacion_desde: Optional[str] = None,
+    fecha_consolidacion_hasta: Optional[str] = None,
 
     proxy_request: bool = False,
 ) -> tuple[dict[str, Any], list[str], bool]:
@@ -1101,6 +1140,8 @@ async def mis_facilidades(
         cuit_representado=cuit_representado,
         denominacion=denominacion,
         situacion_excluyente=situacion_excluyente,
+        fecha_consolidacion_desde=fecha_consolidacion_desde,
+        fecha_consolidacion_hasta=fecha_consolidacion_hasta,
 
         proxy_request=proxy_request,
     )

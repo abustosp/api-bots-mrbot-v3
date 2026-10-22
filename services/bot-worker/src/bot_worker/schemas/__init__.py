@@ -197,6 +197,8 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "representado_cuit": _string(pattern=CUIT),
         "denominacion": _string(min_length=1, max_length=128),
         "situacion_excluyente": _list(item=str, max_length=20),
+        "fecha_consolidacion_desde": _string(pattern=DATE),
+        "fecha_consolidacion_hasta": _string(pattern=DATE),
         "incluir_pdf": _boolean(default=True), "incluir_xlsx": _boolean(default=True),
         "subir_archivos": _boolean(default=True),
     },

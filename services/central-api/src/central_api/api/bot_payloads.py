@@ -214,6 +214,8 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "representado_cuit": _string(pattern=CUIT),
         "denominacion": _string(min_length=1, max_length=128),
         "situacion_excluyente": _list(item=str, max_length=20),
+        "fecha_consolidacion_desde": _string(pattern=DATE),
+        "fecha_consolidacion_hasta": _string(pattern=DATE),
         "incluir_pdf": _boolean(default=True), "incluir_xlsx": _boolean(default=True),
         "subir_archivos": _boolean(default=True),
     },
@@ -881,6 +883,8 @@ _FIELD_DESCRIPTIONS: dict[str, str] = {
     "emitidos": "Incluye en la consulta los comprobantes emitidos por el contribuyente.",
     "excel": "Solicita generar el resultado en formato Excel.",
     "exportar_para_aplicativo": "Solicita exportar las retenciones en un formato preparado para importar en un aplicativo fiscal.",
+    "fecha_consolidacion_desde": "Fecha de consolidación mínima del plan (inclusive); los planes anteriores no se procesan.",
+    "fecha_consolidacion_hasta": "Fecha de consolidación máxima del plan (inclusive); los planes posteriores no se procesan.",
     "fecha_desde": "Fecha inicial del intervalo de consulta.",
     "fecha_hasta": "Fecha final del intervalo de consulta.",
     "filtro_impuestos": "Lista opcional de filtros de obligaciones impositivas; cada elemento puede incluir período, impuesto, concepto, subconcepto y categoría.",
@@ -1107,7 +1111,7 @@ def _field_description(
             meaning = f"{meaning} Formato: período `AAAAMM`."
         else:
             meaning = f"{meaning} Formato: fecha `DD/MM/AAAA`."
-    elif field_name in {"fecha_desde", "fecha_hasta"}:
+    elif field_name in {"fecha_desde", "fecha_hasta", "fecha_consolidacion_desde", "fecha_consolidacion_hasta"}:
         meaning = f"{meaning} Formato: fecha `DD/MM/AAAA`."
     elif field_name == "periodo" and bot == "consulta_pagos_vep":
         meaning = f"{meaning} Formato: cantidad de meses como cadena de 1 a 3 dígitos; mínimo 1."

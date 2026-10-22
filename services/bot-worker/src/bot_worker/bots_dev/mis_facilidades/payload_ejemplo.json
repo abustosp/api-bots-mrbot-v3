@@ -3,6 +3,8 @@
   "representado_cuit": "20123456789",
   "denominacion": "EJEMPLO S A",
   "situacion_excluyente": ["Plan Cancelado"],
+  "fecha_consolidacion_desde": "01/01/2026",
+  "fecha_consolidacion_hasta": "30/06/2026",
   "incluir_pdf": true,
   "incluir_xlsx": true,
   "subir_archivos": true
