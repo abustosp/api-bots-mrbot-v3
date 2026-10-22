@@ -3,7 +3,7 @@ import os
 import random
 import re
 import traceback
-from datetime import datetime
+from datetime import date, datetime
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -419,6 +419,17 @@ def extract_plan_entries(html_content: str) -> List[Dict[str, Optional[str]]]:
     return entries
 
 
+def parse_fecha(texto: Optional[str]) -> Optional[date]:
+    try:
+        return datetime.strptime((texto or "").strip(), "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+def extract_fecha_consolidacion_from_detail(html_content: str) -> Optional[date]:
+    soup = BeautifulSoup(html_content, "html.parser")
+    fecha = soup.select_one("#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_fechaConsolidacion")
+    return parse_fecha(normalize_text(fecha.get_text(" ", strip=True))) if fecha else None
+
 def extract_plan_num_from_detail(html_content: str) -> Optional[str]:
     soup = BeautifulSoup(html_content, "html.parser")
     plan_num = soup.select_one("#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_nroPlan")
@@ -737,6 +748,8 @@ async def bot_mis_facilidades(
     cuit_representado: Optional[str],
     denominacion: Optional[str],
     ubicacion_descarga: Optional[str] = None,
+    fecha_consolidacion_desde: Optional[str] = None,
+    fecha_consolidacion_hasta: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Ejecuta el bot de Mis Facilidades y retorna un diccionario con los resultados y logs.
@@ -758,6 +771,15 @@ async def bot_mis_facilidades(
     browser = None
     context = None
     page = None
+
+    fecha_desde = parse_fecha(fecha_consolidacion_desde)
+    fecha_hasta = parse_fecha(fecha_consolidacion_hasta)
+    if (fecha_consolidacion_desde and not fecha_desde) or (fecha_consolidacion_hasta and not fecha_hasta):
+        result["errors"].append("Las fechas de consolidación deben tener formato dd/mm/aaaa")
+        return result
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        result["errors"].append("fecha_consolidacion_desde no puede ser posterior a fecha_consolidacion_hasta")
+        return result
 
     try:
         runtime_proxy, proxy_source = get_runtime_proxy_config()
@@ -894,6 +916,20 @@ async def bot_mis_facilidades(
                     result["logs"].append(f"[{datetime.now()}] Error: Plan {plan_num} no accesible")
                     result["planes_no_accesibles"] += 1
                     continue
+
+                if fecha_desde or fecha_hasta:
+                    # Sin fecha legible no se puede filtrar: el plan se descarga igual.
+                    fecha_consolidacion = extract_fecha_consolidacion_from_detail(await page1.content())
+                    if fecha_consolidacion and (
+                        (fecha_desde and fecha_consolidacion < fecha_desde)
+                        or (fecha_hasta and fecha_consolidacion > fecha_hasta)
+                    ):
+                        result["logs"].append(
+                            f"[{datetime.now()}] Plan {plan_num} fuera del rango de consolidación - omitido"
+                        )
+                        await page1.locator("#ContentPlaceHolder1_btnVolver").click()
+                        await page1.wait_for_load_state("domcontentloaded")
+                        continue
 
                 detail_plan_num = extract_plan_num_from_detail(await page1.content())
                 if detail_plan_num:
@@ -1081,6 +1117,8 @@ async def process_single_task(
                 cuit_representado=task.get("cuit_representado"),
                 denominacion=task.get("denominacion"),
                 ubicacion_descarga=task.get("ubicacion_descarga"),
+                fecha_consolidacion_desde=task.get("fecha_consolidacion_desde"),
+                fecha_consolidacion_hasta=task.get("fecha_consolidacion_hasta"),
             )
         
         # Guardar log individual (usar CUIT del representado si existe, sino el representante)
@@ -1129,6 +1167,14 @@ async def process_single_task(
         return result
 
 
+def _celda_fecha(valor: Any) -> Optional[str]:
+    if valor is None or pd.isna(valor):
+        return None
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%d/%m/%Y")
+    return str(valor).strip() or None
+
+
 async def main():
     """
     Función principal que lee el Excel y ejecuta las tareas en paralelo.
@@ -1163,6 +1209,9 @@ async def main():
             "cuit_representado": str(row.get("cuit_representado", "")) if pd.notna(row.get("cuit_representado")) else None,
             "denominacion": str(row.get("denominacion", "")) if pd.notna(row.get("denominacion")) else None,
             "ubicacion_descarga": str(row.get("ubicacion_descarga", "")) if pd.notna(row.get("ubicacion_descarga")) else None,
+            # Columnas opcionales (dd/mm/aaaa); celdas fecha de Excel se normalizan.
+            "fecha_consolidacion_desde": _celda_fecha(row.get("fecha_consolidacion_desde")),
+            "fecha_consolidacion_hasta": _celda_fecha(row.get("fecha_consolidacion_hasta")),
         }
         tasks.append((task, idx + 1))
     
