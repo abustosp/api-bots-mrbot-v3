@@ -11,6 +11,7 @@ arba/descargar: clave_encriptada cuit! clave! periodo! denominacion! proxy_reque
 carga_portal_iva/cargar: clave_encriptada cuit_representante! clave_representante! cuit_representado denominacion periodo! operaciones_ng_o_e prorrateo_global prorrateo_asignacion_directa prorrateo_ambos importacion_definitiva_bienes importacion_servicios regimen_turiva bienes_usados ninguna_anteriores proxy_request
 ccma/consultar: clave_encriptada cuit_representante! clave_representante! cuit_representado! proxy_request movimientos pdf
 ccma_compensacion/compensar: clave_encriptada cuit_representante! clave_representante! cuit_representado! proxy_request movimientos pdf compensar confirmar
+certificacion_primaria_granos/consultar: clave_encriptada desde! hasta! cuit_representante! clave! denominacion! cuit_representado minio_upload proxy_request
 certificado_mipyme/descargar: clave_encriptada cuit_representante! clave! cuit_representado! proxy_request
 compensaciones/consultar: clave_encriptada cuit_login! clave! cuit_representado! desde! hasta! excel csv pdf proxy_request
 consulta_cuit/consulta: cuit!

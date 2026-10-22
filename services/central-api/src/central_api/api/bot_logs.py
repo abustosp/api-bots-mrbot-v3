@@ -103,6 +103,8 @@ LOG_SPECS: tuple[LogSpec, ...] = (
             _REP_REPDO,
             (*_CUITS, "periodo_desde", "periodo_hasta",
              "periodos_descargados")),
+    LogSpec("/certificacion_primaria_granos/logs",
+            (("certificacion_primaria_granos", ("consultar",)),), _REP_REPDO, _CUITS),
     LogSpec("/liquidacion_granos/logs",
             (("liquidacion_granos", ("consultar",)),), _REP_REPDO, _CUITS),
     LogSpec("/mis_comprobantes/logs",

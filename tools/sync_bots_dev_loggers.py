@@ -30,6 +30,11 @@ MANIFIESTO: dict[str, tuple[str, ...]] = {
     "facturometro": ("facturometro_bot_logger.py",),
     "libro_sueldos_digital": ("libro_sueldos_digital_bot_logger.py",),
     "mis_retenciones": ("mis_retenciones_bot_logger.py",),
+    "certificacion_primaria_granos": (
+        "__init__.py",
+        "certificacion_primaria_granos_bot.py",
+        "certificacion_primaria_granos_bot_logger.py",
+    ),
     "declaracion_en_linea": (
         "__init__.py",
         "declaracion_en_linea_bot.py",

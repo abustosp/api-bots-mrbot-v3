@@ -139,3 +139,18 @@ def test_logger_script_exige_ambas_claves_true_y_mapea_entorno():
     assert env["CCMA_CUIT_REPRESENTADO"] == "20111" and env["CCMA_PDF"] == "true"
     for bot, rel in SCRIPTS.items():
         assert (CARPETA / rel).is_file(), rel
+
+
+def test_logger_script_certificacion_primaria_granos_mapea_entorno():
+    from bot_worker.runtime.logger_script import SCRIPTS, entorno
+
+    assert "certificacion_primaria_granos" in SCRIPTS
+    env = entorno(
+        "certificacion_primaria_granos",
+        {"representado_nombre": "GIMENEZ", "fecha_desde": "01/08/2025", "fecha_hasta": "31/10/2025"},
+        "20222", "k",
+    )
+    assert env["CERTIFICACION_PRIMARIA_GRANOS_CUIT_REPRESENTANTE"] == "20222"
+    assert env["CERTIFICACION_PRIMARIA_GRANOS_DENOMINACION"] == "GIMENEZ"
+    assert env["CERTIFICACION_PRIMARIA_GRANOS_DESDE"] == "01/08/2025"
+    assert env["CERTIFICACION_PRIMARIA_GRANOS_HASTA"] == "31/10/2025"

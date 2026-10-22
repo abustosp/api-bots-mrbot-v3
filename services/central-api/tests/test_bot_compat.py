@@ -21,7 +21,7 @@ def test_todos_los_aliases_de_bots_exponen_triptico_de_job() -> None:
     paths = set(app.openapi()["paths"])
     hidden_aliases = {"/arba/consulta", "/vep_archivo/carga"}
 
-    assert len(BOT_ROUTE_ALIASES) == 38
+    assert len(BOT_ROUTE_ALIASES) == 39
     for route_path, _bot, _operation in BOT_ROUTE_ALIASES:
         triplet = (
             f"/api/v3{route_path}",

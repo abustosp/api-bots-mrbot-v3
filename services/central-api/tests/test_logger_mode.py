@@ -50,3 +50,38 @@ def test_solicitud_logger_cifra_las_claves(monkeypatch):
     assert pedido["payload"]["anio"] == "2026"
     assert pedido["credentials_encrypted_rsa_oaep"]["cuit_representante"] == "20111111112"
     assert "Secreta123" not in str(pedido)
+
+
+def test_bot_certificacion_primaria_granos_acepta_logger_true(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from central_api.main import create_app
+    from central_api.settings import get_settings
+
+    for var in ("API_KEY_HMAC_SECRET", "DATABASE_URL", "ADMIN_TOKEN",
+                "SEALED_PRIVATE_KEY_PATH", "S3_ENDPOINT"):
+        monkeypatch.delenv(var, raising=False)
+    get_settings.cache_clear()
+    try:
+        cliente = TestClient(create_app())
+        payload = {
+            "representado_cuit": "20123456786",
+            "representado_nombre": "APELLIDO NOMBRE",
+            "fecha_desde": "01/08/2025",
+            "fecha_hasta": "31/10/2025",
+        }
+        for extra in ({"logger": True}, {"logger": True, "logger_script": True}):
+            r = cliente.post(
+                "/api/v3/bots/certificacion_primaria_granos/consultar",
+                json={"payload": {**payload, **extra}, "credentials": {}},
+            )
+            assert r.status_code == 202, r.text
+        # El alias V1 (denominacion/desde/hasta) también pasa por el mismo camino.
+        r = cliente.post(
+            "/api/v3/certificacion_primaria_granos/consulta",
+            json={"cuit_representante": "20123456786", "clave": "x", "denominacion": "A B",
+                  "desde": "01/08/2025", "hasta": "31/10/2025", "logger": True},
+        )
+        assert r.status_code == 202, r.text
+    finally:
+        get_settings.cache_clear()

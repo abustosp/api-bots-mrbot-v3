@@ -40,6 +40,7 @@ Cada ficha interna debe leerse junto a la ficha del mismo nombre de `docs/extern
 | `libro_sueldos_digital` | [Flujo y contrato](bots/libro_sueldos_digital.md) |
 | `libros_portal_iva` | [Flujo y contrato](bots/libros_portal_iva.md) |
 | `liquidacion_granos` | [Flujo y contrato](bots/liquidacion_granos.md) |
+| `certificacion_primaria_granos` | [Flujo y contrato](bots/certificacion_primaria_granos.md) |
 | `mis_comprobantes` | [Flujo y contrato](bots/mis_comprobantes.md) |
 | `mis_facilidades` | [Flujo y contrato](bots/mis_facilidades.md) |
 | `mis_retenciones` | [Flujo y contrato](bots/mis_retenciones.md) |

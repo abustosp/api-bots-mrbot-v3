@@ -62,6 +62,7 @@ RUTAS: dict[tuple[str, str], str] = {
     ("vep_ccma", "generar"): "/vep-ccma/generar",
     ("consulta_pagos_vep", "consultar"): "/vep/consulta-pagos",
     ("liquidacion_granos", "consultar"): "/liquidacion_granos/consulta",
+    ("certificacion_primaria_granos", "consultar"): "/certificacion_primaria_granos/consulta",
 }
 
 
