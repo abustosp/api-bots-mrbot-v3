@@ -893,7 +893,7 @@ async def seleccionar_denominacion(page: Page, denominacion: str) -> None:
         except Exception:
             continue
 
-        button_text = normalize_text(await button.inner_text())
+        button_text = normalize_text(await button.inner_text() or await button.get_attribute("value") or "")
         if not button_text:
             continue
 

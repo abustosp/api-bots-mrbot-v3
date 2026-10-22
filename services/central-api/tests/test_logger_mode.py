@@ -50,3 +50,82 @@ def test_solicitud_logger_cifra_las_claves(monkeypatch):
     assert pedido["payload"]["anio"] == "2026"
     assert pedido["credentials_encrypted_rsa_oaep"]["cuit_representante"] == "20111111112"
     assert "Secreta123" not in str(pedido)
+
+
+def test_bot_certificacion_primaria_granos_acepta_logger_true(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from central_api.main import create_app
+    from central_api.settings import get_settings
+
+    for var in ("API_KEY_HMAC_SECRET", "DATABASE_URL", "ADMIN_TOKEN",
+                "SEALED_PRIVATE_KEY_PATH", "S3_ENDPOINT"):
+        monkeypatch.delenv(var, raising=False)
+    get_settings.cache_clear()
+    try:
+        cliente = TestClient(create_app())
+        payload = {
+            "representado_cuit": "20123456786",
+            "representado_nombre": "APELLIDO NOMBRE",
+            "fecha_desde": "01/08/2025",
+            "fecha_hasta": "31/10/2025",
+        }
+        for extra in ({"logger": True}, {"logger": True, "logger_script": True}):
+            r = cliente.post(
+                "/api/v3/bots/certificacion_primaria_granos/consultar",
+                json={"payload": {**payload, **extra}, "credentials": {}},
+            )
+            assert r.status_code == 202, r.text
+        # El alias V1 (denominacion/desde/hasta) también pasa por el mismo camino.
+        r = cliente.post(
+            "/api/v3/certificacion_primaria_granos/consulta",
+            json={"cuit_representante": "20123456786", "clave": "x", "denominacion": "A B",
+                  "desde": "01/08/2025", "hasta": "31/10/2025", "logger": True},
+        )
+        assert r.status_code == 202, r.text
+    finally:
+        get_settings.cache_clear()
+
+
+
+_LG_CUIT = "20123456786"
+
+
+@pytest.fixture
+def _entorno_dev(monkeypatch):
+    from central_api.settings import get_settings
+    from central_api.store import JOBS
+
+    for var in ("API_KEY_HMAC_SECRET", "DATABASE_URL", "ADMIN_TOKEN",
+                "SEALED_PRIVATE_KEY_PATH", "S3_ENDPOINT"):
+        monkeypatch.delenv(var, raising=False)
+    get_settings.cache_clear()
+    JOBS.clear()
+    yield JOBS
+    JOBS.clear()
+    get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("extra", [{"logger": True}, {"logger": True, "logger_script": True}])
+def test_bot_liquidacion_granos_acepta_logger_true(_entorno_dev, extra):
+    from fastapi.testclient import TestClient
+
+    from central_api.main import create_app
+
+    cliente = TestClient(create_app())
+    v1 = {"desde": "01/01/2024", "hasta": "31/01/2024", "denominacion": "ACME SA",
+          "cuit_representante": _LG_CUIT, "clave": "DEMO_NO_USAR", **extra}
+    canonico = {
+        "payload": {"desde": "01/01/2024", "hasta": "31/01/2024", "denominacion": "ACME SA", **extra},
+        "credentials": {"cuit_representante": _LG_CUIT, "clave": "DEMO_NO_USAR"},
+    }
+    for i, (ruta, cuerpo) in enumerate((
+        ("/api/v3/bots/liquidacion_granos/consultar", canonico),
+        ("/api/v3/liquidacion_granos/consulta", v1),
+    )):
+        r = cliente.post(ruta, json=cuerpo, headers={"Idempotency-Key": f"lg-{i}-{len(extra)}"})
+        assert r.status_code == 202, r.text
+        job = _entorno_dev[r.json()["job_id"]]
+        assert job.payload["logger"] is True
+        assert job.payload.get("logger_script") is (True if "logger_script" in extra else None)
+        assert "01/01/2024" in str(job.payload), job.payload

@@ -1,0 +1,8 @@
+{
+  "operacion": "consultar",
+  "representado_cuit": "20123456786",
+  "representado_nombre": "APELLIDO NOMBRE",
+  "fecha_desde": "01/08/2025",
+  "fecha_hasta": "31/10/2025",
+  "subir_archivos": true
+}

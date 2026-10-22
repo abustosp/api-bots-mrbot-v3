@@ -191,7 +191,7 @@ def test_ruta_canonica_muestra_el_envelope_y_los_payloads_de_bots() -> None:
     body = operation["requestBody"]["content"]["application/json"]["schema"]
 
     assert body["required"] == ["payload"]
-    assert len(body["properties"]["payload"]["oneOf"]) == 45
+    assert len(body["properties"]["payload"]["oneOf"]) == 46
     assert body["example"]["payload"]["cuit_representado"] == "20123456786"
     assert body["example"]["credentials"]["clave"] == "clave_fiscal"
     for payload_schema in body["properties"]["payload"]["oneOf"]:

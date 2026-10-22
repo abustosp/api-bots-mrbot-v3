@@ -22,6 +22,9 @@ from bot_worker.bots.ccma.plugin import CcmaPlugin
 from bot_worker.bots.ccma_compensacion.plugin import (
     CcmaCompensacionPlugin,
 )
+from bot_worker.bots.certificacion_primaria_granos.plugin import (
+    CertificacionPrimariaGranosPlugin,
+)
 from bot_worker.bots.certificado_mipyme.plugin import (
     CertificadoMipymePlugin,
 )
@@ -95,6 +98,7 @@ PLUGINS = (
     CargaPortalIvaPlugin(),  # type: ignore[arg-type]
     CcmaPlugin(),  # type: ignore[arg-type]
     CcmaCompensacionPlugin(),  # type: ignore[arg-type]
+    CertificacionPrimariaGranosPlugin(),  # type: ignore[arg-type]
     CertificadoMipymePlugin(),  # type: ignore[arg-type]
     CompensacionesPlugin(),  # type: ignore[arg-type]
     ComprobantesPlugin(),  # type: ignore[arg-type]

@@ -107,6 +107,7 @@ BOT_ROUTE_ALIASES: tuple[tuple[str, str, str], ...] = (
     ("/vep-ccma/generar", "vep_ccma", "generar"),
     ("/vep/consulta-pagos", "consulta_pagos_vep", "consultar"),
     ("/liquidacion_granos/consulta", "liquidacion_granos", "consultar"),
+    ("/certificacion_primaria_granos/consulta", "certificacion_primaria_granos", "consultar"),
     ("/consulta_cuit/individual", "consulta_cuit", "consultar"),
     ("/consulta_cuit/masivo", "consulta_cuit", "consultar_masivo"),
 )

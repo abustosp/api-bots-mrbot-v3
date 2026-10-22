@@ -102,6 +102,13 @@ _FAMILY_FIELDS: dict[str, dict[str, tuple[Any, Any]]] = {
         "incluir_movimientos": _boolean(), "incluir_pdf": _boolean(),
         "subir": _boolean(default=True),
     },
+    "certificacion_primaria_granos": {
+        "representado_cuit": _string(required=True, pattern=CUIT),
+        "representado_nombre": _string(required=True, min_length=1, max_length=128),
+        "fecha_desde": _string(required=True, pattern=DATE),
+        "fecha_hasta": _string(required=True, pattern=DATE),
+        "subir_archivos": _boolean(default=True),
+    },
     "certificado_mipyme": {
         "representado_cuit": _string(required=True, pattern=CUIT),
         "subir": _boolean(default=True),

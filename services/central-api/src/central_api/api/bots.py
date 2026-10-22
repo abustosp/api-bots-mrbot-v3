@@ -335,6 +335,7 @@ OPERATIONS: dict[tuple[str, str], dict] = {
     ("carga_portal_iva", "cargar"): _op("carga_portal_iva", "cargar", 3),
     ("ccma", "consultar"): _op("ccma", "consultar", 2),
     ("ccma_compensacion", "compensar"): _op("ccma_compensacion", "compensar", 3),
+    ("certificacion_primaria_granos", "consultar"): _op("certificacion_primaria_granos", "consultar", 2),
     ("certificado_mipyme", "descargar"): _op("certificado_mipyme", "descargar", 1),
     ("compensaciones", "consultar"): _op("compensaciones", "consultar", 2),
     ("comprobantes", "consultar"): _op("comprobantes", "consultar", 2),
@@ -382,6 +383,7 @@ CATALOGUE = [
     {"bot": "carga_portal_iva", "operaciones": ["cargar"]},
     {"bot": "ccma", "operaciones": ["consultar"]},
     {"bot": "ccma_compensacion", "operaciones": ["compensar"]},
+    {"bot": "certificacion_primaria_granos", "operaciones": ["consultar"]},
     {"bot": "certificado_mipyme", "operaciones": ["descargar"]},
     {"bot": "compensaciones", "operaciones": ["consultar"]},
     {

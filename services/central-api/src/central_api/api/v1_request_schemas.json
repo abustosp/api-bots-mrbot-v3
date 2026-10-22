@@ -455,6 +455,112 @@
       "type": "object"
     }
   },
+  "certificacion_primaria_granos.ConsultaCertificacionPrimariaGranosRequest": {
+    "fields": [
+      "clave_encriptada",
+      "desde",
+      "hasta",
+      "cuit_representante",
+      "clave",
+      "denominacion",
+      "cuit_representado",
+      "minio_upload",
+      "proxy_request"
+    ],
+    "schema": {
+      "properties": {
+        "clave_encriptada": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clave fiscal cifrada con la clave pública RSA (RSA-OAEP-SHA256, Base64) obtenida en /api/v1/security/public-key. Si se envía junto con la clave en texto plano, prevalece la cifrada.",
+          "title": "Clave Encriptada"
+        },
+        "desde": {
+          "example": "01/01/2024",
+          "title": "Desde",
+          "type": "string"
+        },
+        "hasta": {
+          "example": "31/12/2024",
+          "title": "Hasta",
+          "type": "string"
+        },
+        "cuit_representante": {
+          "example": "20123456786",
+          "title": "Cuit Representante",
+          "type": "string"
+        },
+        "clave": {
+          "example": "mi_contraseña_secreta",
+          "title": "Clave",
+          "type": "string"
+        },
+        "denominacion": {
+          "description": "Nombre exacto del representado en ARCA/AFIP para operar en Liquidación de Granos (se descargan los certificados de depósito como depositante)",
+          "example": "Empresa Ejemplo S.A.",
+          "title": "Denominacion",
+          "type": "string"
+        },
+        "cuit_representado": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CUIT del representado (opcional, para trazabilidad de logs)",
+          "example": "30876543210",
+          "title": "Cuit Representado"
+        },
+        "minio_upload": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "example": true,
+          "title": "Minio Upload"
+        },
+        "proxy_request": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Indica si se debe usar un proxy para la solicitud",
+          "example": false,
+          "title": "Proxy Request"
+        }
+      },
+      "required": [
+        "desde",
+        "hasta",
+        "cuit_representante",
+        "clave",
+        "denominacion"
+      ],
+      "title": "ConsultaCertificacionPrimariaGranosRequest",
+      "type": "object"
+    }
+  },
   "certificado_mipyme.CertificadoMipymeRequest": {
     "fields": [
       "clave_encriptada",

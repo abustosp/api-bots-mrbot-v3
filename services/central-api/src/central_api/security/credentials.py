@@ -117,7 +117,7 @@ def normalize_v2_payload(
         normalized.setdefault("representado_cuit", normalized["cuit"])
         normalized.pop("cuit", None)
     if bot in {
-        "arba", "liquidacion_granos", "rcel", "retper_iibb_misiones",
+        "arba", "certificacion_primaria_granos", "liquidacion_granos", "rcel", "retper_iibb_misiones",
         "mis_retenciones", "mis_retenciones_iva_simple", "portal_iva",
     }:
         if "denominacion" in normalized:
@@ -229,6 +229,7 @@ def normalize_v2_payload(
         "aportes_en_linea": "subir",
         "arba": "subir",
         "ccma": "subir",
+        "certificacion_primaria_granos": "subir_archivos",
         "certificado_mipyme": "subir",
         "compensaciones": "subir",
         "comprobantes": "subir_csv",

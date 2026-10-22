@@ -52,7 +52,7 @@ def test_generated_bot_routers_expose_create_status_cancel_triplets() -> None:
         "/comprobantes/historial",
     }
 
-    assert len(BOT_ROUTE_ALIASES) == 38
+    assert len(BOT_ROUTE_ALIASES) == 39
     assert len(bot_routers) >= len({path.rpartition("/")[0] for path, _, _ in BOT_ROUTE_ALIASES})
     for route_path, bot, _operation in BOT_ROUTE_ALIASES:
         create_path = f"/api/v3{route_path}"

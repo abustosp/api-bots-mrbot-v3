@@ -58,8 +58,9 @@ clasifican aparte como herramientas/infraestructura, no plugins productivos.
 
 ## Scripts `_logger` dentro de cada bot
 
-Para siete bots (`ccma`, `siper`, `facturometro`, `libro_sueldos_digital`,
-`declaracion_en_linea`, `mis_retenciones` y `retper_iibb_agip`) la carpeta del bot guarda,
+Para nueve bots (`ccma`, `siper`, `facturometro`, `libro_sueldos_digital`,
+`declaracion_en_linea`, `mis_retenciones`, `retper_iibb_agip`,
+`certificacion_primaria_granos` y `liquidacion_granos`) la carpeta del bot guarda,
 junto a `NOTA.md` y `payload_ejemplo.json`, una copia **sin modificar** del script
 `*_bot_logger.py` de la raíz `bots_dev/`, y `shared/` guarda la copia de `bots_dev/shared/`.
 Son los que ejecuta la variante `_logger` del worker (`runtime/logger_script.py`, con

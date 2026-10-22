@@ -344,6 +344,7 @@ def _servicio_para_bot(bot: str, manifiesto) -> str:
         "pago_devoluciones": "Pago de Devoluciones",
         "certificado_mipyme": "Certificado MiPyME",
         "liquidacion_granos": "Liquidacion de Granos",
+        "certificacion_primaria_granos": "Certificacion Primaria de Granos",
         "compensaciones": "Compensaciones",
         "hacienda": "Hacienda",
         "declaracion_en_linea": "Declaracion en Linea",

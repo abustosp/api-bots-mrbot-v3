@@ -96,10 +96,10 @@ _SENSITIVE = re.compile(
     r"playwright|locator|page\.(?:goto|click|fill)|stack\s*trace|traceback|https?://|s3://|presigned|x-amz-|"
     r"file://|(?:/|\\)(?:home|tmp|var|mnt|app|workspace)(?:/|\\)|selector|chrom(?:e|ium)|openssl|minio|driver|csrf|"
     r"(?:token|password|clave)=|password|secret(?:[_ -]?key)?|api[_ -]?key|access[_ -]?key|bearer\b|"
-    r"sqlalchemy|database|target\s+closed|strict\s+mode|timeout\s+\d+ms|connection\s+(?:refused|reset)", re.I,
+    r"sql[_ ]?alchemy|database|target\s+closed|strict\s+mode|timeout\s+\d+ms|connection\s+(?:refused|reset)", re.I,
 )
 _TECHNICAL = re.compile(
-    r"exception|traceback|stack|debug|locator|selector|driver|browser|chrom(?:e|ium)|minio|s3|openssl|sqlalchemy|"
+    r"exception|traceback|stack|debug|locator|selector|driver|browser|chrom(?:e|ium)|minio|s3|openssl|sql[_ ]?alchemy|"
     r"database|connection|errno|attributeerror|runtimeerror|assertionerror|typeerror|keyerror|indexerror|"
     r"\berror\b|\bfailed\b|\bfailure\b|\btimeout\b", re.I,
 )

@@ -56,6 +56,7 @@ La disponibilidad de una operación en su cuenta debe confirmarse con el catálo
 | `libro_sueldos_digital` | [Descargar documentación del Libro de Sueldos Digital](bots/libro_sueldos_digital.md) |
 | `libros_portal_iva` | [Descargar libros y declaraciones de IVA](bots/libros_portal_iva.md) |
 | `liquidacion_granos` | [Consultar liquidaciones y certificados de granos](bots/liquidacion_granos.md) |
+| `certificacion_primaria_granos` | [Descargar certificados de depósito como depositante](bots/certificacion_primaria_granos.md) |
 | `mis_comprobantes` | [Consultar, solicitar y obtener historial de Mis Comprobantes](bots/mis_comprobantes.md) |
 | `mis_facilidades` | [Consultar planes y documentación](bots/mis_facilidades.md) |
 | `mis_retenciones` | [Consultar retenciones y percepciones](bots/mis_retenciones.md) |

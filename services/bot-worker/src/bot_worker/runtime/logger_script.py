@@ -29,6 +29,8 @@ SCRIPTS: dict[str, str] = {
     "declaracion_en_linea": "declaracion_en_linea/declaracion_en_linea_bot_logger.py",
     "retper_iibb_agip": "retper_iibb_agip/agip_bot_logger.py",
     "mis_retenciones": "mis_retenciones/mis_retenciones_bot_logger.py",
+    "certificacion_primaria_granos": "certificacion_primaria_granos/certificacion_primaria_granos_bot_logger.py",
+    "liquidacion_granos": "liquidacion_granos/liquidacion_granos_bot_logger.py",
 }
 
 #: esperas (s) previas a cada intento; 0 = primer intento sin espera.
@@ -85,6 +87,19 @@ def entorno(bot: str, payload: dict[str, Any], cuit: str, clave: str) -> dict[st
                 "MIS_RETENCIONES_DENOMINACION": str(payload.get("representado_nombre") or payload.get("denominacion", "")),
                 "MIS_RETENCIONES_DESDE": str(payload.get("fecha_desde") or payload.get("desde", "")),
                 "MIS_RETENCIONES_HASTA": str(payload.get("fecha_hasta") or payload.get("hasta", ""))}
+    if bot == "certificacion_primaria_granos":
+        return {"CERTIFICACION_PRIMARIA_GRANOS_CUIT_REPRESENTANTE": cuit,
+                "CERTIFICACION_PRIMARIA_GRANOS_CLAVE": clave,
+                "CERTIFICACION_PRIMARIA_GRANOS_DENOMINACION": str(payload.get("representado_nombre") or payload.get("denominacion", "")),
+                "CERTIFICACION_PRIMARIA_GRANOS_DESDE": str(payload.get("fecha_desde") or payload.get("desde", "")),
+                "CERTIFICACION_PRIMARIA_GRANOS_HASTA": str(payload.get("fecha_hasta") or payload.get("hasta", "")),
+                "CERTIFICACION_PRIMARIA_GRANOS_HEADLESS": "true"}
+    if bot == "liquidacion_granos":
+        return {"LIQUIDACION_GRANOS_CUIT_REPRESENTANTE": cuit, "LIQUIDACION_GRANOS_CLAVE": clave,
+                "LIQUIDACION_GRANOS_DENOMINACION": str(payload.get("representado_nombre") or payload.get("denominacion", "")),
+                "LIQUIDACION_GRANOS_DESDE": str(payload.get("fecha_desde") or payload.get("desde", "")),
+                "LIQUIDACION_GRANOS_HASTA": str(payload.get("fecha_hasta") or payload.get("hasta", "")),
+                "LIQUIDACION_GRANOS_HEADLESS": "true"}
     if bot == "retper_iibb_agip":
         return {"AGIP_USUARIO": str(payload.get("usuario") or cuit), "AGIP_CLAVE": clave,
                 "AGIP_CUIT_REPRESENTADO": rep, "AGIP_DENOMINACION": str(payload.get("denominacion", "")),
