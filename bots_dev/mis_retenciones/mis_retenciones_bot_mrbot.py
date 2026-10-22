@@ -352,6 +352,14 @@ async def is_impuesto_selected(page, label: str, code: str) -> bool:
     normalized_label = re.sub(r"\s+", " ", (label or "").strip())
     return bool(normalized_label and normalized_label in current)
 
+def _fecha_mostrada_ok(mostrada: str, valor: str) -> bool:
+    """El datepicker de ARCA reescribe ``dd/mm/aaaa`` como ``mm/dd/aaaa``."""
+    mostrada = (mostrada or "").strip()
+    partes = valor.split("/")
+    if len(partes) != 3:
+        return mostrada == valor
+    return mostrada in {valor, f"{partes[1]}/{partes[0]}/{partes[2]}"}
+
 async def _set_datepicker_value(page, input_locator, value: str, label: str) -> bool:
     """Set a datepicker value with multiple strategies: fill, type, and JS fallback.
     The input may be hidden (Angular controlled), so we don't require visibility."""
@@ -370,12 +378,11 @@ async def _set_datepicker_value(page, input_locator, value: str, label: str) -> 
             pass
         # Strategy 1: fill + Enter
         try:
-            await input_locator.fill("")
             await input_locator.fill(value, force=True)
             await input_locator.press("Enter")
             await asyncio.sleep(0.3)
             current = (await input_locator.input_value()) or ""
-            if current.strip() == value:
+            if _fecha_mostrada_ok(current, value):
                 return True
         except Exception:
             pass
@@ -388,7 +395,7 @@ async def _set_datepicker_value(page, input_locator, value: str, label: str) -> 
                 await input_locator.press("Enter")
                 await asyncio.sleep(0.3)
                 current = (await input_locator.input_value()) or ""
-                if current.strip() == value:
+                if _fecha_mostrada_ok(current, value):
                     return True
             except Exception:
                 pass
@@ -406,19 +413,11 @@ async def _set_datepicker_value(page, input_locator, value: str, label: str) -> 
                     )
                     await asyncio.sleep(0.3)
                     current = (await input_locator.input_value()) or ""
-                    if current.strip() == value:
+                    if _fecha_mostrada_ok(current, value):
                         return True
             except Exception:
                 pass
         await asyncio.sleep(0.4)
-    # Final check: even if we can't read the value, the fill may have worked
-    # (Angular-controlled inputs sometimes don't expose value via input_value())
-    try:
-        current = (await input_locator.input_value()) or ""
-        if current.strip():
-            return True
-    except Exception:
-        pass
     return False
 
 async def ensure_date_range(page, desde: str, hasta: str) -> bool:
@@ -442,7 +441,7 @@ async def ensure_date_range(page, desde: str, hasta: str) -> bool:
         except Exception:
             current_desde = ""
             current_hasta = ""
-        if current_desde.strip() == desde and current_hasta.strip() == hasta:
+        if _fecha_mostrada_ok(current_desde, desde) and _fecha_mostrada_ok(current_hasta, hasta):
             return True
         if not await _set_datepicker_value(page, fecha_desde_input, desde, "desde"):
             continue
@@ -454,11 +453,7 @@ async def ensure_date_range(page, desde: str, hasta: str) -> bool:
         try:
             final_desde = (await fecha_desde_input.input_value()) or ""
             final_hasta = (await fecha_hasta_input.input_value()) or ""
-            if final_desde.strip() == desde and final_hasta.strip() == hasta:
-                return True
-            # If both have some value, consider it success (Angular may reformat)
-            if final_desde.strip() and final_hasta.strip():
-                return True
+            return _fecha_mostrada_ok(final_desde, desde) and _fecha_mostrada_ok(final_hasta, hasta)
         except Exception:
             return True
     return False

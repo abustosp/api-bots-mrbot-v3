@@ -20,6 +20,11 @@ Sin impuestos (omitido, `null` o `[]`) el plugin usa los seis códigos, o cinco 
 - `extra="allow"` deja pasar y conservar nombres desconocidos, aunque el flujo solo consume campos conocidos (`schema.py:L42-L44`, `plugin.py:L219-L298`).
 - El esquema V3 de credenciales es genérico (`central-api/api/bots.py:L820-L845`), frente al requisito práctico de acceso fiscal (`plugin.py:L175-L182`).
 
+## Cambios por ARCA (octubre 2026)
+
+- **Exportación XLSX.** ARCA entrega un XLSX real con nombre `.csv`. `_normalizar_exportacion_csv` detecta el zip (`PK\x03\x04`) y `_xlsx_a_csv` lo reescribe como CSV con la stdlib; antes fallaba con `retenciones_export_format_invalid`.
+- **Datepicker.** ARCA reescribe `dd/mm/aaaa` como `mm/dd/aaaa`. `_setear_fecha` escribe sin vaciar antes y acepta ambas formas (`_fecha_mostrada_ok`); antes caía en un fallback que dejaba `desde` crudo y la consulta traía filas desde enero. Las variantes de `bots_dev/mis_retenciones` aplican la misma verificación.
+
 ## Referencias y pruebas revisadas
 
 - `services/bot-worker/src/bot_worker/bots/mis_retenciones/schema.py:L25-L144`

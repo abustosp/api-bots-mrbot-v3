@@ -259,6 +259,14 @@ class MisRetencionesIvaSimplePlugin:
                         "diagnostic_code": getattr(exc, "diagnostic_code", ""),
                     }
                     continue
+                if not self._operacion_coincide(destino, operacion):
+                    # ARCA repite a veces el archivo de otra operación: no se entrega.
+                    resultados_operacion[formato] = {
+                        "filas": 0,
+                        "mensaje": f"el archivo exportado no corresponde a {operacion}",
+                        "diagnostic_code": "iva_simple_operation_mismatch",
+                    }
+                    continue
                 resumen: dict[str, Any] = {
                     "filas": self._contar_filas(destino), "archivo": destino.name
                 }
@@ -279,9 +287,25 @@ class MisRetencionesIvaSimplePlugin:
         """Cuenta filas de datos del CSV sin cargarlo completo en memoria."""
         try:
             with open(archivo, "r", encoding="utf-8-sig", newline="") as fh:
-                return max(0, sum(1 for _ in fh) - 1)
+                primera = fh.readline()
+                encabezado = 1 if "CUIT" in primera.upper() else 0
+                return max(0, (1 if primera else 0) + sum(1 for _ in fh) - encabezado)
         except OSError:
             return 0
+
+    @staticmethod
+    def _operacion_coincide(archivo: Path, operacion: str) -> bool:
+        """Falso si las filas de ``Descripcion Operacion`` son de la otra operación."""
+        esperado = "PERCEP" if "PERCEP" in operacion.upper() else "RETENC"
+        try:
+            with open(archivo, "r", encoding="utf-8-sig", newline="") as fh:
+                lector = csv.DictReader(fh)
+                if "Descripcion Operacion" not in (lector.fieldnames or []):
+                    return True
+                valores = [(f.get("Descripcion Operacion") or "").upper() for f in lector]
+        except OSError:
+            return True
+        return all(v.startswith(esperado) for v in valores)
 
     @staticmethod
     def _muestra(archivo: Path, limite: int = 5) -> list[dict[str, str]]:

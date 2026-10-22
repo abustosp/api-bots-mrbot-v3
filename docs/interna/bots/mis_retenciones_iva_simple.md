@@ -21,6 +21,12 @@ Se consultan tres categorías de operación y dos alternativas de formato (`iva_
 - La consulta puede devolver estado `OK` con errores particulares, sin un `PARCIAL` derivado de `datos.errores` (`plugin.py:L213-L275`).
 - Las credenciales del catálogo son genéricas, sin requiredness (`central-api/api/bots.py:L820-L845`), aunque el plugin requiere acceso fiscal (`plugin.py:L174-L181`).
 
+## Cambios por ARCA (octubre 2026)
+
+- **Modo desactivado al recargar.** Con IVA Simple activo ARCA oculta `#selectImpuestos`; `_asegurar_formulario` lo tomaba como formulario ausente, recargaba y desactivaba el modo. El portal ahora sobrescribe `_asegurar_formulario` y considera válido el formulario si `#selectTipoOperacionIvaSimple` está visible. Sin esto el resultado salía sin el marcador (`iva_simple_result_marker_missing`).
+- **Archivo repetido.** El formato `iva_simple` de `PERCEPCIONES IMPOSITIVAS` llega con las filas de retenciones. El plugin valida `Descripcion Operacion` (`_operacion_coincide`) y informa `iva_simple_operation_mismatch` en vez de entregar el archivo; los archivos sin esa columna (formato fijo) no se validan. `bots_dev` (`bot` y `bot_mrbot`) lo descartan con `archivo_coincide_operacion`.
+- `_contar_filas` ya no resta encabezado en el formato `iva_simple`, que no lo tiene.
+
 ## Referencias y pruebas revisadas
 
 - `services/bot-worker/src/bot_worker/bots/mis_retenciones_iva_simple/schema.py:L27-L152`
