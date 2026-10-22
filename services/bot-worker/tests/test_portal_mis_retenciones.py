@@ -108,3 +108,24 @@ def test_recortar_hasta_futuro_a_hoy() -> None:
     hoy = date(2026, 9, 27)
     assert _recortar_a_hoy("30/09/2026", hoy) == "27/09/2026"
     assert _recortar_a_hoy("31/08/2026", hoy) == "31/08/2026"
+
+
+def test_xlsx_de_arca_con_nombre_csv_se_normaliza_a_csv(tmp_path: Any) -> None:
+    import csv
+    import zipfile
+
+    hoja = (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+        '<row r="1"><c r="A1" t="inlineStr"><is><t>CUIT</t></is></c>'
+        '<c r="C1" t="inlineStr"><is><t>Importe</t></is></c></row>'
+        '<row r="2"><c r="A2" t="inlineStr"><is><t>30541583420</t></is></c>'
+        '<c r="C2"><v>332196.97</v></c></row></sheetData></worksheet>'
+    )
+    archivo = tmp_path / "retenciones.csv"
+    with zipfile.ZipFile(archivo, "w") as libro:
+        libro.writestr("xl/worksheets/sheet1.xml", hoja)
+
+    MisRetencionesPortal._normalizar_exportacion_csv(archivo)
+
+    with archivo.open(encoding="utf-8-sig", newline="") as stream:
+        assert list(csv.reader(stream)) == [["CUIT", "", "Importe"], ["30541583420", "", "332196.97"]]
