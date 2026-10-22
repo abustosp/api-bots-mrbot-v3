@@ -841,13 +841,14 @@ def test_sin_rango_no_se_lee_la_fecha_de_consolidacion(tmp_path: Path) -> None:
     assert "fecha_consolidacion" not in datos["planes"][0]
 
 
-def test_fecha_de_consolidacion_ilegible_omite_el_plan_y_reporta_error(tmp_path: Path) -> None:
+def test_fecha_de_consolidacion_ilegible_descarga_el_plan(tmp_path: Path) -> None:
     datos, errores, servicio = _consultar_con_rango(
-        tmp_path, {"A": None, "B": "10/02/2026"}, fecha_consolidacion_desde="01/01/2026"
+        tmp_path, {"A": None, "B": "10/02/2025"}, fecha_consolidacion_desde="01/01/2026"
     )
 
-    assert servicio.pdf_pedidos == ["B"]
-    assert len(errores) == 1 and "plan A" in errores[0].internal_diagnostic
+    assert servicio.pdf_pedidos == ["A"]
+    assert errores == []
+    assert "fecha_consolidacion" not in datos["planes"][0]
 
 
 def test_validacion_de_fechas_de_consolidacion() -> None:

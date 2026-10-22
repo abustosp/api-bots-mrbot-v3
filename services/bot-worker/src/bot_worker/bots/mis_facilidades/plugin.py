@@ -287,21 +287,15 @@ class MisFacilidadesPlugin:
             fecha_consolidacion = None
             if desde or hasta:
                 numero_plan = str((plan or {}).get("numero", "") or "s-n")
+                # Sin fecha legible no se puede filtrar: el plan se descarga igual.
                 try:
                     fecha_consolidacion = await servicio.fecha_consolidacion(numero_plan)
                     consolidado = parsear_fecha(fecha_consolidacion or "")
                 except Exception:
-                    errores.append(
-                        BotError(
-                            category=Categoria.TARGET_UNAVAILABLE,
-                            internal_diagnostic=(
-                                f"plan {numero_plan}: fecha de consolidación no disponible"
-                            ),
-                            retryable=False,
-                        )
-                    )
-                    continue
-                if (desde and consolidado < desde) or (hasta and consolidado > hasta):
+                    fecha_consolidacion = consolidado = None
+                if consolidado and (
+                    (desde and consolidado < desde) or (hasta and consolidado > hasta)
+                ):
                     continue
             reloj = getattr(runtime, "deadline", None)
             restante = reloj.remaining_seconds() if reloj is not None else None

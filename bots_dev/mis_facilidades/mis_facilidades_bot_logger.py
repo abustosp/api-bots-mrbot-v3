@@ -256,15 +256,13 @@ async def bot_mis_facilidades_logger(
                     continue
 
                 if fecha_desde or fecha_hasta:
+                    # Sin fecha legible no se puede filtrar: el plan se descarga igual.
                     fecha_consolidacion = extract_fecha_consolidacion_from_detail(await page1.content())
-                    if fecha_consolidacion is None:
-                        error_logs.append(f"No se pudo leer la fecha de consolidación del plan {plan_num}")
-                        success = False
-                    if fecha_consolidacion and (fecha_desde and fecha_consolidacion < fecha_desde or fecha_hasta and fecha_consolidacion > fecha_hasta):
-                        fuera_de_rango += 1
-                    if fecha_consolidacion is None or (fecha_desde and fecha_consolidacion < fecha_desde) or (
-                        fecha_hasta and fecha_consolidacion > fecha_hasta
+                    if fecha_consolidacion and (
+                        (fecha_desde and fecha_consolidacion < fecha_desde)
+                        or (fecha_hasta and fecha_consolidacion > fecha_hasta)
                     ):
+                        fuera_de_rango += 1
                         debug.log(f"Plan {plan_num} fuera del rango de consolidación")
                         plan_dir.rmdir()
                         if not await navigate_back_to_plan_list(page1):
