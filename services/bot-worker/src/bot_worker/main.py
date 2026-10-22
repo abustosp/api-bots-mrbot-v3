@@ -213,6 +213,7 @@ class JobEnvelope(BaseModel):
                     "captcha_profile": {"provider": "disabled"},
                     "service_profile": {"name": "development"},
                     "force": False,
+                    "logger_request": {"note": "solo modo logger"},
                 }
             ],
         },
