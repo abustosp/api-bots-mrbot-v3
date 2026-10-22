@@ -144,25 +144,31 @@ async def _principal_desde_pg(
     from central_api.models.identity import ApiKey, User
 
     async with nueva_sesion() as sesion:
-        fila = (
+        # Varios usuarios pueden compartir el mismo valor de clave: el selector
+        # no es único, se resuelve por usuario + verificador.
+        filas = (
             await sesion.execute(
-                select(ApiKey).where(
+                select(ApiKey, User)
+                .join(User, User.id == ApiKey.user_id)
+                .where(
                     ApiKey.key_prefix == key_id,
                     ApiKey.revoked_at.is_(None),
                     (ApiKey.expires_at.is_(None))
                     | (ApiKey.expires_at > func.current_timestamp()),
                 )
             )
-        ).scalar_one_or_none()
-        verificador = fila.verifier_hmac if fila is not None else None
-        if not verify_presented_secret(hmac_secret, secret, verificador):
-            return None
+        ).all()
+        fila = cuenta = None
+        for candidata, usuario in filas:
+            if identidad is not None and usuario.email.strip().casefold() != identidad.strip().casefold():
+                continue
+            if verify_presented_secret(hmac_secret, secret, candidata.verifier_hmac):
+                fila, cuenta = candidata, usuario
+                break
         if fila is None:
-            return None  # dummy comparado: no existe, sin oráculo
-        cuenta = await sesion.get(User, fila.user_id)
-        if cuenta is None or not cuenta.habilitado:
+            verify_presented_secret(hmac_secret, secret, None)  # tiempo constante
             return None
-        if identidad is not None and cuenta.email.strip().casefold() != identidad.strip().casefold():
+        if not cuenta.habilitado:
             return None
         scopes = list(getattr(fila, "scopes", None) or [])
         if scopes:

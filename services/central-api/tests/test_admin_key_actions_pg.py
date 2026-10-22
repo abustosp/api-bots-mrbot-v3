@@ -197,24 +197,28 @@ def test_reemplazar_por_el_mismo_valor_actual(pg_panel) -> None:
     assert _fila(k1)[0] is True
 
 
-def test_valor_activo_de_otro_usuario_sigue_bloqueado(pg_panel) -> None:
+def test_valor_activo_de_otro_usuario_se_permite(pg_panel) -> None:
+    """La auth exige usuario + clave: dos usuarios pueden compartir el valor."""
     client, admin_users = pg_panel
     compartido = f"shared{uuid.uuid4().hex[:6]}"
-    a = client.post("/admin/users", headers=H, json={"email": f"pg-a-{uuid.uuid4().hex[:8]}@example.test", "api_key": compartido, "motivo": "abc"})
+    email_a = f"pg-a-{uuid.uuid4().hex[:8]}@example.test"
+    email_b = f"pg-b-{uuid.uuid4().hex[:8]}@example.test"
+    a = client.post("/admin/users", headers=H, json={"email": email_a, "api_key": compartido, "motivo": "abc"})
     assert a.status_code == 201, a.text
-    b = client.post("/admin/users", headers=H, json={"email": f"pg-b-{uuid.uuid4().hex[:8]}@example.test", "api_key": f"otro{uuid.uuid4().hex[:6]}", "motivo": "abc"})
+    b = client.post("/admin/users", headers=H, json={"email": email_b, "api_key": f"otro{uuid.uuid4().hex[:6]}", "motivo": "abc"})
     b_user = b.json()["usuario"]["id"]
     b_key = b.json()["credenciales"]["clave"]["id"]
     admin_users.USERS.clear()
     admin_users.API_KEYS.clear()
     r = _rotar(client, b_user, b_key, compartido)
-    assert r.status_code == 409
-    assert r.json()["detail"] == "valor de clave ya registrado"
-    # La clave de B sigue activa: la rotación fallida no la revoca.
-    assert _fila(b_key)[0] is False
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v3/bots", auth=(email_a, compartido)).status_code == 200
+    assert client.get("/api/v3/bots", auth=(email_b, compartido)).status_code == 200
+    assert _fila(b_key)[0] is True
 
 
-def test_restaurar_con_valor_ya_activo_devuelve_409(pg_panel) -> None:
+
+def test_restaurar_con_valor_activo_de_otro_usuario_se_permite(pg_panel) -> None:
     client, admin_users = pg_panel
     valor = f"rest{uuid.uuid4().hex[:6]}"
     a = client.post("/admin/users", headers=H, json={"email": f"pg-ra-{uuid.uuid4().hex[:8]}@example.test", "api_key": valor, "motivo": "abc"})
@@ -224,9 +228,8 @@ def test_restaurar_con_valor_ya_activo_devuelve_409(pg_panel) -> None:
     assert b.status_code == 201, b.text
     admin_users.API_KEYS.clear()
     r = client.post(f"/admin/api-keys/{a_key}/restore", headers=H, json={"motivo": "res"})
-    assert r.status_code == 409
-    assert "ya está activo" in r.json()["detail"]
-    assert _fila(a_key)[0] is True
+    assert r.status_code == 200, r.text
+    assert _fila(a_key)[0] is False
 
 
 def _clave_fantasma(admin_users, user_id: str):

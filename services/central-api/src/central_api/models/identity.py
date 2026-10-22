@@ -48,7 +48,7 @@ class ApiKey(Base):
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    # Únicos solo entre claves activas (0018): un valor revocado puede volver
+    # Únicos solo entre claves activas de un mismo usuario (0028): un valor revocado puede volver
     # a asignarse. Ver índices parciales en ``__table_args__``.
     key_prefix: Mapped[str] = mapped_column(sa.String(16), nullable=False)
     verifier_hmac: Mapped[str] = mapped_column(sa.Text, nullable=False)
@@ -83,13 +83,15 @@ class ApiKey(Base):
         sa.Index("ix_api_keys_user_id", "user_id"),
         sa.Index("ix_api_keys_key_prefix", "key_prefix"),
         sa.Index(
-            "uq_api_keys_active_prefix",
+            "uq_api_keys_active_user_prefix",
+            "user_id",
             "key_prefix",
             unique=True,
             postgresql_where=sa.text("revoked_at IS NULL"),
         ),
         sa.Index(
-            "uq_api_keys_active_verifier",
+            "uq_api_keys_active_user_verifier",
+            "user_id",
             "verifier_hmac",
             unique=True,
             postgresql_where=sa.text("revoked_at IS NULL"),

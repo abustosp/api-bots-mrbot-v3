@@ -52,8 +52,8 @@ def test_postgres_principal_requires_enabled_matching_owner(monkeypatch) -> None
     )
 
     class Result:
-        def scalar_one_or_none(self):
-            return key_row
+        def all(self):
+            return [(key_row, account)]
 
     class Session:
         async def execute(self, _statement):

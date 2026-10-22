@@ -175,7 +175,8 @@ def emitir_clave(
 
     Con ``valor_fijo`` se conserva el valor literal en vez de generar uno
     aleatorio. Debe tener al menos 3 caracteres sin espacios y un verificador
-    HMAC único entre las claves activas. Una clave revocada no bloquea su
+    HMAC único entre las claves activas del mismo usuario (otro usuario puede
+    usar el mismo valor: la autenticación exige usuario + clave). Una clave revocada no bloquea su
     valor, y ``reemplaza`` (la clave que se rota) tampoco: así un usuario puede
     volver a su valor anterior (p. ej. ``abp``).
     """
@@ -190,7 +191,8 @@ def emitir_clave(
         valor = "mrk_" + secrets.token_urlsafe(32)
     verificador = _firmar_clave(valor)
     if any(
-        k.verificador_hmac == verificador and not k.revocada and k.id != reemplaza
+        k.verificador_hmac == verificador and k.user_id == user_id
+        and not k.revocada and k.id != reemplaza
         for k in API_KEYS.values()
     ):
         raise HTTPException(status_code=409, detail="valor de clave ya registrado")
@@ -2002,7 +2004,8 @@ async def restaurar_clave_api(
     motivo = validar_motivo(body.motivo, minimo=MOTIVO_MINIMO_IDENTIDAD)
     meta = await _meta_clave(key_id)
     if meta.revocada and any(
-        k.id != meta.id and not k.revocada and k.verificador_hmac == meta.verificador_hmac
+        k.id != meta.id and k.user_id == meta.user_id and not k.revocada
+        and k.verificador_hmac == meta.verificador_hmac
         for k in API_KEYS.values()
     ):
         raise HTTPException(
