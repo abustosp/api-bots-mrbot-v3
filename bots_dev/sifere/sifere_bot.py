@@ -109,6 +109,13 @@ async def _representado_vigente(page1) -> Optional[str]:
     return None
 
 
+async def _verificar_representado(page1, cuit_representado: str) -> None:
+    """Falla si el encabezado de COMARB no muestra al representado pedido (con o sin selector)."""
+    vigente = await _representado_vigente(page1)
+    if vigente != re.sub(r"\D", "", cuit_representado):
+        raise RuntimeError(f"No se seleccionó el representado {cuit_representado} en SIFERE (vigente: {vigente})")
+
+
 async def _wait_ready(page, timeout_ms: int = 10000, idle_timeout_ms: int = 5000) -> None:
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
@@ -347,22 +354,17 @@ async def sifere_consultas(
 
             await _wait_ready(page1)
             target_frame, select_cuit = await _find_cuit_selector(page1)
-            vigente = await _representado_vigente(page1) if select_cuit is None else None
-            if select_cuit is None and vigente == re.sub(r"\D", "", cuit_representado):
-                # Sin otros representados COMARB entra directo a mainMenu.do
-                # ("X (CUIT) representando a X (CUIT)") y no muestra selector.
-                pass
-            elif select_cuit is None:
-                raise RuntimeError("Selector #selectedCuit no encontrado")
-            else:
+            if select_cuit is not None:
                 await select_cuit.select_option(cuit_representado)
                 action_target = target_frame if target_frame is not None else page1
                 await action_target.get_by_role("button", name="Seleccionar").click(timeout=8000, no_wait_after=True)
                 await asyncio.sleep(3)
                 await _wait_ready(page1, timeout_ms=8000)
+            # Sin selector (un único CUIT) COMARB ya entra "representando a" ese CUIT; en ambos casos se verifica.
+            await _verificar_representado(page1, cuit_representado)
         except Exception as exc:
             error_logs.append(safe_public_message(exc, context="query", stage="la consulta"))
-            # Try to recover/continue if possible, but likely fatal for this run
+            return saved_files, error_logs, False  # sin representado correcto no se consulta
 
         # ==================== SIRCREB ====================
         # SIRCREB: detalleMensual muestra el "Mes/Año" del mes siguiente al parámetro.
