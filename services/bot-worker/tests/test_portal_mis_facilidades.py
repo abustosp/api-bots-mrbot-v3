@@ -531,6 +531,9 @@ class _ServicioMF:
     async def listar_planes(self) -> list[dict[str, str]]:
         return self.planes
 
+    async def fecha_consolidacion(self, numero: str) -> str | None:
+        return getattr(self, "fechas", {}).get(numero)
+
     async def exportar_vistas_pdf(self, *, numero: str, destino_dir: Path, base: str) -> list[dict]:
         from bot_worker.bots.errors import TargetUnavailableError
 
@@ -786,3 +789,110 @@ def test_consultar_procesa_todos_los_planes_con_presupuesto_holgado(tmp_path: Pa
 
     assert datos["planes_procesados"] == 5
     assert errores == []
+
+
+def _consultar_con_rango(tmp_path: Path, fechas: dict[str, str | None], **rango: str):
+    from bot_worker.bots.mis_facilidades.plugin import MisFacilidadesPlugin
+
+    plugin = MisFacilidadesPlugin()
+    _, entrada = asyncio.run(plugin.validate({
+        "operacion": "consultar",
+        "representado_cuit": "20123456789",
+        "subir_archivos": False,
+        "incluir_xlsx": False,
+        **rango,
+    }))
+    servicio = _ServicioMF([
+        {"numero": numero, "situacion": "Vigente"} for numero in fechas
+    ])
+    servicio.fechas = fechas
+    datos, _, errores = asyncio.run(
+        plugin._consultar(servicio, entrada, _runtime_mf(tmp_path), "20123456789")
+    )
+    return datos, errores, servicio
+
+
+def test_filtro_fecha_consolidacion_es_inclusivo_en_ambos_extremos(tmp_path: Path) -> None:
+    datos, errores, servicio = _consultar_con_rango(
+        tmp_path,
+        {"A": "31/12/2025", "B": "01/01/2026", "C": "30/06/2026", "D": "01/07/2026"},
+        fecha_consolidacion_desde="01/01/2026",
+        fecha_consolidacion_hasta="30/06/2026",
+    )
+
+    assert errores == []
+    assert servicio.pdf_pedidos == ["B", "C"]
+    assert [p["fecha_consolidacion"] for p in datos["planes"]] == ["01/01/2026", "30/06/2026"]
+
+
+def test_filtro_fecha_consolidacion_con_un_solo_limite(tmp_path: Path) -> None:
+    fechas = {"A": "31/12/2025", "B": "01/01/2026"}
+    _, _, solo_desde = _consultar_con_rango(tmp_path, fechas, fecha_consolidacion_desde="01/01/2026")
+    _, _, solo_hasta = _consultar_con_rango(tmp_path, fechas, fecha_consolidacion_hasta="31/12/2025")
+
+    assert solo_desde.pdf_pedidos == ["B"]
+    assert solo_hasta.pdf_pedidos == ["A"]
+
+
+def test_sin_rango_no_se_lee_la_fecha_de_consolidacion(tmp_path: Path) -> None:
+    datos, _, servicio = _consultar_con_rango(tmp_path, {"A": "31/12/2025"})
+
+    assert servicio.pdf_pedidos == ["A"]
+    assert "fecha_consolidacion" not in datos["planes"][0]
+
+
+def test_fecha_de_consolidacion_ilegible_descarga_el_plan(tmp_path: Path) -> None:
+    datos, errores, servicio = _consultar_con_rango(
+        tmp_path, {"A": None, "B": "10/02/2025"}, fecha_consolidacion_desde="01/01/2026"
+    )
+
+    assert servicio.pdf_pedidos == ["A"]
+    assert errores == []
+    assert "fecha_consolidacion" not in datos["planes"][0]
+
+
+def test_validacion_de_fechas_de_consolidacion() -> None:
+    from bot_worker.bots.errors import InvalidInputError
+    from bot_worker.bots.mis_facilidades.plugin import MisFacilidadesPlugin
+
+    base = {"operacion": "consultar", "representado_cuit": "20123456789"}
+    for invalido in (
+        {"fecha_consolidacion_desde": "2026-01-01"},
+        {"fecha_consolidacion_hasta": "31/02/2026"},
+        {"fecha_consolidacion_desde": "02/01/2026", "fecha_consolidacion_hasta": "01/01/2026"},
+    ):
+        try:
+            asyncio.run(MisFacilidadesPlugin().validate({**base, **invalido}))
+        except InvalidInputError:
+            continue
+        raise AssertionError(f"debió rechazar {invalido}")
+    _, ok = asyncio.run(MisFacilidadesPlugin().validate(
+        {**base, "fecha_consolidacion_desde": "01/01/2026", "fecha_consolidacion_hasta": "01/01/2026"}
+    ))
+    assert ok.fecha_consolidacion_desde == ok.fecha_consolidacion_hasta == "01/01/2026"
+
+
+def test_portal_lee_la_fecha_de_consolidacion_del_detalle() -> None:
+    class _Span(_Locator):
+        async def text_content(self, **_: object) -> str:
+            return " 05/06/2026 "
+
+    class _Pagina:
+        def locator(self, selector: str) -> _Locator:
+            assert selector == "#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_fechaConsolidacion"
+            return _Span(1)
+
+    portal = MisFacilidadesPortal(_Pagina())
+    pasos: list[str] = []
+
+    async def _abrir(numero: str) -> None:
+        pasos.append(f"abrir {numero}")
+
+    async def _volver(*, suprimir_error: bool = False) -> None:
+        pasos.append("listado")
+
+    portal._abrir_plan = _abrir  # type: ignore[method-assign]
+    portal._volver_al_listado = _volver  # type: ignore[method-assign]
+
+    assert asyncio.run(portal.fecha_consolidacion("P-1")) == "05/06/2026"
+    assert pasos == ["abrir P-1", "listado"]

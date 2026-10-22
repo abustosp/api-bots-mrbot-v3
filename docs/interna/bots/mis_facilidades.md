@@ -12,6 +12,8 @@ Catálogo central: operación única `consultar` (`services/central-api/src/cent
 
 ## Normalizaciones y outputs
 
+**Filtro por fecha de consolidación.** `fecha_consolidacion_desde/hasta` (`dd/mm/aaaa`, opcionales, inclusivas; `desde <= hasta`). La fecha solo está en el detalle del plan (`#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_fechaConsolidacion`), así que el plugin llama a `servicio.fecha_consolidacion(numero)` después de los filtros de situación y antes de exportar; fuera de rango el plan se omite, y si la fecha no se puede leer el plan se descarga igual (sin `fecha_consolidacion` en el resumen).
+
 Resultado incluye `cuits_disponibles`, planes/procesados y errores por plan o sección. Cada PDF se produce por vista disponible; las tablas se ensamblan en XLSX. Si falla una parte, se conserva el resto y estado se vuelve `PARCIAL`; sin errores, `OK` (`plugin.py:L207-L229`, `L242-L361`). `subir_archivos=false` deja generación/localización temporal pero sin `files[]`. `situacion_excluyente=[]` no filtra. Un campo vacío de CUIT no es `None`, pasa por limpieza y falla.
 
 ## Discrepancias observadas

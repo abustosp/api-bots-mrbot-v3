@@ -14,6 +14,8 @@ from shared.proxy import get_proxy_config
 
 # Import helpers from common version
 from mis_facilidades.mis_facilidades_bot import (
+    extract_fecha_consolidacion_from_detail,
+    parse_fecha,
     normalize_text,
     normalize_cuit,
     extract_cuit_from_text,
@@ -106,11 +108,20 @@ async def bot_mis_facilidades_logger(
     cuit_representado: Optional[str] = None,
     denominacion: Optional[str] = None,
     situacion_excluyente: Optional[List[str]] = None,
+    fecha_consolidacion_desde: Optional[str] = None,
+    fecha_consolidacion_hasta: Optional[str] = None,
     proxy_request: bool = False,
 ) -> tuple[dict[str, Any], list[str], bool]:
     results: dict[str, Any] = {"archivos": []}
     error_logs: list[str] = []
     success = True
+    fuera_de_rango = 0
+    fecha_desde = parse_fecha(fecha_consolidacion_desde)
+    fecha_hasta = parse_fecha(fecha_consolidacion_hasta)
+    if (fecha_consolidacion_desde and not fecha_desde) or (fecha_consolidacion_hasta and not fecha_hasta):
+        return results, ["Las fechas de consolidación deben tener formato dd/mm/aaaa"], False
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        return results, ["fecha_consolidacion_desde no puede ser posterior a fecha_consolidacion_hasta"], False
     found_plan: Optional[bool] = None
 
     debug = DebugCapture(prefix="mis_facilidades")
@@ -243,6 +254,22 @@ async def bot_mis_facilidades_logger(
                     error_logs.append(f"Error al abrir detalle del plan {plan_num}: {exc}")
                     success = False
                     continue
+
+                if fecha_desde or fecha_hasta:
+                    # Sin fecha legible no se puede filtrar: el plan se descarga igual.
+                    fecha_consolidacion = extract_fecha_consolidacion_from_detail(await page1.content())
+                    if fecha_consolidacion and (
+                        (fecha_desde and fecha_consolidacion < fecha_desde)
+                        or (fecha_hasta and fecha_consolidacion > fecha_hasta)
+                    ):
+                        fuera_de_rango += 1
+                        debug.log(f"Plan {plan_num} fuera del rango de consolidación")
+                        plan_dir.rmdir()
+                        if not await navigate_back_to_plan_list(page1):
+                            error_logs.append("No se pudo volver al listado de planes")
+                            success = False
+                            break
+                        continue
 
                 detail_plan_num = extract_plan_num_from_detail(await page1.content())
                 if detail_plan_num:
@@ -407,7 +434,7 @@ async def bot_mis_facilidades_logger(
         error_logs.append(f"Error en bot mis facilidades: {exc}")
         success = False
 
-    if not results["archivos"] and found_plan is not False:
+    if not results["archivos"] and found_plan is not False and not fuera_de_rango:
         success = False
 
     return results, error_logs, success
@@ -419,6 +446,8 @@ async def main():
     clave = os.getenv("MIS_FACILIDADES_CLAVE", "")
     cuit_representado = os.getenv("MIS_FACILIDADES_CUIT_REPRESENTADO", "")
     situacion_excluyente = os.getenv("MIS_FACILIDADES_SITUACION_EXCLUYENTE", "")
+    fecha_desde = os.getenv("MIS_FACILIDADES_FECHA_CONSOLIDACION_DESDE", "") or None
+    fecha_hasta = os.getenv("MIS_FACILIDADES_FECHA_CONSOLIDACION_HASTA", "") or None
     if situacion_excluyente:
         situacion_excluyente = [s.strip() for s in situacion_excluyente.split(",") if s.strip()]
     else:
@@ -426,7 +455,8 @@ async def main():
     
     if cuit and clave:
         res = await bot_mis_facilidades_logger(
-            cuit, clave, cuit_representado=cuit_representado, denominacion="MI EMPRESA", situacion_excluyente=situacion_excluyente, proxy_request=False
+            cuit, clave, cuit_representado=cuit_representado, denominacion="MI EMPRESA", situacion_excluyente=situacion_excluyente,
+            fecha_consolidacion_desde=fecha_desde, fecha_consolidacion_hasta=fecha_hasta, proxy_request=False
         )
         print(res)
 

@@ -34,6 +34,8 @@ _PLANES_JS = r"""
   .filter(plan => plan.numero || plan.situacion || plan.detalle_id)
 """
 
+_SELECTOR_FECHA_CONSOLIDACION = "#ContentPlaceHolder1_CabeceraPlanesEnviados_cab_fechaConsolidacion"
+
 _TABLA_JS = r"""
 (table) => {
   const visible = el => {
@@ -232,6 +234,23 @@ class MisFacilidadesPortal(PortalArca):
     async def listar_planes(self) -> list[dict[str, str]]:
         """Lee los planes del listado, conservando el identificador de detalle."""
         return await self.paso("listar_planes", self._leer_planes())
+
+    async def fecha_consolidacion(self, numero: str) -> str | None:
+        """Fecha de consolidación (``dd/mm/aaaa``) que muestra el detalle del plan.
+
+        Abre el detalle, lee la cabecera y vuelve al listado. ``None`` si la
+        cabecera no la informa.
+        """
+        numero = str(numero or "").strip()
+        await self._abrir_plan(numero)
+        try:
+            span = self.page.locator(_SELECTOR_FECHA_CONSOLIDACION)
+            if not await span.count():
+                return None
+            texto = " ".join(((await span.first.text_content()) or "").split())
+            return texto if re.fullmatch(r"\d{2}/\d{2}/\d{4}", texto) else None
+        finally:
+            await self._volver_al_listado(suprimir_error=True)
 
     def errores_de_plan(self, numero: str) -> list[dict[str, str]]:
         """Errores de seccion del plan, sin mensajes libres del sitio."""

@@ -45,7 +45,7 @@ from bot_worker.bots.errors import (
     TargetUnavailableError,
     sin_secretos,
 )
-from bot_worker.bots.mis_facilidades.schema import ENTRADAS, esquema_entrada
+from bot_worker.bots.mis_facilidades.schema import ENTRADAS, esquema_entrada, parsear_fecha
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
 from bot_worker.runtime.context import ruta_para_upload
 
@@ -255,6 +255,16 @@ class MisFacilidadesPlugin:
         )
         planes = await servicio.listar_planes()
         excluyentes = [str(s).lower() for s in (entrada.situacion_excluyente or [])]
+        desde = (
+            parsear_fecha(entrada.fecha_consolidacion_desde)
+            if entrada.fecha_consolidacion_desde
+            else None
+        )
+        hasta = (
+            parsear_fecha(entrada.fecha_consolidacion_hasta)
+            if entrada.fecha_consolidacion_hasta
+            else None
+        )
         datos: dict[str, Any] = {
             "operacion": "consultar",
             "representado_cuit": cuit_objetivo,
@@ -274,6 +284,19 @@ class MisFacilidadesPlugin:
             if excluyentes and any(e in situacion.lower() for e in excluyentes):
                 continue
             await runtime.cancellation.raise_if_cancelled()
+            fecha_consolidacion = None
+            if desde or hasta:
+                numero_plan = str((plan or {}).get("numero", "") or "s-n")
+                # Sin fecha legible no se puede filtrar: el plan se descarga igual.
+                try:
+                    fecha_consolidacion = await servicio.fecha_consolidacion(numero_plan)
+                    consolidado = parsear_fecha(fecha_consolidacion or "")
+                except Exception:
+                    fecha_consolidacion = consolidado = None
+                if consolidado and (
+                    (desde and consolidado < desde) or (hasta and consolidado > hasta)
+                ):
+                    continue
             reloj = getattr(runtime, "deadline", None)
             restante = reloj.remaining_seconds() if reloj is not None else None
             if plan_mas_lento and restante is not None and restante <= plan_mas_lento:
@@ -302,6 +325,8 @@ class MisFacilidadesPlugin:
                 "denominacion": denominacion_plan,
                 "situacion": situacion,
             }
+            if fecha_consolidacion:
+                resumen["fecha_consolidacion"] = fecha_consolidacion
             try:
                 if entrada.incluir_pdf:
                     vistas = await servicio.exportar_vistas_pdf(
