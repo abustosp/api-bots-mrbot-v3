@@ -40,6 +40,11 @@ MANIFIESTO: dict[str, tuple[str, ...]] = {
         "declaracion_en_linea_bot.py",
         "declaracion_en_linea_bot_logger.py",
     ),
+    "liquidacion_granos": (
+        "__init__.py",
+        "liquidacion_granos_bot.py",
+        "liquidacion_granos_bot_logger.py",
+    ),
     "retper_iibb_agip": ("agip_bot_logger.py",),
     "shared": (
         "__init__.py",

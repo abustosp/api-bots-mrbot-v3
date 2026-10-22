@@ -154,3 +154,20 @@ def test_logger_script_certificacion_primaria_granos_mapea_entorno():
     assert env["CERTIFICACION_PRIMARIA_GRANOS_DENOMINACION"] == "GIMENEZ"
     assert env["CERTIFICACION_PRIMARIA_GRANOS_DESDE"] == "01/08/2025"
     assert env["CERTIFICACION_PRIMARIA_GRANOS_HASTA"] == "31/10/2025"
+def test_logger_script_liquidacion_granos_mapea_entorno():
+    from bot_worker.runtime.logger_script import SCRIPTS, entorno
+
+    assert "liquidacion_granos" in SCRIPTS
+    env = entorno(
+        "liquidacion_granos",
+        {"desde": "01/01/2024", "hasta": "31/01/2024", "denominacion": "ACME SA"},
+        "20123456786", "k",
+    )
+    assert env == {
+        "LIQUIDACION_GRANOS_CUIT_REPRESENTANTE": "20123456786",
+        "LIQUIDACION_GRANOS_CLAVE": "k",
+        "LIQUIDACION_GRANOS_DENOMINACION": "ACME SA",
+        "LIQUIDACION_GRANOS_DESDE": "01/01/2024",
+        "LIQUIDACION_GRANOS_HASTA": "31/01/2024",
+        "LIQUIDACION_GRANOS_HEADLESS": "true",
+    }

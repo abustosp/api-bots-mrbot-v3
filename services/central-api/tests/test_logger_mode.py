@@ -85,3 +85,47 @@ def test_bot_certificacion_primaria_granos_acepta_logger_true(monkeypatch):
         assert r.status_code == 202, r.text
     finally:
         get_settings.cache_clear()
+
+
+
+_LG_CUIT = "20123456786"
+
+
+@pytest.fixture
+def _entorno_dev(monkeypatch):
+    from central_api.settings import get_settings
+    from central_api.store import JOBS
+
+    for var in ("API_KEY_HMAC_SECRET", "DATABASE_URL", "ADMIN_TOKEN",
+                "SEALED_PRIVATE_KEY_PATH", "S3_ENDPOINT"):
+        monkeypatch.delenv(var, raising=False)
+    get_settings.cache_clear()
+    JOBS.clear()
+    yield JOBS
+    JOBS.clear()
+    get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("extra", [{"logger": True}, {"logger": True, "logger_script": True}])
+def test_bot_liquidacion_granos_acepta_logger_true(_entorno_dev, extra):
+    from fastapi.testclient import TestClient
+
+    from central_api.main import create_app
+
+    cliente = TestClient(create_app())
+    v1 = {"desde": "01/01/2024", "hasta": "31/01/2024", "denominacion": "ACME SA",
+          "cuit_representante": _LG_CUIT, "clave": "DEMO_NO_USAR", **extra}
+    canonico = {
+        "payload": {"desde": "01/01/2024", "hasta": "31/01/2024", "denominacion": "ACME SA", **extra},
+        "credentials": {"cuit_representante": _LG_CUIT, "clave": "DEMO_NO_USAR"},
+    }
+    for i, (ruta, cuerpo) in enumerate((
+        ("/api/v3/bots/liquidacion_granos/consultar", canonico),
+        ("/api/v3/liquidacion_granos/consulta", v1),
+    )):
+        r = cliente.post(ruta, json=cuerpo, headers={"Idempotency-Key": f"lg-{i}-{len(extra)}"})
+        assert r.status_code == 202, r.text
+        job = _entorno_dev[r.json()["job_id"]]
+        assert job.payload["logger"] is True
+        assert job.payload.get("logger_script") is (True if "logger_script" in extra else None)
+        assert "01/01/2024" in str(job.payload), job.payload

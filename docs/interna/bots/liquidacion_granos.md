@@ -34,4 +34,4 @@ Las fechas se parsean/serializan a formato uniforme. `subir_archivos: null` y cu
 
 ## Modo logger
 
-Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública.
+Esta operación admite `logger: true` en la solicitud (ver [API §10](../api.md) y [Workers](../workers.md#modo-logger)): ejecuta el mismo plugin y guarda logs, HAR, capturas, HTML y descargas en `logger/{job_id}/`. No figura en la documentación pública. Con `logger_script: true` (booleano explícito, también oculto) corre en cambio la copia de `liquidacion_granos_bot_logger.py` de `bot_worker/bots_dev/liquidacion_granos/` en lugar del plugin.
