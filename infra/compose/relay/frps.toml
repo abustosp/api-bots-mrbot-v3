@@ -1,0 +1,23 @@
+# Servidor frp (relay) de la central. Lo monta relay.compose.yaml.
+# Los workers de casa (detrás de NAT) conectan hacia afuera por 7000 y exponen su
+# bot-worker:8080 como relay:<puerto> SOLO dentro de la red docker de la central.
+bindPort = 7000
+# FRP_AUTH_TOKEN llega por entorno del contenedor (nunca en este archivo).
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_AUTH_TOKEN }}"
+# Sesión sin latido válido (token rotado o worker dado de baja) cae en <= 75 s (frpc late cada 30 s, tolera un Ping perdido);
+# frps solo renueva el latido si el hook acepta el Ping.
+transport.heartbeatTimeout = 75
+# Solo túneles cifrados.
+transport.tls.force = true
+# Rango de puertos de workers (igual a RELAY_PORT_RANGE de la central).
+allowPorts = [{ start = 20001, end = 20100 }]
+# Los túneles escuchan dentro del contenedor; no se publican en el host.
+proxyBindAddr = "0.0.0.0"
+
+# La central valida cada Login/NewProxy (token por worker, puerto propio).
+[[httpPlugins]]
+name = "mrbot-central"
+addr = "central-api:8000"
+path = "/internal/v1/relay/frp-hook"
+ops = ["Login", "NewProxy", "Ping"]

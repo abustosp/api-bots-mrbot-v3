@@ -1,0 +1,39 @@
+# Relay frp de la central (para workers detrás de NAT).
+# Se superpone al compose de la central para compartir su red y resolver
+# `central-api` (hook) y `relay` (destino que usa la central):
+#   docker compose -f central.compose.yaml -f relay.compose.yaml \
+#     --env-file .env.central up -d
+# Solo se publica el puerto de control 7000. Los puertos 20001-20100 de los
+# túneles NO se publican: únicamente son alcanzables desde la red de la central.
+# Requiere FRP_AUTH_TOKEN en .env.central (ver central.env.example).
+# Si la central corre en otro proyecto/red, fijar `networks.default.name`
+# con el nombre de esa red (docker network ls).
+
+services:
+  frps:
+    image: fatedier/frps:v0.61.1
+    command: ["-c", "/etc/frp/frps.toml"]
+    environment:
+      FRP_AUTH_TOKEN: ${FRP_AUTH_TOKEN:?fijar FRP_AUTH_TOKEN (token compartido con los frpc)}
+    volumes:
+      - ./relay/frps.toml:/etc/frp/frps.toml:ro
+    ports:
+      - "${RELAY_PUBLIC_PORT:-7000}:7000"
+    networks:
+      default:
+        aliases: [relay]
+    depends_on:
+      - central-api
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    restart: unless-stopped

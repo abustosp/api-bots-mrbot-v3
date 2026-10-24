@@ -1,0 +1,41 @@
+# Worker en casa detrás de NAT: bot-worker + frpc (túnel saliente hacia la central).
+# Uso:
+#   cp worker-relay.env.example .env.worker
+#   # completar CENTRAL_URL (URL pública), WORKER_ADVERTISED_URL=http://relay:<puerto>
+#   # y FRP_AUTH_TOKEN; pegar en ./frpc.toml el archivo generado en el panel
+#   docker compose -f worker-relay.compose.yaml --env-file .env.worker up -d
+# Sin puertos publicados: la central llega al worker por el túnel (relay:<puerto>).
+# Sin updater en v1: actualizar a mano con
+#   docker compose -f worker-relay.compose.yaml --env-file .env.worker pull && \
+#   docker compose -f worker-relay.compose.yaml --env-file .env.worker up -d
+# Invariantes W-1/W-2/W-3 heredadas de worker.compose.yaml (extends).
+
+name: mrbot-v3-worker-relay
+
+services:
+  bot-worker:
+    extends:
+      file: worker.compose.yaml
+      service: bot-worker
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  frpc:
+    image: fatedier/frpc:v0.61.1
+    command: ["-c", "/etc/frp/frpc.toml"]
+    environment:
+      # Lo expande frpc.toml con {{ .Envs.FRP_AUTH_TOKEN }}.
+      FRP_AUTH_TOKEN: ${FRP_AUTH_TOKEN:?fijar FRP_AUTH_TOKEN (el mismo de la central)}
+    volumes:
+      - ./frpc.toml:/etc/frp/frpc.toml:ro
+    depends_on:
+      - bot-worker
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    restart: unless-stopped

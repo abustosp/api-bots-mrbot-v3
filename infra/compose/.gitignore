@@ -1,3 +1,5 @@
 # Nunca versionar entorno ni secretos locales (solo desarrollo).
 .env
 secrets/
+# Config de frpc con el token de relay de cada worker.
+frpc.toml

@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from central_api.internal.job_events import router as events_router
 from central_api.internal.job_results import router as results_router
+from central_api.internal.relay import router as relay_router
 from central_api.internal.updater import router as updater_router
 from central_api.internal.uploads import router as uploads_router
 from central_api.internal.workers import router as workers_router
@@ -14,3 +15,4 @@ router.include_router(events_router, tags=["internal-events"])
 router.include_router(results_router, tags=["internal-jobs"])
 router.include_router(uploads_router, tags=["internal-artifacts"])
 router.include_router(updater_router, tags=["internal-updater"])
+router.include_router(relay_router, tags=["internal-relay"])

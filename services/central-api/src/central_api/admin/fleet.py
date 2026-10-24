@@ -29,7 +29,7 @@ from central_api.admin._common import require_admin, validar_motivo
 from central_api.admin.audit import log_event, nuevo_uuid7
 from central_api.admin.workers import derive_state, worker_overview
 from central_api.settings import get_settings
-from central_api.store import EPHEMERAL_WORKERS, JOBS, WORKERS, WorkerEntry, utcnow
+from central_api.store import EPHEMERAL_WORKERS, JOBS, RELAY_WORKERS, WORKERS, WorkerEntry, utcnow
 from central_api.worker_nodes import merge_nodes
 
 router = APIRouter()
@@ -416,6 +416,7 @@ _DESCRIPCIONES_CAMPOS_RESPUESTA = {
     "latest_digest": "Identificador de imagen más reciente conocido por la flota.",
     "flota": "Inventario consolidado de workers manuales y efímeros.",
     "manuales": "Workers administrados fuera del grupo efímero.",
+    "relay": "Workers detrás de NAT conectados por el relay frp (origen relay y relay_port).",
     "efimeros": "Workers efímeros y datos de su instancia.",
     "resumen": "Totales de capacidad, estado y versiones de la flota.",
     "worker": "Estado, capacidad y métricas actuales del worker.",
@@ -513,9 +514,11 @@ _ERROR_VALIDACION = {
                 "latest_digest": "sha256:abc123",
                 "flota": [{"node": "10.0.0.13:8080", "estado": "SANO", "capacidad": 5}],
                 "manuales": [{"node": "10.0.0.13:8080", "estado": "SANO"}],
+                "relay": [{"node": "relay:20001", "origen": "relay", "relay_port": 20001, "estado": "SANO"}],
                 "efimeros": [],
                 "resumen": {
                     "manuales": {"total": 1, "sanos": 1, "capacidad": 5, "en_ejecucion": 1},
+                    "relay": {"total": 1, "sanos": 1, "capacidad": 5, "en_ejecucion": 0},
                     "efimeros": {"total": 0, "sanos": 0, "capacidad": 0, "en_ejecucion": 0, "costo_estimado_usd": 0.0},
                     "versiones": {"latest_version": "2.4.1", "latest_digest": "sha256:abc123", "total": 1, "outdated": 0, "unknown": 0},
                 },
@@ -539,9 +542,13 @@ def ver_flota(authorization: str | None = Header(default=None)) -> dict:
         for item in EPHEMERAL_WORKERS.values()
         if item.get("node")
     }
+    relay = [
+        {**fila, "origen": "relay", "relay_port": RELAY_WORKERS[fila["node"]]["port"]}
+        for fila in flota if fila["node"] in RELAY_WORKERS
+    ]
     manuales = [
         fila for fila in flota
-        if fila["node"] not in nodos_efimeros
+        if fila["node"] not in nodos_efimeros and fila["node"] not in RELAY_WORKERS
     ]
     efimeros = [
         _vista_efimero(instance_id, item)
@@ -550,16 +557,18 @@ def ver_flota(authorization: str | None = Header(default=None)) -> dict:
     resumen_manuales = _resumen_filas(manuales)
     resumen_efimeros = _resumen_filas(efimeros)
     resumen_efimeros["costo_estimado_usd"] = _costo_estimado_efimeros()
-    resumen_versiones = _version_summary(manuales + efimeros)
+    resumen_versiones = _version_summary(manuales + relay + efimeros)
     return {
         "success": True,
         "latest_version": resumen_versiones["latest_version"],
         "latest_digest": resumen_versiones["latest_digest"],
         "flota": flota,
         "manuales": manuales,
+        "relay": relay,
         "efimeros": efimeros,
         "resumen": {
             "manuales": resumen_manuales,
+            "relay": _resumen_filas(relay),
             "efimeros": resumen_efimeros,
             "versiones": resumen_versiones,
         },
