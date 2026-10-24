@@ -33,7 +33,8 @@ infra/
 └── deploy/
     └── runbooks/
         ├── despliegue-worker.md  # worker con solo CENTRAL_URL mas token
-        └── despliegue-central.md # central con solo la lista de IPs
+        ├── despliegue-central.md # central con solo la lista de IPs
+        └── relay-workers.md      # workers detrás de NAT vía frp (relay)
 ```
 
 ## Despliegue por subdirectorios
@@ -48,6 +49,8 @@ Cada destino se despliega con lo minimo que necesita:
   [`deploy/runbooks/despliegue-worker.md`](deploy/runbooks/despliegue-worker.md).
 - Central: solo la lista de IPs de workers, ver
   [`deploy/runbooks/despliegue-central.md`](deploy/runbooks/despliegue-central.md).
+- Workers detrás de NAT (frp): ver
+  [`deploy/runbooks/relay-workers.md`](deploy/runbooks/relay-workers.md).
 - Entrada estándar: `compose.yaml` desde la raíz o desde `infra/compose`.
 - nginx-v2: `central-api.mrbot.com.ar`, `worker-${WORKER_NUMBER:-1}.mrbot.com.ar`
   y, mediante el perfil explícito `database-ui`, `database-bots.mrbot.com.ar`.

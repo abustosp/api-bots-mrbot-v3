@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     # Inventario de workers: SOLO direcciones "ip:port", contactadas por HTTP.
     # El panel de administración puede sumar nodos en caliente (ADMIN_NODES).
     worker_nodes: str = Field(default="", alias="WORKER_NODES")
+    # Relay frp para workers tras NAT: la central ve a cada uno como ``RELAY_HOST:<puerto>``.
+    relay_host: str = Field(default="relay", alias="RELAY_HOST")
+    relay_port_range: str = Field(default="20001-20100", alias="RELAY_PORT_RANGE")
+    # Host y puerto de frps que marca el frpc del worker (dirección pública).
+    relay_public_addr: str = Field(default="", alias="RELAY_PUBLIC_ADDR")
+    relay_public_port: int = Field(default=7000, alias="RELAY_PUBLIC_PORT")
     # Alias legibles por nodo: "host:port=alias,host:port=alias" (solo para mostrar en el panel).
     worker_aliases: str = Field(default="", alias="WORKER_ALIASES")
     # Versión objetivo opcional de la flota. Sin valor, se deriva el máximo

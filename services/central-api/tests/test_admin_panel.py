@@ -512,3 +512,14 @@ def test_panel_se_sirve_sin_cache() -> None:
         assert respuesta.status_code == 200
         assert respuesta.headers["cache-control"] == "no-store, must-revalidate"
         assert respuesta.headers["x-content-type-options"] == "nosniff"
+
+
+def test_panel_incluye_seccion_workers_relay() -> None:
+    from central_api.admin.panel import ADMIN_PANEL_HTML as html
+
+    for ident in ("fleet-relay-table", "fleet-relay-count", "add-relay-form", "relay-config-toml", "relay-config-env"):
+        assert f'id="{ident}"' in html
+    for accion in ("relay-token", "worker-pause", "worker-alias", "worker-remove"):
+        assert f'data-action="{accion}"' in html or f'"{accion}"' in html
+    assert '"/admin/workers/relay"' in html and "/admin/workers/relay/${encodeURIComponent(" in html and "/token`" in html
+    assert "N relay" not in html and "/ ${esc(conteoRelay)} relay" in html

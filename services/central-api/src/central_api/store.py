@@ -58,6 +58,10 @@ ADMIN_NODES: set[str] = set()
 # Tienen prioridad sobre ``WORKER_ALIASES`` del entorno.
 WORKER_ALIAS_OVERRIDES: dict[str, str] = {}
 
+# Workers por relay frp (``relay_workers`` en PostgreSQL): nodo -> {alias, port,
+# token_hash}. Solo se guarda el sha256 del token; el token se muestra una vez.
+RELAY_WORKERS: dict[str, dict] = {}
+
 # Nodos pausados desde el panel (``worker_paused`` en PostgreSQL): no reciben
 # jobs nuevos, los en curso terminan. Es una marca aparte del ``status`` del
 # worker para que latidos y circuit breaker no la pisen.

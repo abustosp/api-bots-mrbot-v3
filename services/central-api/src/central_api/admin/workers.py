@@ -29,6 +29,7 @@ from central_api.settings import get_settings
 from central_api.store import (
     ADMIN_NODES,
     PAUSED_NODES,
+    RELAY_WORKERS,
     WORKER_ALIAS_OVERRIDES,
     WORKERS,
     WorkerEntry,
@@ -205,6 +206,12 @@ def derive_state(entry: WorkerEntry | None) -> str:
         return "DRENANDO"
     if entry.node in PAUSED_NODES:
         return "PAUSADO"
+    if entry.node in RELAY_WORKERS:
+        from central_api.relay_probe import estado_sondeo
+
+        estado = estado_sondeo(entry.node)
+        if estado is not None:
+            return estado
     if entry.last_heartbeat_at is None:
         return "REGISTRANDO"
     age = now - entry.last_heartbeat_at
@@ -318,6 +325,13 @@ def require_admin(authorization: str | None) -> None:
         raise HTTPException(status_code=403, detail="ADMIN_TOKEN inválido")
 
 
+def reactivar_nodo(node: str) -> None:
+    """Alta de un nodo ya quitado: limpia el DRENANDO que dejó la baja anterior."""
+    entry = WORKERS.get(node)
+    if entry is not None and entry.status == "DRENANDO":
+        entry.status = "REGISTRANDO"
+
+
 def _coerce_node(raw: str) -> str:
     text = (raw or "").strip()
     if not text:
@@ -389,6 +403,7 @@ async def add_worker(body: AddWorkerBody, authorization: str | None = Header(def
         reachable = False
         detail = type(exc).__name__
     ADMIN_NODES.add(node)
+    reactivar_nodo(node)
     return {
         "success": True,
         "node": node,
@@ -416,7 +431,7 @@ async def add_worker(body: AddWorkerBody, authorization: str | None = Header(def
         ),
     },
 )
-def remove_worker(node: str, authorization: str | None = Header(default=None)) -> dict:
+async def remove_worker(node: str, authorization: str | None = Header(default=None)) -> dict:
     """Quita el nodo del inventario administrado y, si está activo, lo drena."""
     require_admin(authorization)
     try:
@@ -424,6 +439,9 @@ def remove_worker(node: str, authorization: str | None = Header(default=None)) -
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     ADMIN_NODES.discard(norm)
+    from central_api.admin.relay import liberar_relay
+
+    await liberar_relay(norm)  # libera puerto y token si era un worker relay
     entry = WORKERS.get(norm)
     if entry is not None:
         entry.status = "DRENANDO"

@@ -18,10 +18,12 @@ from central_api.admin.retention import router as retention_router
 from central_api.admin.subscriptions import router as billing_router
 from central_api.admin.updates import router as updates_router
 from central_api.admin.users import router as users_router
+from central_api.admin.relay import router as relay_router
 from central_api.admin.workers import router as workers_admin_router
 
 router = APIRouter()
 router.include_router(panel_router, tags=["admin"])
+router.include_router(relay_router, tags=["admin-workers"])
 router.include_router(workers_admin_router, tags=["admin-workers"])
 router.include_router(users_router, tags=["admin-users"])
 router.include_router(reporting_router, tags=["admin-reporting"])

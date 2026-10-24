@@ -270,6 +270,17 @@ async def lifespan(app: FastAPI):
             logging.getLogger(__name__).warning(
                 "no se pudieron cargar los workers pausados: %s", type(exc).__name__
             )
+    if app.state.db_configurado:
+        try:
+            from central_api.admin.relay import cargar_relay_persistidos
+
+            await cargar_relay_persistidos()
+        except Exception as exc:  # noqa: BLE001 - sin tabla aún, sin relays
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "no se pudieron cargar los workers relay: %s", type(exc).__name__
+            )
     tarea_scheduler: asyncio.Task | None = None
     tarea_autoscaler: asyncio.Task | None = None
     tarea_adopcion: asyncio.Task | None = None
@@ -301,12 +312,20 @@ async def lifespan(app: FastAPI):
                 )
 
         tarea_adopcion = asyncio.create_task(_adoptar_efimeras())
+    from central_api.relay_probe import relay_probe_loop
+
+    tarea_sondeo_relay = asyncio.create_task(relay_probe_loop())
     try:
         yield
     finally:
+        tarea_sondeo_relay.cancel()
         tarea_apoc.cancel()
         if tarea_adopcion is not None:
             tarea_adopcion.cancel()
+        try:
+            await tarea_sondeo_relay
+        except (asyncio.CancelledError, Exception):
+            pass
         try:
             await tarea_apoc
         except (asyncio.CancelledError, Exception):

@@ -47,6 +47,12 @@ services:
       OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      # Relay de workers detrás de NAT (ver relay.compose.yaml).
+      RELAY_HOST: ${RELAY_HOST:-relay}
+      RELAY_PORT_RANGE: ${RELAY_PORT_RANGE:-20001-20100}
+      RELAY_PUBLIC_ADDR: ${RELAY_PUBLIC_ADDR:-}
+      RELAY_PUBLIC_PORT: ${RELAY_PUBLIC_PORT:-7000}
+      FRP_AUTH_TOKEN: ${FRP_AUTH_TOKEN:-}
     ports:
       - "127.0.0.1:${CENTRAL_PORT:-8000}:8000"
     healthcheck:

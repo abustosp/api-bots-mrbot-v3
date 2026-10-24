@@ -140,11 +140,11 @@ def test_panel_admin_muestra_las_dos_secciones_de_flota() -> None:
     assert 'data-action="worker-remove"' in cuerpo
     assert 'data-action="ephemeral-terminate"' in cuerpo
     assert 'api("/admin/autoscale/terminate"' in cuerpo
-    assert "manuales / ${esc(conteoEfimeros)} efimeros" in cuerpo
+    assert "manuales / ${esc(conteoEfimeros)} efímeros / ${esc(conteoRelay)} relay" in cuerpo
     assert "${esc(worker.instance_id" in cuerpo
     assert 'id="fleet-version-summary"' in cuerpo
     assert 'id="fleet-outdated-only"' in cuerpo
-    assert cuerpo.count("<th>Versión</th>") == 2
+    assert cuerpo.count("<th>Versión</th>") == 3  # manuales, efímeros y relay
     assert "Desactualizado" in cuerpo
     assert "de ${totalVersions} desactualizados" in cuerpo
     assert "manualesVisibles" in cuerpo
