@@ -896,3 +896,23 @@ def test_el_dump_limpia_el_temporal(monkeypatch, tmp_path) -> None:
         assert os.listdir(tmp_path) == []
     finally:
         get_settings.cache_clear()
+
+
+def test_tag_en_key_validacion_y_llaves_en_el_tar(tmp_path: Path) -> None:
+    momento = datetime(2026, 10, 16, 18, 30, 5, tzinfo=timezone.utc)
+    key = B._nombre_key("dump", momento, "produccion")
+    assert key == "dump/20261016T183005Z-produccion-mrbot-db.tar.gz"
+    assert B._tag_de_key(key) == "produccion"
+    assert B._tag_de_key(B._nombre_key("dump", momento)) == ""
+    assert B._validar_tag(" feat-x.1 ") == "feat-x.1"
+    for malo in ("a/b", "../x", "-x", "a b"):
+        with pytest.raises(B.SolicitudInvalida):
+            B._validar_tag(malo)
+
+    (tmp_path / "users.copy").write_bytes(b"1\n")
+    manifiesto = {"tablas": [{"nombre": "users", "columnas": ["id"], "filas": 1, "sha256": "x"}]}
+    tar_path = tmp_path / "d.tar.gz"
+    B._empaquetar(str(tmp_path), str(tar_path), manifiesto, {"RSA_PRIVATE_KEY": "PEM"})
+    with tarfile.open(tar_path) as tar:
+        assert sorted(tar.getnames()) == ["llaves.json", "manifest.json", "users.copy"]
+        assert json.load(tar.extractfile("llaves.json")) == {"RSA_PRIVATE_KEY": "PEM"}

@@ -333,10 +333,10 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="backups">
-        <div class="kicker">Continuidad de datos</div><h2>Backups de la base</h2><p class="subtle">Los dumps se guardan en el bucket configurado (BACKUP_BUCKET) como un tar.gz con una tabla por archivo COPY y un manifiesto con la revisión de Alembic, columnas, filas y sha256. El restore requiere el esquema ya migrado: no recrea tablas. <strong>overwrite</strong> reemplaza los registros que se pisan por clave primaria; <strong>append</strong> agrega sin pisar nada (ON CONFLICT DO NOTHING). Las tablas sin clave primaria no permiten decidir el pisotón: se informan como «sin PK». El dump incluye alembic_version: si restaurás un dump de otra revisión, el marcador vuelve a la del dump (el restore no recrea el esquema).</p>
-        <div class="form-actions"><button class="button primary" type="button" id="backups-dump">Crear dump</button><button class="button secondary" type="button" id="backups-refresh">Actualizar lista</button><span class="muted" id="backups-status" aria-live="polite"></span></div>
+        <div class="kicker">Continuidad de datos</div><h2>Backups de la base</h2><p class="subtle">Los dumps se guardan en el bucket configurado (BACKUP_BUCKET) como un tar.gz con una tabla por archivo COPY y un manifiesto con la revisión de Alembic, columnas, filas y sha256. El restore requiere el esquema ya migrado: no recrea tablas. <strong>overwrite</strong> reemplaza los registros que se pisan por clave primaria; <strong>append</strong> agrega sin pisar nada (ON CONFLICT DO NOTHING). Las tablas sin clave primaria no permiten decidir el pisotón: se informan como «sin PK». El dump guarda además las llaves privadas (RSA_PRIVATE_KEY y ASSIGNMENT_SIGNING_KEY) en llaves.json: protegé el bucket. El tag se agrega al nombre del archivo. El dump incluye alembic_version: si restaurás un dump de otra revisión, el marcador vuelve a la del dump (el restore no recrea el esquema).</p>
+        <div class="form-actions"><div class="field"><label for="backups-tag">Tag (opcional: produccion, testing, branch...)</label><input id="backups-tag" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" placeholder="produccion"></div><button class="button primary" type="button" id="backups-dump">Crear dump</button><button class="button secondary" type="button" id="backups-refresh">Actualizar lista</button><span class="muted" id="backups-status" aria-live="polite"></span></div>
         <div class="grid" id="backups-summary"></div>
-        <div class="table-wrap"><table><thead><tr><th>Archivo (key)</th><th>Tamaño</th><th>Fecha</th><th class="actions-head">Acciones</th></tr></thead><tbody id="backups-table"><tr><td colspan="4" class="empty">Cargando dumps...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Archivo (key)</th><th>Tag</th><th>Tamaño</th><th>Fecha</th><th class="actions-head">Acciones</th></tr></thead><tbody id="backups-table"><tr><td colspan="5" class="empty">Cargando dumps...</td></tr></tbody></table></div>
         <details id="backups-restore-panel" class="hidden"><summary>Restaurar dump <code id="backups-restore-key"></code></summary><div class="details-body">
           <p class="muted">Elegí el modo, el motivo y escribí RESTAURAR para confirmar. En overwrite se reemplazan los registros que se pisan por clave primaria; append no pisa nada. La simulación (dry run) cuenta filas y colisiones sin cambiar datos.</p>
           <div class="form-grid">
@@ -1518,7 +1518,7 @@ details > .details-body { padding: 0 14px 14px; }
       const data = await api("/admin/backups");
       renderBackupSummary(data);
       const rows = data.objects || [];
-      $("#backups-table").innerHTML = rows.length ? rows.map((item) => `<tr><td><code>${esc(item.key)}</code></td><td>${esc(humanBytes(item.size_bytes))}</td><td>${esc(date(item.last_modified))}</td><td class="actions"><div class="actions-inner"><button class="button secondary small" data-action="backup-restore" data-key="${esc(item.key)}">Restaurar</button><button class="button secondary small" data-action="backup-download" data-key="${esc(item.key)}">Descargar</button></div></td></tr>`).join("") : `<tr><td colspan="4" class="empty">${data.success ? "Todavía no hay dumps en el bucket." : `No se pudo listar el bucket (${esc(data.error || "error")}): ${esc(data.detalle || "")}`}</td></tr>`;
+      $("#backups-table").innerHTML = rows.length ? rows.map((item) => `<tr><td><code>${esc(item.key)}</code></td><td>${esc(item.tag || "—")}</td><td>${esc(humanBytes(item.size_bytes))}</td><td>${esc(date(item.last_modified))}</td><td class="actions"><div class="actions-inner"><button class="button secondary small" data-action="backup-restore" data-key="${esc(item.key)}">Restaurar</button><button class="button secondary small" data-action="backup-download" data-key="${esc(item.key)}">Descargar</button></div></td></tr>`).join("") : `<tr><td colspan="5" class="empty">${data.success ? "Todavía no hay dumps en el bucket." : `No se pudo listar el bucket (${esc(data.error || "error")}): ${esc(data.detalle || "")}`}</td></tr>`;
       $("#backups-status").textContent = data.success ? `${rows.length} dump(s) en ${data.bucket}.` : `El bucket no respondió: ${data.error || "error"}.`;
     } catch (error) { flash(error.message, "error"); $("#backups-status").textContent = ""; }
   }
@@ -1529,7 +1529,7 @@ details > .details-body { padding: 0 14px 14px; }
     if (limpio.length < 10) { flash("El motivo del dump debe tener al menos 10 caracteres.", "error"); return; }
     $("#backups-status").textContent = "Creando dump (puede tardar según el tamaño de la base)...";
     try {
-      const data = await api("/admin/backups/dump", { method: "POST", body: JSON.stringify({ motivo: limpio }) });
+      const data = await api("/admin/backups/dump", { method: "POST", body: JSON.stringify({ motivo: limpio, tag: $("#backups-tag").value.trim() }) });
       flash(`Dump creado: ${data.key} (${humanBytes(data.size_bytes)}, ${data.total_filas} filas, ${data.duracion_segundos} s).`);
       await loadBackups();
     } catch (error) { flash(error.message, "error"); $("#backups-status").textContent = ""; }

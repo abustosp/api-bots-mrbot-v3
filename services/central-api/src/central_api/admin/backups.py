@@ -53,6 +53,13 @@ from central_api.store import utcnow
 router = APIRouter()
 
 MANIFEST_NAME = "manifest.json"
+LLAVES_NAME = "llaves.json"
+#: Settings con llaves privadas que se guardan en el dump (sin ellas las
+#: credenciales cifradas de la base no se pueden descifrar al recrear todo).
+LLAVES_PRIVADAS = {
+    "RSA_PRIVATE_KEY": "rsa_private_key",
+    "ASSIGNMENT_SIGNING_KEY": "assignment_signing_key",
+}
 MANIFEST_VERSION = 1
 CONFIRMACION_RESTORE = "RESTAURAR"
 MODO_OVERWRITE = "overwrite"
@@ -64,6 +71,9 @@ PRESIGN_EXPIRACION_SEGUNDOS = 300
 #: Identificadores admisibles para tablas del dump (se citan igualmente al
 #: construir el SQL; la lista blanca evita cualquier nombre inyectado).
 _IDENTIFICADOR = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}$")
+#: Tag del backup (entorno/branch): va en el nombre del objeto, sin ``/``.
+_TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_KEY_CON_TAG = re.compile(r"^\d{8}T\d{6}Z-(?:(.+)-)?mrbot-db\.tar\.gz$")
 
 SIN_BASE = "DATABASE_URL no configurada"
 SIN_BACKUP = (
@@ -128,11 +138,26 @@ def _orden_topologico(
     return orden
 
 
-def _nombre_key(prefijo: str, momento: datetime) -> str:
-    """``<prefijo>/<YYYYmmddTHHMMSSZ>-mrbot-db.tar.gz`` con el sello del dump."""
+def _validar_tag(tag: str | None) -> str:
+    texto = (tag or "").strip()
+    if texto and not _TAG.match(texto):
+        raise SolicitudInvalida(
+            f"tag inválido: {tag!r} (letras, números, '.', '_' o '-'; máx. 64)"
+        )
+    return texto
+
+
+def _tag_de_key(key: str) -> str:
+    """Tag embebido en el nombre del objeto ('' si el dump no tiene)."""
+    coincide = _KEY_CON_TAG.match(key.rsplit("/", 1)[-1])
+    return (coincide.group(1) or "") if coincide else ""
+
+
+def _nombre_key(prefijo: str, momento: datetime, tag: str = "") -> str:
+    """``<prefijo>/<YYYYmmddTHHMMSSZ>[-<tag>]-mrbot-db.tar.gz``."""
     sello = momento.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     limpio = (prefijo or "").strip("/")
-    nombre = f"{sello}-mrbot-db.tar.gz"
+    nombre = f"{sello}-{tag}-mrbot-db.tar.gz" if tag else f"{sello}-mrbot-db.tar.gz"
     return f"{limpio}/{nombre}" if limpio else nombre
 
 
@@ -355,8 +380,13 @@ def _volcar_tablas(
     }
 
 
-def _empaquetar(destino: str, tar_path: str, manifiesto: dict[str, Any]) -> int:
-    """Comprime ``<tabla>.copy`` + manifest.json en tar.gz y devuelve su tamaño."""
+def _empaquetar(
+    destino: str,
+    tar_path: str,
+    manifiesto: dict[str, Any],
+    llaves: dict[str, str] | None = None,
+) -> int:
+    """Comprime ``<tabla>.copy`` + manifest.json (+ llaves.json) en tar.gz."""
     with open(os.path.join(destino, MANIFEST_NAME), "w", encoding="utf-8") as archivo:
         json.dump(manifiesto, archivo, ensure_ascii=False, indent=2)
     with tarfile.open(tar_path, "w:gz") as tar:
@@ -364,6 +394,11 @@ def _empaquetar(destino: str, tar_path: str, manifiesto: dict[str, Any]) -> int:
             nombre = f"{entrada['nombre']}.copy"
             tar.add(os.path.join(destino, nombre), arcname=nombre)
         tar.add(os.path.join(destino, MANIFEST_NAME), arcname=MANIFEST_NAME)
+        if llaves:
+            ruta = os.path.join(destino, LLAVES_NAME)
+            with open(os.open(ruta, os.O_WRONLY | os.O_CREAT, 0o600), "w") as archivo:
+                json.dump(llaves, archivo, indent=2)
+            tar.add(ruta, arcname=LLAVES_NAME)
     return os.path.getsize(tar_path)
 
 
@@ -373,6 +408,7 @@ def _crear_dump(
     tablas: Sequence[str],
     incluir_datos: bool,
     momento: datetime,
+    tag: str = "",
 ) -> dict[str, Any]:
     """Dump completo: escribe en disco, empaqueta, sube y limpia el temporal."""
     base = Path(settings.backup_dir)
@@ -385,8 +421,15 @@ def _crear_dump(
             incluir_datos=incluir_datos,
             destino=str(trabajo),
         )
+        llaves = {
+            nombre: valor
+            for nombre, atributo in LLAVES_PRIVADAS.items()
+            if (valor := str(getattr(settings, atributo, "") or "").strip())
+        }
         manifiesto = {
             "version": MANIFEST_VERSION,
+            "tag": tag,
+            "llaves": sorted(llaves),
             "created_at": momento.astimezone(timezone.utc).isoformat(),
             "database": datos["database"],
             "alembic_revision": datos["alembic_revision"],
@@ -394,15 +437,17 @@ def _crear_dump(
             "tablas": datos["tablas"],
             "total_filas": datos["total_filas"],
         }
-        key = _nombre_key(settings.backup_prefix, momento)
+        key = _nombre_key(settings.backup_prefix, momento, tag)
         tar_path = trabajo / key.rsplit("/", 1)[-1]
-        size_bytes = _empaquetar(str(trabajo), str(tar_path), manifiesto)
+        size_bytes = _empaquetar(str(trabajo), str(tar_path), manifiesto, llaves)
         sha256 = _sha256_archivo(tar_path)
         _subir_archivo(settings, tar_path, key)
         return {
             "success": True,
             "bucket": settings.backup_bucket,
             "key": key,
+            "tag": tag,
+            "llaves": sorted(llaves),
             "size_bytes": size_bytes,
             "size_raw": datos["size_raw"],
             "tablas": datos["tablas"],
@@ -750,6 +795,7 @@ def _listar_objetos(settings: Settings) -> dict[str, Any]:
             objetos.append(
                 {
                     "key": str(item.get("Key") or ""),
+                    "tag": _tag_de_key(str(item.get("Key") or "")),
                     "size_bytes": int(item.get("Size") or 0),
                     "last_modified": _iso(item.get("LastModified")),
                 }
@@ -783,6 +829,15 @@ def _url_descarga(settings: Settings, key: str) -> str:
 
 
 class DumpBody(BaseModel):
+    tag: str | None = Field(
+        default=None,
+        description=(
+            "Etiqueta del backup (p. ej. produccion, testing o una branch); va en "
+            "el nombre del objeto y en el manifiesto. Si se omite se usa BACKUP_TAG. "
+            "Letras, números, '.', '_' y '-' (máx. 64)."
+        ),
+        examples=["produccion"],
+    )
     motivo: str = Field(
         description="Justificación de auditoría del dump; entre 10 y 500 caracteres.",
         examples=["Respaldo previo a la migración de octubre"],
@@ -922,7 +977,9 @@ def _error_http(exc: Exception) -> HTTPException:
         "topológico por claves foráneas, exporta cada una con COPY en formato "
         "texto, arma un tar.gz con un archivo por tabla y un manifest.json "
         "(revisión de Alembic, columnas, filas y sha256 de cada tabla) y lo sube "
-        "a s3://BACKUP_BUCKET/BACKUP_PREFIX/<timestamp>-mrbot-db.tar.gz. El dump "
+        "a s3://BACKUP_BUCKET/BACKUP_PREFIX/<timestamp>[-<tag>]-mrbot-db.tar.gz, junto "
+        "con llaves.json (RSA_PRIVATE_KEY y ASSIGNMENT_SIGNING_KEY): quien lea el "
+        "bucket puede descifrar las credenciales, protéjalo. El dump "
         "se escribe en disco (BACKUP_DIR) y el temporal se borra al terminar. "
         "Requiere autorización administrativa y un motivo de auditoría."
     ),
@@ -964,6 +1021,7 @@ async def backups_dump(
     if not settings.database_url:
         raise HTTPException(status_code=503, detail=SIN_BASE)
     tablas = [_validar_nombre_tabla(t) for t in body.tablas]
+    tag = _validar_tag(body.tag or settings.backup_tag)
     momento = utcnow()
     _sin_cache(respuesta)
     inicio = time.monotonic()
@@ -974,6 +1032,7 @@ async def backups_dump(
             tablas=tablas,
             incluir_datos=body.incluir_datos,
             momento=momento,
+            tag=tag,
         )
     except Exception as exc:  # noqa: BLE001 - se audita y se informa el tipo
         log_event(
@@ -1001,6 +1060,8 @@ async def backups_dump(
             "total_filas": resultado["total_filas"],
             "cantidad_tablas": resultado["cantidad_tablas"],
             "incluir_datos": body.incluir_datos,
+            "tag": tag,
+            "llaves": resultado.get("llaves"),
         },
     )
     return resultado
