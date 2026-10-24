@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     # La conexión (endpoint, región y credenciales) sí es la de object storage.
     backup_bucket: str = Field(default="mrbot-bots-api-bkp-db", alias="BACKUP_BUCKET")
     backup_prefix: str = Field(default="dump", alias="BACKUP_PREFIX")
+    # Tag por defecto de los dumps (p. ej. produccion/testing) si el panel no manda uno.
+    backup_tag: str = Field(default="", alias="BACKUP_TAG")
     # Directorio temporal de trabajo: el dump se escribe en disco (nunca en
     # memoria) y se borra al terminar, tanto el archivo como la carpeta.
     backup_dir: str = Field(default="/tmp/mrbot-backups", alias="BACKUP_DIR")
