@@ -48,6 +48,7 @@ from bot_worker.bots.errors import (
 )
 from bot_worker.bots.rcel.schema import ENTRADAS, esquema_entrada
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from mrbot_contracts.datos_csv import nombre_rcel_facturas, separar_rcel
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -55,6 +56,9 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
     BotResult = Any  # type: ignore[assignment,misc]
     BotRuntime = Any  # type: ignore[assignment,misc]
 
+# Los campos extraídos de cada factura se guardan como un CSV (con ``|``) en S4 y
+# no en el JSON de la base: la central vuelve a armar el response al pedirlo.
+ID_ARTEFACTO_FACTURAS = "rcel_facturas.csv"
 SERVICIO_ARCA = "COMPROBANTES EN LÍNEA"
 RCEL_BASE_URL_DEFAULT = "https://fe.afip.gob.ar/rcel/jsp/index_bis.jsp"
 
@@ -95,6 +99,12 @@ class RcelPlugin:
             ArtifactSpec(
                 nombre="rcel",
                 content_types=("application/pdf",),
+                max_bytes=52_428_800,
+                obligatorio=False,
+            ),
+            ArtifactSpec(
+                nombre="rcel_facturas.csv",
+                content_types=("text/csv",),
                 max_bytes=52_428_800,
                 obligatorio=False,
             ),
@@ -280,4 +290,44 @@ class RcelPlugin:
                 datos["facturas"].append(resumen)
         if not getattr(entrada, "incluir_json", True):
             datos.pop("facturas", None)
+        datos = await self._guardar_csv(datos, entrada, runtime, artefactos, errores)
         return datos, artefactos, errores
+
+    async def _guardar_csv(
+        self,
+        datos: dict[str, Any],
+        entrada: Any,
+        runtime: BotRuntime,
+        artefactos: list[dict[str, Any]],
+        errores: list[Any],
+    ) -> dict[str, Any]:
+        """Sube ``RCEL_facturas_*.csv`` con los campos de cada factura y reduce el payload."""
+        from bot_worker.bots.errors import Categoria
+        from bot_worker.runtime.context import BotError
+
+        reducido, archivos = separar_rcel(datos)
+        texto = archivos.get("facturas")
+        if texto is None:
+            return reducido
+        nombre = nombre_rcel_facturas(entrada.representado_cuit, runtime.job_id)
+        destino = runtime.artifact_store.resolve(nombre)
+        destino.write_text(texto, encoding="utf-8", newline="")
+        await runtime.event_sink.progress(
+            phase="SUBIENDO", percent=85, message="Subiendo datos de facturas"
+        )
+        try:
+            referencia = await runtime.artifact_store.upload(
+                ID_ARTEFACTO_FACTURAS, destino.name
+            )
+        except ValueError as exc:
+            # Sin el CSV el dato scrapeado se perderia: se conserva en el JSON.
+            errores.append(
+                BotError(
+                    category=Categoria.ARTIFACT_UPLOAD_FAILED,
+                    internal_diagnostic=f"subida de {nombre}: {exc}",
+                    retryable=True,
+                )
+            )
+            return datos
+        artefactos.append(referencia)
+        return reducido

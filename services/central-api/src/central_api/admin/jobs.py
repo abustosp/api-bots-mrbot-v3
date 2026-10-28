@@ -944,11 +944,15 @@ async def _con_json_reconstruido(registro: dict, job_id: str) -> dict:
     Solo se usa en el detalle de un job (nunca en listados) y el resultado no se
     persiste: el JSON existe únicamente en esta respuesta.
     """
-    from central_api import mc_json
+    from central_api import datos_archivo, mc_json
 
     job = registro.get("job") or {}
     request = registro.get("request") or {}
-    if not mc_json.aplica(str(job.get("bot") or ""), str(job.get("operacion") or ""), request):
+    bot = str(job.get("bot") or "")
+    datos_resp = ((registro.get("response") or {}).get("payload")) or {}
+    es_mc = mc_json.aplica(bot, str(job.get("operacion") or ""), request)
+    es_csv = datos_archivo.aplica(bot, datos_resp)
+    if not (es_mc or es_csv):
         return registro
     try:
         from sqlalchemy import select
@@ -971,13 +975,18 @@ async def _con_json_reconstruido(registro: dict, job_id: str) -> dict:
         bloque = registro.get(clave)
         if isinstance(bloque, dict) and isinstance(bloque.get("payload"), dict):
             nuevo = dict(bloque)
-            nuevo["payload"] = await mc_json.reconstruir(
-                bot=str(job.get("bot")),
-                operacion=str(job.get("operacion")),
-                payload=request,
-                datos=bloque["payload"],
-                artefactos=claves,
-            )
+            if es_csv:
+                nuevo["payload"] = await datos_archivo.reconstruir(
+                    bot=bot, datos=bloque["payload"], artefactos=claves
+                )
+            else:
+                nuevo["payload"] = await mc_json.reconstruir(
+                    bot=bot,
+                    operacion=str(job.get("operacion")),
+                    payload=request,
+                    datos=bloque["payload"],
+                    artefactos=claves,
+                )
             registro[clave] = nuevo
     return registro
 

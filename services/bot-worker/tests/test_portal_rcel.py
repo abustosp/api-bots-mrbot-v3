@@ -354,6 +354,7 @@ def test_plugin_rcel_default_extrae_campos_y_pdf_roto_no_tumba_la_corrida(
     runtime = SimpleNamespace(
         cancellation=SimpleNamespace(raise_if_cancelled=no_op),
         event_sink=SimpleNamespace(progress=no_op),
+        job_id="job-rcel",
         artifact_store=_Store(base),
     )
     plugin_base = plugin
@@ -374,8 +375,16 @@ def test_plugin_rcel_default_extrae_campos_y_pdf_roto_no_tumba_la_corrida(
     # Paridad V1: el PDF roto no entra en ``facturas`` ni en ``cantidad``
     # (V1 solo agrega a ``facturas`` lo que devuelve la extraccion).
     assert datos["cantidad"] == 1
-    assert [f["archivo"] for f in datos["facturas"]] == ["ok.pdf"]
-    assert datos["facturas"][0]["campos"] == {"AUX": "20123456789-011-00012-00000345"}
+    # Los campos extraidos salieron del JSON y viajan en un CSV con "|".
+    assert "facturas" not in datos and datos["datos_en_archivo"] == ["facturas"]
+    from mrbot_contracts.datos_csv import facturas_rcel_desde_csv
+
+    facturas = facturas_rcel_desde_csv(
+        (base / "RCEL_facturas_20123456789_job-rcel.csv").read_text(encoding="utf-8")
+    )
+    assert [f["archivo"] for f in facturas] == ["ok.pdf"]
+    assert facturas[0]["campos"] == {"AUX": "20123456789-011-00012-00000345"}
+    assert [a["artifact_id"] for a in artefactos] == ["rcel_facturas.csv"]
     assert len(errores) == 1
     assert "rcel_pdf_fields_failed" in errores[0].internal_diagnostic
     assert "roto.pdf" in errores[0].internal_diagnostic
@@ -506,6 +515,7 @@ def test_plugin_emite_los_errores_de_descarga_del_portal(tmp_path: Path) -> None
     runtime = SimpleNamespace(
         cancellation=SimpleNamespace(raise_if_cancelled=no_op),
         event_sink=SimpleNamespace(progress=no_op),
+        job_id="job-rcel",
         artifact_store=ArtifactStore(tmp_path, slots={}),
     )
 
@@ -566,6 +576,7 @@ def test_plugin_extrae_campos_antes_de_subir_y_no_sube_pdf_sin_campos(tmp_path: 
     runtime = SimpleNamespace(
         cancellation=SimpleNamespace(raise_if_cancelled=no_op),
         event_sink=SimpleNamespace(progress=no_op),
+        job_id="job-rcel",
         artifact_store=_Store(tmp_path),
     )
 
@@ -574,9 +585,17 @@ def test_plugin_extrae_campos_antes_de_subir_y_no_sube_pdf_sin_campos(tmp_path: 
     )
 
     # Como V1: extrae antes de subir, y el PDF que falla no se sube ni se lista.
-    assert orden == ["extraer:ok.pdf", "subir:ok.pdf", "extraer:roto.pdf"]
-    assert [f["archivo"] for f in datos["facturas"]] == ["ok.pdf"]
-    assert len(artefactos) == 1
+    assert orden == [
+        "extraer:ok.pdf", "subir:ok.pdf", "extraer:roto.pdf",
+        "subir:RCEL_facturas_20123456789_job-rcel.csv",
+    ]
+    from mrbot_contracts.datos_csv import facturas_rcel_desde_csv
+
+    facturas = facturas_rcel_desde_csv(
+        (tmp_path / "RCEL_facturas_20123456789_job-rcel.csv").read_text(encoding="utf-8")
+    )
+    assert [f["archivo"] for f in facturas] == ["ok.pdf"]
+    assert len(artefactos) == 2  # el PDF bueno y el CSV de facturas
     assert len(errores) == 1
 
 

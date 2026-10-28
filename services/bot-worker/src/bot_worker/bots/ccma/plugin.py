@@ -53,6 +53,11 @@ from bot_worker.bots.errors import (
     sin_secretos,
 )
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from mrbot_contracts.datos_csv import (
+    nombre_ccma_movimientos,
+    nombre_ccma_saldos,
+    separar_ccma,
+)
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -65,6 +70,10 @@ URL_CTACTE = (
     "https://servicios2.afip.gob.ar/tramites_con_clave_fiscal/ccam/P04_ctacte.asp"
 )
 ID_ARTEFACTO_PDF = "ccma_resumen.pdf"
+# Saldos y movimientos se guardan siempre como CSV (con ``|``) y no en el JSON de
+# la base: la central vuelve a armar el response al pedirlo.
+ID_ARTEFACTO_SALDOS = "ccma_saldos.csv"
+ID_ARTEFACTO_MOVIMIENTOS = "ccma_movimientos.csv"
 MAX_MOVIMIENTOS = 500
 MAX_PAGINAS = 100
 
@@ -108,6 +117,18 @@ class CcmaPlugin:
                 nombre="ccma_resumen.pdf",
                 content_types=("application/pdf",),
                 max_bytes=10_485_760,
+                obligatorio=False,
+            ),
+            ArtifactSpec(
+                nombre="ccma_saldos.csv",
+                content_types=("text/csv",),
+                max_bytes=10_485_760,
+                obligatorio=False,
+            ),
+            ArtifactSpec(
+                nombre="ccma_movimientos.csv",
+                content_types=("text/csv",),
+                max_bytes=52_428_800,
                 obligatorio=False,
             ),
         ),
@@ -254,7 +275,37 @@ class CcmaPlugin:
             raise _normalizar_error(exc, secretos) from exc
 
         await runtime.cancellation.raise_if_cancelled()
+        # El dato scrapeado sale del JSON y se guarda como CSV en S4.
+        datos = await self._guardar_csv(datos, entrada, runtime, artefactos)
         await runtime.event_sink.progress(
             phase="FINALIZANDO", percent=90, message="Normalizando resultado"
         )
         return BotResult(result="OK", data=datos, artifacts=artefactos)
+
+    async def _guardar_csv(
+        self,
+        datos: dict[str, Any],
+        entrada: Any,
+        runtime: BotRuntime,
+        artefactos: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Sube ``CCMA_saldos_*.csv`` y ``CCMA_movimientos_*.csv``; devuelve el payload reducido."""
+        reducido, archivos = separar_ccma(datos)
+        nombres = {
+            "saldos": (ID_ARTEFACTO_SALDOS, nombre_ccma_saldos),
+            "movimientos": (ID_ARTEFACTO_MOVIMIENTOS, nombre_ccma_movimientos),
+        }
+        for clave, texto in archivos.items():
+            id_artefacto, armar_nombre = nombres[clave]
+            nombre = armar_nombre(entrada.representado_cuit, runtime.job_id)
+            destino = runtime.artifact_store.resolve(nombre)
+            destino.write_text(texto, encoding="utf-8", newline="")
+            await runtime.event_sink.progress(
+                phase="SUBIENDO", percent=85, message=f"Subiendo {clave}"
+            )
+            try:
+                referencia = await runtime.artifact_store.upload(id_artefacto, destino.name)
+            except ValueError as exc:
+                raise ArtifactUploadError(str(exc)) from exc
+            artefactos.append(referencia)
+        return reducido

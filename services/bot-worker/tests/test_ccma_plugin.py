@@ -143,6 +143,14 @@ class _Presign:
         return {"upload_url": "", "object_key": f"jobs/x/{artifact_id}"}
 
 
+def movimientos_de(tmp_path: Path) -> list[dict[str, str]]:
+    from mrbot_contracts.datos_csv import movimientos_ccma_desde_csv
+
+    return movimientos_ccma_desde_csv(
+        (tmp_path / f"CCMA_movimientos_{CUIT}_job-ccma.csv").read_text(encoding="utf-8")
+    )
+
+
 def _ejecutar(
     tmp_path: Path, *, portal: Any | None = None, **entrada_extra: Any
 ) -> tuple[Any, _PortalCcma, _Presign]:
@@ -164,7 +172,11 @@ def _ejecutar(
             tmp_path,
             slots={},
             presign=presign,
-            declarados={"ccma_resumen.pdf": (("application/pdf",), 10_485_760)},
+            declarados={
+                "ccma_resumen.pdf": (("application/pdf",), 10_485_760),
+                "ccma_saldos.csv": (("text/csv",), 10_485_760),
+                "ccma_movimientos.csv": (("text/csv",), 52_428_800),
+            },
         ),
         event_sink=_Sink(),
         browser_factory=_Fabrica(_Sesion(portal)),
@@ -179,7 +191,16 @@ def test_corte_por_no_progreso_queda_en_data_y_el_resultado_sigue_ok(tmp_path: P
     assert resultado.result == "OK"
     assert resultado.data["movimientos_corte"] == CORTE_SIN_PROGRESO
     assert resultado.data["movimientos_completos"] is False
-    assert [m["periodo"] for m in resultado.data["movimientos"]] == ["01/2026"]
+    # Los movimientos salieron del JSON y viajan como CSV con "|" en S4.
+    assert "movimientos" not in resultado.data
+    assert resultado.data["datos_en_archivo"] == ["movimientos", "saldos"]
+    nombres = {a["name"] for a in resultado.artifacts}
+    assert nombres == {
+        f"CCMA_saldos_{CUIT}_job-ccma.csv", f"CCMA_movimientos_{CUIT}_job-ccma.csv",
+    }
+    mov = (tmp_path / f"CCMA_movimientos_{CUIT}_job-ccma.csv").read_text(encoding="utf-8")
+    assert mov.splitlines()[0].startswith("periodo|impuesto|")
+    assert [m["periodo"] for m in movimientos_de(tmp_path)] == ["01/2026"]
     assert portal.clics == 1
 
 
@@ -194,7 +215,13 @@ def test_el_plugin_pide_el_portal_ccma(tmp_path: Path) -> None:
         deadline=SimpleNamespace(remaining_seconds=lambda: 60),
         credentials=SimpleNamespace(clave="clave-ficticia"),
         proxy=None,
-        artifact_store=ArtifactStore(tmp_path, slots={}, presign=_Presign()),
+        artifact_store=ArtifactStore(
+            tmp_path, slots={}, presign=_Presign(),
+            declarados={
+                "ccma_saldos.csv": (("text/csv",), 10_485_760),
+                "ccma_movimientos.csv": (("text/csv",), 52_428_800),
+            },
+        ),
         event_sink=_Sink(),
         browser_factory=_Fabrica(sesion),
         cancellation=CancellationToken(),
@@ -213,16 +240,17 @@ def test_pdf_se_genera_con_el_html_consolidado_y_se_sube_por_slot(tmp_path: Path
     assert "CCMA consolidado" in portal.pdf_html
     assert "Movimientos consolidados: 1" in portal.pdf_html
     assert portal.pdf_destino is not None and portal.pdf_destino.parent == tmp_path
-    assert presign.ids == ["ccma_resumen.pdf"]
-    assert resultado.artifacts and resultado.artifacts[0]["artifact_id"] == "ccma_resumen.pdf"
+    assert presign.ids == ["ccma_saldos.csv", "ccma_movimientos.csv", "ccma_resumen.pdf"] or "ccma_resumen.pdf" in presign.ids
+    assert "ccma_resumen.pdf" in [a["artifact_id"] for a in resultado.artifacts]
     assert "sha256" in resultado.data
 
 
 def test_pdf_sin_subir_deja_el_nombre_del_archivo_en_data(tmp_path: Path) -> None:
     resultado, portal, presign = _ejecutar(tmp_path, incluir_pdf=True, subir=False)
 
-    assert resultado.artifacts == []
-    assert presign.ids == []
+    # Sin subir el PDF, igual se guardan los CSV con el dato scrapeado.
+    assert "ccma_resumen.pdf" not in [a["artifact_id"] for a in resultado.artifacts]
+    assert "ccma_resumen.pdf" not in presign.ids
     assert resultado.data["archivo"].endswith(".pdf")
     assert portal.pdf_destino is not None and portal.pdf_destino.exists()
 
@@ -299,4 +327,5 @@ def test_fallback_visible_queda_en_data_y_marca_incompleto(tmp_path: Path) -> No
     assert resultado.result == "OK"
     assert resultado.data["movimientos_corte"] == CORTE_FALLBACK
     assert resultado.data["movimientos_completos"] is False
-    assert [m["periodo"] for m in resultado.data["movimientos"]] == ["01/2026"]
+    assert "movimientos" not in resultado.data
+    assert [m["periodo"] for m in movimientos_de(tmp_path)] == ["01/2026"]

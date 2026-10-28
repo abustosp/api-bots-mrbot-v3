@@ -169,6 +169,16 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
                 {"object_key": getattr(a, "object_key", None)} for a in artefactos
             ],
         )
+        # CCMA y RCEL: el dato scrapeado vive como CSV en S4 y se vuelve a armar.
+        from central_api import datos_archivo
+
+        payload = await datos_archivo.reconstruir(
+            bot=fila.bot,
+            datos=payload,
+            artefactos=[
+                {"object_key": getattr(a, "object_key", None)} for a in artefactos
+            ],
+        )
         payload = {"schema_version": 1, **payload}
     summary = resultado.summary if resultado is not None else {}
     result = {

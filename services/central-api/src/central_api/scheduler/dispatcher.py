@@ -143,6 +143,34 @@ def artifact_upload_slots(job: Job) -> list[dict]:
     """
     payload = job.payload if isinstance(job.payload, dict) else {}
     slots: list[dict] = []
+    if job.bot == "ccma":
+        # Saldos y movimientos se guardan siempre como CSV (con ``|``): son el
+        # dato scrapeado que la central reconstruye al responder.
+        slots.append(
+            {
+                "artifact_id": "ccma_saldos.csv",
+                "name_hint": "ccma_saldos.csv",
+                "max_bytes": 10_485_760,
+                "content_types": ["text/csv"],
+            }
+        )
+        slots.append(
+            {
+                "artifact_id": "ccma_movimientos.csv",
+                "name_hint": "ccma_movimientos.csv",
+                "max_bytes": 52_428_800,
+                "content_types": ["text/csv"],
+            }
+        )
+    if job.bot == "rcel":
+        slots.append(
+            {
+                "artifact_id": "rcel_facturas.csv",
+                "name_hint": "rcel_facturas.csv",
+                "max_bytes": 52_428_800,
+                "content_types": ["text/csv"],
+            }
+        )
     if job.bot == "ccma" and payload.get("incluir_pdf") and payload.get("subir", True):
         slots.append(
             {
