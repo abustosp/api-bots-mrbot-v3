@@ -324,14 +324,18 @@ def test_dispatcher_declara_slots_de_salida_por_bot(entorno_limpio):
         worker,
         "token-ccma",
     )
-    assert ccma["artifact_uploads"] == [
-        {
-            "artifact_id": "ccma_resumen.pdf",
-            "name_hint": "ccma_resumen.pdf",
-            "max_bytes": 10_485_760,
-            "content_types": ["application/pdf"],
-        }
+    # CCMA siempre sube saldos y movimientos como CSV; el PDF solo si se pidio.
+    assert [slot["artifact_id"] for slot in ccma["artifact_uploads"]] == [
+        "ccma_saldos.csv",
+        "ccma_movimientos.csv",
+        "ccma_resumen.pdf",
     ]
+    assert ccma["artifact_uploads"][-1] == {
+        "artifact_id": "ccma_resumen.pdf",
+        "name_hint": "ccma_resumen.pdf",
+        "max_bytes": 10_485_760,
+        "content_types": ["application/pdf"],
+    }
 
     comprobantes = build_envelope(
         Job(
