@@ -334,9 +334,9 @@ details > .details-body { padding: 0 14px 14px; }
 
       <section class="view hidden" data-panel="backups">
         <div class="kicker">Continuidad de datos</div><h2>Backups de la base</h2><p class="subtle">Los dumps se guardan en el bucket configurado (BACKUP_BUCKET) como un tar.gz con una tabla por archivo COPY y un manifiesto con la revisión de Alembic, columnas, filas y sha256. El restore requiere el esquema ya migrado: no recrea tablas. <strong>overwrite</strong> reemplaza los registros que se pisan por clave primaria; <strong>append</strong> agrega sin pisar nada (ON CONFLICT DO NOTHING). Las tablas sin clave primaria no permiten decidir el pisotón: se informan como «sin PK». El dump guarda además las llaves privadas (RSA_PRIVATE_KEY y ASSIGNMENT_SIGNING_KEY) en llaves.json: protegé el bucket. El tag se agrega al nombre del archivo. El dump incluye alembic_version: si restaurás un dump de otra revisión, el marcador vuelve a la del dump (el restore no recrea el esquema).</p>
-        <div class="form-actions"><div class="field"><label for="backups-tag">Tag (opcional: produccion, testing, branch...)</label><input id="backups-tag" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" placeholder="produccion"></div><button class="button primary" type="button" id="backups-dump">Crear dump</button><button class="button secondary" type="button" id="backups-refresh">Actualizar lista</button><span class="muted" id="backups-status" aria-live="polite"></span></div>
+        <div class="form-actions"><div class="field"><label for="backups-tag">Tag (opcional: produccion, testing, branch...)</label><input id="backups-tag" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" placeholder="produccion"></div><button class="button primary" type="button" id="backups-dump">Crear dump</button><button class="button secondary" type="button" id="backups-refresh">Actualizar lista</button><button class="button danger" type="button" id="backups-delete-selected" disabled>Eliminar seleccionados (0)</button><span class="muted" id="backups-status" aria-live="polite"></span></div>
         <div class="grid" id="backups-summary"></div>
-        <div class="table-wrap"><table><thead><tr><th>Archivo (key)</th><th>Tag</th><th>Tamaño</th><th>Fecha</th><th class="actions-head">Acciones</th></tr></thead><tbody id="backups-table"><tr><td colspan="5" class="empty">Cargando dumps...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th><input type="checkbox" id="backups-select-all" aria-label="Seleccionar todos los dumps"></th><th>Archivo (key)</th><th>Tag</th><th>Tamaño</th><th>Fecha</th><th class="actions-head">Acciones</th></tr></thead><tbody id="backups-table"><tr><td colspan="6" class="empty">Cargando dumps...</td></tr></tbody></table></div>
         <details id="backups-restore-panel" class="hidden"><summary>Restaurar dump <code id="backups-restore-key"></code></summary><div class="details-body">
           <p class="muted">Elegí el modo, el motivo y escribí RESTAURAR para confirmar. En overwrite se reemplazan los registros que se pisan por clave primaria; append no pisa nada. La simulación (dry run) cuenta filas y colisiones sin cambiar datos.</p>
           <div class="form-grid">
@@ -348,6 +348,15 @@ details > .details-body { padding: 0 14px 14px; }
           <div class="form-actions"><button class="button danger" type="button" id="backups-restore-run">Ejecutar restore</button><button class="button secondary" type="button" id="backups-restore-cancel">Cancelar</button></div>
         </div></details>
         <div id="backups-restore-result"></div>
+        <details id="backups-delete-panel" class="hidden"><summary>Eliminar dumps <code id="backups-delete-count"></code></summary><div class="details-body">
+          <p class="muted"><strong>Atención:</strong> se van a borrar definitivamente del bucket los dumps listados abajo. Esta acción no se puede deshacer.</p>
+          <ul id="backups-delete-list"></ul>
+          <div class="form-grid">
+            <div class="field"><label for="backups-delete-reason">Motivo (mínimo 10)</label><input id="backups-delete-reason" type="text" minlength="10" maxlength="500" value="limpieza de dumps desde panel V3"></div>
+            <div class="field"><label for="backups-delete-confirm">Confirmación (escribí eliminar)</label><input id="backups-delete-confirm" type="text" placeholder="eliminar" autocomplete="off"></div>
+          </div>
+          <div class="form-actions"><button class="button danger" type="button" id="backups-delete-run">Eliminar definitivamente</button><button class="button secondary" type="button" id="backups-delete-cancel">Cancelar</button></div>
+        </div></details>
       </section>
     </section>
   </main>
@@ -1505,7 +1514,7 @@ details > .details-body { padding: 0 14px 14px; }
     if (!window.confirm(enabled ? "¿Deshabilitar el autoscaler automático? Las instancias existentes no se tocan." : "¿Habilitar el autoscaler automático?")) return;
     try { await api(`/admin/autoscale/${enabled ? "disable" : "enable"}`, { method: "POST", body: JSON.stringify({ motivo: enabled ? "deshabilitar autoscaler desde panel V3" : "habilitar autoscaler desde panel V3" }) }); await loadEphemeral(); } catch (error) { flash(error.message, "error"); }
   }
-  const backupState = { key: "" };
+  const backupState = { key: "", deleteKeys: [] };
   const humanBytes = (value) => { const n = Number(value || 0); if (!Number.isFinite(n) || n <= 0) return "0 B"; const units = ["B", "KB", "MB", "GB"]; const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024))); return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`; };
   const backupPath = (key) => `/admin/backups/${String(key || "").split("/").map(encodeURIComponent).join("/")}`;
   function renderBackupSummary(data) {
@@ -1518,7 +1527,8 @@ details > .details-body { padding: 0 14px 14px; }
       const data = await api("/admin/backups");
       renderBackupSummary(data);
       const rows = data.objects || [];
-      $("#backups-table").innerHTML = rows.length ? rows.map((item) => `<tr><td><code>${esc(item.key)}</code></td><td>${esc(item.tag || "—")}</td><td>${esc(humanBytes(item.size_bytes))}</td><td>${esc(date(item.last_modified))}</td><td class="actions"><div class="actions-inner"><button class="button secondary small" data-action="backup-restore" data-key="${esc(item.key)}">Restaurar</button><button class="button secondary small" data-action="backup-download" data-key="${esc(item.key)}">Descargar</button></div></td></tr>`).join("") : `<tr><td colspan="5" class="empty">${data.success ? "Todavía no hay dumps en el bucket." : `No se pudo listar el bucket (${esc(data.error || "error")}): ${esc(data.detalle || "")}`}</td></tr>`;
+      $("#backups-table").innerHTML = rows.length ? rows.map((item) => `<tr><td><input type="checkbox" class="backup-check" data-key="${esc(item.key)}" aria-label="Seleccionar ${esc(item.key)}"></td><td><code>${esc(item.key)}</code></td><td>${esc(item.tag || "—")}</td><td>${esc(humanBytes(item.size_bytes))}</td><td>${esc(date(item.last_modified))}</td><td class="actions"><div class="actions-inner"><button class="button secondary small" data-action="backup-restore" data-key="${esc(item.key)}">Restaurar</button><button class="button secondary small" data-action="backup-download" data-key="${esc(item.key)}">Descargar</button><button class="button danger small" data-action="backup-delete" data-key="${esc(item.key)}">Eliminar</button></div></td></tr>`).join("") : `<tr><td colspan="6" class="empty">${data.success ? "Todavía no hay dumps en el bucket." : `No se pudo listar el bucket (${esc(data.error || "error")}): ${esc(data.detalle || "")}`}</td></tr>`;
+      syncBackupSelection();
       $("#backups-status").textContent = data.success ? `${rows.length} dump(s) en ${data.bucket}.` : `El bucket no respondió: ${data.error || "error"}.`;
     } catch (error) { flash(error.message, "error"); $("#backups-status").textContent = ""; }
   }
@@ -1578,11 +1588,52 @@ details > .details-body { padding: 0 14px 14px; }
       if (!dry_run) await loadBackups();
     } catch (error) { flash(error.message, "error"); } finally { $("#backups-status").textContent = ""; }
   }
+  const selectedBackupKeys = () => $$("#backups-table .backup-check:checked").map((node) => node.dataset.key);
+  function syncBackupSelection() {
+    const checks = $$("#backups-table .backup-check");
+    const picked = checks.filter((node) => node.checked).length;
+    const all = $("#backups-select-all");
+    all.checked = checks.length > 0 && picked === checks.length;
+    all.indeterminate = picked > 0 && picked < checks.length;
+    all.disabled = checks.length === 0;
+    const button = $("#backups-delete-selected");
+    button.disabled = picked === 0;
+    button.textContent = `Eliminar seleccionados (${picked})`;
+  }
+  function openDelete(keys) {
+    if (!keys.length) { flash("Elegí al menos un dump para eliminar.", "error"); return; }
+    backupState.deleteKeys = keys.slice();
+    $("#backups-delete-count").textContent = `(${keys.length})`;
+    $("#backups-delete-list").innerHTML = keys.map((key) => `<li><code>${esc(key)}</code></li>`).join("");
+    $("#backups-delete-confirm").value = "";
+    $("#backups-delete-panel").classList.remove("hidden");
+    $("#backups-delete-panel").open = true;
+    $("#backups-delete-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function closeDelete() { backupState.deleteKeys = []; $("#backups-delete-panel").classList.add("hidden"); $("#backups-delete-confirm").value = ""; }
+  async function runDelete() {
+    const keys = backupState.deleteKeys.slice();
+    if (!keys.length) { flash("Elegí al menos un dump para eliminar.", "error"); return; }
+    const motivo = $("#backups-delete-reason").value.trim();
+    const confirmacion = $("#backups-delete-confirm").value.trim();
+    if (motivo.length < 10) { flash("El motivo debe tener al menos 10 caracteres.", "error"); return; }
+    if (confirmacion.toLowerCase() !== "eliminar") { flash('Escribí exactamente "eliminar" en la confirmación para borrar.', "error"); return; }
+    if (!window.confirm(`¿Eliminar definitivamente ${keys.length} dump(s) del bucket? No se puede deshacer.`)) return;
+    $("#backups-status").textContent = "Eliminando...";
+    try {
+      const data = await api("/admin/backups/delete", { method: "POST", body: JSON.stringify({ keys, motivo, confirmacion }) });
+      const fallidas = (data.errores || []).length;
+      flash(fallidas ? `Se eliminaron ${(data.eliminadas || []).length}, fallaron ${fallidas}.` : `Se eliminaron ${(data.eliminadas || []).length} dump(s).`, fallidas ? "error" : "ok");
+      closeDelete();
+      await loadBackups();
+    } catch (error) { flash(error.message, "error"); } finally { $("#backups-status").textContent = ""; }
+  }
   function backupsAction(event) {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const key = button.dataset.key || "";
     if (button.dataset.action === "backup-restore") { openRestore(key); return; }
+    if (button.dataset.action === "backup-delete") { openDelete([key]); return; }
     if (button.dataset.action === "backup-download") { downloadBackup(key); }
   }
   async function loadAudit(event) { if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const action = $("#audit-action").value.trim(); const actor = $("#audit-actor").value.trim(); if (action) params.set("accion", action); if (actor) params.set("actor", actor); try { const data = await api(`/admin/audit?${params}`); const rows = data.eventos || []; $("#audit-table").innerHTML = rows.length ? rows.slice().reverse().map((item) => `<tr><td>${esc(date(item.occurred_at))}</td><td><strong>${esc(item.action)}</strong></td><td>${esc(item.actor_id)}</td><td>${esc(item.target_type)}<br><span class="muted">${esc(short(item.target_id, 22))}</span></td><td><span class="status ${item.result === "success" ? "status-good" : "status-bad"}">${esc(item.result)}</span></td><td>${esc(item.reason || "—")}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No hay eventos para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); } }
@@ -1603,6 +1654,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#fleet-refresh").addEventListener("click", loadFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-update-all").addEventListener("click", updateAllWorkers); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#fleet-relay-table").addEventListener("click", fleetAction); $("#add-relay-form").addEventListener("submit", addRelay); $("#relay-config-close").addEventListener("click", () => { $("#relay-config").classList.add("hidden"); $("#relay-config-toml").textContent = ""; $("#relay-config-env").textContent = ""; }); $("#relay-config").addEventListener("click", async (event) => { const b = event.target.closest("button[data-copy]"); if (!b) return; try { await writeClipboard($(b.dataset.copy).textContent); flash("Copiado."); } catch (error) { flash(error.message, "error"); } }); $("#audit-filter").addEventListener("submit", loadAudit);
   $("#eph-refresh").addEventListener("click", () => loadEphemeral(true)); $("#eph-zone").addEventListener("change", changeZone); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-launch-type").addEventListener("change", () => syncTypeInfo(true)); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
   $("#backups-dump").addEventListener("click", createDump); $("#backups-refresh").addEventListener("click", loadBackups); $("#backups-table").addEventListener("click", backupsAction); $("#backups-restore-run").addEventListener("click", runRestore); $("#backups-restore-cancel").addEventListener("click", closeRestore);
+  $("#backups-table").addEventListener("change", (event) => { if (event.target.classList.contains("backup-check")) syncBackupSelection(); }); $("#backups-select-all").addEventListener("change", (event) => { $$("#backups-table .backup-check").forEach((node) => { node.checked = event.target.checked; }); syncBackupSelection(); }); $("#backups-delete-selected").addEventListener("click", () => openDelete(selectedBackupKeys())); $("#backups-delete-run").addEventListener("click", runDelete); $("#backups-delete-cancel").addEventListener("click", closeDelete);
   if (state.token) { showLoggedIn(true); setView(state.view); } else { showLoggedIn(false); }
 })();
 </script>

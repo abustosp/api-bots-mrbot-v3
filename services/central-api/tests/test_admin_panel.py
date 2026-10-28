@@ -475,6 +475,25 @@ def test_panel_backups_tiene_nav_vista_y_endpoints() -> None:
     assert "secreto" not in html.split('data-panel="backups"')[1].split("</section>")[0]
 
 
+def test_panel_backups_permite_eliminar_con_checkboxes_y_confirmacion() -> None:
+    html = TestClient(create_app()).get("/admin/").text
+    for marca in (
+        'id="backups-select-all"',
+        'id="backups-delete-selected"',
+        'id="backups-delete-confirm"',
+        'id="backups-delete-run"',
+        'class="backup-check"',
+        'data-action="backup-delete"',
+        '"/admin/backups/delete"',
+        "function runDelete()",
+        "function openDelete(keys)",
+        '{ keys, motivo, confirmacion }',
+        'confirmacion.toLowerCase() !== "eliminar"',
+        "no se puede deshacer",
+    ):
+        assert marca in html, marca
+
+
 def test_panel_backups_javascript_pasa_node_check() -> None:
     """El <script> del panel debe ser JavaScript válido (node --check rc=0)."""
     import re

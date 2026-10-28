@@ -65,6 +65,8 @@ LLAVES_PRIVADAS = {
 TABLAS_EXCLUIDAS = frozenset({"worker_heartbeats"})
 MANIFEST_VERSION = 1
 CONFIRMACION_RESTORE = "RESTAURAR"
+CONFIRMACION_ELIMINAR = "eliminar"
+MAX_ELIMINAR = 200
 MODO_OVERWRITE = "overwrite"
 MODO_APPEND = "append"
 COPY_CHUNK = 1 << 20
@@ -827,6 +829,43 @@ def _listar_objetos(settings: Settings) -> dict[str, Any]:
     }
 
 
+def _key_de_dump_valida(settings: Settings, key: str) -> str:
+    """Normaliza y valida que la key sea un dump de este bucket (nunca otro objeto)."""
+    limpia = (key or "").strip().lstrip("/")
+    prefijo = (settings.backup_prefix or "").strip("/")
+    partes = limpia.split("/")
+    if not limpia or ".." in partes or "" in partes:
+        raise SolicitudInvalida(f"key de backup inválida: {key!r}")
+    if prefijo and not limpia.startswith(f"{prefijo}/"):
+        raise SolicitudInvalida(f"la key no pertenece al prefijo de backups: {key!r}")
+    if not _KEY_CON_TAG.match(partes[-1]):
+        raise SolicitudInvalida(f"la key no tiene formato de dump: {key!r}")
+    return limpia
+
+
+def _eliminar_objetos(settings: Settings, keys: Sequence[str]) -> dict[str, Any]:
+    """Borra los dumps indicados; informa cuáles se eliminaron y cuáles fallaron."""
+    cliente = _cliente_s3(settings)
+    eliminadas: list[str] = []
+    errores: list[dict[str, str]] = []
+    for inicio in range(0, len(keys), 1000):
+        lote = list(keys[inicio : inicio + 1000])
+        respuesta = cliente.delete_objects(
+            Bucket=settings.backup_bucket,
+            Delete={"Objects": [{"Key": k} for k in lote], "Quiet": False},
+        )
+        eliminadas.extend(str(o.get("Key")) for o in respuesta.get("Deleted") or [])
+        for err in respuesta.get("Errors") or []:
+            errores.append(
+                {
+                    "key": str(err.get("Key") or ""),
+                    "error": str(err.get("Code") or "error"),
+                    "detalle": str(err.get("Message") or ""),
+                }
+            )
+    return {"eliminadas": eliminadas, "errores": errores}
+
+
 def _url_descarga(settings: Settings, key: str) -> str:
     return _cliente_s3(settings).generate_presigned_url(
         "get_object",
@@ -869,6 +908,21 @@ class DumpBody(BaseModel):
             "quedan las cabeceras de cada tabla (filas 0) para pruebas."
         ),
         examples=[True],
+    )
+
+
+class EliminarBody(BaseModel):
+    keys: list[str] = Field(
+        description=f"Keys de los dumps a eliminar (1 a {MAX_ELIMINAR}).",
+        examples=[["dump/20261016T183000Z-mrbot-db.tar.gz"]],
+    )
+    motivo: str = Field(
+        description="Justificación de auditoría; entre 10 y 500 caracteres.",
+        examples=["Limpieza de dumps de prueba"],
+    )
+    confirmacion: str = Field(
+        description='Debe ser "eliminar" (sin distinguir mayúsculas).',
+        examples=["eliminar"],
     )
 
 
@@ -1285,6 +1339,101 @@ def _restaurar_desde_bucket(
         )
     finally:
         shutil.rmtree(trabajo, ignore_errors=True)
+
+
+@router.post(
+    "/backups/delete",
+    summary="Eliminar uno o varios dumps del bucket",
+    description=(
+        "Borra definitivamente los dumps indicados del bucket de backups. Solo "
+        "acepta keys con el prefijo y el formato de nombre de un dump, de modo "
+        "que no puede tocar otros objetos. Requiere confirmacion=eliminar, "
+        "autorización administrativa y motivo. La operación no se puede deshacer."
+    ),
+    responses={
+        **_AUTH_RESPONSES,
+        **_400_MOTIVO,
+        **_503_BACKUP,
+        200: {
+            "description": "Resultado por key: eliminadas y con error.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "solicitadas": 1,
+                        "eliminadas": ["dump/20261016T183000Z-mrbot-db.tar.gz"],
+                        "errores": [],
+                    }
+                }
+            },
+        },
+    },
+)
+async def backups_eliminar(
+    body: EliminarBody,
+    respuesta: Response,
+    authorization: str | None = Header(default=None),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+) -> dict:
+    """Elimina los dumps pedidos y audita cada operación."""
+    actor = require_admin(authorization)
+    motivo = validar_motivo(body.motivo)
+    if (body.confirmacion or "").strip().casefold() != CONFIRMACION_ELIMINAR:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f'confirmacion debe ser "{CONFIRMACION_ELIMINAR}": eliminar un dump '
+                "es definitivo y requiere confirmación explícita"
+            ),
+        )
+    if not body.keys:
+        raise HTTPException(status_code=400, detail="indicá al menos un dump a eliminar")
+    if len(body.keys) > MAX_ELIMINAR:
+        raise HTTPException(
+            status_code=400,
+            detail=f"se pueden eliminar hasta {MAX_ELIMINAR} dumps por operación",
+        )
+    settings = _settings_backup()
+    try:
+        keys = list(dict.fromkeys(_key_de_dump_valida(settings, k) for k in body.keys))
+    except SolicitudInvalida as exc:
+        raise _error_http(exc) from exc
+    _sin_cache(respuesta)
+    try:
+        resultado = await asyncio.to_thread(_eliminar_objetos, settings, keys)
+    except Exception as exc:  # noqa: BLE001 - se audita y se informa el tipo
+        log_event(
+            "backup.delete",
+            actor_id=actor,
+            target_type="database-backup",
+            target_id=",".join(keys)[:500],
+            request_id=request_id or "",
+            result="error",
+            reason=motivo,
+            metadata={"keys": keys, "error": type(exc).__name__},
+        )
+        raise _error_http(exc) from exc
+    log_event(
+        "backup.delete",
+        actor_id=actor,
+        target_type="database-backup",
+        target_id=",".join(keys)[:500],
+        request_id=request_id or "",
+        result="success" if not resultado["errores"] else "error",
+        reason=motivo,
+        metadata={
+            "keys": keys,
+            "eliminadas": resultado["eliminadas"],
+            "errores": resultado["errores"],
+        },
+    )
+    return {
+        "success": not resultado["errores"],
+        "bucket": settings.backup_bucket,
+        "solicitadas": len(keys),
+        "eliminadas": resultado["eliminadas"],
+        "errores": resultado["errores"],
+    }
 
 
 @router.get(

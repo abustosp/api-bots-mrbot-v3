@@ -202,6 +202,13 @@ class FakeS3:
     def generate_presigned_url(self, operacion, Params=None, ExpiresIn=None) -> str:
         return f"https://fake-bucket.local/{Params['Key']}?X-Amz-Expires={ExpiresIn}"
 
+    def delete_objects(self, Bucket, Delete) -> dict:
+        borradas = []
+        for item in Delete["Objects"]:
+            self.objetos.pop(item["Key"], None)
+            borradas.append({"Key": item["Key"]})
+        return {"Deleted": borradas}
+
 
 class ClienteFallo:
     """Cliente que siempre falla (bucket caído o sin credenciales)."""
@@ -836,7 +843,85 @@ def test_descarga_prefirmada_y_listado_con_bucket_fake(cliente, monkeypatch) -> 
     assert datos["expires_seconds"] == B.PRESIGN_EXPIRACION_SEGUNDOS
 
 
+K1 = "dump/20261016T183000Z-mrbot-db.tar.gz"
+K2 = "dump/20261017T090000Z-produccion-mrbot-db.tar.gz"
+K3 = "dump/20261018T090000Z-mrbot-db.tar.gz"
+
+
+def _borrar(cliente, keys, confirmacion="eliminar", motivo="limpieza de dumps de prueba"):
+    return cliente.post(
+        "/admin/backups/delete",
+        headers=H,
+        json={"keys": keys, "motivo": motivo, "confirmacion": confirmacion},
+    )
+
+
+def test_eliminar_borra_solo_los_dumps_pedidos_y_audita(cliente, monkeypatch) -> None:
+    from central_api.admin import audit
+
+    falso = FakeS3({K1: b"a", K2: b"b", K3: b"c"})
+    monkeypatch.setattr(B, "_cliente_s3", lambda _s: falso)
+    antes = len(audit.AUDIT_LOG)
+    respuesta = _borrar(cliente, [K1, K2, K1], confirmacion="ELIMINAR")
+    assert respuesta.status_code == 200, respuesta.text
+    cuerpo = respuesta.json()
+    assert cuerpo["success"] is True
+    assert cuerpo["solicitadas"] == 2
+    assert sorted(cuerpo["eliminadas"]) == sorted([K1, K2])
+    assert list(falso.objetos) == [K3]
+    eventos = audit.AUDIT_LOG[antes:]
+    assert [e.action for e in eventos] == ["backup.delete"]
+    assert eventos[0].reason == "limpieza de dumps de prueba"
+
+
+def test_eliminar_exige_confirmacion_y_no_borra_nada(cliente, monkeypatch) -> None:
+    falso = FakeS3({K1: b"a"})
+    monkeypatch.setattr(B, "_cliente_s3", lambda _s: falso)
+    for mala in ("", "borrar", "RESTAURAR"):
+        assert _borrar(cliente, [K1], confirmacion=mala).status_code == 400
+    assert K1 in falso.objetos
+
+
+def test_eliminar_rechaza_keys_que_no_son_dumps(cliente, monkeypatch) -> None:
+    falso = FakeS3({K1: b"a", "otro/archivo.txt": b"x", "dump/notas.txt": b"y"})
+    monkeypatch.setattr(B, "_cliente_s3", lambda _s: falso)
+    for mala in ("otro/archivo.txt", "dump/notas.txt", "dump/../x.tar.gz", "/", ""):
+        respuesta = _borrar(cliente, [K1, mala])
+        assert respuesta.status_code == 400, (mala, respuesta.text)
+    assert len(falso.objetos) == 3
+
+
+def test_eliminar_valida_cantidad_y_motivo(cliente, monkeypatch) -> None:
+    monkeypatch.setattr(B, "_cliente_s3", lambda _s: FakeS3({K1: b"a"}))
+    assert _borrar(cliente, []).status_code == 400
+    assert _borrar(cliente, [K1], motivo="corto").status_code == 400
+    muchas = [f"dump/20261016T{n:06d}Z-mrbot-db.tar.gz" for n in range(B.MAX_ELIMINAR + 1)]
+    assert _borrar(cliente, muchas).status_code == 400
+
+
+def test_eliminar_con_bucket_caido_responde_503(cliente, monkeypatch) -> None:
+    monkeypatch.setattr(B, "_cliente_s3", lambda _s: ClienteFallo())
+    assert _borrar(cliente, [K1]).status_code == 503
+
+
+def test_eliminar_informa_errores_parciales(cliente, monkeypatch) -> None:
+    class Parcial(FakeS3):
+        def delete_objects(self, Bucket, Delete):
+            return {
+                "Deleted": [{"Key": K1}],
+                "Errors": [{"Key": K2, "Code": "AccessDenied", "Message": "no"}],
+            }
+
+    monkeypatch.setattr(B, "_cliente_s3", lambda _s: Parcial({K1: b"a", K2: b"b"}))
+    cuerpo = _borrar(cliente, [K1, K2]).json()
+    assert cuerpo["success"] is False
+    assert cuerpo["eliminadas"] == [K1]
+    assert cuerpo["errores"][0]["key"] == K2
+
+
 def test_endpoints_de_backups_exigen_bearer(cliente) -> None:
+    cuerpo = {"keys": [K1], "motivo": "y" * 12, "confirmacion": "eliminar"}
+    assert cliente.post("/admin/backups/delete", json=cuerpo).status_code == 401
     assert cliente.get("/admin/backups").status_code == 401
     assert cliente.post("/admin/backups/dump", json={"motivo": "x" * 12}).status_code == 401
     assert (
