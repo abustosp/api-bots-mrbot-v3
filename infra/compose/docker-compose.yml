@@ -90,6 +90,7 @@ services:
     environment:
       # Efectivas hoy (las lee Settings): resto via Docker secrets para
       # el soporte *_FILE del plan de infra seccion 6.3.
+      BACKUP_DIR: /var/lib/mrbot-backups
       DATABASE_URL: ${DATABASE_URL:-}
       WORKER_NODES: ${WORKER_NODES:-}
       WORKER_ALIASES: ${WORKER_ALIASES:-}
@@ -160,6 +161,8 @@ services:
       # Tabla de apócrifos de AFIP: se descarga sola y se refresca cada 7 días.
       # Sin volumen propio, el tmpfs de /tmp la perdería en cada reinicio.
       - apoc_base:/var/lib/mrbot
+      # Temporal del dump (volumen anonimo, ligado al contenedor): en disco, no en el tmpfs de /tmp (256m). Cada dump usa un subdirectorio que se borra al subirlo.
+      - /var/lib/mrbot-backups
     ports:
       - "127.0.0.1:8000:8000"
     labels:

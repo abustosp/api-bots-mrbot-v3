@@ -35,6 +35,7 @@ services:
       - path: .env.central
         required: false
     environment:
+      BACKUP_DIR: /var/lib/mrbot-backups
       DATABASE_URL: ${DATABASE_URL:-}
       WORKER_NODES: ${WORKER_NODES:-}
       WORKER_ALIASES: ${WORKER_ALIASES:-}
@@ -71,4 +72,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:mode=1777,size=256m
+    volumes:
+      # Temporal del dump (volumen anonimo, ligado al contenedor): en disco, no en el tmpfs de /tmp (256m). Cada dump usa un subdirectorio que se borra al subirlo.
+      - /var/lib/mrbot-backups
     restart: unless-stopped

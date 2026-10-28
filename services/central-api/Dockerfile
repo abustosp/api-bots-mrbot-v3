@@ -49,7 +49,8 @@ RUN python -m pip install --no-cache-dir /wheels/* \
  && rm -rf /wheels
 # Caché persistente de la tabla de apócrifos de AFIP (volumen `apoc_base`).
 # Va en una capa propia para no invalidar la instalación de dependencias.
-RUN mkdir -p /var/lib/mrbot && chown mrbot:mrbot /var/lib/mrbot
+RUN mkdir -p /var/lib/mrbot /var/lib/mrbot-backups \
+ && chown mrbot:mrbot /var/lib/mrbot /var/lib/mrbot-backups
 # Migraciones one-off: el job `migrate` corre `python -m central_api.migrate`
 # en esta misma imagen (nunca en el CMD); necesita env.py + versions.
 COPY services/central-api/alembic /app/alembic
