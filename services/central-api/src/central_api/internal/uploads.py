@@ -62,7 +62,7 @@ async def _job_para_presign(job_id: str):
         if fila is None:
             return None
         return SimpleNamespace(
-            id=str(fila.id), worker_node=None, status=str(fila.status),
+            id=str(fila.id), bot=str(fila.bot), worker_node=None, status=str(fila.status),
             assignment_attempt=int(fila.attempts or 0), _origen_db=True,
             payload=fila.request_payload if isinstance(fila.request_payload, dict) else {},
         )
@@ -178,7 +178,7 @@ async def presign_artifact(
         ttl_seconds=ARTIFACT_URL_TTL_SECONDS,
         endpoint=ajustes.object_storage_endpoint,
         region=ajustes.object_storage_region,
-        bucket=ajustes.bucket_para_artefacto(body.artifact_id),
+        bucket=ajustes.bucket_para_bot(getattr(job, "bot", None)),
         access_key=ajustes.object_storage_access_key,
         secret_key=ajustes.object_storage_secret_key,
     )

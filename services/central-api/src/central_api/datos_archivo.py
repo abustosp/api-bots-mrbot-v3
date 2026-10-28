@@ -48,16 +48,23 @@ def _clave_de(artefactos: Sequence[Mapping[str, Any]], artifact_id: str) -> str 
     return candidatas[-1] if candidatas else None
 
 
-def _leer(settings: Settings, object_key: str) -> bytes:
-    return get_object_bytes(
-        endpoint=settings.object_storage_endpoint,
-        region=settings.object_storage_region,
-        bucket=settings.bucket_para_artefacto(object_key),
-        access_key=settings.object_storage_access_key,
-        secret_key=settings.object_storage_secret_key,
-        object_key=object_key,
-        max_bytes=MAX_BYTES_CSV,
-    )
+def _leer(settings: Settings, object_key: str, bot: str | None = None) -> bytes:
+    """Lee el objeto del bucket del módulo; si aún no se migró, del general."""
+    ultimo: Exception | None = None
+    for bucket in settings.buckets_de_lectura(bot):
+        try:
+            return get_object_bytes(
+                endpoint=settings.object_storage_endpoint,
+                region=settings.object_storage_region,
+                bucket=bucket,
+                access_key=settings.object_storage_access_key,
+                secret_key=settings.object_storage_secret_key,
+                object_key=object_key,
+                max_bytes=MAX_BYTES_CSV,
+            )
+        except RuntimeError as exc:
+            ultimo = exc
+    raise ultimo or RuntimeError("no se pudo leer el archivo del almacenamiento")
 
 
 def reconstruir_sync(
@@ -86,7 +93,7 @@ def reconstruir_sync(
             if object_key is None:
                 return {**datos, "datos_error": f"archivo_no_disponible:{clave}"}
             archivo = trabajo / f"{clave}.csv"
-            archivo.write_bytes(_leer(ajustes, object_key))
+            archivo.write_bytes(_leer(ajustes, object_key, bot))
             textos[clave] = archivo.read_text(encoding="utf-8")
         return reconstruir(datos, textos)
     except Exception as exc:  # noqa: BLE001 - se informa el tipo, no el detalle

@@ -66,7 +66,9 @@ def _openapi_error(
 ARTIFACT_URL_TTL_SECONDS = 3600
 
 
-def _url_directa(object_key: str | None, filename: str | None = None) -> str | None:
+def _url_directa(
+    object_key: str | None, filename: str | None = None, bot: str | None = None
+) -> str | None:
     """URL temporal de descarga directa al almacenamiento, o ``None``.
 
     Devuelve ``None`` si el almacenamiento no está configurado: el cliente
@@ -82,7 +84,7 @@ def _url_directa(object_key: str | None, filename: str | None = None) -> str | N
         return presign_get_url(
             endpoint=cfg.object_storage_public_endpoint or cfg.object_storage_endpoint,
             region=cfg.object_storage_region,
-            bucket=cfg.bucket_para_artefacto(object_key),
+            bucket=cfg.bucket_para_bot(bot),
             access_key=cfg.object_storage_access_key,
             secret_key=cfg.object_storage_secret_key,
             object_key=str(object_key),
@@ -147,7 +149,7 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
                 f"/api/v3/jobs/{jid}/artifacts/{item.id}/download"
             ),
             "url": (direct_url := _url_directa(
-                getattr(item, "object_key", None), item.filename
+                getattr(item, "object_key", None), item.filename, fila.bot
             )),
             "url_expires_in": ARTIFACT_URL_TTL_SECONDS if direct_url else None,
         }

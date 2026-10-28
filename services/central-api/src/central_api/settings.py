@@ -74,11 +74,6 @@ class Settings(BaseSettings):
     object_storage_logger_bucket: str = Field(
         default="logger", alias="OBJECT_STORAGE_LOGGER_BUCKET"
     )
-    # Un bucket por módulo para el dato scrapeado que se guarda como CSV
-    # (``ccma_saldos.csv``, ``ccma_movimientos.csv``, ``rcel_facturas.csv``).
-    # Los demás artefactos siguen en ``OBJECT_STORAGE_BUCKET``.
-    object_storage_ccma_bucket: str = Field(default="ccma", alias="OBJECT_STORAGE_CCMA_BUCKET")
-    object_storage_rcel_bucket: str = Field(default="rcel", alias="OBJECT_STORAGE_RCEL_BUCKET")
     # Vigencia de un archivo subido para poder reutilizarlo en varios jobs.
     uploads_retention_seconds: int = Field(
         default=86_400, alias="UPLOADS_RETENTION_SECONDS"
@@ -266,22 +261,17 @@ class Settings(BaseSettings):
     def _keep_raw(cls, v: object) -> object:
         return v or ""
 
-    def bucket_para_artefacto(self, artifact_id_o_key: str | None) -> str:
-        """Bucket de un artefacto según su ``artifact_id`` o su ``object_key``.
+    def bucket_para_bot(self, bot: str | None) -> str:
+        """Bucket de S4 de los artefactos de un módulo (ver ``central_api.buckets``)."""
+        from central_api.buckets import bucket_de_bot
 
-        El ``object_key`` lleva el ``artifact_id`` (``jobs/<job>/<intento>/<artifact_id>/<id>``),
-        así que no hace falta guardar el bucket en la base: los artefactos
-        anteriores siguen resolviéndose en el bucket general.
-        """
-        texto = str(artifact_id_o_key or "")
-        partes = texto.split("/")
-        artifact_id = partes[3] if len(partes) >= 5 and partes[0] == "jobs" else texto
-        por_artefacto = {
-            "ccma_saldos.csv": self.object_storage_ccma_bucket,
-            "ccma_movimientos.csv": self.object_storage_ccma_bucket,
-            "rcel_facturas.csv": self.object_storage_rcel_bucket,
-        }
-        return por_artefacto.get(artifact_id) or self.object_storage_bucket
+        return bucket_de_bot(bot, self.object_storage_bucket)
+
+    def buckets_de_lectura(self, bot: str | None) -> list[str]:
+        """Buckets donde buscar un artefacto: el del módulo y, por compatibilidad
+        con objetos aún no migrados, el general."""
+        propio = self.bucket_para_bot(bot)
+        return [propio] if propio == self.object_storage_bucket else [propio, self.object_storage_bucket]
 
     @property
     def object_storage_configurado(self) -> bool:

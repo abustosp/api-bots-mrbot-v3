@@ -358,7 +358,8 @@ async def download_artifact(
 
         async with nueva_sesion() as session:
             repo = JobRepository(session)  # type: ignore[arg-type]
-            await repo.get_scoped(job_uuid, user_uuid)
+            job_fila = await repo.get_scoped(job_uuid, user_uuid)
+            bot = getattr(job_fila, "bot", None)
             artifact = (await session.execute(
                 select(JobArtifact).where(
                     JobArtifact.id == artifact_uuid,
@@ -375,14 +376,19 @@ async def download_artifact(
         raise HTTPException(status_code=404, detail="artefacto no encontrado") from exc
 
     settings = get_settings()
-    if object_exists(
-        endpoint=settings.object_storage_endpoint,
-        region=settings.object_storage_region,
-        bucket=settings.bucket_para_artefacto(object_key),
-        access_key=settings.object_storage_access_key,
-        secret_key=settings.object_storage_secret_key,
-        object_key=object_key,
-    ) is False:
+    bucket = None
+    for candidato in settings.buckets_de_lectura(bot):
+        if object_exists(
+            endpoint=settings.object_storage_endpoint,
+            region=settings.object_storage_region,
+            bucket=candidato,
+            access_key=settings.object_storage_access_key,
+            secret_key=settings.object_storage_secret_key,
+            object_key=object_key,
+        ) is not False:
+            bucket = candidato
+            break
+    if bucket is None:
         raise HTTPException(status_code=410, detail=OBJETO_ELIMINADO)
     try:
         url = presign_get_url(
@@ -391,7 +397,7 @@ async def download_artifact(
                 or settings.object_storage_endpoint
             ),
             region=settings.object_storage_region,
-            bucket=settings.bucket_para_artefacto(object_key),
+            bucket=bucket,
             access_key=settings.object_storage_access_key,
             secret_key=settings.object_storage_secret_key,
             object_key=object_key,

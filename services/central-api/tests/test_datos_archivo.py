@@ -48,7 +48,7 @@ def ajustes(monkeypatch, tmp_path):
 def _almacen(monkeypatch, archivos: dict[str, str]) -> list[str]:
     leidas: list[str] = []
 
-    def _leer(settings, key):
+    def _leer(settings, key, bot=None):
         leidas.append(key)
         return archivos[key].encode("utf-8")
 
@@ -104,7 +104,7 @@ def test_archivo_faltante_informa_y_conserva_el_resto(ajustes) -> None:
 
 
 def test_falla_del_almacenamiento_no_rompe_y_limpia(ajustes, monkeypatch) -> None:
-    def _falla(settings, key):
+    def _falla(settings, key, bot=None):
         raise RuntimeError("no se pudo leer")
 
     monkeypatch.setattr(da, "_leer", _falla)
@@ -140,59 +140,83 @@ def test_slots_de_subida_ccma_y_rcel_siempre_incluyen_los_csv() -> None:
     assert [s["artifact_id"] for s in con_pdf][-1] == "ccma_resumen.pdf"
 
 
-def test_cada_csv_va_a_su_bucket_y_el_resto_al_general(ajustes) -> None:
-    assert ajustes.bucket_para_artefacto("ccma_saldos.csv") == "ccma"
-    assert ajustes.bucket_para_artefacto("ccma_movimientos.csv") == "ccma"
-    assert ajustes.bucket_para_artefacto("rcel_facturas.csv") == "rcel"
-    assert ajustes.bucket_para_artefacto("emitidos_zip") == "bucket"
-    assert ajustes.bucket_para_artefacto("ccma_resumen.pdf") == "bucket"  # el PDF no es dato scrapeado
-    # Desde el object_key que arma la central (artifact_id en la 4.a posicion).
-    assert ajustes.bucket_para_artefacto("jobs/j1/1/ccma_saldos.csv/abc123") == "ccma"
-    assert ajustes.bucket_para_artefacto("jobs/j1/1/rcel_facturas.csv/abc123") == "rcel"
-    assert ajustes.bucket_para_artefacto("jobs/j1/1/emitidos_zip/abc123") == "bucket"
-    assert ajustes.bucket_para_artefacto("jobs/j1/1/rcel_000_pdf/abc123") == "bucket"
-    assert ajustes.bucket_para_artefacto(None) == "bucket"
+MAPA_ACORDADO = {
+    "arba": "retper-iibb-arba",
+    "ccma_compensacion": "ccma",
+    "carga_portal_iva": "portaliva",
+    "libros_portal_iva": "librosiva",
+    "vep_archivo": "vep",
+    "ccma": "ccma",
+    "rcel": "rcel",
+}
 
 
-def test_los_buckets_por_modulo_se_pueden_configurar(monkeypatch, ajustes) -> None:
-    monkeypatch.setenv("OBJECT_STORAGE_CCMA_BUCKET", "otro-ccma")
-    monkeypatch.setenv("OBJECT_STORAGE_RCEL_BUCKET", "otro-rcel")
-    get_settings.cache_clear()
-    nuevo = get_settings()
-    assert nuevo.bucket_para_artefacto("jobs/j/1/ccma_movimientos.csv/x") == "otro-ccma"
-    assert nuevo.bucket_para_artefacto("jobs/j/1/rcel_facturas.csv/x") == "otro-rcel"
+def test_cada_modulo_usa_el_bucket_acordado(ajustes) -> None:
+    for bot, bucket in MAPA_ACORDADO.items():
+        assert ajustes.bucket_para_bot(bot) == bucket, bot
+    # Con todos sus archivos (CSV, PDF, ZIP) en el mismo bucket del modulo.
+    assert ajustes.bucket_para_bot("mis_comprobantes") == "miscomprobantes"
 
 
-def test_la_lectura_usa_el_bucket_del_modulo(ajustes, monkeypatch) -> None:
-    vistos: list[str] = []
+def test_modulos_sin_bucket_definido_usan_el_general(ajustes) -> None:
+    for bot in ("apoc", "certificacion_primaria_granos", "compensaciones", "consulta_cuit", "inexistente", None):
+        assert ajustes.bucket_para_bot(bot) == "bucket", bot
+
+
+def test_todo_bot_del_catalogo_tiene_decision(ajustes) -> None:
+    """Cada modulo del catalogo esta en el mapa o en la lista explicita de pendientes."""
+    from central_api.api.bots import CATALOGUE
+    from central_api.buckets import BUCKET_POR_BOT, SIN_BUCKET
+
+    sin_decidir = {str(i["bot"]) for i in CATALOGUE} - set(BUCKET_POR_BOT) - set(SIN_BUCKET)
+    assert sin_decidir == set(), sin_decidir
+
+
+def test_la_lectura_prueba_primero_el_bucket_del_modulo_y_luego_el_general(ajustes) -> None:
+    assert ajustes.buckets_de_lectura("ccma") == ["ccma", "bucket"]
+    assert ajustes.buckets_de_lectura("apoc") == ["bucket"]
+
+
+def test_la_lectura_cae_al_general_si_el_objeto_aun_no_se_migro(ajustes, monkeypatch) -> None:
+    intentos: list[str] = []
 
     def _get(**kw):
-        vistos.append(kw["bucket"])
+        intentos.append(kw["bucket"])
+        if kw["bucket"] == "ccma":
+            raise RuntimeError("no se pudo leer el archivo del almacenamiento")
         return b"periodo|impuesto\n10/2026|AUT\n"
 
     monkeypatch.setattr(da, "get_object_bytes", _get)
-    da._leer(ajustes, "jobs/j1/1/ccma_movimientos.csv/abc")
-    da._leer(ajustes, "jobs/j1/1/rcel_facturas.csv/abc")
-    assert vistos == ["ccma", "rcel"]
+    assert da._leer(ajustes, "jobs/j1/1/ccma_movimientos.csv/abc", "ccma").startswith(b"periodo")
+    assert intentos == ["ccma", "bucket"]
 
 
-def test_el_presign_de_subida_elige_el_bucket_del_artefacto(ajustes, monkeypatch) -> None:
+def test_si_no_esta_en_ningun_bucket_falla_con_el_ultimo_error(ajustes, monkeypatch) -> None:
+    def _get(**kw):
+        raise RuntimeError("no se pudo leer el archivo del almacenamiento")
+
+    monkeypatch.setattr(da, "get_object_bytes", _get)
+    with pytest.raises(RuntimeError):
+        da._leer(ajustes, "jobs/j1/1/x/abc", "rcel")
+
+
+def test_el_presign_de_subida_usa_el_bucket_del_modulo_del_job(ajustes, monkeypatch) -> None:
+    from types import SimpleNamespace
+
     from central_api.internal import uploads as up
 
     vistos: list[str] = []
     monkeypatch.setattr(up, "firmar_subida", lambda **kw: (vistos.append(kw["bucket"]), {"upload_url": "u"})[1])
     monkeypatch.setattr(up, "get_settings", lambda: ajustes)
 
-    async def _vivo(job_id, worker):
-        from types import SimpleNamespace
-        return SimpleNamespace(id=job_id, assignment_attempt=1, _origen_db=False, worker_node=worker, status="CORRIENDO")
+    async def _pedir(bot):
+        async def _vivo(job_id, worker):
+            return SimpleNamespace(id=job_id, bot=bot, assignment_attempt=1, _origen_db=False, worker_node=worker, status="CORRIENDO")
 
-    monkeypatch.setattr(up, "_job_vivo", _vivo)
-
-    async def _pedir(artifact_id):
-        body = up.PresignBody(artifact_id=artifact_id, content_type="text/csv", size_bytes=10)
+        monkeypatch.setattr(up, "_job_vivo", _vivo)
+        body = up.PresignBody(artifact_id="cualquiera.pdf", content_type="application/pdf", size_bytes=10)
         await up.presign_artifact("j1", body, worker_node="w")
 
-    for aid in ("ccma_saldos.csv", "ccma_movimientos.csv", "rcel_facturas.csv", "emitidos_zip"):
-        asyncio.run(_pedir(aid))
-    assert vistos == ["ccma", "ccma", "rcel", "bucket"]
+    for bot in ("ccma", "rcel", "arba", "carga_portal_iva", "apoc"):
+        asyncio.run(_pedir(bot))
+    assert vistos == ["ccma", "rcel", "retper-iibb-arba", "portaliva", "bucket"]

@@ -56,15 +56,22 @@ def _zip_de(artefactos: Sequence[Mapping[str, Any]], tipo: str) -> Mapping[str, 
 
 
 def _leer_zip(settings: Settings, object_key: str) -> bytes:
-    return get_object_bytes(
-        endpoint=settings.object_storage_endpoint,
-        region=settings.object_storage_region,
-        bucket=settings.object_storage_bucket,
-        access_key=settings.object_storage_access_key,
-        secret_key=settings.object_storage_secret_key,
-        object_key=object_key,
-        max_bytes=MAX_BYTES_ZIP,
-    )
+    """Lee el ZIP del bucket de Mis Comprobantes; si aún no se migró, del general."""
+    ultimo: Exception | None = None
+    for bucket in settings.buckets_de_lectura(BOT):
+        try:
+            return get_object_bytes(
+                endpoint=settings.object_storage_endpoint,
+                region=settings.object_storage_region,
+                bucket=bucket,
+                access_key=settings.object_storage_access_key,
+                secret_key=settings.object_storage_secret_key,
+                object_key=object_key,
+                max_bytes=MAX_BYTES_ZIP,
+            )
+        except RuntimeError as exc:
+            ultimo = exc
+    raise ultimo or RuntimeError("no se pudo leer el archivo del almacenamiento")
 
 
 def _reconstruir_tipo(

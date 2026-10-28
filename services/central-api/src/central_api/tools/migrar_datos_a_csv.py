@@ -113,7 +113,7 @@ async def migrar(bot: str, *, aplicar: bool, limite: int | None) -> Counter:
                 put_object_bytes(
                     endpoint=ajustes.object_storage_endpoint,
                     region=ajustes.object_storage_region,
-                    bucket=ajustes.bucket_para_artefacto(artifact_id),
+                    bucket=ajustes.bucket_para_bot(bot),
                     access_key=ajustes.object_storage_access_key,
                     secret_key=ajustes.object_storage_secret_key,
                     object_key=object_key,
