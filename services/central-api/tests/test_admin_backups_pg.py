@@ -238,6 +238,17 @@ def test_dump_completo_ordena_por_fks_y_reporta_la_revision(pg_backups) -> None:
     assert "users" in nombres and "jobs" in nombres
     assert nombres.index(PADRE) < nombres.index(HIJO)
     assert len(nombres) == len(set(nombres))
+    assert "worker_heartbeats" not in nombres
+
+
+def test_dump_rechaza_pedir_explicitamente_worker_heartbeats(pg_backups) -> None:
+    respuesta = pg_backups.cliente.post(
+        "/admin/backups/dump",
+        headers=H,
+        json={"motivo": "respaldo con tabla excluida", "tablas": ["worker_heartbeats"]},
+    )
+    assert respuesta.status_code == 400, respuesta.text
+    assert "worker_heartbeats" in respuesta.json()["detail"]
 
 
 def test_dump_rechaza_tabla_inexistente(pg_backups) -> None:

@@ -60,6 +60,9 @@ LLAVES_PRIVADAS = {
     "RSA_PRIVATE_KEY": "rsa_private_key",
     "ASSIGNMENT_SIGNING_KEY": "assignment_signing_key",
 }
+#: Tablas que nunca entran al dump: datos efímeros y voluminosos (un latido
+#: por worker cada pocos segundos) que se regeneran solos al reconectar.
+TABLAS_EXCLUIDAS = frozenset({"worker_heartbeats"})
 MANIFEST_VERSION = 1
 CONFIRMACION_RESTORE = "RESTAURAR"
 MODO_OVERWRITE = "overwrite"
@@ -336,7 +339,16 @@ def _volcar_tablas(
     tamano_crudo = 0
     with _conectar(dsn) as conn, conn.cursor() as cur:
         catalogo = _tablas_base(cur)
-        seleccion = list(tablas) if tablas else catalogo
+        excluidas = sorted(t for t in (tablas or []) if t in TABLAS_EXCLUIDAS)
+        if excluidas:
+            raise SolicitudInvalida(
+                "tablas excluidas del dump: " + ", ".join(excluidas)
+            )
+        seleccion = (
+            list(tablas)
+            if tablas
+            else [t for t in catalogo if t not in TABLAS_EXCLUIDAS]
+        )
         faltantes = [t for t in seleccion if t not in catalogo]
         if faltantes:
             raise SolicitudInvalida(
