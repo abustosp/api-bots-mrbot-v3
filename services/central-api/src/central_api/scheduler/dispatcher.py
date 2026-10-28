@@ -170,15 +170,24 @@ def artifact_upload_slots(job: Job) -> list[dict]:
                 "content_types": ["application/pdf"],
             }
         )
-    if job.bot == "mis_comprobantes" and payload.get("subir_csv", True):
-        for tipo, artifact_id in (
-            ("emitidos", "emitidos_csv"),
-            ("recibidos", "recibidos_csv"),
-        ):
-            if payload.get(tipo):
+    if job.bot == "mis_comprobantes" and job.operation in ("consulta", "consultar", "historial"):
+        for tipo in ("emitidos", "recibidos"):
+            if not payload.get(tipo):
+                continue
+            # El ZIP original de ARCA se guarda siempre: es la fuente del JSON
+            # que la central reconstruye al responder (carga_json).
+            slots.append(
+                {
+                    "artifact_id": f"{tipo}_zip",
+                    "name_hint": f"{tipo}.zip",
+                    "max_bytes": 52_428_800,
+                    "content_types": ["application/zip"],
+                }
+            )
+            if payload.get("subir_csv", True):
                 slots.append(
                     {
-                        "artifact_id": artifact_id,
+                        "artifact_id": f"{tipo}_csv",
                         "name_hint": f"{tipo}.csv",
                         "max_bytes": 52_428_800,
                         "content_types": ["text/csv"],

@@ -156,6 +156,19 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
     ]
     payload = resultado.payload if resultado is not None else None
     if isinstance(payload, dict):
+        # Mis Comprobantes con carga_json: el JSON no está en la base, se
+        # reconstruye desde el ZIP guardado en S4 y no se persiste.
+        from central_api import mc_json
+
+        payload = await mc_json.reconstruir(
+            bot=fila.bot,
+            operacion=fila.operation,
+            payload=getattr(fila, "request_payload", None),
+            datos=payload,
+            artefactos=[
+                {"object_key": getattr(a, "object_key", None)} for a in artefactos
+            ],
+        )
         payload = {"schema_version": 1, **payload}
     summary = resultado.summary if resultado is not None else {}
     result = {

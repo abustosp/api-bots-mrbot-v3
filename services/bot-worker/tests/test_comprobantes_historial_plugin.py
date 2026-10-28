@@ -152,6 +152,8 @@ def _ejecutar(plugin: Any, servicio: _ServicioHistorial, tmp_path: Path, entrada
             declarados={
                 "emitidos_csv": (("text/csv",), 52_428_800),
                 "recibidos_csv": (("text/csv",), 52_428_800),
+                "emitidos_zip": (("application/zip",), 52_428_800),
+                "recibidos_zip": (("application/zip",), 52_428_800),
             },
         ),
         event_sink=_Sink(),
@@ -179,7 +181,12 @@ def test_historial_descarga_la_consulta_existente_y_no_pide_otra(plugin_cls: typ
     assert sesion.portales == ["comprobantes"]
     assert resultado.data["emitidos"]["filas"] == 1
     assert resultado.data["consultas"]["emitidos"][0]["estado"] == "Finalizada"
-    assert presign.ids == ["emitidos_csv"]
+    # ``mis_comprobantes`` guarda además el ZIP original de ARCA (fuente del JSON).
+    esperado = ["emitidos_zip", "emitidos_csv"] if plugin_cls is MisComprobantesPlugin else ["emitidos_csv"]
+    assert presign.ids == esperado
+    if plugin_cls is MisComprobantesPlugin:
+        assert resultado.data["emitidos"]["zip"]["archivo"].endswith(".zip")
+        assert "muestra" not in resultado.data["emitidos"]
 
 
 @pytest.mark.parametrize("plugin_cls", PLUGINS)

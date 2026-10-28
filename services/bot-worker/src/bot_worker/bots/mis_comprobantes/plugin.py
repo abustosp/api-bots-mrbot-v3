@@ -42,8 +42,8 @@ from bot_worker.bots.errors import (
 )
 from bot_worker.bots.planillas import (
     TIMEOUT_MC_SEGUNDOS_POR_DEFECTO,
+    empaquetar_zip,
     filtrar_csv_comprobantes,
-    leer_muestra_mis_comprobantes,
     materializar_csv_descargado,
 )
 from bot_worker.bots.mis_comprobantes.schema import (
@@ -64,6 +64,9 @@ except ImportError:  # pragma: no cover - solo para tipado estatico
 SERVICIO_ARCA = "MIS COMPROBANTES"
 ID_ARTEFACTO_EMITIDOS = "emitidos_csv"
 ID_ARTEFACTO_RECIBIDOS = "recibidos_csv"
+# El ZIP original de ARCA se guarda siempre: la central reconstruye el JSON desde
+# el al responder, por eso las filas nunca viajan ni se persisten como JSON.
+ID_ARTEFACTO_ZIP = {"emitidos": "emitidos_zip", "recibidos": "recibidos_zip"}
 # Historial de consultas: mismo portal que ``comprobantes`` (port V1 compartido).
 PORTAL_HISTORIAL = "comprobantes"
 
@@ -145,6 +148,18 @@ class MisComprobantesPlugin:
             ArtifactSpec(
                 nombre="recibidos.csv",
                 content_types=("text/csv",),
+                max_bytes=52_428_800,
+                obligatorio=False,
+            ),
+            ArtifactSpec(
+                nombre="emitidos.zip",
+                content_types=("application/zip",),
+                max_bytes=52_428_800,
+                obligatorio=False,
+            ),
+            ArtifactSpec(
+                nombre="recibidos.zip",
+                content_types=("application/zip",),
                 max_bytes=52_428_800,
                 obligatorio=False,
             ),
@@ -381,8 +396,15 @@ class MisComprobantesPlugin:
         runtime: BotRuntime,
         artefactos: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Materializa, filtra por rango, sube por slot y resume ``tipo``."""
+        """Guarda el ZIP de ARCA, filtra por rango y resume ``tipo``.
+
+        El ZIP original se sube siempre (es la fuente del JSON que la central
+        reconstruye al responder). El resumen no lleva filas: solo conteos y
+        hashes, de modo que ningún JSON de comprobantes llega a la base.
+        """
         resumen: dict[str, Any] = {}
+        zip_final = final.with_suffix(".zip")
+        empaquetar_zip(crudo, zip_final)
         materializar_csv_descargado(crudo)
         await runtime.event_sink.progress(
             phase="PROCESANDO", percent=65, message=f"Filtrando {tipo}"
@@ -393,6 +415,22 @@ class MisComprobantesPlugin:
         crudo.unlink(missing_ok=True)
         resumen["filas"] = filas
         resumen["archivo"] = final.name
+        await runtime.event_sink.progress(
+            phase="SUBIENDO", percent=75, message=f"Subiendo ZIP de {tipo}"
+        )
+        try:
+            referencia_zip = await runtime.artifact_store.upload(
+                ID_ARTEFACTO_ZIP[tipo],
+                ruta_para_upload(getattr(runtime, "work_dir", None), zip_final),
+            )
+        except ValueError as exc:
+            raise ArtifactUploadError(str(exc)) from exc
+        artefactos.append(referencia_zip)
+        resumen["zip"] = {
+            "archivo": zip_final.name,
+            "sha256": referencia_zip["sha256"],
+            "size_bytes": referencia_zip["size_bytes"],
+        }
         if getattr(entrada, "subir_csv", True):
             await runtime.event_sink.progress(
                 phase="SUBIENDO", percent=80, message=f"Subiendo {tipo}"
@@ -407,8 +445,6 @@ class MisComprobantesPlugin:
             artefactos.append(referencia)
             resumen["sha256"] = referencia["sha256"]
             resumen["size_bytes"] = referencia["size_bytes"]
-        if getattr(entrada, "incluir_json", True):
-            resumen["muestra"] = self._muestra(final, tipo, entrada)
         return resumen
 
     @staticmethod
@@ -442,12 +478,3 @@ class MisComprobantesPlugin:
                 warnings=["sin consulta en el historial para: " + ", ".join(faltantes)],
             )
         return BotResult(result="OK", data=datos, artifacts=artefactos)
-
-    def _muestra(
-        self, archivo: Path, tipo: str = "emitidos", entrada: Any = None
-    ) -> list[dict[str, str]]:
-        """Filas del CSV final con las columnas auxiliares de V1."""
-        cuit = getattr(entrada, "representado_cuit", "")
-        return leer_muestra_mis_comprobantes(
-            archivo, tipo, cuit, self._muestra_json
-        )

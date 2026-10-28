@@ -344,9 +344,24 @@ def test_dispatcher_declara_slots_de_salida_por_bot(entorno_limpio):
         "token-comprobantes",
     )
     assert [slot["artifact_id"] for slot in comprobantes["artifact_uploads"]] == [
+        "emitidos_zip",
         "emitidos_csv",
+        "recibidos_zip",
         "recibidos_csv",
     ]
+
+    # Sin subir_csv el ZIP original se guarda igual: es la fuente del JSON.
+    solo_zip = build_envelope(
+        Job(
+            id=new_job_id(),
+            bot="mis_comprobantes",
+            operation="consultar",
+            payload={"emitidos": True, "subir_csv": False, "carga_json": True},
+        ),
+        worker,
+        "token-comprobantes",
+    )
+    assert [slot["artifact_id"] for slot in solo_zip["artifact_uploads"]] == ["emitidos_zip"]
 
 
 def test_migrate_encuentra_alembic_del_checkout():

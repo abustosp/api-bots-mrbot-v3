@@ -938,6 +938,50 @@ def _resumen_job(job) -> dict:
     }
 
 
+async def _con_json_reconstruido(registro: dict, job_id: str) -> dict:
+    """Mis Comprobantes con carga_json: arma el JSON desde el ZIP guardado en S4.
+
+    Solo se usa en el detalle de un job (nunca en listados) y el resultado no se
+    persiste: el JSON existe únicamente en esta respuesta.
+    """
+    from central_api import mc_json
+
+    job = registro.get("job") or {}
+    request = registro.get("request") or {}
+    if not mc_json.aplica(str(job.get("bot") or ""), str(job.get("operacion") or ""), request):
+        return registro
+    try:
+        from sqlalchemy import select
+
+        from central_api.models.execution import JobArtifact
+
+        async with nueva_sesion() as sesion:
+            claves = [
+                {"object_key": fila}
+                for fila in (await sesion.execute(
+                    select(JobArtifact.object_key)
+                    .where(JobArtifact.job_id == uuid.UUID(job_id))
+                    .order_by(JobArtifact.created_at)
+                )).scalars()
+            ]
+    except Exception:  # noqa: BLE001 - el panel no debe romperse por esto
+        return registro
+    registro = dict(registro)
+    for clave in ("response", "result"):
+        bloque = registro.get(clave)
+        if isinstance(bloque, dict) and isinstance(bloque.get("payload"), dict):
+            nuevo = dict(bloque)
+            nuevo["payload"] = await mc_json.reconstruir(
+                bot=str(job.get("bot")),
+                operacion=str(job.get("operacion")),
+                payload=request,
+                datos=bloque["payload"],
+                artefactos=claves,
+            )
+            registro[clave] = nuevo
+    return registro
+
+
 def _sanear_resultado(job) -> dict | None:
     if job.result is None:
         return None
@@ -1161,7 +1205,7 @@ async def ver_ejecucion_admin(
         return {"success": True, "record": _registro_memoria(job)}
     if not registros:
         raise HTTPException(status_code=404, detail="job no encontrado")
-    return {"success": True, "record": registros[0]}
+    return {"success": True, "record": await _con_json_reconstruido(registros[0], job_id)}
 
 
 @router.get(
