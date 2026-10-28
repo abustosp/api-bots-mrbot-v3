@@ -378,7 +378,7 @@ async def download_artifact(
     if object_exists(
         endpoint=settings.object_storage_endpoint,
         region=settings.object_storage_region,
-        bucket=settings.object_storage_bucket,
+        bucket=settings.bucket_para_artefacto(object_key),
         access_key=settings.object_storage_access_key,
         secret_key=settings.object_storage_secret_key,
         object_key=object_key,
@@ -391,7 +391,7 @@ async def download_artifact(
                 or settings.object_storage_endpoint
             ),
             region=settings.object_storage_region,
-            bucket=settings.object_storage_bucket,
+            bucket=settings.bucket_para_artefacto(object_key),
             access_key=settings.object_storage_access_key,
             secret_key=settings.object_storage_secret_key,
             object_key=object_key,

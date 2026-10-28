@@ -52,7 +52,7 @@ def _leer(settings: Settings, object_key: str) -> bytes:
     return get_object_bytes(
         endpoint=settings.object_storage_endpoint,
         region=settings.object_storage_region,
-        bucket=settings.object_storage_bucket,
+        bucket=settings.bucket_para_artefacto(object_key),
         access_key=settings.object_storage_access_key,
         secret_key=settings.object_storage_secret_key,
         object_key=object_key,

@@ -82,7 +82,7 @@ def _url_directa(object_key: str | None, filename: str | None = None) -> str | N
         return presign_get_url(
             endpoint=cfg.object_storage_public_endpoint or cfg.object_storage_endpoint,
             region=cfg.object_storage_region,
-            bucket=cfg.object_storage_bucket,
+            bucket=cfg.bucket_para_artefacto(object_key),
             access_key=cfg.object_storage_access_key,
             secret_key=cfg.object_storage_secret_key,
             object_key=str(object_key),

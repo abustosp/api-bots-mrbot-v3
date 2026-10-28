@@ -178,7 +178,7 @@ async def presign_artifact(
         ttl_seconds=ARTIFACT_URL_TTL_SECONDS,
         endpoint=ajustes.object_storage_endpoint,
         region=ajustes.object_storage_region,
-        bucket=ajustes.object_storage_bucket,
+        bucket=ajustes.bucket_para_artefacto(body.artifact_id),
         access_key=ajustes.object_storage_access_key,
         secret_key=ajustes.object_storage_secret_key,
     )
