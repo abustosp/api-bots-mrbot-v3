@@ -120,6 +120,10 @@ def reconstruir_sync(
         if not isinstance(resumen, Mapping):
             continue
         resumen = dict(resumen)
+        if "muestra" in resumen and "zip" not in resumen:
+            # Job histórico (anterior al ZIP): ya trae su muestra guardada.
+            salida[tipo] = resumen
+            continue
         artefacto = _zip_de(artefactos, tipo)
         if artefacto is None:
             resumen["json_error"] = "zip_no_disponible"

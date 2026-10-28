@@ -202,3 +202,13 @@ def test_empaquetar_zip_copia_el_zip_y_envuelve_un_csv(tmp_path) -> None:
     with zipfile.ZipFile(envuelto) as paquete:
         assert paquete.namelist() == ["directo.csv"]
         assert paquete.read("directo.csv") == b"a;b\n1;2\n"
+
+
+def test_job_historico_con_muestra_y_sin_zip_queda_intacto(ajustes) -> None:
+    datos = _datos()
+    datos["emitidos"] = {"filas": 1, "archivo": "x.csv", "muestra": [{"MC": "MCE"}]}
+    salida = mc_json.reconstruir_sync(
+        payload={}, datos=datos, artefactos=[], settings=ajustes
+    )
+    assert salida["emitidos"] == datos["emitidos"]
+    assert "json_error" not in salida["emitidos"]
