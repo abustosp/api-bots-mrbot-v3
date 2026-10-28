@@ -77,83 +77,97 @@ def _registro(etapa: str, aplicar: bool):
     return open(ruta, "a", encoding="utf-8"), ruta
 
 
-async def correr(etapa: str, bot: str | None, limite: int | None, aplicar: bool) -> Counter:
+def _procesar(s, etapa: str, aplicar: bool, fila) -> tuple[str, dict]:
+    """Procesa UN objeto (sincrono, apto para hilos). Devuelve (contador, evento)."""
+    general = s.object_storage_bucket
+    destino = s.bucket_para_bot(fila["bot"])
+    key = fila["object_key"]
+    evento = {"key": key, "bot": fila["bot"], "destino": destino, "etapa": etapa}
+    en_dest = object_exists(**_kw(s), bucket=destino, object_key=key)
+    en_gral = object_exists(**_kw(s), bucket=general, object_key=key)
+
+    if etapa == "copiar":
+        if en_dest:
+            return "ya_en_destino", evento
+        if not en_gral:
+            evento["resultado"] = "origen_ausente"
+            return "ORIGEN_AUSENTE", evento
+        if not aplicar:
+            return "se_copiaria", evento
+        cuerpo = _leer(s, general, key)
+        if cuerpo is None:
+            evento["resultado"] = "error_leyendo_origen"
+            return "ERROR_leyendo_origen", evento
+        if fila["sha256"] and _sha(cuerpo) != fila["sha256"]:
+            evento["resultado"] = "origen_hash_distinto"
+            return "ORIGEN_HASH_DISTINTO_no_se_copia", evento
+        put_object_bytes(**_kw(s), bucket=destino, object_key=key, content=cuerpo,
+                         content_type=fila["content_type"] or "application/octet-stream")
+        copia = _leer(s, destino, key)
+        if copia is not None and _sha(copia) == _sha(cuerpo):
+            evento["resultado"] = "ok"
+            return "copiado_y_verificado", evento
+        evento["resultado"] = "copia_no_coincide"
+        return "ERROR_COPIA_NO_COINCIDE", evento
+
+    # verificar / borrar: el destino se vuelve a leer y comparar AHORA
+    if not en_dest:
+        evento["resultado"] = "no_esta_en_destino"
+        return "NO_ESTA_EN_DESTINO", evento
+    copia = _leer(s, destino, key)
+    esperado = fila["sha256"]
+    if esperado is None and en_gral:
+        orig = _leer(s, general, key)
+        esperado = _sha(orig) if orig is not None else None
+    verificado = (
+        copia is not None and esperado is not None and _sha(copia) == esperado
+        and (fila["size_bytes"] is None or len(copia) == int(fila["size_bytes"]))
+    )
+    if not verificado:
+        evento["resultado"] = "no_verificado"
+        return "NO_VERIFICADO", evento
+    if etapa == "verificar":
+        evento["resultado"] = "verificado"
+        return "verificado", evento
+    if not en_gral:
+        return "ya_borrado_del_general", evento
+    if not aplicar:
+        return "se_borraria_(verificado)", evento
+    try:
+        delete_object_bytes(**_kw(s), bucket=general, object_key=key)
+    except RuntimeError:
+        evento["resultado"] = "error_borrando"
+        return "ERROR_borrando", evento
+    evento["resultado"] = "borrado"
+    return "borrado_del_general", evento
+
+
+async def correr(etapa: str, bot: str | None, limite: int | None, aplicar: bool, hilos: int = 16) -> Counter:
     s = get_settings()
     general = s.object_storage_bucket
     cuenta: Counter = Counter()
     log, ruta = _registro(etapa, aplicar)
-    hechos = 0
+    pendientes = []
     for fila in await _filas(bot):
-        destino = s.bucket_para_bot(fila["bot"])
-        key = fila["object_key"]
-        if destino == general:
+        if s.bucket_para_bot(fila["bot"]) == general:
             cuenta["sin_cambio_(modulo_en_bucket_general)"] += 1
-            continue
-        if limite is not None and hechos >= limite:
-            break
-        en_dest = object_exists(**_kw(s), bucket=destino, object_key=key)
-        en_gral = object_exists(**_kw(s), bucket=general, object_key=key)
-        evento = {"key": key, "bot": fila["bot"], "destino": destino, "etapa": etapa}
+        else:
+            pendientes.append(fila)
+    if limite is not None:
+        pendientes = pendientes[:limite]
+    cuenta["a_procesar"] = len(pendientes)
+    loop = asyncio.get_running_loop()
+    from concurrent.futures import ThreadPoolExecutor
 
-        if etapa == "copiar":
-            if en_dest:
-                cuenta["ya_en_destino"] += 1
-                continue
-            if not en_gral:
-                cuenta["ORIGEN_AUSENTE"] += 1
-                evento["resultado"] = "origen_ausente"; log.write(json.dumps(evento) + "\n")
-                continue
-            hechos += 1
-            if not aplicar:
-                cuenta["se_copiaria"] += 1
-                continue
-            cuerpo = _leer(s, general, key)
-            if cuerpo is None:
-                cuenta["ERROR_leyendo_origen"] += 1; continue
-            if fila["sha256"] and _sha(cuerpo) != fila["sha256"]:
-                cuenta["ORIGEN_HASH_DISTINTO_no_se_copia"] += 1
-                evento["resultado"] = "origen_hash_distinto"; log.write(json.dumps(evento) + "\n")
-                continue
-            put_object_bytes(**_kw(s), bucket=destino, object_key=key, content=cuerpo,
-                             content_type=fila["content_type"] or "application/octet-stream")
-            copia = _leer(s, destino, key)
-            ok = copia is not None and _sha(copia) == _sha(cuerpo)
-            cuenta["copiado_y_verificado" if ok else "ERROR_COPIA_NO_COINCIDE"] += 1
-            evento["resultado"] = "ok" if ok else "copia_no_coincide"
-
-        elif etapa in ("verificar", "borrar"):
-            if not en_dest:
-                cuenta["NO_ESTA_EN_DESTINO"] += 1
-                evento["resultado"] = "no_esta_en_destino"; log.write(json.dumps(evento) + "\n")
-                continue
-            copia = _leer(s, destino, key)
-            esperado = fila["sha256"]
-            if esperado is None and en_gral:
-                orig = _leer(s, general, key)
-                esperado = _sha(orig) if orig is not None else None
-            verificado = copia is not None and esperado is not None and _sha(copia) == esperado \
-                and (fila["size_bytes"] is None or len(copia) == int(fila["size_bytes"]))
-            if not verificado:
-                cuenta["NO_VERIFICADO"] += 1
-                evento["resultado"] = "no_verificado"; log.write(json.dumps(evento) + "\n")
-                continue
-            if etapa == "verificar":
-                cuenta["verificado"] += 1; hechos += 1
-                evento["resultado"] = "verificado"
-            else:
-                if not en_gral:
-                    cuenta["ya_borrado_del_general"] += 1
-                    continue
-                hechos += 1
-                if not aplicar:
-                    cuenta["se_borraria_(verificado)"] += 1
-                    continue
-                try:
-                    delete_object_bytes(**_kw(s), bucket=general, object_key=key)
-                    cuenta["borrado_del_general"] += 1; evento["resultado"] = "borrado"
-                except RuntimeError:
-                    cuenta["ERROR_borrando"] += 1; evento["resultado"] = "error_borrando"
-        log.write(json.dumps(evento) + "\n")
+    with ThreadPoolExecutor(hilos) as pool:
+        tareas = [loop.run_in_executor(pool, _procesar, s, etapa, aplicar, f) for f in pendientes]
+        for i, tarea in enumerate(asyncio.as_completed(tareas), 1):
+            clave, evento = await tarea
+            cuenta[clave] += 1
+            if "resultado" in evento:
+                log.write(json.dumps(evento) + "\n")
+            if i % 500 == 0:
+                print(f"  ... {i}/{len(pendientes)}", file=sys.stderr, flush=True)
     log.close()
     cuenta["_registro"] = ruta
     return cuenta
@@ -165,8 +179,9 @@ def main() -> int:
     ap.add_argument("--bot")
     ap.add_argument("--limite", type=int)
     ap.add_argument("--aplicar", action="store_true")
+    ap.add_argument("--hilos", type=int, default=16)
     a = ap.parse_args()
-    c = asyncio.run(correr(a.etapa, a.bot, a.limite, a.aplicar))
+    c = asyncio.run(correr(a.etapa, a.bot, a.limite, a.aplicar, a.hilos))
     print(json.dumps({"etapa": a.etapa, "modo": "APLICADO" if a.aplicar else "SIMULACION", **c}, indent=1, ensure_ascii=False))
     # Cualquier contador de problema (mayusculas iniciales) hace fallar el proceso.
     problemas = {k: v for k, v in c.items() if isinstance(v, int) and k.startswith(("ERROR", "ORIGEN_", "NO_")) and v}
