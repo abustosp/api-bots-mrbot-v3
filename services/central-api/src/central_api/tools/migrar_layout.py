@@ -42,7 +42,7 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from central_api.api.uploads import segmento_seguro
+from central_api.api.uploads import nombre_archivo_seguro
 from central_api.settings import get_settings
 from central_api.storage import delete_object_bytes, get_object_bytes, object_exists, put_object_bytes
 from mrbot_contracts import datos_csv
@@ -92,7 +92,7 @@ def _cuit(rq) -> str | None:
 
 def _base(filename: str | None) -> str:
     ultimo = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
-    return segmento_seguro(ultimo, defecto="archivo")
+    return nombre_archivo_seguro(ultimo)
 
 
 def _nombre(fn_name: str, plantilla: str, cuit: str) -> str:
@@ -120,6 +120,16 @@ def nombre_destino(clave: str, filename: str | None, rq) -> str:
         if artefacto == "ccma_compensacion.pdf":
             return _nombre("_no_existe", "ccma_compensacion_{}.pdf", cuit)
     return _base(filename)
+
+
+_RENOMBRADOS = ("ccma_saldos.csv", "ccma_movimientos.csv", "ccma_resumen.pdf",
+                "rcel_facturas.csv", "ccma_compensacion.pdf")
+
+
+def se_renombra(clave: str, rq) -> bool:
+    """Solo CCMA/RCEL cambian ``filename``; el resto conserva el nombre original (descarga)."""
+    partes = clave.split("/")
+    return bool(_cuit(rq)) and len(partes) > 3 and partes[3] in _RENOMBRADOS
 
 
 def _con_sufijo(nombre: str, n: int) -> str:
@@ -153,7 +163,8 @@ def planificar(filas) -> tuple[list[dict], int]:
                 n += 1
                 nombre = _con_sufijo(base, n)
             usados.add(nombre)
-            items.append({**f, "nombre": nombre, "nueva": f"jobs/{job}/{nombre}", "desambiguado": n > 1})
+            items.append({**f, "nombre": nombre, "nueva": f"jobs/{job}/{nombre}", "desambiguado": n > 1,
+                          "filename_final": nombre if se_renombra(f["key"], f["rq"]) else f["filename"]})
     return items, ya_nuevo
 
 
@@ -214,7 +225,7 @@ class RepoSQL:
                 r = await ses.execute(
                     text("UPDATE job_artifacts SET object_key = :n, filename = :f "
                          "WHERE id = CAST(:id AS uuid) AND object_key = :v"),
-                    {"n": it["nueva"], "f": it["nombre"], "id": it["id"], "v": it["key"]},
+                    {"n": it["nueva"], "f": it["filename_final"], "id": it["id"], "v": it["key"]},
                 )
                 n += r.rowcount or 0
             await ses.commit()

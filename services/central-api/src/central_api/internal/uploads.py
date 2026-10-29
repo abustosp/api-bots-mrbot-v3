@@ -91,11 +91,11 @@ def clave_artefacto(job_id: str, artifact_id: str, filename: str | None) -> str:
     Sin nombre (worker viejo) se arma ``{artifact_id}-{sufijo}`` para que dos
     archivos del mismo artefacto no se pisen.
     """
-    from central_api.api.uploads import segmento_seguro
+    from central_api.api.uploads import nombre_archivo_seguro, segmento_seguro
 
     base = (filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
     if base:
-        return f"jobs/{job_id}/{segmento_seguro(base, defecto='archivo')}"
+        return f"jobs/{job_id}/{nombre_archivo_seguro(base)}"
     return f"jobs/{job_id}/{segmento_seguro(artifact_id, defecto='archivo')}-{uuid.uuid4().hex[:12]}"
 
 

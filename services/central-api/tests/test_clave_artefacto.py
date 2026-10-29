@@ -54,3 +54,13 @@ def test_worker_viejo_contra_central_nueva_se_sigue_leyendo() -> None:
     assert datos_archivo._clave_de(arts, "ccma_saldos.csv").endswith("ab12cd34ef56")
     z = [{"object_key": f"jobs/{J}/emitidos_zip-ab12cd34ef56"}]
     assert mc_json._zip_de(z, "emitidos")["object_key"].endswith("ab12cd34ef56")
+
+
+def test_nombre_largo_conserva_extension_y_no_colisiona() -> None:
+    from central_api.api.uploads import nombre_archivo_seguro
+
+    base = "6 - 30502637696 - B794504 - " + "Deuda Corriente " * 20 + " - "
+    a, b = nombre_archivo_seguro(base + "obligaciones.pdf"), nombre_archivo_seguro(base + "cuotas.pdf")
+    assert a != b and a.endswith(".pdf") and b.endswith(".pdf") and len(a) <= 200 and len(b) <= 200
+    assert nombre_archivo_seguro("corto.pdf") == "corto.pdf"
+    assert clave_artefacto(J, "plan_pdf", base + "tablas.xlsx").endswith(".xlsx")

@@ -45,6 +45,25 @@ TICKETS: dict[str, dict] = {}
 _SEGMENTO_INVALIDO = re.compile(r"[^A-Za-z0-9._() \-]+")
 
 
+def nombre_archivo_seguro(valor: str, *, defecto: str = "archivo", maximo: int = 200) -> str:
+    """Nombre de archivo saneado que conserva la extension y no colisiona al acortarse.
+
+    Un nombre largo se corta en el cuerpo y se le agrega un hash corto del nombre
+    completo antes de la extension: dos nombres que solo difieren al final
+    (``... - obligaciones.pdf`` / ``... - cuotas.pdf``) siguen siendo distintos.
+    """
+    import hashlib
+    import os
+
+    limpio = _SEGMENTO_INVALIDO.sub("_", str(valor or "")).strip(" .") or defecto
+    if len(limpio) <= maximo:
+        return limpio
+    raiz, ext = os.path.splitext(limpio)
+    ext = ext[:16]
+    sello = hashlib.sha256(limpio.encode("utf-8")).hexdigest()[:8]
+    return f"{raiz[: maximo - len(ext) - 9].rstrip(' .')}-{sello}{ext}"
+
+
 def segmento_seguro(valor: str, *, defecto: str) -> str:
     """Sanea un segmento de object key (sin separadores ni ``..``)."""
     limpio = _SEGMENTO_INVALIDO.sub("_", str(valor or "")).strip(" .")
