@@ -47,3 +47,10 @@ def test_mc_distingue_emitidos_de_recibidos_por_el_nombre_del_zip() -> None:
     assert " - MCE - " in mc_json._zip_de(arts, "emitidos")["object_key"] and mc_json._zip_de(arts, "emitidos")["object_key"].endswith(".zip")
     assert " - MCR - " in mc_json._zip_de(arts, "recibidos")["object_key"]
     assert mc_json._zip_de([{"object_key": f"jobs/{J}/1/emitidos_zip/abc"}], "emitidos")["object_key"].endswith("/abc")
+
+
+def test_worker_viejo_contra_central_nueva_se_sigue_leyendo() -> None:
+    arts = [{"object_key": f"jobs/{J}/ccma_saldos.csv-ab12cd34ef56"}]
+    assert datos_archivo._clave_de(arts, "ccma_saldos.csv").endswith("ab12cd34ef56")
+    z = [{"object_key": f"jobs/{J}/emitidos_zip-ab12cd34ef56"}]
+    assert mc_json._zip_de(z, "emitidos")["object_key"].endswith("ab12cd34ef56")

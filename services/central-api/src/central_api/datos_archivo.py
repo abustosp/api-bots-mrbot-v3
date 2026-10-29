@@ -61,6 +61,13 @@ def _clave_de(artefactos: Sequence[Mapping[str, Any]], artifact_id: str) -> str 
         ]
         if nuevas:
             return nuevas[-1]
+    # Worker anterior al layout nuevo contra la central nueva: ``jobs/{job}/{artifact_id}-{sufijo}``.
+    transicion = [
+        c for c in claves
+        if c.count("/") == 2 and c.rsplit("/", 1)[-1].startswith(f"{artifact_id}-")
+    ]
+    if transicion:
+        return transicion[-1]
     marca = f"/{artifact_id}/"
     candidatas = [c for c in claves if marca in c]
     return candidatas[-1] if candidatas else None

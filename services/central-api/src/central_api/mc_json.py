@@ -61,6 +61,13 @@ def _zip_de(artefactos: Sequence[Mapping[str, Any]], tipo: str) -> Mapping[str, 
     ]
     if nuevos:
         return nuevos[-1]
+    transicion = [
+        a for a in claves
+        if str(a["object_key"]).count("/") == 2
+        and str(a["object_key"]).rsplit("/", 1)[-1].startswith(f"{tipo}_zip-")
+    ]
+    if transicion:
+        return transicion[-1]
     marca = f"/{tipo}_zip/"
     candidatos = [a for a in claves if marca in str(a["object_key"])]
     return candidatos[-1] if candidatos else None
