@@ -29,7 +29,7 @@ Análisis de los 35 bots, uno por agente `claude-haiku-5-5`, leyendo el código.
 | libro_sueldos_digital | scrap, descarga | `lsd/jobs/{job_id}/{cuit}_{periodo}_{nro:05d}.pdf` |
 | liquidacion_granos | descarga, genera | `liquidaciongranos/jobs/{job_id}/{cuit} - {LPG\|LSG EMITIDAS\|RECIBIDAS \| CERTIFICADOS DEPOSITO} - {ddmmaaaa} - {ddmmaaaa}.xlsx`<br>`liquidaciongranos/jobs/{job_id}/{LPG\|LSG} - {Emitida\|Recibida} - {cuit} - {cuit_vendedor} - {coe}.pdf` |
 | mis_facilidades | scrap, genera | `misfacilidades/jobs/{job_id}/{ultimo_digito} - {cuit} - {plan} - {denominacion} - {vista}.pdf`<br>`misfacilidades/jobs/{job_id}/{ultimo_digito} - {cuit} - {plan} - {denominacion} - tablas.xlsx` |
-| mis_retenciones | scrap, descarga, genera | `misretenciones/jobs/{job_id}/{ultimo_digito} - {cuit} - {desde} - {hasta} - {impuesto} - {tipo} - {denominacion}.csv` (y variantes `- siap.csv`, `- xls.csv`) |
+| mis_retenciones | scrap, descarga, genera | `misretenciones/jobs/{job_id}/{ultimo_digito} - {cuit} - {desde} - {hasta} - {codigo_impuesto} - {Retencion\|Percepcion} - {denominacion}.csv` (y variantes `- siap.csv`, `- xls.csv`). Ejemplo real: `2 - 20137366852 - 01092026 - 30092026 - 216 - Retencion - Ayerza Fabian Cirio.csv` |
 | mis_retenciones_iva_simple | scrap, descarga | `misretenciones/jobs/{job_id}/{ultimo_digito} - {cuit} - {desde} - {hasta} - IVA-SIMPLE - {operacion} - {formato} - {denominacion}.csv` |
 | moa | scrap, genera | `moa/jobs/{job_id}/MOA - {cuit}.csv` |
 | pago_devoluciones | descarga | `pagodevoluciones/jobs/{job_id}/pago_devoluciones_{cuit}_{AAAAMMDD_HHMMSS}.xlsx` |
@@ -45,6 +45,8 @@ Análisis de los 35 bots, uno por agente `claude-haiku-5-5`, leyendo el código.
 | vep_ccma | scrap, descarga | `vep/jobs/{job_id}/{cuit} - VEP CCMA.pdf`<br>`vep/jobs/{job_id}/{cuit} - VEP CCMA - QR.png` |
 
 ## Cosas que conviene saber
+
+- **Qué está comprobado con producción y qué no.** Los patrones de estos bots los comparé con archivos reales subidos después del despliegue (29/10): `arba`, `ccma`, `certificado_mipyme`, `declaracion_en_linea`, `facturometro`, `hacienda`, `libros_portal_iva`, `libro_sueldos_digital`, `liquidacion_granos`, `mis_comprobantes`, `mis_facilidades`, `mis_retenciones`, `pago_devoluciones`, `portal_iva`, `rcel`, `sct`, `sifere`, `siper`, `srt` y `vep_ccma`. El resto (`aportes_en_linea`, `compensaciones`, `controladores_fiscales`, `moa`, `consulta_pagos_vep`, `retper_iibb_agip`, `retper_iibb_misiones`, `certificacion_primaria_granos`, `mis_retenciones_iva_simple`, `vep_archivo`, `ccma_compensacion`, `comprobantes`) sale solo de leer el código, sin un archivo real que lo confirme.
 
 - **Solo `rcel` lee el contenido de PDF** (con pdfplumber, para armar `rcel_facturas_{cuit}.csv`). Los demás bots que guardan PDF lo descargan o lo imprimen desde HTML, sin leerlo. `declaracion_en_linea` lee HTML, no PDF.
 - **Bucket `general`:** `certificacion_primaria_granos` y `compensaciones` siguen sin bucket propio. Si `OBJECT_STORAGE_BUCKET` está vacío en algún entorno, la firma de subida cae a un ticket de desarrollo, así que hay que confirmar el bucket real.
