@@ -281,7 +281,7 @@ def test_plugin_abre_portal_y_delega_seleccion_consulta_y_exportacion(
 def _runtime_compensaciones(tmp_path: Path, sesion: Any, subidas: list[Any]) -> Any:
     from bot_worker.runtime.context import ArtifactStore, CancellationToken
 
-    async def presign(artifact_id: str, content_type: str, size: int) -> dict[str, Any]:
+    async def presign(artifact_id: str, content_type: str, size: int, filename: str = "") -> dict[str, Any]:
         return {"upload_url": "", "object_key": f"compensaciones/{artifact_id}"}
 
     store = ArtifactStore(

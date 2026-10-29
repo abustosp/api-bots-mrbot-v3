@@ -138,7 +138,7 @@ class _Presign:
     def __init__(self) -> None:
         self.ids: list[str] = []
 
-    async def __call__(self, artifact_id: str, content_type: str, size: int) -> dict[str, Any]:
+    async def __call__(self, artifact_id: str, content_type: str, size: int, filename: str = "") -> dict[str, Any]:
         self.ids.append(artifact_id)
         return {"upload_url": "", "object_key": f"jobs/x/{artifact_id}"}
 
@@ -147,7 +147,7 @@ def movimientos_de(tmp_path: Path) -> list[dict[str, str]]:
     from mrbot_contracts.datos_csv import movimientos_ccma_desde_csv
 
     return movimientos_ccma_desde_csv(
-        (tmp_path / f"CCMA_movimientos_{CUIT}_job-ccma.csv").read_text(encoding="utf-8")
+        (tmp_path / f"ccma_movimientos_{CUIT}.csv").read_text(encoding="utf-8")
     )
 
 
@@ -196,9 +196,9 @@ def test_corte_por_no_progreso_queda_en_data_y_el_resultado_sigue_ok(tmp_path: P
     assert resultado.data["datos_en_archivo"] == ["movimientos", "saldos"]
     nombres = {a["name"] for a in resultado.artifacts}
     assert nombres == {
-        f"CCMA_saldos_{CUIT}_job-ccma.csv", f"CCMA_movimientos_{CUIT}_job-ccma.csv",
+        f"ccma_saldos_{CUIT}.csv", f"ccma_movimientos_{CUIT}.csv",
     }
-    mov = (tmp_path / f"CCMA_movimientos_{CUIT}_job-ccma.csv").read_text(encoding="utf-8")
+    mov = (tmp_path / f"ccma_movimientos_{CUIT}.csv").read_text(encoding="utf-8")
     assert mov.splitlines()[0].startswith("periodo|impuesto|")
     assert [m["periodo"] for m in movimientos_de(tmp_path)] == ["01/2026"]
     assert portal.clics == 1
@@ -261,7 +261,7 @@ def test_el_pdf_usa_el_nombre_de_v1() -> None:
     from bot_worker.bots.ccma.plugin import nombre_pdf_ccma
 
     assert nombre_pdf_ccma(CUIT, ahora=datetime(2026, 10, 8, 9, 30, 0)) == (
-        f"ccma_{CUIT}_20261008_093000.pdf"
+        f"ccma_resumen_{CUIT}.pdf"
     )
 
 

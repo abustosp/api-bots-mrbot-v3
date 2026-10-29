@@ -85,6 +85,20 @@ async def _job_vivo(job_id: str, worker_node: str):
     return job
 
 
+def clave_artefacto(job_id: str, artifact_id: str, filename: str | None) -> str:
+    """``jobs/{job_id}/{archivo}``: el archivo cuelga directo del job.
+
+    Sin nombre (worker viejo) se arma ``{artifact_id}-{sufijo}`` para que dos
+    archivos del mismo artefacto no se pisen.
+    """
+    from central_api.api.uploads import segmento_seguro
+
+    base = (filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if base:
+        return f"jobs/{job_id}/{segmento_seguro(base, defecto='archivo')}"
+    return f"jobs/{job_id}/{segmento_seguro(artifact_id, defecto='archivo')}-{uuid.uuid4().hex[:12]}"
+
+
 class PresignBody(BaseModel):
     artifact_id: str = Field(
         min_length=1, max_length=128,
@@ -100,6 +114,14 @@ class PresignBody(BaseModel):
         ge=1, le=ARTIFACT_MAX_BYTES,
         description="Tamaño previsto del archivo en bytes. El máximo permitido es 100 MiB.",
         examples=[184320],
+    )
+    filename: str | None = Field(
+        default=None, max_length=255,
+        description=(
+            "Nombre del archivo. La clave queda `jobs/{job_id}/{filename}`; sin "
+            "nombre se usa `jobs/{job_id}/{artifact_id}-{sufijo}`."
+        ),
+        examples=["ccma_saldos_20123456786.csv"],
     )
 
 
@@ -162,10 +184,7 @@ async def presign_artifact(
     # archivos (un libro por período, un PDF por plan). Con clave fija cada
     # archivo pisaría al anterior en el bucket y el resultado chocaría con
     # ``uq_job_artifacts_object_key``.
-    object_key = (
-        f"jobs/{job_id}/{job.assignment_attempt}/{body.artifact_id}/"
-        f"{uuid.uuid4().hex[:12]}"
-    )
+    object_key = clave_artefacto(job_id, body.artifact_id, body.filename)
     expires_at = datetime.now(timezone.utc) + timedelta(
         seconds=ARTIFACT_URL_TTL_SECONDS
     )

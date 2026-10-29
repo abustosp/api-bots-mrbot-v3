@@ -55,19 +55,24 @@ def _segmento(valor: object) -> str:
     return texto or "sin_dato"
 
 
-def nombre_ccma_movimientos(representado: str, job_id: str) -> str:
-    """``CCMA_movimientos_{representado}_{job_id}.csv``."""
-    return f"CCMA_movimientos_{_segmento(representado)}_{_segmento(job_id)}.csv"
+def nombre_ccma_movimientos(representado: str) -> str:
+    """``ccma_movimientos_{representado}.csv``."""
+    return f"ccma_movimientos_{_segmento(representado)}.csv"
 
 
-def nombre_ccma_saldos(representado: str, job_id: str) -> str:
-    """``CCMA_saldos_{representado}_{job_id}.csv``."""
-    return f"CCMA_saldos_{_segmento(representado)}_{_segmento(job_id)}.csv"
+def nombre_ccma_saldos(representado: str) -> str:
+    """``ccma_saldos_{representado}.csv``."""
+    return f"ccma_saldos_{_segmento(representado)}.csv"
 
 
-def nombre_rcel_facturas(representado: str, job_id: str) -> str:
-    """``RCEL_facturas_{representado}_{job_id}.csv``."""
-    return f"RCEL_facturas_{_segmento(representado)}_{_segmento(job_id)}.csv"
+def nombre_ccma_resumen(representado: str) -> str:
+    """``ccma_resumen_{representado}.pdf``."""
+    return f"ccma_resumen_{_segmento(representado)}.pdf"
+
+
+def nombre_rcel_facturas(representado: str) -> str:
+    """``rcel_facturas_{representado}.csv``."""
+    return f"rcel_facturas_{_segmento(representado)}.csv"
 
 
 def a_csv(filas: Iterable[Mapping[str, Any]], columnas: Sequence[str]) -> str:

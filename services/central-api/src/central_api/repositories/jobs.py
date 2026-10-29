@@ -470,7 +470,7 @@ class JobRepository:
         summary_value = _sin_nul(dict(summary or {}))
         assert_no_secretos(summary_value, "job_results.summary")
         prepared_artifacts = [self._prepare_artifact(item) for item in artifacts]
-        expected_prefix = f"jobs/{job_id}/{attempt}/"
+        expected_prefix = f"jobs/{job_id}/"
         if any(
             not item["object_key"].startswith(expected_prefix)
             for item in prepared_artifacts

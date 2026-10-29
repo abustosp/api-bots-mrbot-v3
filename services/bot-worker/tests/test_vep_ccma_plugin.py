@@ -108,7 +108,7 @@ class _Presign:
     def __init__(self) -> None:
         self.ids: list[str] = []
 
-    async def __call__(self, artifact_id: str, content_type: str, size: int) -> dict[str, Any]:
+    async def __call__(self, artifact_id: str, content_type: str, size: int, filename: str = "") -> dict[str, Any]:
         self.ids.append(artifact_id)
         return {"upload_url": "", "object_key": f"jobs/x/{artifact_id}"}
 

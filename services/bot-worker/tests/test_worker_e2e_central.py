@@ -146,7 +146,7 @@ async def _flujo_e2e(base: str, raiz: Path, con_url: bool) -> dict:
     )
     async with httpx.AsyncClient() as cliente:
 
-        async def _presign(aid: str, tipo: str, tamano: int) -> dict:
+        async def _presign(aid: str, tipo: str, tamano: int, filename: str = "") -> dict:
             """Pide la URL prefirmada a la central falsa antes de subir."""
             return await request_presign(
                 cliente, base, job_id="falso", artifact_id=aid,

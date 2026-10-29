@@ -55,6 +55,7 @@ from bot_worker.bots.errors import (
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
 from mrbot_contracts.datos_csv import (
     nombre_ccma_movimientos,
+    nombre_ccma_resumen,
     nombre_ccma_saldos,
     separar_ccma,
 )
@@ -79,9 +80,8 @@ MAX_PAGINAS = 100
 
 
 def nombre_pdf_ccma(cuit_representado: str, ahora: datetime | None = None) -> str:
-    """Nombre del PDF consolidado (port de V1 ``_subir_pdf_ccma_a_minio``)."""
-    marca = (ahora or datetime.now()).strftime("%Y%m%d_%H%M%S")
-    return f"ccma_{cuit_representado}_{marca}.pdf"
+    """Nombre del PDF consolidado: ``ccma_resumen_{cuit representado}.pdf``."""
+    return nombre_ccma_resumen(cuit_representado)
 
 
 def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
@@ -297,7 +297,7 @@ class CcmaPlugin:
         }
         for clave, texto in archivos.items():
             id_artefacto, armar_nombre = nombres[clave]
-            nombre = armar_nombre(entrada.representado_cuit, runtime.job_id)
+            nombre = armar_nombre(entrada.representado_cuit)
             destino = runtime.artifact_store.resolve(nombre)
             destino.write_text(texto, encoding="utf-8", newline="")
             await runtime.event_sink.progress(

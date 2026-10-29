@@ -32,6 +32,12 @@ BOTS: dict[str, tuple[Callable[..., dict[str, Any]], dict[str, str]]] = {
     ),
     "rcel": (datos_csv.reconstruir_rcel, {"facturas": "rcel_facturas.csv"}),
 }
+#: Prefijo del nombre de archivo (``ccma_saldos_{cuit}.csv``) por artifact_id.
+PREFIJO_NOMBRE = {
+    "ccma_saldos.csv": "ccma_saldos_",
+    "ccma_movimientos.csv": "ccma_movimientos_",
+    "rcel_facturas.csv": "rcel_facturas_",
+}
 
 
 def aplica(bot: str, datos: Mapping[str, Any] | None) -> bool:
@@ -41,9 +47,21 @@ def aplica(bot: str, datos: Mapping[str, Any] | None) -> bool:
 
 
 def _clave_de(artefactos: Sequence[Mapping[str, Any]], artifact_id: str) -> str | None:
-    """``object_key`` del último artefacto con ese ``artifact_id`` (intentos previos incluidos)."""
-    marca = f"/{artifact_id}/"
+    """``object_key`` del archivo de ese ``artifact_id``.
+
+    Layout actual: ``jobs/{job}/{ccma_saldos_{cuit}.csv}``, se reconoce por el nombre.
+    Layout histórico: ``jobs/{job}/{intento}/{artifact_id}/{sufijo}``.
+    """
     claves = [str(a.get("object_key") or "") for a in artefactos]
+    prefijo = PREFIJO_NOMBRE.get(artifact_id)
+    if prefijo:
+        nuevas = [
+            c for c in claves
+            if c.count("/") == 2 and c.rsplit("/", 1)[-1].startswith(prefijo)
+        ]
+        if nuevas:
+            return nuevas[-1]
+    marca = f"/{artifact_id}/"
     candidatas = [c for c in claves if marca in c]
     return candidatas[-1] if candidatas else None
 

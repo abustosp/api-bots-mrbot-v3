@@ -157,7 +157,7 @@ class _Subidas:
 
 
 def _runtime(tmp_path: Path, fabrica: _Fabrica, subidas: _Subidas) -> BotRuntime:
-    async def presign(artifact_id: str, content_type: str, size_bytes: int) -> dict[str, Any]:
+    async def presign(artifact_id: str, content_type: str, size_bytes: int, filename: str = "") -> dict[str, Any]:
         return {"upload_url": "", "object_key": f"obj/{artifact_id}"}
 
     store = ArtifactStore(

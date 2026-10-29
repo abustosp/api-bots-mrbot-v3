@@ -189,7 +189,7 @@ class CcmaCompensacionPlugin:
                     datos["movimientos_corte"] = recorrido.corte
                 if entrada.incluir_pdf:
                     nombre = nombre_pdf_ccma(entrada.representado_cuit).replace(
-                        "ccma_", "ccma_compensacion_", 1
+                        "ccma_resumen_", "ccma_compensacion_", 1
                     )
                     destino = runtime.artifact_store.resolve(nombre)
                     html = build_ccma_pdf_html(

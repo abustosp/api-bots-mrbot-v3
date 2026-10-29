@@ -50,8 +50,19 @@ def _zip_de(artefactos: Sequence[Mapping[str, Any]], tipo: str) -> Mapping[str, 
     ``object_key`` (``jobs/<job>/<intento>/<tipo>_zip/<uuid>``): el nombre del
     archivo lo arma el worker con CUIT y razón social y no es confiable.
     """
+    sigla = " - MCE - " if tipo == "emitidos" else " - MCR - "
+    claves = [a for a in artefactos if str(a.get("object_key") or "")]
+    # Layout actual: ``jobs/{job}/{n} - MCE - ... .zip`` (el nombre identifica el tipo).
+    nuevos = [
+        a for a in claves
+        if str(a["object_key"]).count("/") == 2
+        and str(a["object_key"]).lower().endswith(".zip")
+        and sigla in str(a["object_key"]).rsplit("/", 1)[-1]
+    ]
+    if nuevos:
+        return nuevos[-1]
     marca = f"/{tipo}_zip/"
-    candidatos = [a for a in artefactos if marca in str(a.get("object_key") or "")]
+    candidatos = [a for a in claves if marca in str(a["object_key"])]
     return candidatos[-1] if candidatos else None
 
 

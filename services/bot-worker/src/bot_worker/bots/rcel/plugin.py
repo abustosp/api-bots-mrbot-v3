@@ -309,7 +309,7 @@ class RcelPlugin:
         texto = archivos.get("facturas")
         if texto is None:
             return reducido
-        nombre = nombre_rcel_facturas(entrada.representado_cuit, runtime.job_id)
+        nombre = nombre_rcel_facturas(entrada.representado_cuit)
         destino = runtime.artifact_store.resolve(nombre)
         destino.write_text(texto, encoding="utf-8", newline="")
         await runtime.event_sink.progress(

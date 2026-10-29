@@ -22,7 +22,7 @@ DECLARADOS = {
 
 
 def _presign_de_prueba(llamadas: list[tuple[str, str, int]]):
-    async def presign(artifact_id: str, content_type: str, size_bytes: int) -> dict:
+    async def presign(artifact_id: str, content_type: str, size_bytes: int, filename: str = "") -> dict:
         llamadas.append((artifact_id, content_type, size_bytes))
         return {"upload_url": "https://bucket.invalid/put", "object_key": f"jobs/j/1/{artifact_id}"}
 
@@ -142,7 +142,7 @@ def test_mismo_artifact_id_dos_archivos_pide_url_nueva(tmp_path) -> None:
 
     pedidos: list[str] = []
 
-    async def presign(artifact_id: str, content_type: str, size: int) -> dict:
+    async def presign(artifact_id: str, content_type: str, size: int, filename: str = "") -> dict:
         pedidos.append(artifact_id)
         n = len(pedidos)
         return {"upload_url": f"http://s3/u{n}", "object_key": f"jobs/j/1/{artifact_id}/{n}"}

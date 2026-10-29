@@ -145,7 +145,7 @@ def test_execute_desempaqueta_el_zip_del_portal_antes_de_filtrar(
 
     eventos: list[str] = []
 
-    async def _presign(artifact_id: str, content_type: str, size: int) -> dict[str, Any]:
+    async def _presign(artifact_id: str, content_type: str, size: int, filename: str = "") -> dict[str, Any]:
         eventos.append(artifact_id)
         return {"upload_url": "", "object_key": f"jobs/x/{artifact_id}"}
 

@@ -1284,7 +1284,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
             )
 
             async def _presign(
-                artifact_id: str, content_type: str, size_bytes: int
+                artifact_id: str, content_type: str, size_bytes: int, filename: str = ""
             ) -> dict[str, Any]:
                 """Pide URL prefirmada a la central antes de subir.
 
@@ -1304,6 +1304,7 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
                         artifact_id=artifact_id,
                         content_type=content_type,
                         size_bytes=size_bytes,
+                        filename=filename,
                         worker_node=central_node,
                         timeout_seconds=settings.callback_timeout_seconds,
                         service_token=service_token,

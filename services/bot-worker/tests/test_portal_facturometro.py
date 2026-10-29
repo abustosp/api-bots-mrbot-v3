@@ -361,7 +361,7 @@ def test_plugin_sube_la_captura_como_artefacto(tmp_path: Path) -> None:
 
     from bot_worker.runtime.context import ArtifactStore, CancellationToken
 
-    async def _presign(artifact_id: str, content_type: str, size: int) -> dict[str, Any]:
+    async def _presign(artifact_id: str, content_type: str, size: int, filename: str = "") -> dict[str, Any]:
         return {"upload_url": "", "object_key": f"facturometro/{artifact_id}.png"}
 
     store = ArtifactStore(

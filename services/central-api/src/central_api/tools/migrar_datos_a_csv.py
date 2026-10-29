@@ -103,9 +103,9 @@ async def migrar(bot: str, *, aplicar: bool, limite: int | None) -> Counter:
             intento = max(1, int(fila["attempts"] or 1))
             for clave, texto in pendientes.items():
                 artifact_id, armar = archivos_def[clave]
-                nombre = armar(cuit, fila["job_id"])
+                nombre = armar(cuit)
                 cuerpo = texto.encode("utf-8")
-                object_key = f"jobs/{fila['job_id']}/{intento}/{artifact_id}/{uuid.uuid4().hex[:12]}"
+                object_key = f"jobs/{fila['job_id']}/{nombre}"
                 cuenta[f"archivos_{clave}"] += 1
                 cuenta["bytes"] += len(cuerpo)
                 if not aplicar:

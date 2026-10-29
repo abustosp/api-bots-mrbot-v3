@@ -232,7 +232,7 @@ class ArtifactStore:
         )
         if not getattr(slot, "put_url", "") and self._presign is not None:
             # Slot sin URL: se pide una prefirmada a la central antes de subir.
-            renovado = await self._presign(artifact_id, content_type, size)
+            renovado = await self._presign(artifact_id, content_type, size, path.name)
             if renovado.get("upload_url"):
                 slot.put_url = renovado["upload_url"]
             if renovado.get("object_key"):

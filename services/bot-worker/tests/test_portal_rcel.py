@@ -380,7 +380,7 @@ def test_plugin_rcel_default_extrae_campos_y_pdf_roto_no_tumba_la_corrida(
     from mrbot_contracts.datos_csv import facturas_rcel_desde_csv
 
     facturas = facturas_rcel_desde_csv(
-        (base / "RCEL_facturas_20123456789_job-rcel.csv").read_text(encoding="utf-8")
+        (base / "rcel_facturas_20123456789.csv").read_text(encoding="utf-8")
     )
     assert [f["archivo"] for f in facturas] == ["ok.pdf"]
     assert facturas[0]["campos"] == {"AUX": "20123456789-011-00012-00000345"}
@@ -587,12 +587,12 @@ def test_plugin_extrae_campos_antes_de_subir_y_no_sube_pdf_sin_campos(tmp_path: 
     # Como V1: extrae antes de subir, y el PDF que falla no se sube ni se lista.
     assert orden == [
         "extraer:ok.pdf", "subir:ok.pdf", "extraer:roto.pdf",
-        "subir:RCEL_facturas_20123456789_job-rcel.csv",
+        "subir:rcel_facturas_20123456789.csv",
     ]
     from mrbot_contracts.datos_csv import facturas_rcel_desde_csv
 
     facturas = facturas_rcel_desde_csv(
-        (tmp_path / "RCEL_facturas_20123456789_job-rcel.csv").read_text(encoding="utf-8")
+        (tmp_path / "rcel_facturas_20123456789.csv").read_text(encoding="utf-8")
     )
     assert [f["archivo"] for f in facturas] == ["ok.pdf"]
     assert len(artefactos) == 2  # el PDF bueno y el CSV de facturas

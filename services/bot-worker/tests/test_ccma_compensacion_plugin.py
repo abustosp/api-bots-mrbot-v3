@@ -289,6 +289,6 @@ def test_pdf_sin_subir_genera_archivo_con_html_de_ccma(tmp_path: Path) -> None:
 
     assert resultado.result == "OK"
     assert portal.html is not None and "CCMA consolidado" in portal.html
-    assert resultado.data["archivo"].startswith(f"ccma_compensacion_{CUIT}_")
+    assert resultado.data["archivo"] == f"ccma_compensacion_{CUIT}.pdf"
     assert (tmp_path / resultado.data["archivo"]).exists()
     assert resultado.artifacts == []

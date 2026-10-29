@@ -8,15 +8,16 @@ from mrbot_contracts import datos_csv as d
 
 
 def test_nombres_de_archivo_siguen_el_patron_pedido() -> None:
-    assert d.nombre_ccma_movimientos("20326167399", "job-1") == "CCMA_movimientos_20326167399_job-1.csv"
-    assert d.nombre_ccma_saldos("20326167399", "job-1") == "CCMA_saldos_20326167399_job-1.csv"
-    assert d.nombre_rcel_facturas("20326167399", "job-1") == "RCEL_facturas_20326167399_job-1.csv"
+    assert d.nombre_ccma_movimientos("20326167399") == "ccma_movimientos_20326167399.csv"
+    assert d.nombre_ccma_saldos("20326167399") == "ccma_saldos_20326167399.csv"
+    assert d.nombre_ccma_resumen("20326167399") == "ccma_resumen_20326167399.pdf"
+    assert d.nombre_rcel_facturas("20326167399") == "rcel_facturas_20326167399.csv"
 
 
 def test_nombres_no_dejan_pasar_rutas_ni_caracteres_raros() -> None:
-    nombre = d.nombre_ccma_saldos("../etc/pas wd", "a/b\\c")
+    nombre = d.nombre_ccma_saldos("../etc/pas wd")
     assert "/" not in nombre and "\\" not in nombre and " " not in nombre
-    assert d.nombre_ccma_saldos("", "").startswith("CCMA_saldos_sin_dato_sin_dato")
+    assert d.nombre_ccma_saldos("") == "ccma_saldos_sin_dato.csv"
 
 
 def test_csv_usa_pipe_y_cita_solo_lo_necesario() -> None:

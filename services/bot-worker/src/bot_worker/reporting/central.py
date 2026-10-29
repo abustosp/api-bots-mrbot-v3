@@ -41,6 +41,7 @@ async def request_presign(
     content_type: str,
     size_bytes: int,
     worker_node: str = "",
+    filename: str = "",
     timeout_seconds: float = 3.0,
     service_token: str = "",
     sealed_privkey: bytes | None = None,
@@ -61,6 +62,8 @@ async def request_presign(
         "content_type": content_type,
         "size_bytes": size_bytes,
     }
+    if filename:
+        body["filename"] = filename
     try:
         resp = await client.post(
             url,
