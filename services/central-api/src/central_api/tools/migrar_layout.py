@@ -255,7 +255,7 @@ def _guardar_manifiesto(s, datos: dict) -> None:
                      content=cuerpo, content_type="application/json")
 
 
-async def migrar(repo, s, *, aplicar: bool, limite: int | None, bot: str | None, hilos: int = 12) -> dict:
+async def migrar(repo, s, *, aplicar: bool, limite: int | None, bot: str | None, hilos: int = 4) -> dict:
     filas = await repo.filas(bot)
     items, ya_nuevo = planificar(filas)
     if limite is not None:
@@ -331,7 +331,7 @@ def _borrar(s, aplicar: bool, id_: str, m: dict, fila: dict | None) -> str:
     return "borrado"
 
 
-async def borrar_originales(repo, s, *, aplicar: bool, limite: int | None, bot: str | None, hilos: int = 12) -> dict:
+async def borrar_originales(repo, s, *, aplicar: bool, limite: int | None, bot: str | None, hilos: int = 4) -> dict:
     manifiesto = _leer_manifiesto(s)
     pend = [(i, m) for i, m in manifiesto.items() if not bot or m["bot"] == bot]
     if limite is not None:
@@ -360,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--borrar-originales", action="store_true")
     ap.add_argument("--limite", type=int)
     ap.add_argument("--bot")
-    ap.add_argument("--hilos", type=int, default=12)
+    ap.add_argument("--hilos", type=int, default=4)
     a = ap.parse_args(argv)
     s = get_settings()
     fn = borrar_originales if a.borrar_originales else migrar
