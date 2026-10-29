@@ -9,7 +9,7 @@ en S4 pero no su ZIP:
 2. lo guarda dentro de un ZIP de un miembro (mismo formato que genera el worker,
    ``mrbot_contracts.planillas.empaquetar_zip``),
 3. sube el ZIP con el patron de clave del worker
-   (``jobs/<job>/<intento>/<tipo>_zip/<id>``) y registra un ``job_artifacts``.
+   (``jobs/<job>/<nombre>.zip``) y registra un ``job_artifacts``.
 
 Seguridad: por defecto solo simula. Verifica que el ZIP leído de vuelta contenga
 exactamente el CSV de origen (mismos bytes). Es idempotente (un job con su ZIP se
@@ -74,6 +74,23 @@ def _nombre_zip(archivo_csv: str | None, tipo: str, jid: str) -> str:
     return f"{tipo}-{jid[:8]}.zip"
 
 
+def _tiene_zip(arts, tipo: str) -> bool:
+    """ZIP del tipo en layout nuevo (``jobs/<job>/<n> - MCE - ... .zip``) o histórico."""
+    sigla = " - MCE - " if tipo == "emitidos" else " - MCR - "
+    return any(
+        f"/{tipo}_zip/" in a["k"]
+        or (a["k"].lower().endswith(".zip") and sigla in a["k"].rsplit("/", 1)[-1])
+        for a in arts
+    )
+
+
+def _es_csv(clave: str, tipo: str) -> bool:
+    sigla = " - MCE - " if tipo == "emitidos" else " - MCR - "
+    return f"/{tipo}_csv/" in clave or (
+        clave.lower().endswith(".csv") and sigla in clave.rsplit("/", 1)[-1]
+    )
+
+
 def plan(filas) -> tuple[list[dict], list[dict]]:
     """(trabajos regenerables, jobs que no se pueden regenerar y por que)."""
     trabajos, faltan = [], []
@@ -84,9 +101,9 @@ def plan(filas) -> tuple[list[dict], list[dict]]:
             r = pl.get(tipo)
             if not isinstance(r, dict):
                 continue
-            if any(f"/{tipo}_zip/" in a["k"] for a in arts):
+            if _tiene_zip(arts, tipo):
                 continue
-            csv = next((a for a in arts if f"/{tipo}_csv/" in a["k"]), None)
+            csv = next((a for a in arts if _es_csv(a["k"], tipo)), None)
             if csv is not None:
                 trabajos.append({"id": f["id"], "tipo": tipo, "intento": max(1, int(f["attempts"] or 1)),
                                  "csv_key": csv["k"], "csv_nombre": csv["n"], "expira": csv.get("e"), "filas": r.get("filas")})
@@ -117,7 +134,7 @@ def _hacer(s, aplicar: bool, t: dict) -> tuple[str, dict]:
     t = {**t, "zip_nombre": nombre_zip, "zip_bytes": len(cuerpo), "zip_sha": hashlib.sha256(cuerpo).hexdigest()}
     if not aplicar:
         return "se_generaria", t
-    clave = f"jobs/{t['id']}/{t['intento']}/{t['tipo']}_zip/{uuid.uuid4().hex[:12]}"
+    clave = f"jobs/{t['id']}/{t['zip_nombre']}"
     put_object_bytes(**_kw(s), bucket=s.bucket_para_bot(BOT), object_key=clave, content=cuerpo,
                      content_type="application/zip")
     leido = get_object_bytes(**_kw(s), bucket=s.bucket_para_bot(BOT), object_key=clave, max_bytes=MAX_BYTES)

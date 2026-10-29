@@ -42,6 +42,14 @@ def test_plan_regenera_solo_lo_que_tiene_csv_completo_y_sin_zip() -> None:
     assert [(f["id"], f["motivo"], f["filas"]) for f in faltan] == [("c", "solo_muestra", 80)]
 
 
+def test_plan_no_duplica_un_zip_del_layout_nuevo() -> None:
+    zip_nuevo = {"k": "jobs/a/9 - MCE - 01012026 - 31012026 - 20320160856 - Empresa.zip", "n": "x.zip"}
+    csv_nuevo = {"k": "jobs/a/9 - MCE - 01012026 - 31012026 - 20320160856 - Empresa.csv", "n": "x.csv"}
+    trabajos, _ = rz.plan([_fila("a", {"emitidos": {"filas": 3}}, [csv_nuevo, zip_nuevo]),
+                           _fila("b", {"emitidos": {"filas": 3}}, [csv_nuevo])])
+    assert [t["id"] for t in trabajos] == ["b"]
+
+
 def test_nombre_del_zip_sigue_el_patron_del_csv() -> None:
     assert rz._nombre_zip(CSV_E["n"], "emitidos", "j1") == "9 - MCE - 01012026 - 31012026 - 20320160856 - Empresa.zip"
     assert rz._nombre_zip(None, "recibidos", "abcdef123") == "recibidos-abcdef12.zip"
@@ -96,7 +104,7 @@ def test_simulacion_no_escribe(s, monkeypatch) -> None:
     assert est == "se_generaria" and len(al.obj) == 1 and t["zip_nombre"].endswith("Empresa.zip")
 
 
-def test_aplicar_sube_con_el_patron_del_worker_y_verifica(s, monkeypatch) -> None:
+def test_aplicar_sube_con_el_layout_nuevo_y_verifica(s, monkeypatch) -> None:
     csv = _csv()
     al = Almacen({("miscomprobantes", CSV_E["k"]): csv})
     monkeypatch.setattr(rz, "get_object_bytes", al.get)
@@ -104,7 +112,7 @@ def test_aplicar_sube_con_el_patron_del_worker_y_verifica(s, monkeypatch) -> Non
     est, t = rz._hacer(s, True, _trabajo())
     assert est == "subido"
     bucket, clave = next((b, k) for (b, k) in al.obj if k != CSV_E["k"])
-    assert bucket == "miscomprobantes" and clave.startswith("jobs/j1/1/emitidos_zip/")
+    assert bucket == "miscomprobantes" and clave == "jobs/j1/9 - MCE - 01012026 - 31012026 - 20320160856 - Empresa.zip"
     with zipfile.ZipFile(io.BytesIO(al.obj[(bucket, clave)])) as z:
         assert z.read(z.namelist()[0]) == csv
 
