@@ -46,6 +46,8 @@ Análisis de los 35 bots, uno por agente `claude-haiku-5-5`, leyendo el código.
 
 ## Cosas que conviene saber
 
+- **CCMA, comprobado línea por línea y con producción (113 jobs reales del 29/10):** los 113 completaron con `datos_en_archivo` y con CSV en S4. `subir=false` solo evita subir el PDF: los CSV de saldos y movimientos se suben siempre (`plugin.py:279` está fuera del `if subir`). Un test lo fija a propósito. `ccma_compensacion` arma su nombre con `nombre_pdf_compensacion`, que ahora falla con un error claro si cambia el nombre base de CCMA (antes un `replace` fallaba en silencio).
+
 - **Qué está comprobado con producción y qué no.** Los patrones de estos bots los comparé con archivos reales subidos después del despliegue (29/10): `arba`, `ccma`, `certificado_mipyme`, `declaracion_en_linea`, `facturometro`, `hacienda`, `libros_portal_iva`, `libro_sueldos_digital`, `liquidacion_granos`, `mis_comprobantes`, `mis_facilidades`, `mis_retenciones`, `pago_devoluciones`, `portal_iva`, `rcel`, `sct`, `sifere`, `siper`, `srt` y `vep_ccma`. El resto (`aportes_en_linea`, `compensaciones`, `controladores_fiscales`, `moa`, `consulta_pagos_vep`, `retper_iibb_agip`, `retper_iibb_misiones`, `certificacion_primaria_granos`, `mis_retenciones_iva_simple`, `vep_archivo`, `ccma_compensacion`, `comprobantes`) sale solo de leer el código, sin un archivo real que lo confirme.
 
 - **Solo `rcel` lee el contenido de PDF** (con pdfplumber, para armar `rcel_facturas_{cuit}.csv`). Los demás bots que guardan PDF lo descargan o lo imprimen desde HTML, sin leerlo. `declaracion_en_linea` lee HTML, no PDF.

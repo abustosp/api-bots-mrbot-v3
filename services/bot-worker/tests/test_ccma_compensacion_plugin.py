@@ -292,3 +292,14 @@ def test_pdf_sin_subir_genera_archivo_con_html_de_ccma(tmp_path: Path) -> None:
     assert resultado.data["archivo"] == f"ccma_compensacion_{CUIT}.pdf"
     assert (tmp_path / resultado.data["archivo"]).exists()
     assert resultado.artifacts == []
+
+
+def test_nombre_del_pdf_de_compensacion_y_falla_fuerte_si_cambia_la_base(monkeypatch) -> None:
+    from bot_worker.bots.ccma_compensacion import plugin as p
+
+    assert p.nombre_pdf_compensacion("20374730429") == "ccma_compensacion_20374730429.pdf"
+    monkeypatch.setattr(p, "nombre_pdf_ccma", lambda cuit: f"otro_{cuit}.pdf")
+    import pytest
+
+    with pytest.raises(ValueError):
+        p.nombre_pdf_compensacion("20374730429")

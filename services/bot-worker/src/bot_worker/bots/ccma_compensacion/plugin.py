@@ -77,6 +77,15 @@ def _normalizar_error(exc: BaseException, secretos: list[str]) -> ErrorDeBot:
     )
 
 
+def nombre_pdf_compensacion(cuit_representado: str) -> str:
+    """``ccma_compensacion_{cuit}.pdf``; falla fuerte si el nombre base de CCMA cambia."""
+    base = nombre_pdf_ccma(cuit_representado)
+    prefijo = "ccma_resumen_"
+    if not base.startswith(prefijo):
+        raise ValueError(f"nombre de PDF de CCMA inesperado: {base}")
+    return "ccma_compensacion_" + base[len(prefijo):]
+
+
 class CcmaCompensacionPlugin:
     """Compensacion de saldos a favor de CCMA (reafectacion de pagos)."""
 
@@ -188,9 +197,7 @@ class CcmaCompensacionPlugin:
                     datos["movimientos"] = recorrido.movimientos
                     datos["movimientos_corte"] = recorrido.corte
                 if entrada.incluir_pdf:
-                    nombre = nombre_pdf_ccma(entrada.representado_cuit).replace(
-                        "ccma_resumen_", "ccma_compensacion_", 1
-                    )
+                    nombre = nombre_pdf_compensacion(entrada.representado_cuit)
                     destino = runtime.artifact_store.resolve(nombre)
                     html = build_ccma_pdf_html(
                         resumen,
