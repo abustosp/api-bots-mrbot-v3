@@ -95,6 +95,14 @@ def _base(filename: str | None) -> str:
     return segmento_seguro(ultimo, defecto="archivo")
 
 
+def _nombre(fn_name: str, plantilla: str, cuit: str) -> str:
+    """Usa ``datos_csv`` y, si el contrato desplegado aun tiene otra firma, el patron literal."""
+    try:
+        return getattr(datos_csv, fn_name)(cuit)
+    except (AttributeError, TypeError):
+        return plantilla.format(re.sub(r"[^A-Za-z0-9._-]+", "_", cuit).strip("_") or "sin_dato")
+
+
 def nombre_destino(clave: str, filename: str | None, rq) -> str:
     """Nombre base (sin desambiguar) que le toca al objeto en el layout nuevo."""
     partes = clave.split("/")
@@ -102,15 +110,15 @@ def nombre_destino(clave: str, filename: str | None, rq) -> str:
     cuit = _cuit(rq)
     if cuit:
         if artefacto == "ccma_saldos.csv":
-            return datos_csv.nombre_ccma_saldos(cuit)
+            return _nombre("nombre_ccma_saldos", "ccma_saldos_{}.csv", cuit)
         if artefacto == "ccma_movimientos.csv":
-            return datos_csv.nombre_ccma_movimientos(cuit)
+            return _nombre("nombre_ccma_movimientos", "ccma_movimientos_{}.csv", cuit)
         if artefacto == "ccma_resumen.pdf":
-            return datos_csv.nombre_ccma_resumen(cuit)
+            return _nombre("nombre_ccma_resumen", "ccma_resumen_{}.pdf", cuit)
         if artefacto == "rcel_facturas.csv":
-            return datos_csv.nombre_rcel_facturas(cuit)
+            return _nombre("nombre_rcel_facturas", "rcel_facturas_{}.csv", cuit)
         if artefacto == "ccma_compensacion.pdf":
-            return f"ccma_compensacion_{datos_csv._segmento(cuit)}.pdf"
+            return _nombre("_no_existe", "ccma_compensacion_{}.pdf", cuit)
     return _base(filename)
 
 
