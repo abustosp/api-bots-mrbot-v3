@@ -64,3 +64,45 @@ def test_nombre_largo_conserva_extension_y_no_colisiona() -> None:
     assert a != b and a.endswith(".pdf") and b.endswith(".pdf") and len(a) <= 200 and len(b) <= 200
     assert nombre_archivo_seguro("corto.pdf") == "corto.pdf"
     assert clave_artefacto(J, "plan_pdf", base + "tablas.xlsx").endswith(".xlsx")
+
+
+import pytest
+
+from mrbot_contracts import datos_csv as _d
+
+_CUITS = ["20374730429", "30-71234567-8", "", "  20374730429 ", "../etc/passwd", "20374730429\n", "ñandú 1"]
+
+
+@pytest.mark.parametrize("cuit", _CUITS)
+def test_ciclo_completo_ccma_nombre_worker_clave_central_lector(cuit) -> None:
+    """worker arma el nombre -> central arma la clave -> lector encuentra cada archivo."""
+    nombres = {
+        "ccma_saldos.csv": _d.nombre_ccma_saldos(cuit),
+        "ccma_movimientos.csv": _d.nombre_ccma_movimientos(cuit),
+        "ccma_resumen.pdf": _d.nombre_ccma_resumen(cuit),
+    }
+    claves = {i: clave_artefacto(J, i, n) for i, n in nombres.items()}
+    assert len(set(claves.values())) == 3                      # no se pisan entre si
+    assert all(k.startswith(f"jobs/{J}/") and k.count("/") == 2 for k in claves.values())
+    arts = [{"object_key": k} for k in claves.values()]
+    assert datos_archivo._clave_de(arts, "ccma_saldos.csv") == claves["ccma_saldos.csv"]
+    assert datos_archivo._clave_de(arts, "ccma_movimientos.csv") == claves["ccma_movimientos.csv"]
+
+
+@pytest.mark.parametrize("cuit", _CUITS)
+def test_compensacion_no_se_confunde_con_ccma_ni_el_lector_toma_su_pdf(cuit) -> None:
+    resumen = clave_artefacto(J, "ccma_resumen.pdf", _d.nombre_ccma_resumen(cuit))
+    comp = clave_artefacto(J, "ccma_compensacion.pdf", _d.nombre_ccma_resumen(cuit).replace("ccma_resumen_", "ccma_compensacion_", 1))
+    assert resumen != comp
+    arts = [{"object_key": comp}]
+    assert datos_archivo._clave_de(arts, "ccma_saldos.csv") is None
+    assert datos_archivo._clave_de(arts, "ccma_movimientos.csv") is None
+
+
+@pytest.mark.parametrize("cuit", _CUITS)
+def test_ciclo_completo_rcel_el_pdf_de_arca_no_se_confunde_con_el_csv(cuit) -> None:
+    csv = clave_artefacto(J, "rcel_facturas.csv", _d.nombre_rcel_facturas(cuit))
+    pdf = clave_artefacto(J, "rcel", "20338500646_001_00003_00000258.pdf")
+    arts = [{"object_key": pdf}, {"object_key": csv}]
+    assert datos_archivo._clave_de(arts, "rcel_facturas.csv") == csv
+    assert datos_archivo._clave_de([{"object_key": pdf}], "rcel_facturas.csv") is None
