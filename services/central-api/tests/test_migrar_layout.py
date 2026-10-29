@@ -238,3 +238,13 @@ def test_origen_distinto_de_sha_de_la_fila(s, monkeypatch):
     instalar(monkeypatch, m)
     r = correr(s, m, aplicar=True)
     assert r["sha_no_coincide"] == 1 and m.filas["1"]["key"].count("/") == 4
+
+
+def test_clave_de_transicion_se_detecta_y_se_renombra_como_ccma() -> None:
+    k = f"jobs/{J}/ccma_saldos.csv-ab12cd34ef56"
+    assert ml.es_viejo(k) and not ml.es_viejo(f"jobs/{J}/ccma_saldos_20374730429.csv")
+    assert ml._artifact_id(k) == "ccma_saldos.csv"
+    assert ml.nombre_destino(k, "CCMA_saldos_x.csv", {"representado_cuit": "20374730429"}) == "ccma_saldos_20374730429.csv"
+    assert ml.se_renombra(k, {"representado_cuit": "20374730429"})
+    k2 = f"jobs/{J}/emitidos_zip-ab12cd34ef56"
+    assert ml.nombre_destino(k2, "6 - MCE - x.zip", {}) == "6 - MCE - x.zip"

@@ -52,6 +52,8 @@ LOTE = 50
 MANIFIESTO_KEY = "_migraciones/migrar_layout_manifiesto.json"
 MANIFIESTO_LOCAL = "/tmp/migrar_layout_manifiesto.json"
 _VIEJO = re.compile(r"^jobs/[^/]+/[^/]+/[^/]+/[^/]+")
+# Transicion (worker anterior contra central nueva): ``jobs/{job}/{artifact_id}-{12 hex}``.
+_TRANSICION = re.compile(r"^jobs/[^/]+/[^/]+-[0-9a-f]{12}$")
 
 _SQL = """
 SELECT a.id::text AS id, a.job_id::text AS job, j.bot AS bot, j.request_payload AS rq,
@@ -75,7 +77,15 @@ def _sha(b: bytes) -> str:
 
 
 def es_viejo(clave: str) -> bool:
-    return bool(_VIEJO.match(clave or ""))
+    return bool(_VIEJO.match(clave or "") or _TRANSICION.match(clave or ""))
+
+
+def _artifact_id(clave: str) -> str:
+    """artifact_id embebido en la clave vieja o de transicion ('' si no se puede saber)."""
+    if _TRANSICION.match(clave or ""):
+        return clave.rsplit("/", 1)[-1][:-13]
+    partes = (clave or "").split("/")
+    return partes[3] if len(partes) > 3 else ""
 
 
 def _cuit(rq) -> str | None:
@@ -106,7 +116,7 @@ def _nombre(fn_name: str, plantilla: str, cuit: str) -> str:
 def nombre_destino(clave: str, filename: str | None, rq) -> str:
     """Nombre base (sin desambiguar) que le toca al objeto en el layout nuevo."""
     partes = clave.split("/")
-    artefacto = partes[3] if len(partes) > 3 else ""
+    artefacto = _artifact_id(clave)
     cuit = _cuit(rq)
     if cuit:
         if artefacto == "ccma_saldos.csv":
@@ -129,7 +139,7 @@ _RENOMBRADOS = ("ccma_saldos.csv", "ccma_movimientos.csv", "ccma_resumen.pdf",
 def se_renombra(clave: str, rq) -> bool:
     """Solo CCMA/RCEL cambian ``filename``; el resto conserva el nombre original (descarga)."""
     partes = clave.split("/")
-    return bool(_cuit(rq)) and len(partes) > 3 and partes[3] in _RENOMBRADOS
+    return bool(_cuit(rq)) and _artifact_id(clave) in _RENOMBRADOS
 
 
 def _con_sufijo(nombre: str, n: int) -> str:
