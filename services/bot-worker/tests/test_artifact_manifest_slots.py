@@ -189,3 +189,32 @@ def test_upload_confirma_http_y_normaliza_error_sin_url_firmada(tmp_path, fallo)
                 assert "bucket.invalid" not in str(exc.value)
 
     asyncio.run(ejecutar())
+
+
+def test_el_worker_le_manda_a_la_central_el_nombre_real_del_archivo_en_cada_subida(tmp_path: Path) -> None:
+    """ArtifactStore.upload -> presign(artifact_id, tipo, tamano, nombre): el nombre es el del archivo, no el artifact_id."""
+    vistos: list[tuple[str, str]] = []
+
+    async def presign(artifact_id: str, content_type: str, size_bytes: int, filename: str = "") -> dict:
+        vistos.append((artifact_id, filename))
+        return {"upload_url": "", "object_key": f"jobs/j/{filename}"}
+
+    store = ArtifactStore(work_dir=tmp_path, slots={}, presign=presign, declarados=_DECLARADOS_CCMA)
+    for nombre in ("ccma_saldos_20374730429.csv", "ccma_movimientos_20374730429.csv", "ccma_resumen_20374730429.pdf"):
+        (tmp_path / nombre).write_bytes(b"x" * 10)
+    ids = {"ccma_saldos_20374730429.csv": "ccma_saldos.csv", "ccma_movimientos_20374730429.csv": "ccma_movimientos.csv",
+           "ccma_resumen_20374730429.pdf": "ccma_resumen.pdf"}
+
+    async def _subir():
+        return [await store.upload(i, n) for n, i in ids.items()]
+
+    refs = asyncio.run(_subir())
+    assert vistos == [(i, n) for n, i in ids.items()]
+    assert [r["object_key"] for r in refs] == [f"jobs/j/{n}" for n in ids]
+
+
+_DECLARADOS_CCMA = {
+    "ccma_saldos.csv": (("text/csv",), 1_024),
+    "ccma_movimientos.csv": (("text/csv",), 1_024),
+    "ccma_resumen.pdf": (("application/pdf",), 1_024),
+}

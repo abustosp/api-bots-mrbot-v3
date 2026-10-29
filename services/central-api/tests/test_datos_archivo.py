@@ -220,3 +220,58 @@ def test_el_presign_de_subida_usa_el_bucket_del_modulo_del_job(ajustes, monkeypa
     for bot in ("ccma", "rcel", "arba", "carga_portal_iva", "apoc"):
         asyncio.run(_pedir(bot))
     assert vistos == ["ccma", "rcel", "retper-iibb-arba", "portaliva", "bucket"]
+
+
+def test_presign_con_filename_arma_jobs_job_archivo_en_el_bucket_del_modulo_y_el_lector_lo_encuentra(ajustes, monkeypatch) -> None:
+    """Endpoint real de presign: el nombre del worker termina en la clave que el lector de la central resuelve."""
+    from types import SimpleNamespace
+
+    from central_api.internal import uploads as up
+    from mrbot_contracts import datos_csv as d
+
+    firmados: list[tuple[str, str]] = []
+    monkeypatch.setattr(up, "firmar_subida",
+                        lambda **kw: (firmados.append((kw["bucket"], kw["object_key"])), {"upload_url": "u"})[1])
+    monkeypatch.setattr(up, "get_settings", lambda: ajustes)
+    job = "01a1311e-5fcb-7e52-822e-01840c992f2e"
+
+    async def _vivo(job_id, worker):
+        return SimpleNamespace(id=job_id, bot="ccma", assignment_attempt=3, _origen_db=False, worker_node=worker, status="CORRIENDO")
+
+    monkeypatch.setattr(up, "_job_vivo", _vivo)
+
+    async def _pedir():
+        for aid, nombre in (("ccma_saldos.csv", d.nombre_ccma_saldos("20374730429")),
+                            ("ccma_movimientos.csv", d.nombre_ccma_movimientos("20374730429")),
+                            ("ccma_resumen.pdf", d.nombre_ccma_resumen("20374730429"))):
+            body = up.PresignBody(artifact_id=aid, content_type="text/csv", size_bytes=10, filename=nombre)
+            r = await up.presign_artifact(job, body, worker_node="w")
+            assert r["object_key"] == f"jobs/{job}/{nombre}"      # sin intento ni artifact_id en la clave
+
+    asyncio.run(_pedir())
+    assert {b for b, _ in firmados} == {"ccma"} and len({k for _, k in firmados}) == 3
+    arts = [{"object_key": k} for _, k in firmados]
+    assert da._clave_de(arts, "ccma_saldos.csv").endswith("ccma_saldos_20374730429.csv")
+    assert da._clave_de(arts, "ccma_movimientos.csv").endswith("ccma_movimientos_20374730429.csv")
+
+
+def test_presign_sin_filename_de_un_worker_viejo_sigue_funcionando_y_el_lector_lo_encuentra(ajustes, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from central_api.internal import uploads as up
+
+    claves: list[str] = []
+    monkeypatch.setattr(up, "firmar_subida", lambda **kw: (claves.append(kw["object_key"]), {"upload_url": "u"})[1])
+    monkeypatch.setattr(up, "get_settings", lambda: ajustes)
+
+    async def _vivo(job_id, worker):
+        return SimpleNamespace(id=job_id, bot="ccma", assignment_attempt=1, _origen_db=False, worker_node=worker, status="CORRIENDO")
+
+    monkeypatch.setattr(up, "_job_vivo", _vivo)
+
+    async def _pedir():
+        await up.presign_artifact("j9", up.PresignBody(artifact_id="ccma_saldos.csv", content_type="text/csv", size_bytes=10), worker_node="w")
+
+    asyncio.run(_pedir())
+    assert claves[0].startswith("jobs/j9/ccma_saldos.csv-") and claves[0].count("/") == 2
+    assert da._clave_de([{"object_key": claves[0]}], "ccma_saldos.csv") == claves[0]
