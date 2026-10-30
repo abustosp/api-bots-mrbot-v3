@@ -60,7 +60,7 @@ jobs:
           exit-code: "0"
 
       - name: Subir SARIF (filesystem)
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -118,6 +118,7 @@ jobs:
           exit-code: "1"
 
       - name: Trivy image (SARIF)
+        id: trivy-sarif
         if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -131,7 +132,8 @@ jobs:
           exit-code: "0"
 
       - name: Subir SARIF (${{ matrix.name }})
-        uses: github/codeql-action/upload-sarif@v3
+        if: steps.trivy-sarif.conclusion == 'success'
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-${{ matrix.name }}.sarif
           category: trivy-${{ matrix.name }}
@@ -177,7 +179,7 @@ jobs:
           exit-code: "0"
 
       - name: Subir SARIF (${{ matrix.image }})
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-external.sarif
           # Categoría única por imagen (solo minúsculas, sin ":" ni "/").
