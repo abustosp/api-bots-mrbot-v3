@@ -1,0 +1,177 @@
+name: trivy-scan
+
+# Análisis de vulnerabilidades con Trivy.
+# Cubre: central-api, bot-worker, worker-updater (imágenes que se
+# construyen en este repo) + relay frps/frpc y postgres (imágenes
+# externas del compose) + filesystem del repo (deps Python, secretos,
+# misconfigurations de Dockerfiles/Compose).
+#
+# Resultados: tabla en el log + SARIF en la pestaña Security del repo.
+# Si el build de bot-worker necesita la base privada
+# (docker.abp.net.ar), definir estos secrets en el repo:
+#   REGISTRY_URL (p. ej. docker.abp.net.ar), REGISTRY_USER, REGISTRY_PASS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Lunes 03:00 UTC: detecta CVEs nuevos sin depender de pushes.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trivy-fs:
+    name: Trivy filesystem (repo)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trivy FS (tabla en log)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: VULN,SECRET,MISCONFIG
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: table
+          exit-code: "0"
+
+      - name: Trivy FS (SARIF)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: VULN,SECRET,MISCONFIG
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-fs.sarif
+          exit-code: "0"
+
+      - name: Subir SARIF (filesystem)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  trivy-built-images:
+    name: Trivy imagen (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: central-api
+            dockerfile: services/central-api/Dockerfile
+            tag: mrbot-central-api:trivy
+          - name: bot-worker
+            dockerfile: services/bot-worker/Dockerfile
+            tag: mrbot-bot-worker:trivy
+          - name: worker-updater
+            dockerfile: services/worker-updater/Dockerfile
+            tag: mrbot-worker-updater:trivy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login registry privado (solo si hay secrets)
+        if: ${{ secrets.REGISTRY_USER != '' && secrets.REGISTRY_PASS != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASS }}
+
+      - name: Build ${{ matrix.name }}
+        run: docker build -f ${{ matrix.dockerfile }} -t ${{ matrix.tag }} .
+
+      - name: Trivy image (tabla en log)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: image
+          scan-ref: ${{ matrix.tag }}
+          scanners: VULN,SECRET
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+
+      - name: Trivy image (SARIF)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: image
+          scan-ref: ${{ matrix.tag }}
+          scanners: VULN,SECRET
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          exit-code: "0"
+
+      - name: Subir SARIF (${{ matrix.name }})
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-${{ matrix.name }}
+
+  trivy-external-images:
+    name: Trivy imagen externa (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Imágenes de terceros referenciadas en infra/compose:
+        # relay (frps en la central, frpc en worker-relay) + postgres.
+        image:
+          - fatedier/frps:v0.61.1
+          - fatedier/frpc:v0.61.1
+          - postgres:17.6-bookworm
+    steps:
+      - name: Trivy image (tabla en log)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: image
+          scan-ref: ${{ matrix.image }}
+          scanners: VULN,SECRET
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: table
+          exit-code: "0"
+
+      - name: Trivy image (SARIF)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: image
+          scan-ref: ${{ matrix.image }}
+          scanners: VULN,SECRET
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-external.sarif
+          exit-code: "0"
+
+      - name: Subir SARIF (${{ matrix.image }})
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-external.sarif
+          # Categoría única por imagen (solo minúsculas, sin ":" ni "/").
+          category: trivy-external-${{ strategy.job-index }}
