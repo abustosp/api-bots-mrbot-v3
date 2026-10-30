@@ -54,15 +54,15 @@ Análisis de los 35 bots, uno por agente `claude-haiku-5-5`, leyendo el código.
 
 - **Solo `rcel` lee el contenido de PDF** (con pdfplumber, para armar `rcel_facturas_{cuit}.csv`). Los demás bots que guardan PDF lo descargan o lo imprimen desde HTML, sin leerlo. `declaracion_en_linea` lee HTML, no PDF.
 - **Bucket `general`:** `certificacion_primaria_granos` y `compensaciones` siguen sin bucket propio. Si `OBJECT_STORAGE_BUCKET` está vacío en algún entorno, la firma de subida cae a un ticket de desarrollo, así que hay que confirmar el bucket real.
-- **Buckets inferidos por nombre (confirmar):** `comprobantes` → `miscomprobantes`, `libro_sueldos_digital` → `lsd`, `mis_retenciones_iva_simple` → `misretenciones`, `vep_ccma` y `consulta_pagos_vep` → `vep`.
+- **Buckets inferidos por nombre, comprobados en S4 (30/10):** `comprobantes` → `miscomprobantes` (2 objetos), `libro_sueldos_digital` → `lsd` (51), `mis_retenciones_iva_simple` → `misretenciones` (61), `vep_ccma` (3) y `consulta_pagos_vep` (7) → `vep`. Los 201 objetos existen en el bucket asignado, y el listado de S4 incluye `lsd`, `misretenciones`, `vep` y `miscomprobantes`. Queda una discrepancia de nombre: el bot legacy de `mis_retenciones_iva_simple` apuntaba a `misretencionesivasimple`, que no existe en S4.
 - **Colisiones posibles dentro de un job** (mismo nombre, uno pisa al otro):
-  - `controladores_fiscales`: `F8010.001.pem`, `F8010_001.pem` y `F8010.001.zip` dan la misma clave `constancia_F8010_001.pdf`. El nombre se corta a 100 caracteres.
-  - `hacienda`: dos PDF con igual `cuit_ref` y código, o ambos `SIN_CUIT` o `SIN_CODIGO`.
-  - `libro_sueldos_digital`: `nro` conserva solo dígitos, así que `1` y `01` coinciden.
+  - `controladores_fiscales` (RIESGO_REAL en el código): `F8010.001.pem`, `F8010_001.pem` y `F8010.001.zip` dan la misma clave `constancia_F8010_001.pdf`. El nombre se corta a 100 caracteres.
+  - `hacienda` (RIESGO_REAL en el código, nunca visto en producción: 0 jobs con nombre repetido en 37): dos PDF con igual `cuit_ref` y código, o ambos `SIN_CUIT` o `SIN_CODIGO`. El nombre no incluye punto de venta. La central rechaza el resultado entero con 422 por firma duplicada (`repositories/jobs.py:479`) y el worker lo da por entregado (`reporting/results.py:68`).
+  - `libro_sueldos_digital` (RIESGO_BAJO, depende de que el portal entregue `nroliq` como `1` y `01` en el mismo período): `nro` conserva solo dígitos, así que `1` y `01` coinciden.
   - `carga_portal_iva`: en `uploads`, dos campos con el mismo nombre de archivo apuntan al mismo objeto.
 - **Reintentos:** la clave no incluye el intento. Lo verifiqué en producción: 10 jobs reintentados completaron con archivos y no hay ninguna clave duplicada en `job_artifacts`.
 - **Hallazgos sin resolver:**
   - `ccma_compensacion` arma su nombre cambiando un texto de `ccma_resumen_{cuit}.pdf`. Si cambia ese prefijo no da error y el nombre queda mal.
   - `carga_portal_iva` tiene código muerto (`decodificar_archivo`) que usa `base64` sin importarlo.
   - En `consulta_cuit` la documentación dice carpeta `logger/{job_id}/` y el código sube `{job_id}.tar.gz`.
-  - `aportes_en_linea` registró un HTML en un runbook y un XLS en otro con el mismo nombre `.xls`. No verifiqué cuál entrega ARCA hoy.
+  - `aportes_en_linea`: resuelto leyendo S4. Los 6 archivos más recientes empiezan con `0d0a3c68746d6c3e` (`<html>`), o sea que el contenido es HTML aunque el nombre sea `.xls` y el tipo declarado sea `application/vnd.ms-excel`. Es una pregunta de producto si debería llamarse `.html`.
