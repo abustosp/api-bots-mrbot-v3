@@ -14,7 +14,7 @@ name: mrbot-v3-db
 
 services:
   postgres:
-    image: postgres:17.6-bookworm
+    image: postgres:17.9-bookworm
     env_file:
       - path: .env.db
         required: false

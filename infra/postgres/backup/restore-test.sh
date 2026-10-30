@@ -37,7 +37,7 @@ trap cleanup EXIT
 docker run -d --name "$NAME" \
     -e POSTGRES_DB=mrbot -e POSTGRES_USER=mrbot_app \
     -e POSTGRES_PASSWORD=restore-test-temporal \
-    postgres:17.6-bookworm >/dev/null
+    postgres:17.9-bookworm >/dev/null
 
 for _ in $(seq 1 30); do
     docker exec "$NAME" pg_isready -U mrbot_app -d mrbot >/dev/null 2>&1 && break

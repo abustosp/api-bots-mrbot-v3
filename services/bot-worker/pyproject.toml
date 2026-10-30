@@ -13,7 +13,15 @@ dependencies = [
   "pydantic-settings>=2.3",
   "httpx>=0.27",
   "cryptography>=41",
-  "pdfplumber==0.11.4",
+  "pdfplumber>=0.11.10",
+  # Pisos de seguridad (hallazgos Trivy HIGH/CRITICAL con fix publicado).
+  # pdfplumber>=0.11.10 trae pdfminer.six==20260107 y rompe el pin
+  # vulnerable pdfminer.six==20231228 que exigía 0.11.4.
+  "urllib3>=2.8.0",
+  "msgpack>=1.2.3",
+  "pdfminer.six>=20251230",
+  "setuptools>=78.1.1",
+  "certifi>=2026.6.17",
   # Scripts _logger de bots_dev/ (declaracion_en_linea parsea HTML; liquidacion_granos usa pandas).
   "pandas>=2.0",
   "beautifulsoup4>=4.12",

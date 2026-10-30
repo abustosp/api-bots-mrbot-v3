@@ -22,7 +22,7 @@ services:
       options: {max-size: "10m", max-file: "3"}
 
   frpc:
-    image: fatedier/frpc:v0.61.1
+    image: fatedier/frpc:v0.61.2
     command: ["-c", "/etc/frp/frpc.toml"]
     environment:
       # Lo expande frpc.toml con {{ .Envs.FRP_AUTH_TOKEN }}.

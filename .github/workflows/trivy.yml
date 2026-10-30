@@ -150,10 +150,12 @@ jobs:
       matrix:
         # Imágenes de terceros referenciadas en infra/compose:
         # relay (frps en la central, frpc en worker-relay) + postgres.
+        # Mantener en sync con infra/compose/*.yaml. Excepciones
+        # documentadas (falsos positivos, root requerido): docs/trivy-exceptions.md.
         image:
-          - fatedier/frps:v0.61.1
-          - fatedier/frpc:v0.61.1
-          - postgres:17.6-bookworm
+          - fatedier/frps:v0.61.2
+          - fatedier/frpc:v0.61.2
+          - postgres:17.9-bookworm
     steps:
       - name: Trivy image (tabla en log)
         uses: aquasecurity/trivy-action@v0.36.0

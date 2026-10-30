@@ -40,7 +40,7 @@ name: mrbot-v3
 
 services:
   postgres:
-    image: postgres:17.6-bookworm
+    image: postgres:17.9-bookworm
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mrbot}
       POSTGRES_USER: ${POSTGRES_USER:-mrbot_app}

@@ -25,7 +25,7 @@ bot-worker:8080 <- frpc --7000/TLS--->  frps (alias `relay`) <- central-api http
   central sondea `http://relay:<puerto>/internal/v1/health` cada 15 s
   (`relay_probe.py`). Un fallo => DEGRADADO, tres seguidos => CAIDO; vuelve a
   SANO con el primer éxito.
-- frp fijado en `v0.61.1` (`fatedier/frps` y `fatedier/frpc`).
+- frp fijado en `v0.61.2` (`fatedier/frps` y `fatedier/frpc`).
 
 ## 2. Lado central
 

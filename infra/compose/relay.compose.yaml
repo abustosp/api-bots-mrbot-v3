@@ -11,7 +11,7 @@
 
 services:
   frps:
-    image: fatedier/frps:v0.61.1
+    image: fatedier/frps:v0.61.2
     command: ["-c", "/etc/frp/frps.toml"]
     environment:
       FRP_AUTH_TOKEN: ${FRP_AUTH_TOKEN:?fijar FRP_AUTH_TOKEN (token compartido con los frpc)}
