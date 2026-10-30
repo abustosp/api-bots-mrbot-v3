@@ -13,5 +13,5 @@ WORKDIR /app
 # Mitigaciones reales: cap_drop ALL + no-new-privileges (compose) y allowlist
 # de repositorios de imágenes (UPDATER_ALLOWED_REPOS).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD-SHELL ps | grep -q '[u]pdater.py'
+  CMD ps | grep -q '[u]pdater.py'
 ENTRYPOINT ["python3", "-u", "/app/updater.py"]
