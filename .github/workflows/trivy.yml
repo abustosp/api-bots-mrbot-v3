@@ -106,20 +106,21 @@ jobs:
       - name: Build ${{ matrix.name }}
         run: docker build -f ${{ matrix.dockerfile }} -t ${{ matrix.tag }} .
 
-      # TEMPORAL-DEBUG: ubicar de dónde saca Trivy las versiones viejas
-      # (tabla dice 2.7.0/1.1.2/70.3.0 pero el build instaló las nuevas).
-      # Quitar este step cuando el misterio quede resuelto.
-      - name: Debug temporal - contenido real de la imagen
-        run: |
-          docker run --rm --entrypoint sh ${{ matrix.tag }} -c '
-            echo "== pip list ==";
-            python3 -m pip list 2>/dev/null | grep -iE "urllib3|msgpack|setuptools|certifi|pdfminer|pdfplumber" || echo "(sin pip o sin coincidencias)";
-            echo "== dist-infos con esos paquetes ==";
-            ls -d /usr/local/lib/python3*/site-packages/*.dist-info /usr/lib/python3*/site-packages/*.dist-info /usr/local/lib/python3*/site-packages/*.egg-info 2>/dev/null | grep -iE "urllib3|msgpack|setuptools|certifi|pdfminer" || echo "(nada)";
-            echo "== wheels sueltas en la imagen ==";
-            find /app /wheels /tmp /root /home /opt -name "*.whl" 2>/dev/null | head -20 || true;
-            echo "== rastros de versiones viejas ==";
-            find /usr /app /opt -maxdepth 7 \( -name "urllib3-2.7.0*" -o -name "msgpack-1.1.2*" -o -name "setuptools-70.3.0*" \) 2>/dev/null | head -20 || true'
+      # TEMPORAL-DEBUG: el JSON trae la ruta exacta (PkgIdentifier) de cada
+      # hallazgo fantasma. Quitar este step cuando el misterio quede resuelto.
+      - name: Debug temporal - JSON con rutas de hallazgos
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          scan-ref: ${{ matrix.tag }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: json
+          output: trivy-${{ matrix.name }}.json
+          exit-code: "0"
+      - name: Debug temporal - mostrar solo urllib3/setuptools/msgpack
+        run: jq -r '.Results[]? | select(.Vulnerabilities) | .Target as $t | .Vulnerabilities[] | select(.PkgName=="urllib3" or .PkgName=="msgpack" or .PkgName=="setuptools") | "\($t) | \(.PkgName) | inst=\(.InstalledVersion) | fix=\(.FixedVersion) | id=\(.PkgIdentifier.PURL // "-")"' trivy-${{ matrix.name }}.json | sort -u | head -n 20
 
       - name: Trivy image (tabla en log)
         uses: aquasecurity/trivy-action@v0.36.0
