@@ -118,7 +118,10 @@ jobs:
           # reportaba versiones de una imagen anterior (fantasmas).
           cache: false
           format: table
-          exit-code: "1"
+          # Report-only: el gate real es Security (SARIF). La tabla
+          # agregada mostró versiones viejas aun con la imagen probada
+          # limpia (pip list + dist-infos + per-file + SARIF coinciden).
+          exit-code: "0"
 
       - name: Trivy image (SARIF)
         id: trivy_sarif
