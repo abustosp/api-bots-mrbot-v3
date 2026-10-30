@@ -89,13 +89,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # `secrets` no existe en expresiones `if:` de GitHub Actions, por eso
+      # el login es un script que se omite solo cuando no hay credenciales.
       - name: Login registry privado (solo si hay secrets)
-        if: ${{ secrets.REGISTRY_USER != '' && secrets.REGISTRY_PASS != '' }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.REGISTRY_URL }}
-          username: ${{ secrets.REGISTRY_USER }}
-          password: ${{ secrets.REGISTRY_PASS }}
+        run: |
+          if [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_PASS" ]; then
+            echo "$REGISTRY_PASS" | docker login "${REGISTRY_URL:-docker.abp.net.ar}" -u "$REGISTRY_USER" --password-stdin
+          else
+            echo "Sin credenciales del registry privado: se omite el login."
+          fi
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_PASS: ${{ secrets.REGISTRY_PASS }}
 
       - name: Build ${{ matrix.name }}
         run: docker build -f ${{ matrix.dockerfile }} -t ${{ matrix.tag }} .
