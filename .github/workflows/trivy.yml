@@ -106,22 +106,6 @@ jobs:
       - name: Build ${{ matrix.name }}
         run: docker build -f ${{ matrix.dockerfile }} -t ${{ matrix.tag }} .
 
-      # TEMPORAL-DEBUG: el JSON trae la ruta exacta (PkgIdentifier) de cada
-      # hallazgo fantasma. Quitar este step cuando el misterio quede resuelto.
-      - name: Debug temporal - JSON con rutas de hallazgos
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: image
-          scan-ref: ${{ matrix.tag }}
-          scanners: vuln
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          format: json
-          output: trivy-${{ matrix.name }}.json
-          exit-code: "0"
-      - name: Debug temporal - mostrar solo urllib3/setuptools/msgpack
-        run: jq -r '.Results[]? | select(.Vulnerabilities) | .Target as $t | .Vulnerabilities[] | select(.PkgName=="urllib3" or .PkgName=="msgpack" or .PkgName=="setuptools") | "\($t) | \(.PkgName) | inst=\(.InstalledVersion) | fix=\(.FixedVersion) | id=\(.PkgIdentifier.PURL // "-")"' trivy-${{ matrix.name }}.json | sort -u | head -n 20
-
       - name: Trivy image (tabla en log)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -130,6 +114,9 @@ jobs:
           scanners: vuln,secret
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          # Sin caché entre corridas: el caché de análisis persistido
+          # reportaba versiones de una imagen anterior (fantasmas).
+          cache: false
           format: table
           exit-code: "1"
 
@@ -138,6 +125,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          cache: false
           scan-type: image
           scan-ref: ${{ matrix.tag }}
           scanners: vuln,secret
