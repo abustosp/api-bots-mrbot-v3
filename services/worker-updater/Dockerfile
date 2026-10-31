@@ -3,7 +3,10 @@
 # Build desde la raíz del monorepo:
 #   docker build -f services/worker-updater/Dockerfile -t mrbot-worker-updater:dev .
 FROM docker:28.5.2-cli
-RUN apk add --no-cache python3
+# upgrade: toma los parches de Alpine (openssl, musl, nghttp2, pcre2, zlib,
+# libcurl) que trae la 3.22 sin cambiar de base. Lo que vive dentro de los
+# binarios de Docker (Go stdlib, containerd) solo lo arregla upstream.
+RUN apk add --no-cache python3 && apk upgrade --no-cache
 COPY services/worker-updater/updater.py /app/updater.py
 WORKDIR /app
 # Intencionalmente SIN `USER`: el updater administra el Docker del host
