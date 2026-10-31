@@ -18,7 +18,9 @@ BUCKET_POR_BOT: dict[str, str] = {
     "carga_portal_iva": "portaliva",
     "ccma": "ccma",
     "ccma_compensacion": "ccma",
+    "certificacion_primaria_granos": "liquidaciongranos",
     "certificado_mipyme": "certificadomipyme",
+    "compensaciones": "sct",
     "controladores_fiscales": "controladoresfiscales",
     "declaracion_en_linea": "declaracionenlinea",
     "facturometro": "facturometro",
@@ -48,7 +50,7 @@ BUCKET_POR_BOT: dict[str, str] = {
 }
 
 #: Módulos sin bucket definido: siguen en el bucket general hasta que se decida.
-SIN_BUCKET = ("apoc", "certificacion_primaria_granos", "compensaciones", "consulta_cuit")
+SIN_BUCKET = ("apoc", "consulta_cuit")
 
 
 def bucket_de_bot(bot: str | None, general: str) -> str:
