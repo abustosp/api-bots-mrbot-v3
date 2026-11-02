@@ -17,6 +17,12 @@ _SIN_DATOS = (
     re.compile(r"no\s+tiene\s+afiliaci[oó]n\s+vigente", re.I),
     re.compile(r"no\s+registra\s+afiliaci[oó]n", re.I),
 )
+_FUERA_DE_SERVICIO = re.compile(r"fuera\s+de\s+servicio", re.I)
+CODIGO_FUERA_DE_SERVICIO = "srt_fuera_de_servicio"
+MENSAJE_FUERA_DE_SERVICIO = (
+    "Servicio de SRT fuera de servicio: el portal informa que el sitio"
+    " no se encuentra disponible"
+)
 _IFRAME_RESULTADO = "#ifrmResultadoPorCuit"
 
 
@@ -101,6 +107,11 @@ class SrtPortal(PortalArca):
             total_ms=15_000,
         )
         if enlace is None:
+            if await self._pagina_fuera_de_servicio():
+                raise TargetUnavailableError(
+                    MENSAJE_FUERA_DE_SERVICIO,
+                    diagnostic_code=CODIGO_FUERA_DE_SERVICIO,
+                )
             pista = await self._pista_de_pagina()
             raise TargetUnavailableError(
                 f"no se encontró el enlace de Consulta de Alícuotas del portal SRT ({pista})",
@@ -119,11 +130,24 @@ class SrtPortal(PortalArca):
             pass
         await self._esperar(1_500)
         if "ErrorValidate" in await self._url() or await self._campo_cuit() is None:
+            if await self._pagina_fuera_de_servicio():
+                raise TargetUnavailableError(
+                    MENSAJE_FUERA_DE_SERVICIO,
+                    diagnostic_code=CODIGO_FUERA_DE_SERVICIO,
+                )
             pista = await self._pista_de_pagina()
             raise TargetUnavailableError(
                 f"el enlace del portal no abrió la consulta SRT ({pista})",
                 diagnostic_code="srt_query_link_invalid",
             )
+
+    async def _pagina_fuera_de_servicio(self) -> bool:
+        """True si el portal SRT muestra su tarjeta de fuera de servicio."""
+        try:
+            texto = await self._texto(self.page.locator("body"))
+        except Exception:
+            return False
+        return bool(_FUERA_DE_SERVICIO.search(texto or ""))
 
     async def _campo_cuit(self) -> Any | None:
         return await self._primero_visible(
@@ -167,6 +191,11 @@ class SrtPortal(PortalArca):
             self._preparado = True
         await self._limpiar_consulta_previa()
         if not await self._ingresar_cuit(digits):
+            if await self._pagina_fuera_de_servicio():
+                raise TargetUnavailableError(
+                    MENSAJE_FUERA_DE_SERVICIO,
+                    diagnostic_code=CODIGO_FUERA_DE_SERVICIO,
+                )
             pista = await self._pista_de_pagina()
             raise TargetUnavailableError(
                 f"no se pudo ingresar el CUIT en el portal SRT ({pista})",
@@ -237,11 +266,21 @@ class SrtPortal(PortalArca):
         )
 
     async def _esperar_resultado(self) -> None:
+        if await self._pagina_fuera_de_servicio():
+            raise TargetUnavailableError(
+                MENSAJE_FUERA_DE_SERVICIO,
+                diagnostic_code=CODIGO_FUERA_DE_SERVICIO,
+            )
         try:
             await self.page.wait_for_selector(
                 f"{_IFRAME_RESULTADO}, #myModal, [id*='Resultado' i]", timeout=20_000
             )
         except Exception:
+            if await self._pagina_fuera_de_servicio():
+                raise TargetUnavailableError(
+                    MENSAJE_FUERA_DE_SERVICIO,
+                    diagnostic_code=CODIGO_FUERA_DE_SERVICIO,
+                ) from None
             raise CaptchaUnsolvableError("el portal SRT no devolvió resultado") from None
         await self._esperar(1_000)
 

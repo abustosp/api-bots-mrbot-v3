@@ -551,6 +551,22 @@ async def _is_arca_home(page: Page) -> bool:
     return False
 
 
+_FUERA_DE_SERVICIO_RE = re.compile(r"fuera\s+de\s+servicio", re.I)
+MENSAJE_FUERA_DE_SERVICIO = (
+    "Servicio de SRT fuera de servicio: el portal informa que el sitio"
+    " no se encuentra disponible"
+)
+
+
+async def _pagina_fuera_de_servicio(page: Page) -> bool:
+    """True si el portal SRT muestra su tarjeta de fuera de servicio."""
+    try:
+        texto = await page.locator("body").inner_text()
+    except Exception:
+        return False
+    return bool(_FUERA_DE_SERVICIO_RE.search(texto or ""))
+
+
 async def _is_srt_query_page(page: Page) -> bool:
     if re.search(r"/Consultas/Alicuotas/Default\.aspx", page.url or "", re.I):
         return True
@@ -645,6 +661,9 @@ async def _open_srt_query_page(page: Page, context: Any, debug: DebugCapture) ->
         await page.goto(SRT_ALICUOTAS_URL, timeout=45_000, wait_until="domcontentloaded")
 
     if not await _is_srt_query_page(page):
+        if await _pagina_fuera_de_servicio(page):
+            debug.log("Portal SRT fuera de servicio: se informa mensaje operativo")
+            raise RuntimeError(MENSAJE_FUERA_DE_SERVICIO)
         raise RuntimeError("No se pudo abrir Consulta de Alicuotas")
 
     return page
@@ -695,6 +714,8 @@ async def _fill_srt_cuit(page: Page, cuit_representado: str) -> None:
         except Exception:
             continue
 
+    if await _pagina_fuera_de_servicio(page):
+        raise RuntimeError(MENSAJE_FUERA_DE_SERVICIO)
     raise RuntimeError(f"No se encontro el campo para ingresar CUIT/CUIL en SRT. URL actual: {page.url}")
 
 

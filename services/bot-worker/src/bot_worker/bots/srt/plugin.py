@@ -47,6 +47,10 @@ from bot_worker.bots.errors import (
 )
 from bot_worker.bots.srt.schema import ENTRADAS, esquema_entrada
 from bot_worker.bots.registry import ArtifactSpec, BotManifest
+from bot_worker.runtime.portals.srt import (
+    CODIGO_FUERA_DE_SERVICIO,
+    MENSAJE_FUERA_DE_SERVICIO,
+)
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -241,16 +245,22 @@ class SrtPlugin:
                 fila.setdefault("message", None)
                 fila.setdefault("data", None)
             except ErrorDeBot as exc:
+                codigo = getattr(exc, "diagnostic_code", None) or exc.diagnostico
+                mensaje = (
+                    MENSAJE_FUERA_DE_SERVICIO
+                    if codigo == CODIGO_FUERA_DE_SERVICIO
+                    else codigo
+                )
                 fila = {
                     "cuit": cuit,
                     "status": "ERROR",
-                    "message": getattr(exc, "diagnostic_code", None) or exc.diagnostico,
+                    "message": mensaje,
                     "data": None,
                 }
                 errores.append(
                     BotError(
                         category=Categoria.TARGET_UNAVAILABLE,
-                        internal_diagnostic=f"CUIT {cuit}: {fila['message']}",
+                        internal_diagnostic=f"CUIT {cuit}: {codigo}",
                         retryable=False,
                     )
                 )

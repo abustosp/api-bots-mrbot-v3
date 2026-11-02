@@ -39,14 +39,18 @@ class _Locator:
         else:
             raise AssertionError(f"click inesperado: {self.selector}")
 
+    async def inner_text(self, **_: object) -> str:
+        return self.page.body_text
+
 
 class _Page:
-    def __init__(self, *, con_enlace: bool = True) -> None:
+    def __init__(self, *, con_enlace: bool = True, body_text: str = "") -> None:
         self.url = "https://eservicios.srt.gob.ar/Servicios.aspx"
         self.eventos: list[str] = []
         self.representado = False
         self.consulta_abierta = False
         self.con_enlace = con_enlace
+        self.body_text = body_text
         self.goto_calls: list[str] = []
 
     def locator(self, selector: str, **_: object) -> _Locator:
@@ -201,3 +205,46 @@ def test_lote_sin_fallos_no_reporta_errores() -> None:
     assert errores == []
     assert datos["consultas_error"] == 0
     assert datos["consultas_ok"] == 1
+
+
+def test_portal_caido_informa_fuera_de_servicio_en_lugar_de_link() -> None:
+    async def escenario() -> None:
+        page = _Page(
+            con_enlace=False,
+            body_text="Fuera de Servicio Actualmente el sitio no se encuentra disponible",
+        )
+        portal = SrtPortal(page)
+        portal._esperar = AsyncMock()  # type: ignore[method-assign]
+        portal._primero_visible = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        with pytest.raises(TargetUnavailableError) as error:
+            await portal.abrir_consulta()
+
+        assert error.value.diagnostic_code == "srt_fuera_de_servicio"
+        assert "fuera de servicio" in error.value.diagnostico.lower()
+        assert page.goto_calls == []
+
+    asyncio.run(escenario())
+
+
+def test_fuera_de_servicio_llega_como_mensaje_operativo() -> None:
+    from bot_worker.bots.errors import TargetUnavailableError
+
+    datos, errores = _lote_srt(
+        {
+            "20123456789": TargetUnavailableError(
+                "Servicio de SRT fuera de servicio",
+                diagnostic_code="srt_fuera_de_servicio",
+            ),
+        },
+        ["20123456789"],
+    )
+
+    assert datos["consultas"][0]["status"] == "ERROR"
+    assert (
+        datos["consultas"][0]["message"]
+        == "Servicio de SRT fuera de servicio: el portal informa que el sitio"
+        " no se encuentra disponible"
+    )
+    assert datos["consultas_error"] == 1
+    assert "srt_fuera_de_servicio" in errores[0].internal_diagnostic
