@@ -104,7 +104,7 @@ class SrtPortal(PortalArca):
                 self.page.locator('[id="11"] a'),
                 self.page.locator("a", has_text=re.compile(r"consulta\s+(?:de\s+)?al[ií]cuotas", re.I)),
             ),
-            total_ms=15_000,
+            total_ms=30_000,
         )
         if enlace is None:
             if await self._pagina_fuera_de_servicio():

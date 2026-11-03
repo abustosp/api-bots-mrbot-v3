@@ -119,11 +119,16 @@ async def _open_srt_query_page(srt_page, error_logs: List[str]) -> bool:
     """Navega a la página de consulta de alícuotas dentro del portal SRT."""
     try:
         # Esperar que cargue y buscar el link "Consulta de Alícuotas"
-        await wait_page_ready(srt_page, timeout_ms=15_000)
+        await wait_page_ready(srt_page, timeout_ms=30_000)
 
         consulta_link = srt_page.locator(
             '[id="11"], a:has-text("Consulta de Alícuotas"), a:has-text("Consulta Alicuotas")'
         )
+        try:
+            # Espera hasta 30 s a que aparezca el enlace (count() no espera).
+            await consulta_link.first.wait_for(state="attached", timeout=30_000)
+        except Exception:
+            pass
         try:
             if await consulta_link.count() > 0:
                 await consulta_link.first.click(timeout=5_000)
