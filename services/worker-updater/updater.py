@@ -42,6 +42,7 @@ class Config:
     allowed_repos: tuple[str, ...] = ()
     poll_seconds: float = 10.0
     health_timeout: float = 180.0
+    auto: bool = False  # pide a la central la última versión estable cuando no hay orden
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Config":
@@ -68,6 +69,7 @@ class Config:
             allowed_repos=repos,
             poll_seconds=float(e.get("UPDATER_POLL_SECONDS", "10")),
             health_timeout=float(e.get("UPDATER_HEALTH_TIMEOUT", "180")),
+            auto=e.get("UPDATER_AUTO", "").strip().lower() in ("1", "true", "yes", "latest"),
         )
 
 
@@ -221,7 +223,10 @@ class Updater:
             return json.loads(resp.read() or b"{}")
 
     def poll(self) -> dict:
-        return self._request("GET", "/internal/v1/updater/command?" + urllib.parse.urlencode({"node": self.cfg.node}))
+        query = {"node": self.cfg.node}
+        if self.cfg.auto:
+            query["auto"] = "true"
+        return self._request("GET", "/internal/v1/updater/command?" + urllib.parse.urlencode(query))
 
     def report(self, request_id: str, estado: str, error: str) -> None:
         cuerpo = {"node": self.cfg.node, "request_id": request_id, "estado": estado, "error": error}

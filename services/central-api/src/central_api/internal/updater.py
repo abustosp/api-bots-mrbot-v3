@@ -42,10 +42,11 @@ class ReportBody(BaseModel):
 @router.get("/command", summary="Comando pendiente para el nodo del updater")
 def obtener_comando(
     node: str = Query(min_length=3, max_length=255),
+    auto: bool = Query(default=False, description="El updater pide autoactualizarse a la última estable."),
     authorization: str | None = Header(default=None),
 ) -> dict:
     _exigir_updater(authorization)
-    return comando_para(node)
+    return comando_para(node, auto)
 
 
 @router.post("/report", summary="Resultado de una actualización")

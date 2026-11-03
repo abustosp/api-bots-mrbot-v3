@@ -232,3 +232,117 @@ def test_no_se_puede_cancelar_una_actualizacion_que_el_updater_ya_ejecuta(flota)
     flota.post("/admin/workers/viejo-a:8080/update", json={"motivo": "ya en ejecución"}, headers=ADMIN)
     assert _comando(flota, "viejo-a:8080")["action"] == "update"  # pasa a ACTUALIZANDO
     assert flota.delete("/admin/workers/viejo-a:8080/update", headers=ADMIN).status_code == 409
+
+
+def _auto(cliente, nodo):
+    r = cliente.get("/internal/v1/updater/command", params={"node": nodo, "auto": "true"}, headers=UPDATER)
+    assert r.status_code == 200
+    return r.json()
+
+
+def test_auto_pausa_al_instante_espera_ocioso_y_actualiza(flota) -> None:
+    from central_api.store import PAUSED_NODES, WORKERS
+
+    WORKERS["viejo-a:8080"].running_jobs = 1
+    assert _auto(flota, "viejo-a:8080") == {"action": "none", "estado": "DRENANDO"}
+    assert "viejo-a:8080" in PAUSED_NODES  # desactualizado: sin jobs nuevos
+    WORKERS["viejo-a:8080"].running_jobs = 0
+    comando = _auto(flota, "viejo-a:8080")
+    assert comando["action"] == "update" and comando["app_version"] == "2.0.0"
+    flota.post(
+        "/internal/v1/updater/report", headers=UPDATER,
+        json={"node": "viejo-a:8080", "request_id": comando["request_id"], "estado": "HECHO"},
+    )
+    assert "viejo-a:8080" not in PAUSED_NODES
+
+
+def test_auto_no_fuerza_el_drenaje_por_tiempo(flota) -> None:
+    from central_api.store import WORKERS
+    from central_api.worker_updates import UPDATE_REQUESTS
+
+    WORKERS["viejo-a:8080"].running_jobs = 1
+    _auto(flota, "viejo-a:8080")
+    UPDATE_REQUESTS["viejo-a:8080"].drain_started_at -= timedelta(hours=2)
+    assert _auto(flota, "viejo-a:8080")["action"] == "none"
+
+
+def test_auto_ignora_dev_y_nodos_al_dia(flota, monkeypatch) -> None:
+    from central_api.store import PAUSED_NODES, WORKERS
+
+    assert _auto(flota, "nuevo:8080") == {"action": "none"}  # ya en la última
+    WORKERS["viejo-b:8080"].app_version = "3.0.0-dev"
+    assert _auto(flota, "viejo-b:8080") == {"action": "none"}  # instalada -dev
+    monkeypatch.setenv("WORKER_IMAGE_REF", "registry.local/mrbot-bot-worker:3.0.0-dev")
+    monkeypatch.setenv("WORKER_LATEST_VERSION", "3.0.0-dev")
+    get_settings.cache_clear()
+    assert _auto(flota, "viejo-a:8080") == {"action": "none"}  # objetivo -dev
+    assert not PAUSED_NODES
+
+
+def test_auto_no_reintenta_la_misma_version_tras_fallar(flota) -> None:
+    comando = _auto(flota, "viejo-a:8080")
+    flota.post(
+        "/internal/v1/updater/report", headers=UPDATER,
+        json={"node": "viejo-a:8080", "request_id": comando["request_id"], "estado": "REVERTIDO", "error": "x"},
+    )
+    assert _auto(flota, "viejo-a:8080") == {"action": "none"}
+
+
+def test_sin_flag_auto_no_se_crea_solicitud(flota) -> None:
+    assert _comando(flota, "viejo-a:8080") == {"action": "none"}
+
+
+def test_auto_respeta_el_cupo_y_no_pausa_toda_la_flota(flota) -> None:
+    from central_api.store import PAUSED_NODES, WORKERS
+
+    WORKERS["viejo-a:8080"].running_jobs = 1
+    _auto(flota, "viejo-a:8080")  # ocupa el único cupo
+    assert _auto(flota, "viejo-b:8080") == {"action": "none", "estado": "ENCOLADA"}
+    assert PAUSED_NODES == {"viejo-a:8080"}  # viejo-b sigue recibiendo jobs hasta su turno
+
+
+def test_auto_abandona_si_el_worker_nunca_queda_ocioso(flota) -> None:
+    from central_api.store import PAUSED_NODES, WORKERS
+    from central_api.worker_updates import UPDATE_REQUESTS
+
+    WORKERS["viejo-a:8080"].running_jobs = 1
+    _auto(flota, "viejo-a:8080")
+    UPDATE_REQUESTS["viejo-a:8080"].drain_started_at -= timedelta(hours=3)
+    assert _auto(flota, "viejo-a:8080") == {"action": "none"}
+    assert "viejo-a:8080" not in PAUSED_NODES
+    assert UPDATE_REQUESTS["viejo-a:8080"].status == "FALLIDO"
+
+
+def test_auto_version_que_fallo_en_un_nodo_no_se_propaga(flota) -> None:
+    comando = _auto(flota, "viejo-a:8080")
+    flota.post(
+        "/internal/v1/updater/report", headers=UPDATER,
+        json={"node": "viejo-a:8080", "request_id": comando["request_id"], "estado": "REVERTIDO", "error": "x"},
+    )
+    assert _auto(flota, "viejo-b:8080") == {"action": "none"}
+
+
+def test_auto_respeta_la_ventana_horaria(flota, monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    from central_api import worker_updates
+
+    monkeypatch.setenv("WORKER_UPDATE_AUTO_WINDOW", "02:00-05:00")
+    get_settings.cache_clear()
+    for utc_h, esperado in ((6, True), (12, False)):  # Buenos Aires = UTC-3
+        assert worker_updates._en_ventana(datetime(2026, 1, 1, utc_h, tzinfo=timezone.utc)) is esperado
+    monkeypatch.setenv("WORKER_UPDATE_AUTO_WINDOW", "23:00-02:00")  # cruza medianoche
+    get_settings.cache_clear()
+    assert worker_updates._en_ventana(datetime(2026, 1, 1, 3, tzinfo=timezone.utc)) is True  # 00:00 BA
+    monkeypatch.setenv("WORKER_UPDATE_AUTO_WINDOW", "basura")
+    get_settings.cache_clear()
+    assert worker_updates._en_ventana(datetime(2026, 1, 1, 6, tzinfo=timezone.utc)) is False
+    assert _auto(flota, "viejo-a:8080") == {"action": "none"}  # fuera de ventana: no se crea nada
+
+
+def test_auto_con_registry_caido_no_usa_la_referencia_atrasada(flota, monkeypatch) -> None:
+    from central_api import registry
+
+    monkeypatch.setattr(registry, "habilitado", lambda: True)
+    monkeypatch.setattr(registry, "latest", lambda: None)
+    assert _auto(flota, "viejo-a:8080") == {"action": "none"}
