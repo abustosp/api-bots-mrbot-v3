@@ -626,6 +626,11 @@ async def _open_srt_query_page(page: Page, context: Any, debug: DebugCapture) ->
         'a[href*="Alicuotas"], div[id="Consulta de Alícuotas"] a,'
         ' div[id="Consulta de Alicuotas"] a, a:has-text("Consulta de Alícuotas")'
     ).first
+    # Espera hasta 30 s a que aparezca el enlace (count() no espera).
+    try:
+        await consulta_link.wait_for(state="attached", timeout=30_000)
+    except Exception:
+        pass
     if await consulta_link.count() > 0:
         link_visible = False
         try:
