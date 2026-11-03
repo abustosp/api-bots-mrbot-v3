@@ -74,11 +74,12 @@ services:
       UPDATER_TOKEN: ${UPDATER_TOKEN:-}
       UPDATER_NODE: ${UPDATER_NODE:-}
       UPDATER_ALLOWED_REPOS: ${UPDATER_ALLOWED_REPOS:-}
-      UPDATER_COMPOSE_FILE: ${UPDATER_HOST_DIR:-}/worker.compose.yaml
+      UPDATER_COMPOSE_FILE: ${UPDATER_HOST_DIR:-}/${UPDATER_COMPOSE_NAME:-worker.compose.yaml}
       UPDATER_ENV_FILE: ${UPDATER_HOST_DIR:-}/${UPDATER_ENV_NAME:-.env.worker}
       UPDATER_PROJECT: ${UPDATER_PROJECT:-mrbot-v3-worker}
       UPDATER_SERVICE: ${UPDATER_SERVICE:-bot-worker}
       UPDATER_HEALTH_TIMEOUT: ${UPDATER_HEALTH_TIMEOUT:-180}
+      UPDATER_AUTO: ${UPDATER_AUTO:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${UPDATER_HOST_DIR:-/nonexistent}:${UPDATER_HOST_DIR:-/nonexistent}

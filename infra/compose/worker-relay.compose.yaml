@@ -5,9 +5,10 @@
 #   # y FRP_AUTH_TOKEN; pegar en ./frpc.toml el archivo generado en el panel
 #   docker compose -f worker-relay.compose.yaml --env-file .env.worker up -d
 # Sin puertos publicados: la central llega al worker por el túnel (relay:<puerto>).
-# Sin updater en v1: actualizar a mano con
-#   docker compose -f worker-relay.compose.yaml --env-file .env.worker pull && \
-#   docker compose -f worker-relay.compose.yaml --env-file .env.worker up -d
+# Actualización: botón del panel o autoactualización a la última versión estable con el
+# servicio opcional worker-updater (--profile updater; ver worker-relay.env.example).
+# A mano: docker compose -f worker-relay.compose.yaml --env-file .env.worker pull && \
+#         docker compose -f worker-relay.compose.yaml --env-file .env.worker up -d
 # Invariantes W-1/W-2/W-3 heredadas de worker.compose.yaml (extends).
 
 name: mrbot-v3-worker-relay
@@ -20,6 +21,15 @@ services:
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
+
+  # Opcional (--profile updater): mismo updater que los workers manuales, apuntando a este compose.
+  worker-updater:
+    extends:
+      file: worker.compose.yaml
+      service: worker-updater
+    environment:
+      UPDATER_COMPOSE_FILE: ${UPDATER_HOST_DIR:-}/worker-relay.compose.yaml
+      UPDATER_PROJECT: ${UPDATER_PROJECT:-mrbot-v3-worker-relay}
 
   frpc:
     image: fatedier/frpc:v0.71.1

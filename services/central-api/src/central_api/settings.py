@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     worker_update_max_parallel: int = Field(default=1, ge=1, le=20, alias="WORKER_UPDATE_MAX_PARALLEL")
     # Espera máxima de drenaje antes de liberar el comando (el worker aún drena 120 s al recibir SIGTERM).
     worker_update_drain_seconds: int = Field(default=180, ge=0, alias="WORKER_UPDATE_DRAIN_SECONDS")
+    # Autoactualización: espera máxima a que el worker quede ocioso (2 h); luego se abandona y se reanuda.
+    worker_update_auto_drain_seconds: int = Field(default=7200, ge=60, alias="WORKER_UPDATE_AUTO_DRAIN_SECONDS")
+    # Ventana (hora de Buenos Aires, "HH:MM-HH:MM", admite cruzar medianoche) en que la
+    # autoactualización puede iniciar. Vacío = sin restricción. No interrumpe una en curso.
+    worker_update_auto_window: str = Field(default="", alias="WORKER_UPDATE_AUTO_WINDOW")
     worker_update_timeout_seconds: int = Field(default=900, ge=60, alias="WORKER_UPDATE_TIMEOUT_SECONDS")
     # Firma Ed25519 de asignaciones (la central firma, el worker verifica con
     # la pública que recibe en el registro). Sin clave configurada se genera

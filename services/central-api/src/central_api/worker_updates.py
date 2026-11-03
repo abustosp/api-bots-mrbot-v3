@@ -23,8 +23,9 @@ historial de la solicitud.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from central_api.settings import get_settings
 from central_api.store import JOBS, PAUSED_NODES, WORKERS, utcnow
@@ -32,6 +33,7 @@ from central_api.store import JOBS, PAUSED_NODES, WORKERS, utcnow
 ACTIVOS = ("ENCOLADA", "DRENANDO", "ACTUALIZANDO")
 TERMINALES = ("HECHO", "FALLIDO", "REVERTIDO")
 ESTADOS_REPORTABLES = ("HECHO", "FALLIDO", "REVERTIDO")
+AUTO_REINTENTO = timedelta(hours=1)
 
 
 @dataclass
@@ -51,6 +53,10 @@ class UpdateRequest:
     error: str = ""
     # Solo se reanuda al terminar si la pausa la puso esta solicitud.
     paused_by_update: bool = False
+    # Autoactualización: el nodo queda pausado desde el inicio, espera ocioso sin tope de
+    # drenaje y la solicitud vence si el updater deja de consultar (``last_poll_at``).
+    auto: bool = False
+    last_poll_at: datetime = field(default_factory=utcnow)
 
     def public(self) -> dict:
         def iso(valor: datetime | None) -> str | None:
@@ -93,7 +99,8 @@ def solicitud_activa(node: str) -> UpdateRequest | None:
         return None
     if req.status in ("ENCOLADA", "DRENANDO"):
         limite = timedelta(seconds=get_settings().worker_update_timeout_seconds)
-        if utcnow() - req.created_at > limite:
+        desde = req.last_poll_at if req.auto else req.created_at
+        if utcnow() - desde > limite:
             _cerrar(
                 req, "FALLIDO",
                 "ningún updater tomó la solicitud: verifique que el host tenga el worker-updater",
@@ -188,11 +195,82 @@ def _cupo_libre() -> bool:
     return en_curso < get_settings().worker_update_max_parallel
 
 
-def comando_para(node: str) -> dict:
+def es_estable(version: str) -> bool:
+    """Versión desplegable por autoactualización: no vacía y sin ``-dev``."""
+    return bool(version) and "-dev" not in version
+
+
+def _en_ventana(ahora: datetime) -> bool:
+    """True si ``WORKER_UPDATE_AUTO_WINDOW`` está vacía o ``ahora`` cae dentro. Formato inválido = bloqueado."""
+    ventana = get_settings().worker_update_auto_window.strip()
+    if not ventana:
+        return True
+    try:
+        ini, fin = (time.fromisoformat(x.strip()) for x in ventana.split("-"))
+    except ValueError:
+        return False  # configuración inválida: mejor no actualizar que hacerlo a deshoras
+    from central_api.admin.reporting import REPORT_TZ
+
+    hora = ahora.astimezone(REPORT_TZ).time()
+    return ini <= hora < fin if ini <= fin else hora >= ini or hora < fin
+
+
+def _auto_solicitud(node: str, ahora: datetime) -> UpdateRequest | None:
+    """Crea la solicitud automática si el nodo está desactualizado respecto de la última estable.
+
+    Ignora las versiones ``-dev`` (objetivo o instalada) y no reintenta la misma versión
+    durante ``AUTO_REINTENTO`` tras un fallo, para no entrar en bucle de rollbacks.
+    """
+    entrada = WORKERS.get(node)
+    if entrada is None:
+        return None  # nodo desconocido: UPDATER_NODE debe coincidir con host:puerto registrado
+    actual = str(getattr(entrada, "app_version", "") or "").strip()
+    if not es_estable(actual):
+        return None
+    from central_api import registry
+
+    if not _en_ventana(ahora):
+        return None
+    if registry.habilitado() and not registry.latest():
+        return None  # registry caído: no caer a un WORKER_IMAGE_REF posiblemente atrasado
+    image, app_version, digest = objetivo()
+    if not image or not es_estable(app_version) or app_version == actual:
+        return None
+    from central_api.registry import TAG_VERSION
+
+    if TAG_VERSION.match(actual) and TAG_VERSION.match(app_version) and actual > app_version:
+        return None  # el worker está más nuevo que el registry (p. ej. lo cacheado está atrasado)
+    # Canario: si esta versión falló en CUALQUIER nodo, no se propaga a otros por AUTO_REINTENTO.
+    if any(
+        r.app_version == app_version and r.status in ("FALLIDO", "REVERTIDO")
+        and r.finished_at and ahora - r.finished_at < AUTO_REINTENTO
+        for r in UPDATE_REQUESTS.values()
+    ):
+        return None
+    req = UpdateRequest(
+        id=uuid.uuid4().hex, node=node, image=image, app_version=app_version, image_digest=digest,
+        requested_by="auto", motivo="autoactualización", auto=True,
+    )
+    UPDATE_REQUESTS[node] = req
+    # Sin jobs nuevos desde ya, pero solo si hay cupo: así nunca se pausa más de
+    # WORKER_UPDATE_MAX_PARALLEL nodos y la flota conserva capacidad.
+    if _cupo_libre() and node not in PAUSED_NODES:
+        PAUSED_NODES.add(node)
+        req.paused_by_update = True
+        req.status = "DRENANDO"
+        req.drain_started_at = ahora
+    return req
+
+
+def comando_para(node: str, auto: bool = False) -> dict:
     """Respuesta al polling del updater: avanza la máquina de estados del nodo."""
     ahora = utcnow()
     _vencer_atascadas(ahora)
     req = solicitud_activa(node)
+    if req is None and auto:
+        req = _auto_solicitud(node, ahora)
+    if req is not None:
+        req.last_poll_at = ahora
     if req is None:
         return {"action": "none"}
     if req.status == "ENCOLADA":
@@ -205,7 +283,11 @@ def comando_para(node: str) -> dict:
             req.paused_by_update = True
     if req.status == "DRENANDO":
         espera = ahora - (req.drain_started_at or ahora)
-        if _en_vuelo(node) > 0 and espera < timedelta(seconds=get_settings().worker_update_drain_seconds):
+        if req.auto and espera > timedelta(seconds=get_settings().worker_update_auto_drain_seconds):
+            _cerrar(req, "FALLIDO", "el worker no quedó ocioso a tiempo; se reanuda")
+            return {"action": "none"}
+        tope = timedelta(seconds=get_settings().worker_update_drain_seconds)
+        if _en_vuelo(node) > 0 and (req.auto or espera < tope):
             return {"action": "none", "estado": req.status}
         req.status = "ACTUALIZANDO"
         req.command_sent_at = ahora
