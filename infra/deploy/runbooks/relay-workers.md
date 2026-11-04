@@ -132,3 +132,68 @@ Central de pruebas en `api2` + `frps`; worker relay en `abp-server`
    pegar el `frpc.toml` nuevo y reiniciar frpc.
 9. Con 4-5 workers relay, enviar jobs (p. ej. 20 de `consulta_cuit`) con el worker
    manual pausado: los reciben todos los relay (reparto observado 7/7/7/6/5).
+
+## 7. Worker relay que sale solo por un wifi 4G
+
+Caso: el host tiene salida por cable (`eno1`) y también conectado al wifi de un
+módem 4G (MiFi); el worker debe salir **solo** por el 4G (IP pública distinta de
+la del cable). Instancia actual: `ana-hp` (`192.168.0.100`), wifi `4G-MIFI-8ACA`,
+alias `wifi-4g-8aca`, nodo `relay:20003` en la central de `conciliabot2`.
+
+### Cómo funciona
+
+- El worker, `frpc` y un auxiliar corren en una red docker dedicada `wifi-net`
+  (`172.30.0.0/24`). Una regla de ruteo por origen manda esa subred a la tabla 100,
+  cuya ruta por defecto es la del wifi. El resto del host y los demás contenedores
+  siguen por el cable.
+- Sin `sudo` sin contraseña: el servicio `wifi-route` (`network_mode: host`,
+  `NET_ADMIN`, `restart: unless-stopped`) reaplica regla y ruta cada 20 s, así que
+  sobrevive a reinicios y a reconexiones del wifi (el gateway se relee en cada vuelta).
+- Si el wifi cae, la tabla 100 tiene `blackhole default`: el worker queda sin red,
+  no cae al cable. Es intencional.
+- No usar macvlan sobre la interfaz wifi: los AP/MiFi rechazan MACs adicionales.
+- Solo cambia el origen del tráfico: el protocolo es el mismo (frpc saliente a
+  `RELAY_PUBLIC_ADDR:7000` y el worker a `CENTRAL_URL`). La IP pública del 4G suele
+  rotar (CGNAT); no importa porque el túnel es saliente.
+
+### Alta de un host nuevo
+
+1. Alta en el panel de la **central real** (o `POST /admin/workers/relay` con
+   `{"alias": "..."}` y el `ADMIN_TOKEN`): devuelve puerto, token y `frpc.toml`. Si
+   se da 409 es que se agotó `RELAY_PORT_RANGE`. Ojo: `central-testing` (api2) y la
+   central real (conciliabot2) son distintas; confirmar a cuál se apunta.
+2. En el host, ver nombre de la interfaz y subred libre:
+   `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev` (la `wifi` conectada al SSID del
+   módem). Crear la red (la subred no debe pisar nada de `ip route`):
+   `docker network create --subnet 172.30.0.0/24 --opt com.docker.network.bridge.name=br-wifi wifi-net`
+3. Copiar a `~/mrbot-relay-worker-wifi/` (modo 700): `worker.compose.yaml`,
+   `worker-relay.compose.yaml`, `worker-relay.wifi.compose.yaml`, `frpc.toml` (0644)
+   y `.env.worker` (0600) con `CENTRAL_URL` pública, `WORKER_ADVERTISED_URL=http://relay:<puerto>`,
+   `FRP_AUTH_TOKEN`, `WORKER_IMAGE`/`APP_VERSION` vigentes y `WORKER_CONCURRENCY=5`.
+   Si la interfaz no es `wlo1` o la subred no es `172.30.0.0/24`, agregar
+   `WIFI_IFACE` / `WIFI_SUBNET` al `.env.worker`.
+4. Imagen: si el host no tiene login del registry, copiarla de otro host de la
+   **misma LAN** (`ssh A 'docker save IMG | gzip -1' | ssh B 'gunzip | docker load'`);
+   hacerlo desde un host remoto a través de internet es del orden de KB/s. Bajar también
+   `fatedier/frpc:v0.71.1`.
+5. Levantar:
+   `docker compose -p mrbot-relay-wifi -f worker-relay.compose.yaml -f worker-relay.wifi.compose.yaml --env-file .env.worker up -d`
+
+### Verificación
+
+```bash
+# El worker sale por el 4G (IP distinta de la del cable: curl https://api.ipify.org en el host).
+docker exec mrbot-relay-wifi-bot-worker-1 python -c "import urllib.request;print(urllib.request.urlopen('https://api.ipify.org',timeout=10).read().decode())"
+docker logs mrbot-relay-wifi-frpc-1 2>&1 | grep -E "login to server success|start proxy success"
+docker inspect mrbot-relay-wifi-bot-worker-1 --format '{{.Args}}' | grep -o 'concurrency [0-9]*'
+ip rule | grep lookup\ 100; ip route show table 100   # default via <gw> dev <wifi> + blackhole
+```
+
+En el panel el nodo debe figurar `SANO`. Prueba de corte: desconectar el wifi del
+host; el nodo pasa a DEGRADADO/CAIDO y no debe aparecer tráfico por el cable.
+
+### Trampas
+
+- Al cambiar la subred/interfaz hay que recrear `wifi-route` y, si cambia la subred,
+  la red `wifi-net` (hay que bajar el stack antes).
+- Quitar la regla vieja a mano si se cambia de subred: `ip rule del from <subred> lookup 100`.

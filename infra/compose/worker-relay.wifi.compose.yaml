@@ -1,0 +1,38 @@
+# Override para que un worker relay salga SOLO por el wifi de un módem 4G.
+# Runbook: infra/deploy/runbooks/relay-workers.md, sección 7.
+# Uso (en el host del worker, junto a worker-relay.compose.yaml):
+#   docker network create --subnet 172.30.0.0/24 --opt com.docker.network.bridge.name=br-wifi wifi-net
+#   docker compose -p mrbot-relay-wifi -f worker-relay.compose.yaml -f worker-relay.wifi.compose.yaml \
+#     --env-file .env.worker up -d
+# Variables opcionales (en .env.worker): WIFI_IFACE (def. wlo1), WIFI_SUBNET (def. 172.30.0.0/24).
+# WIFI_SUBNET debe ser la subred con la que se creó wifi-net.
+networks:
+  default:
+    name: wifi-net
+    external: true
+
+services:
+  # Política de ruteo sin sudo: WIFI_SUBNET -> tabla 100 -> WIFI_IFACE. El host usa
+  # network_mode: host + NET_ADMIN (acceso al docker = root en el host, igual que sudo).
+  # Si el wifi cae, la ruta blackhole corta la salida en vez de caer al cable.
+  # shortcut: sondeo cada 20 s, no hay evento de NetworkManager; tras un cambio de gateway
+  # el worker puede quedar hasta 20 s sin salida.
+  wifi-route:
+    image: alpine:latest
+    network_mode: host
+    cap_add: [NET_ADMIN]
+    restart: unless-stopped
+    environment:
+      WIFI_IFACE: ${WIFI_IFACE:-wlo1}
+      WIFI_SUBNET: ${WIFI_SUBNET:-172.30.0.0/24}
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          ip rule | grep -q "from $$WIFI_SUBNET lookup 100" || ip rule add from $$WIFI_SUBNET lookup 100
+          ip route replace blackhole default metric 200 table 100
+          GW=$$(ip route show default dev $$WIFI_IFACE | awk '{print $$3; exit}')
+          [ -n "$$GW" ] && ip route replace default via $$GW dev $$WIFI_IFACE metric 10 table 100
+          sleep 20
+        done
