@@ -106,9 +106,16 @@ jobs:
       - name: Build ${{ matrix.name }}
         run: docker build -f ${{ matrix.dockerfile }} -t ${{ matrix.tag }} .
 
+      # get.trivy.dev (usado por setup-trivy) ya no resuelve: instalar desde GitHub Releases.
+      - name: Instalar Trivy
+        run: |
+          V=0.70.0
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${V}/trivy_${V}_Linux-64bit.tar.gz" | sudo tar -xz -C /usr/local/bin trivy
+
       - name: Trivy image (tabla en log)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          skip-setup-trivy: true
           scan-type: image
           scan-ref: ${{ matrix.tag }}
           scanners: vuln,secret
@@ -128,6 +135,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          skip-setup-trivy: true
           cache: false
           scan-type: image
           scan-ref: ${{ matrix.tag }}
