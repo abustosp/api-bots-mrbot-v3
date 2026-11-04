@@ -253,7 +253,7 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="kicker">Identidades y acceso</div><h2>Usuarios</h2><p class="subtle">Alta, estado, plan y claves API de los clientes V3. Para depuración se admite un nombre sin mail (p. ej. abp). En la columna API Key: «Ver» la muestra, «Copiar» la copia y «Guardar» reemplaza la clave por lo que escribas (vacío = aleatoria). La clave se guarda cifrada, nunca en texto plano.</p>
         <form id="users-filter" class="toolbar"><div class="field wide"><label for="users-email">Buscar por email o usuario</label><input id="users-email" name="email" type="search" placeholder="cliente@example.com o abp"></div><div class="field"><label for="users-state">Estado</label><select id="users-state"><option value="">Todos</option><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><button class="button primary" type="submit">Buscar</button></form>
         <details><summary>Crear usuario</summary><div class="details-body"><form id="create-user-form"><div class="form-grid"><div class="field"><label for="new-email">Email o usuario debug</label><input id="new-email" type="text" placeholder="cliente@example.com o abp" required></div><div class="field"><label for="new-display">Nombre</label><input id="new-display" type="text"></div><div class="field"><label for="new-account-type">Tipo de cuenta</label><select id="new-account-type"><option value="PRUEBA">Prueba (100 consultas únicas)</option><option value="TESTING">Testing (ilimitada)</option><option value="NORMAL">Normal (cupo mensual)</option></select></div><div class="field hidden" id="new-max-field"><label for="new-max-requests">Cupo mensual NORMAL (requests/mes)</label><input id="new-max-requests" type="number" min="1" max="10000000" step="1" placeholder="Ej.: 1000"></div><div class="field"><label for="new-api-key">API key (mínimo 3; las claves cortas son débiles)</label><input id="new-api-key" type="password" minlength="3" placeholder="Vacío = generar automáticamente; mínimo 3 caracteres" autocomplete="new-password"></div><div class="field"><label for="new-state">Estado inicial</label><select id="new-state"><option value="habilitado">Activo</option><option value="deshabilitado">Desactivado</option></select></div><div class="field"><label for="new-reason">Motivo</label><input id="new-reason" type="text" value="alta desde panel V3" minlength="3" maxlength="500" required></div></div><div class="form-actions"><label class="checkbox-inline"><input id="new-send-credentials" type="checkbox"> Enviar credenciales por email</label><button class="button primary" type="submit">Crear usuario</button></div></form></div></details>
-        <div class="table-wrap"><table><thead><tr><th>User ID</th><th>Email / usuario</th><th>Nombre</th><th>Tipo</th><th>Cuenta</th><th>API Key</th><th>Estado</th><th>Cupo mensual</th><th>Consultas actuales</th><th>Consultas restantes</th><th class="actions-head">Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="11" class="empty">Cargando...</td></tr></tbody></table></div>
+        <div class="table-wrap"><table data-page-size="100"><thead><tr><th>User ID</th><th>Email / usuario</th><th>Nombre</th><th>Tipo</th><th>Cuenta</th><th>API Key</th><th>Estado</th><th>Cupo mensual</th><th>Consultas actuales</th><th>Consultas restantes</th><th class="actions-head">Acciones</th></tr></thead><tbody id="users-table"><tr><td colspan="11" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
       <section class="view hidden" data-panel="jobs">
@@ -740,10 +740,17 @@ details > .details-body { padding: 0 14px 14px; }
   }
   async function loadUsers(event) {
     if (event) event.preventDefault();
-    const params = new URLSearchParams({ limit: "100" }); const email = $("#users-email").value.trim(); const estado = $("#users-state").value; if (email) params.set("email", email); if (estado) params.set("estado", estado);
+    const email = $("#users-email").value.trim(); const estado = $("#users-state").value;
     try {
-      const data = await api(`/admin/users?${params}`);
-      const rows = data.usuarios || [];
+      // Se traen todos (de a 200) y se pagina en el cliente (100 por pagina), para que
+      // los filtros por columna ofrezcan los valores de TODOS los usuarios, no solo de la pagina.
+      const rows = [];
+      for (let offset = 0; ; offset += 200) {
+        const params = new URLSearchParams({ limit: "200", offset: String(offset) }); if (email) params.set("email", email); if (estado) params.set("estado", estado);
+        const data = await api(`/admin/users?${params}`);
+        rows.push(...(data.usuarios || []));
+        if (!(data.usuarios || []).length || rows.length >= data.total) break;
+      }
       $("#users-table").innerHTML = rows.length ? rows.map((user) => {
         const enabled = user.estado === "habilitado";
         return `<tr><td><div class="user-id"><code>${esc(user.id)}</code><button type="button" class="button secondary small" data-action="copy-user-id" data-id="${esc(user.id)}" title="Copiar user ID">Copiar</button></div></td><td>${esc(user.email)}</td><td>${esc(user.display_name || "—")}</td><td><span class="pill">${esc(user.plan)}</span></td><td>${accountEditor(user)}</td><td>${userKeyCell(user, enabled)}</td><td><span class="status ${statusClass(user.estado)}">${enabled ? "Activo" : "Desactivado"}</span></td><td>${esc(user.consultas_limite ?? "∞")}</td><td>${esc(user.consultas_consumidas ?? 0)}${user.consultas_reservadas ? ` <span class="muted">(+${esc(user.consultas_reservadas)} en curso)</span>` : ""}</td><td>${esc(user.consultas_restantes ?? "∞")}</td><td class="actions"><div class="actions-inner"><button type="button" class="button secondary small" data-action="user-toggle" data-id="${esc(user.id)}" data-enabled="${enabled}">${enabled ? "Desactivar" : "Activar"}</button></div></td></tr>`;
@@ -796,7 +803,13 @@ details > .details-body { padding: 0 14px 14px; }
     const st = cfState(table);
     const rows = cfDataRows(table);
     let shown = 0;
-    rows.forEach((row) => { const ok = cfPass(row, st.sel, -1); row.classList.toggle("hidden", !ok); if (ok) shown += 1; });
+    const size = Number(table.dataset.pageSize || 0);
+    const passing = rows.filter((row) => cfPass(row, st.sel, -1));
+    const pages = size ? Math.max(1, Math.ceil(passing.length / size)) : 1;
+    st.page = Math.min(st.page || 0, pages - 1);
+    const visible = new Set(size ? passing.slice(st.page * size, (st.page + 1) * size) : passing);
+    rows.forEach((row) => { row.classList.toggle("hidden", !visible.has(row)); });
+    shown = passing.length;
     const active = Object.values(st.sel).some((set) => set && set.size);
     const headCells = table.tHead ? Array.from(table.tHead.rows[0].cells) : [];
     headCells.forEach((th, index) => {
@@ -809,6 +822,9 @@ details > .details-body { padding: 0 14px 14px; }
     if (bar && bar.classList.contains("cf-bar")) {
       bar.querySelector(".cf-count").textContent = active ? `Mostrando ${shown} de ${rows.length}` : pluralFilas(rows.length);
       bar.querySelector(".cf-clear").classList.toggle("hidden", !active);
+      const pager = bar.querySelector(".cf-pager"); pager.classList.toggle("hidden", pages <= 1);
+      pager.querySelector(".cf-page").textContent = `Página ${st.page + 1} de ${pages}`;
+      pager.querySelector("[data-pg=prev]").disabled = st.page <= 0; pager.querySelector("[data-pg=next]").disabled = st.page >= pages - 1;
       const chips = bar.querySelector(".cf-chips"); chips.innerHTML = "";
       Object.entries(st.sel).forEach(([index, set]) => {
         if (!set || !set.size) return;
@@ -820,7 +836,7 @@ details > .details-body { padding: 0 14px 14px; }
     }
   }
   function cfClearAll(table) {
-    const st = cfState(table); st.sel = {};
+    const st = cfState(table); st.sel = {}; st.page = 0;
     cfApply(table); cfCloseMenu();
   }
   function cfCloseMenu() { if (cfOpenMenu) { cfOpenMenu.remove(); cfOpenMenu = null; } }
@@ -864,11 +880,11 @@ details > .details-body { padding: 0 14px 14px; }
       const kind = action.dataset.cf;
       if (kind === "all") visibleChecks().forEach((c) => { c.checked = true; });
       else if (kind === "none") visibleChecks().forEach((c) => { c.checked = false; });
-      else if (kind === "clear") { delete st.sel[index]; cfApply(table); cfCloseMenu(); }
+      else if (kind === "clear") { delete st.sel[index]; st.page = 0; cfApply(table); cfCloseMenu(); }
       else if (kind === "apply") {
         const chosen = new Set(Array.from(list.querySelectorAll("input:checked")).map((c) => c.value));
         if (chosen.size) st.sel[index] = chosen; else delete st.sel[index];
-        cfApply(table); cfCloseMenu();
+        st.page = 0; cfApply(table); cfCloseMenu();
       }
     });
   }
@@ -898,7 +914,8 @@ details > .details-body { padding: 0 14px 14px; }
     const wrap = table.closest(".table-wrap");
     if (wrap && !(wrap.nextElementSibling && wrap.nextElementSibling.classList.contains("cf-bar"))) {
       const bar = document.createElement("div"); bar.className = "cf-bar";
-      bar.innerHTML = `<span class="cf-count" aria-live="polite"></span><span class="cf-chips"></span><button type="button" class="button secondary small cf-clear hidden">Quitar filtros</button>`;
+      bar.innerHTML = `<span class="cf-count" aria-live="polite"></span><span class="cf-chips"></span><button type="button" class="button secondary small cf-clear hidden">Quitar filtros</button><span class="cf-pager hidden"><button type="button" class="button secondary small" data-pg="prev">‹ Anterior</button> <span class="cf-page"></span> <button type="button" class="button secondary small" data-pg="next">Siguiente ›</button></span>`;
+      bar.querySelector(".cf-pager").addEventListener("click", (event) => { const b = event.target.closest("[data-pg]"); if (!b) return; st.page = (st.page || 0) + (b.dataset.pg === "next" ? 1 : -1); cfApply(table); });
       bar.querySelector(".cf-clear").addEventListener("click", () => cfClearAll(table));
       wrap.after(bar);
     }
