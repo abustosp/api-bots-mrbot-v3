@@ -28,7 +28,7 @@ services:
       file: worker.compose.yaml
       service: worker-updater
     environment:
-      UPDATER_COMPOSE_FILE: ${UPDATER_HOST_DIR:-}/worker-relay.compose.yaml
+      UPDATER_COMPOSE_FILE: ${UPDATER_HOST_DIR:-}/${UPDATER_COMPOSE_NAME:-worker-relay.compose.yaml}
       UPDATER_PROJECT: ${UPDATER_PROJECT:-mrbot-v3-worker-relay}
 
   frpc:
