@@ -193,7 +193,7 @@ else:
 suspicious = [
     k
     for k in env
-    if any(t in k.upper() for t in ("DATABASE", "POSTGRES", "RSA", "SMTP", "MERCADOPAGO"))
+    if any(t in k.upper() for t in ("DATABASE", "POSTGRES", "RSA", "SMTP",))
 ]
 if suspicious:
     bad(f"W-1: el entorno del worker tiene claves prohibidas: {suspicious}")

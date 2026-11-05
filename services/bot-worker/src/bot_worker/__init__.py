@@ -2,7 +2,7 @@
 
 Toda la configuracion llega por variables de entorno (ver config.py).
 Prohibido en este servicio: DSN/drivers/ORM de base de datos, clave
-privada RSA, claves de bucket, SMTP, MercadoPago y credenciales admin.
+privada RSA, claves de bucket, SMTP y credenciales admin.
 """
 
 from typing import TYPE_CHECKING

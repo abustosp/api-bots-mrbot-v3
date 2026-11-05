@@ -1,8 +1,7 @@
 """Configuración de central-api por variables de entorno.
 
 Todo secreto se lee SOLO desde aquí (nunca con ``os.environ`` disperso en
-routers): base de datos, HMAC de API keys, firma interna central-worker y
-credenciales de MercadoPago. La central SOLO conoce a los workers por su
+routers): base de datos, HMAC de API keys, firma interna central-worker. La central SOLO conoce a los workers por su
 IP:puerto y los contacta por HTTP. El inventario inicial llega en
 ``WORKER_NODES`` (``"10.0.0.11:8080,10.0.0.12:8080"``); el panel de
 administración puede sumar nodos en caliente (``POST /admin/workers``) y el

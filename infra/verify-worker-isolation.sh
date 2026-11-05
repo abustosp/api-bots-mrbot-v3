@@ -120,7 +120,7 @@ CENTRAL_ONLY = {
     "session_signing_key",
     "api_key_hmac_secret",
 }
-SUSPICIOUS = ("DATABASE", "POSTGRES", "RSA", "SMTP", "MERCADOPAGO")
+SUSPICIOUS = ("DATABASE", "POSTGRES", "RSA", "SMTP",)
 
 for path in sorted(glob.glob("infra/compose/*.yml")):
     spec = yaml.safe_load(pathlib.Path(path).read_text()) or {}

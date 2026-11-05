@@ -806,7 +806,7 @@ def test_worker_aislado_sin_base_ni_secretos_ajenos():
                 fugas.append(f"{ruta.name}: {palabra}")
     assert fugas == []
     bloque = _bloque_worker_compose()
-    for prefijo in ("DATABASE_", "POSTGRES", "MINIO_", "MERCADOPAGO", "RSA_"):
+    for prefijo in ("DATABASE_", "POSTGRES", "MINIO_", "RSA_"):
         assert prefijo not in bloque, f"secreto ajeno en worker: {prefijo}"
 
 

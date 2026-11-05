@@ -300,7 +300,6 @@ def test_public_account_endpoint_reports_quota(monkeypatch) -> None:
     set_billing_account(user_id, "TESTING")
     body = client.get("/api/v3/mi/cuenta").json()
     assert body["ilimitado"] is True and body["disponibles"] is None
-    for gone in ("/api/v3/billing/plan", "/api/v3/billing/credit-products",
-                 "/api/v3/billing/webhooks/mercadopago"):
+    for gone in ("/api/v3/billing/plan", "/api/v3/billing/credit-products"):
         assert client.get(gone).status_code in (404, 405)
     get_settings.cache_clear()

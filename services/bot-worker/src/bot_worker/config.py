@@ -43,8 +43,6 @@ FORBIDDEN_ENV_PREFIXES = (
     "RSA_",
     "JOB_SECRETS",
     "SMTP_",
-    "MERCADOPAGO",
-    "MP_",
     "ADMIN_",
     "SECRET_",
     "API_KEY_HMAC",

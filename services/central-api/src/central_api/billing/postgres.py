@@ -88,7 +88,6 @@ async def _open_locked_period(
     period = BillingAccountPeriod(
         id=new_uuid7(),
         user_id=uid,
-        plan_code=None,
         account_type=ACCOUNT_NORMAL,
         starts_at=start,
         ends_at=end,
@@ -285,7 +284,6 @@ async def assign_account_in_db(
                 account.requests_consumed = 0
                 account.generation_id = uuid.uuid4()
             account.max_requests = max_requests
-            account.plan_code = None
             account.expires_at = None
             account.updated_at = now
             open_periods = (
