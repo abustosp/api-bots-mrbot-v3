@@ -36,7 +36,7 @@
 | T-40 min | detener escritores V2 y snapshot SQLite | datos | `integrity_check = ok` |
 | T-30 min | importar `legacy` y ETL users (§Comandos) | datos | ETL sin errores bloqueantes |
 | T-15 min | reconciliación + revisión humana | datos + seguridad | todos los umbrales verdes |
-| T-10 min | sembrar catálogo, planes y período inicial (`python3 infra/legacy/seed_periods.py --apply`, plan `migrado-v2`; sidecar de consumo heredado sin secretos) | central | DDL y permisos validados |
+| T-10 min | asignar tipo de cuenta (`PRUEBA`, `TESTING` o `NORMAL`) a los usuarios migrados desde el panel admin (ver `services/central-api/BILLING.md`) | central | DDL y permisos validados |
 | T-5 min | central + workers V3 sin tráfico | operaciones | health, heartbeat y fake job verdes |
 | T-0 | abrir `/api/v3`, habilitar DNS/ruta | release manager | aprobación go |
 | T+15 min | canarios de bots y autenticación | QA | sin fuga ni duplicación |

@@ -20,7 +20,6 @@ infra/legacy/
 ├── generate_legacy_ddl.py           # SQLite (ro) -> DDL determinista
 ├── import_legacy.py                 # carga re-ejecutable + manifest.json
 ├── etl_users.py                     # users -> public.users (UUIDv4) + mapa
-├── seed_periods.py                  # cuota V2 -> plan/suscripciones/periodos
 └── reconcile_counts.py              # conciliación origen vs legacy
 ```
 
@@ -51,12 +50,6 @@ python3 infra/legacy/etl_users.py \
 
 # 5. Sellar ANTES de exponer la central
 psql "$DATABASE_URL" -f infra/legacy/03-legacy-readonly.sql
-
-# 5b. Siembra inicial de cuota migrada (plan `migrado-v2`, suscripciones
-#     ACTIVA/CANCELADA, un periodo ABIERTO por habilitado; consumo heredado
-#     en sidecar JSON, sin filas de ledgers). Se aplica con el mapa ya creado
-#     por el ETL; re-ejecutable sin duplicar:
-python3 infra/legacy/seed_periods.py --apply
 
 # 6. Reconciliación (umbral: igualdad exacta en los 33 conteos)
 python3 infra/legacy/reconcile_counts.py \
@@ -91,11 +84,8 @@ UNION ALL SELECT 'user_id_map', count(*) FROM legacy.user_id_map;
   `key_prefix` es UNIQUE: una fila migrada no autenticaría nunca. El ETL no
   crea filas en `public.api_keys`; la primera clave V3 se emite por el flujo
   normal de la central. `packages/mrbot-contracts` no se tocó.
-- Siembra inicial de cuota: `seed_periods.py` (este scope) genera plan
-  `migrado-v2`, suscripciones y primer periodo por usuario migrado según
-  plan 07 §3.6 contra el DDL real (`0006`). Sin filas de `usage_ledger` ni
-  `credit_ledger`: el primero exige `job_id` y el segundo no admite dinero
-  inferido (plan 04 §1.1). Lo aplica el operador con DSN en T-10.
+- Cuota: no se siembra. Todo usuario migrado nace con cuenta `PRUEBA`; el tipo de
+  cuenta se asigna a mano (panel admin, `services/central-api/BILLING.md`).
 - Divergencia fuera de scope (no se toca aquí, ver runbook): el DDL de este
   scope usa `legacy.user_id_map(legacy_user_id, v3_user_id, migrated_at,
   source_mail, source_row_checksum)` (plan 07 §3.4) mientras

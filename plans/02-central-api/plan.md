@@ -2013,7 +2013,7 @@ La retención de trazas respeta política de privacidad.
 
 Responde `200` si el proceso FastAPI puede aceptar requests y el event loop no está en shutdown.
 
-No consulta worker local, PostgreSQL, MinIO ni MercadoPago.
+No consulta worker local, PostgreSQL ni MinIO.
 
 Esto permite reiniciar o escalar central-api independientemente de workers.
 
@@ -2193,9 +2193,6 @@ La tabla siguiente contiene solo configuración de la central.
 | `SMTP_PASSWORD` | secreto | vacío | Credencial SMTP. |
 | `SMTP_FROM` | email | vacío | Remitente de notificaciones. |
 | `SMTP_REQUIRE_TLS` | booleano | `true` | Exigir TLS SMTP. |
-| `MERCADOPAGO_ACCESS_TOKEN` | secreto | vacío en F2 | Token de API MercadoPago. |
-| `MERCADOPAGO_WEBHOOK_SECRET` | secreto | vacío en F2 | Validación de webhooks MercadoPago. |
-| `MERCADOPAGO_PUBLIC_KEY` | string | vacío en F2 | Checkout público si aplica. |
 | `OIDC_ISSUER_URL` | URL | requerido para admin | Proveedor de identidad admin. |
 | `OIDC_CLIENT_ID` | string | requerido para admin | Cliente OIDC. |
 | `OIDC_CLIENT_SECRET` | secreto | requerido para admin | Secreto OIDC confidencial. |
@@ -2215,7 +2212,6 @@ La tabla siguiente contiene solo configuración de la central.
 | Clave RSA privada | Descifra credenciales entrantes de clientes. | SEC-3 impide que el worker la posea. |
 | `OBJECT_STORAGE_ACCESS_KEY` y `OBJECT_STORAGE_SECRET_KEY` | Firma URLs limitadas de upload y download. | El worker usa solo URLs prefirmadas. |
 | SMTP | Envía avisos de cuenta, billing e incidentes admin. | No es responsabilidad de ejecución. |
-| Tokens y webhook secret MercadoPago | Procesa pagos y eventos financieros. | El worker no toma decisiones monetarias. |
 | Secreto HMAC de API keys | Verifica clientes y emite keys. | No debe autenticar clientes. |
 | Credenciales OIDC y sesión admin | Identifica personas del panel. | No monta panel ni sesiones humanas. |
 | KMS/envelope key de payload persistido | Protege jobs guardados en la DB. | Solo recibe credencial efímera en memoria. |
@@ -2332,7 +2328,7 @@ No deben mezclarse con el environment de central-api.
 
 52. La imagen de central contiene credenciales de Postgres y firmas de storage solo mediante secretos inyectados.
 
-53. La imagen del worker no contiene `DATABASE_URL`, clave RSA privada, tokens MercadoPago, SMTP ni credenciales permanentes del bucket.
+53. La imagen del worker no contiene `DATABASE_URL`, clave RSA privada, SMTP ni credenciales permanentes del bucket.
 
 54. La documentación OpenAPI y catálogo se validan en CI contra el manifiesto de bots.
 

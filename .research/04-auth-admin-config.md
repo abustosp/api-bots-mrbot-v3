@@ -34,7 +34,7 @@
 23. Those reads and destructive fiscal-log operations are audited, but ordinary user/admin actions are not comprehensively audited.
 24. The panel is Jinja2 server-rendered HTML, not a separate SPA or API management console.
 25. It already exposes worker-related job state, worker IDs, cancellation controls, queue metrics, and job-history retention.
-26. No MercadoPago, payment, billing, subscription, checkout, or entitlement implementation was found.
+26. No payment provider integration, payment, billing, subscription, checkout, or entitlement implementation was found.
 
 ## 2. Customer authentication model
 
@@ -556,9 +556,9 @@ sequenceDiagram
 
 ## 10. Payments and billing search
 
-- Repository-wide search for `MercadoPago|mercadopago|payment|billing|subscription|checkout` returned no payment/billing implementation.
+- Repository-wide search for `payment|billing|subscription|checkout` returned no payment/billing implementation.
 - The two incidental hits were unrelated Spanish site UI text in `bots_dev/consulta_pagos_veps/consulta_pagos_veps_draft.py:29` and a test comment containing “checkout.”
-- No MercadoPago SDK import, token/config variable, webhook handler, checkout endpoint, payment entity, invoice entity, subscription state, price/plan model, or entitlement code was found.
+- No payment-provider SDK import, token/config variable, webhook handler, checkout endpoint, payment entity, invoice entity, subscription state, price/plan model, or entitlement code was found.
 - Current commercial control is only the administrator-managed integer monthly quota on `users`.
 - V3 needs a separate billing/entitlement boundary if paid plans are in scope: provider webhooks, verified event signatures, product/price mapping, entitlement ledger, idempotency, dispute/refund behavior, and reconciliation.
 
@@ -611,5 +611,5 @@ sequenceDiagram
 - Reviewed every template under `app/templates/admin/` and the mail template location referenced by the email helper.
 - Reviewed the complete `.env.example`, including the duplicate JSON-bucket declaration.
 - Read `app/core/config.py` and its canonical re-export target `app/jobs/config.py` to avoid treating the 20-line shim as the complete settings inventory.
-- Searched repository-wide for API-key dependency use, quota increments, RSA/job-secret call sites, storage usage, `os.getenv` configuration reads, and MercadoPago/payment/billing terms.
+- Searched repository-wide for API-key dependency use, quota increments, RSA/job-secret call sites, storage usage, `os.getenv` configuration reads, and payment/billing terms.
 - No code, configuration, commit, or source-repository file was modified during this research.

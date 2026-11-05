@@ -886,7 +886,7 @@ El tag debe fijarse además por digest inmutable en CI. Se publica `image_versio
 | Playwright provisto por base y `playwright-stealth` si se conserva. | Rutas públicas, admin Jinja y autenticación de cliente. |
 | `cryptography` para TLS o validación, no RSA privada. | RSA privada, `MRBOT_KEYS_DIR`, `JOB_SECRETS_KEY`. |
 | `requests` o `httpx` para CapMonster y callbacks. | SDK MinIO y access/secret key. |
-| pandas, numpy, openpyxl, pdfplumber, BeautifulSoup, aiofiles. | SMTP, MercadoPago, billing y templates de email. |
+| pandas, numpy, openpyxl, pdfplumber, BeautifulSoup, aiofiles. | SMTP, billing y templates de email. |
 | `openssl` solo si el flujo de plugin realmente convierte PEM. | Migraciones, SQLite, `reporte/`, logs por bot V2. |
 La imagen no copia `bots_dev/`, `app/api/routes`, `app/jobs/worker.py`, `app/models`, `alembic/`, `reporte/`, volumen SQLite ni `mrbot-keys`. Corre como usuario no root, tiene `/work` escribible efímero, stdout estructurado e init para recolectar hijos Chromium.
 ### 13.3 Migración futura a imágenes por bot o grupo
@@ -958,7 +958,6 @@ bot-worker:
 | `SMTP_*`, `CONTEXT_SSL` | El worker no envía correo. |
 | `MRBOT_KEYS_DIR`, PEM RSA privada, `JOB_SECRETS_KEY` | SEC-3 y credenciales solo de central. |
 | `API_KEY_HMAC_SECRET`, `SECRET_KEY`, `ADMIN_*` | No autentica clientes ni administra usuarios. |
-| `MERCADOPAGO_*` | No factura ni cobra. |
 | `ALEMBIC_*`, SQLite, historial de jobs | No migra ni persiste estado. |
 ---
 ## 15. Catálogo de bots a portar, insumo F3
@@ -1013,7 +1012,7 @@ Orden de F3 recomendado: primero `siper` o `certificado_mipyme` para validar con
 10. Una prueba de caos mata un worker en job de lectura y la central reencola por lease vencida, sin operador y sin aceptar un resultado tardío de la lease vieja.
 11. Peticiones sin token reciben `401`; token no autorizado recibe `403`; la red de despliegue no publica puerto de worker ni crea Ingress público.
 12. La rotación de token admite período de gracia acotado y revocar un worker no exige rotar token de toda la flota.
-13. El worker no contiene RSA privada, `MRBOT_KEYS_DIR`, `JOB_SECRETS_KEY`, credenciales MinIO, SMTP, MercadoPago ni configuración admin.
+13. El worker no contiene RSA privada, `MRBOT_KEYS_DIR`, `JOB_SECRETS_KEY`, credenciales MinIO, SMTP ni configuración admin.
 14. Un canario de credencial no aparece en logs, excepciones, eventos, resultados, artefactos, workspace ni callbacks, incluso ante error forzado.
 15. Los plugins no pueden importar DB, leer environment durante negocio, usar `os.getcwd`, escribir fuera de `work_dir` ni subir a keys arbitrarias.
 16. Un plugin retorna `BotResult` tipado. Retornos ambiguos o `CANCELADO` como eje de resultado fallan la validación de contrato.

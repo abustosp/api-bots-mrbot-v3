@@ -232,7 +232,7 @@ def do_load(staging: str, report_path: str, send_emails: bool, dry_run: bool) ->
                 ).fetchone()[0]
                 if vivos:
                     raise SystemExit(f"abortado: {vivos} jobs vivos de usuarios a borrar")
-                for t in ("credit_ledger", "payments", "subscriptions", "upload_tickets",
+                for t in ("upload_tickets",
                           "billing_usage", "billing_account_periods"):
                     n = cur.execute(f"SELECT count(*) FROM {t} WHERE user_id = ANY(%s::uuid[])", (ids,)).fetchone()[0]
                     if n:

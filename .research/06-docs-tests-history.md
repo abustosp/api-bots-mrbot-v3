@@ -190,7 +190,7 @@
 | Worker health | Suggested DB heartbeat | V3 requires worker-reported health and depth to central API. Protocol is open. |
 | Worker max jobs | No fixed per-worker value in plan | V3 fixes this at five. |
 | Rate fairness | Optional future Redis semaphore and fair share | V3 should decide whether tiers/credits drive fairness. |
-| Payments | Not addressed | V3 must design MercadoPago subscription and top-up flows. |
+| Payments | Not addressed | V3 needs a quota/account model (implemented as manually assigned account types; no payments). |
 | IDs | Not addressed in cluster plan | V3 must enforce UUIDv4 user IDs and UUIDv7 bot/job table IDs. |
 | User timestamps/reset | Not addressed | V3 must omit the three specified user columns. |
 | V1/V2 sync compatibility | Plan intentionally retains both routes | V3 must choose deprecation/migration behavior. |
@@ -207,7 +207,7 @@
 | User UUIDv4 and bot/job UUIDv7 IDs | Plan is silent. Earlier V2 documents retain integer user foreign keys. | **MISSING / likely conflict with inherited schema.** Make IDs a V3 schema invariant. |
 | No sequential IDs anywhere | Plan does not specify replacing legacy numeric primary keys. | **MISSING.** V3 schema/migrations must prevent sequence IDs. |
 | Drop user `fecha_ultimo_reset`, `created_at`, `updated_at` | Plan does not address user model redesign. | **MISSING.** V3 must not copy V2 user model. |
-| Tier quotas, credit top-ups, MercadoPago | Not addressed. | **MISSING.** This is new V3 domain work. |
+| Tier quotas, credit top-ups, payments | Not addressed. | **MISSING.** This is new V3 domain work. |
 | Monorepo and per-part READMEs | Plan describes one application/image and k8s manifests. | **NOT A LOGICAL CONFLICT**, but the V3 repo layout must supersede this packaging choice. |
 ## 4. `PLAN.md` and `ORIGINAL_REQUEST.md`
 ### 4.1 `PLAN.md`
@@ -773,7 +773,7 @@
 8. Design assignment idempotency and lease/retry behavior before implementing workers.
 9. Use PostgreSQL with explicit UUID columns: UUIDv4 for users and UUIDv7 for bot/job-related tables, with no sequence primary keys.
 10. Do not migrate V2 `fecha_ultimo_reset`, `created_at`, or `updated_at` into V3 users table.
-11. Model subscription tier allowance, consumed quota, credits, top-up purchase, MercadoPago payment state/webhooks, and audit ledger centrally.
+11. Model subscription tier allowance, consumed quota, credits, top-up purchase, and audit ledger centrally (payments were later dropped; accounts are managed manually).
 12. Preserve URL-free relational persistence and dynamically minted artifact URLs if MinIO/object storage is retained.
 13. Make async job execution the only V3 execution path. If legacy synchronous endpoints survive temporarily, isolate them in a documented deprecation adapter with a sunset plan.
 14. Create monorepo root README plus service-specific READMEs for central API, worker, shared packages, infrastructure, and migrations.

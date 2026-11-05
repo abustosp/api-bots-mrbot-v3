@@ -12,7 +12,7 @@ Diseno: [plan de infra](../../plans/06-infra/plan.md).
   (`--concurrency 5` entra por CLI; el máximo es 10).
 - El build verifica que `psycopg`, `sqlalchemy` y `alembic` no son
   importables (invariante W-1). Sin driver de base, sin modelos ORM,
-  sin clave RSA, sin SMTP ni MercadoPago.
+  sin clave RSA ni SMTP.
 - Build desde la raiz del monorepo:
 
 ```bash

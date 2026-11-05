@@ -182,7 +182,7 @@ Una prueba CI verifica que los contextos no contienen secretos ni `bots_dev/` sa
 | Imagen | Base | Incluye | Excluye de forma obligatoria |
 |---|---|---|---|
 | `central-api` | Python slim por digest | FastAPI, Uvicorn, SQLAlchemy, Alembic, `psycopg`, Jinja, MinIO broker | Navegador, Playwright, Chromium, bots pesados. |
-| `bot-worker` | Base Playwright interna por digest | Runtime, bots, Chromium, Playwright, PDF/XLSX/HTML parsing | `psycopg`, SQLAlchemy, Alembic, modelos DB, RSA privada, SMTP, MercadoPago. |
+| `bot-worker` | Base Playwright interna por digest | Runtime, bots, Chromium, Playwright, PDF/XLSX/HTML parsing | `psycopg`, SQLAlchemy, Alembic, modelos DB, RSA privada, SMTP. |
 
 La base worker V2 conocida es `docker.abp.net.ar/abustosp/bb:py3.14.7-pw1.62-20260818`.
 
@@ -420,7 +420,6 @@ services:
       - session_signing_key
       - rsa_private_key
       - smtp_password
-      - mercadopago_access_token
       - minio_central_credentials
     ports:
       - "127.0.0.1:8000:8000"
@@ -576,8 +575,6 @@ secrets:
     file: ./secrets/rsa_private_key.pem
   smtp_password:
     file: ./secrets/smtp_password.txt
-  mercadopago_access_token:
-    file: ./secrets/mercadopago_access_token.txt
   minio_central_credentials:
     file: ./secrets/minio_central_credentials.txt
   worker_auth_token:
@@ -665,7 +662,6 @@ El worker nunca recibe:
 - la clave privada RSA ni `MRBOT_KEYS_DIR`.
 - credenciales MinIO de larga duración.
 - `SMTP_USER`, `SMTP_PASSWORD` ni configuración SMTP.
-- token, clave webhook o configuración MercadoPago.
 - `API_KEY_HMAC_SECRET`.
 - claves de sesión administrativa.
 - credenciales de proxy, claves de captcha ni endpoints de servicio por
@@ -1138,7 +1134,7 @@ Un alerta avisa antes de 70%, 85% y 95% de capacidad de volumen.
 10. Las migraciones se ejecutan mediante job one-off y ningún `CMD` de aplicación ejecuta `alembic upgrade head`.
 11. Compose inicia dos o más workers y estos no publican puerto al host.
 12. Cada worker tiene `init: true`, `/dev/shm` memory-backed de 2 GiB, `deploy.resources.limits.pids=512`, 3 GiB RAM y `stop_grace_period` de al menos 150 s.
-13. El worker no recibe `DATABASE_URL`, RSA privada, credenciales MinIO, SMTP ni MercadoPago.
+13. El worker no recibe `DATABASE_URL`, RSA privada, credenciales MinIO, SMTP.
 14. Los secretos runtime se montan desde Docker secrets o secret manager y no se pasan como build arguments.
 15. La credencial filtrada de `readme-registry.md` V2 se rota antes de usar registry V3 y no aparece en documentación V3.
 16. La CI ejecuta detección por paths, pruebas offline, contratos, Playwright gate, gitleaks, Trivy, SBOM y pruebas integradas pertinentes.

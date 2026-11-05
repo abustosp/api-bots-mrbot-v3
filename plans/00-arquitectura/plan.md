@@ -168,7 +168,6 @@ El diagnóstico V2 era correcto: SQLite bloquea el cluster, la recuperación glo
 | R6 monorepo por servicios | Una aplicación y una imagen con comandos distintos | PARCIAL | Monorepo sí, servicios con dependencias, Dockerfiles y README propios |
 | R7 tiers | No tratado | NO CUBIERTO | Billing se realiza antes de asignar |
 | R8 créditos | No tratado | NO CUBIERTO | Ledger y reserva de consumo pertenecen a central |
-| R9 MercadoPago | No tratado | NO CUBIERTO | Integración de billing independiente |
 | R10 central balancea workers sanos | Workers se auto-seleccionan jobs; KEDA solo escala | CONFLICTO DIRECTO | Scheduler central elige destino y persiste asignación |
 | R11 admin ve workers no disponibles | Heartbeat sugerido en DB, sin modelo de visualización | PARCIAL | Heartbeat HTTP actualiza flota y panel consulta estado central |
 | R12 worker informa salud y cola | Heartbeat DB propuesto, sin contrato ni profundidad | PARCIAL | Mensaje heartbeat tipado con capacidad, cola y recursos |
@@ -1426,7 +1425,6 @@ La frase operativa es: un deploy nunca cambia la semántica de un job en vuelo. 
 | R6 | Monorepo y README por parte | ADR-004, §8.2 | CI valida árbol, README raíz y READMEs de servicios y paquete |
 | R7 | Suscripciones con tiers | §3 principio 4, límites central | Test reserva cuota de período de suscripción antes de ASIGNADO |
 | R8 | Créditos | §3 principio 4, §5.15 | Test de concurrencia no deja saldo negativo y produce ledger único |
-| R9 | MercadoPago | Límite central §8.1 | Webhook idempotente por evento acredita o actualiza suscripción una vez |
 | R10 | Central balancea workers sanos | §3.1, §4.3, §5.4 | Con tres workers, central asigna por capacidad, versión y salud sin polling DB worker |
 | R11 | Admin informa workers no disponibles | §5.4, heartbeat §5.7 | Al faltar tres heartbeats, panel expone worker CAIDO y último visto |
 | R12 | Worker reporta salud y cola | §5.7 | Heartbeat actualiza capacidad, cola, recursos e intentos visibles centralmente |

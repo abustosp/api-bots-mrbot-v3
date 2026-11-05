@@ -10,20 +10,20 @@ Este plan **sí** posee:
 - Catálogo declarativo de bots y operaciones.
 - Cola, ciclo de vida, resultado, eventos, leases y artefactos de jobs.
 - Registro y telemetría persistida de workers.
-- Planes, suscripciones, períodos, consumo, créditos y pagos.
+- Cuentas de facturación por usuario (`billing_accounts`, `billing_account_periods`, `billing_usage`), definidas en migraciones Alembic y descritas en `plans/04-billing/plan.md`.
 - Auditoría inmutable y el esquema de compatibilidad `legacy`.
 - DDL base, índices, convenciones Alembic y trabajos de poda.
 Este plan **no** posee:
 - Rutas HTTP, Pydantic, algoritmo de scheduler ni autenticación mTLS del protocolo. Son responsabilidad de `plans/02-central-api/plan.md` y `plans/03-worker/plan.md`.
 - La UX del administrador, aunque esta consulta las tablas aquí definidas. Pertenece a `plans/05-admin-panel/plan.md`.
-- Precio comercial, integración de checkout ni firma/validación de MercadoPago. La semántica de facturación se coordina con `plans/04-billing/plan.md`.
+- Precio comercial ni integración con pasarelas de pago: no existe. La semántica de cuentas y cupo se coordina con `plans/04-billing/plan.md`.
 - Almacenamiento físico de bytes de archivos. Es MinIO/S3. La base guarda solamente metadatos y claves de objeto, nunca URL prefirmadas.
 - Migrar y reinterpretar el contenido histórico de las 28 tablas de consulta durante la fase inicial. Se importa sin modificación a `legacy`.
 ## 2. Principios de diseño del esquema
 1. **Una única fuente de verdad.** PostgreSQL es la autoridad para identidad, admisión, asignación, cobro, estado y auditoría. No existen contadores equivalentes en memoria del worker ni tablas por réplica.
 2. **Un único escritor de base.** Solo `central-api` abre conexiones de aplicación. Los workers están aislados de la DB y sus callbacks atraviesan validación, autorización e idempotencia en la central.
 3. **Estado de job normalizado.** `jobs` contiene una fila desde creación hasta estado terminal. No se copia ni borra una fila para moverla entre activa e histórica como hacía V2 con `playwright_jobs_active` y `playwright_jobs_history`.
-4. **Append-only donde importa.** `usage_ledger`, `credit_ledger`, `payment_events`, `job_events` y `audit_log` no se actualizan ni borran por lógica de negocio. Rectificar equivale a agregar un hecho compensatorio ligado al original.
+4. **Append-only donde importa.** `job_events` y `audit_log` no se actualizan ni borran por lógica de negocio. Rectificar equivale a agregar un hecho compensatorio ligado al original.
 5. **JSONB solo para variación real.** La identidad, filtros operativos, estados, fechas, claves, ownership y artefactos se tipan en columnas. Los campos que cambian por bot viven en `job_results.payload JSONB`.
 6. **Secretos fuera de logs.** Nunca se persisten en claro `clave`, `clave_representante` ni `clave_encriptada`; la tabla `jobs` solo guarda `credential_ciphertext` RSA y el acceso administrativo descifra bajo auditoría. Tampoco se persisten URL prefirmadas ni tokens de proveedor.
 7. **UTC y tiempo con zona.** Todos los instantes son `timestamptz`, almacenados y comparados en UTC. Los períodos de facturación son intervalos explícitos, no inferencias desde una fecha del usuario.
@@ -43,7 +43,7 @@ PostgreSQL almacena ambos formatos como el tipo nativo `uuid`, no como `varchar(
 La aplicación debe llamar `uuid.uuid4()` al construir la entidad. No se debe depender de que un cliente entregue el ID. El DDL no instala un `DEFAULT` en `users.id`, de forma que la omisión falle y revele un bug de frontera.
 `gen_random_uuid()` de `pgcrypto` es una alternativa válida para UUIDv4 generados por la base, especialmente para scripts SQL administrativos. No es la estrategia canónica porque se desea portabilidad de pruebas, consistencia con la creación de objetos del dominio y trazabilidad previa al `INSERT`. Si se habilita como defensa opcional, se hace con `CREATE EXTENSION IF NOT EXISTS pgcrypto` y `DEFAULT gen_random_uuid()`, documentando que el ID puede no estar disponible hasta el insert. La migración inicial elegirá una sola estrategia, no ambas de manera ambigua.
 ### 3.3 IDs UUIDv7 para bots, jobs, facturación y auditoría
-`bots`, `bot_operations`, las tablas de ejecución, flota, facturación y auditoría usan UUIDv7. UUIDv7 ordena de forma aproximada por milisegundo de creación. Frente a UUIDv4 aleatorio reduce dispersión de páginas B-tree en tablas de alta inserción, como `jobs`, `job_events`, `usage_ledger`, `payment_events` y `audit_log`.
+`bots`, `bot_operations`, las tablas de ejecución, flota, facturación y auditoría usan UUIDv7. UUIDv7 ordena de forma aproximada por milisegundo de creación. Frente a UUIDv4 aleatorio reduce dispersión de páginas B-tree en tablas de alta inserción, como `jobs`, `job_events` y `audit_log`.
 El orden de `jobs.id` es además el desempate natural de cola. La reclamación ordena por `created_at, id`, y `id` garantiza estabilidad entre inserciones del mismo instante. No se reemplaza `created_at`, ya que la marca explícita sigue siendo necesaria para SLA, retención y diagnóstico. Sí reemplaza la necesidad de un entero correlativo para FIFO.
 V2 ya contiene `app/utils/uuid7.py`, que utiliza el paquete `uuid-utils`, y `app/jobs/manager.py` ya crea `job_id` UUIDv7. V3 reutiliza ese patrón en un módulo compartido de persistencia y genera los valores en la aplicación antes de persistirlos. Esto permite pruebas deterministas mediante un generador inyectable y evita imponer extensiones no estándar en instalaciones PostgreSQL administradas.
 La extensión `pg_uuidv7` es una alternativa operativa. Permite algo equivalente a `DEFAULT uuid_generate_v7()` o a la función expuesta por la versión de extensión instalada. Es conveniente para inserciones SQL masivas y para defensas server-side, pero añade dependencia de empaquetado, privilegios de instalación y nombres de función no portables. No forma parte del baseline de PostgreSQL 17 ni debe asumirse disponible. Si se adopta, se encapsula en una migración condicional, se registra la versión exacta y no se mezclan IDs generados por extensión y aplicación sin una prueba de monotonicidad.
@@ -93,20 +93,18 @@ La consulta excluye deliberadamente `legacy`: ese esquema preserva enteros V2 po
 | `id` | `INTEGER` PK autoincremental | `id uuid` UUIDv4 PK | Elimina enumeración y la secuencia. |
 | `mail` | `String`, nullable, única | `email text NOT NULL`, única case-insensitive | Identidad de contacto no ambigua. Normalizar a minúsculas en la aplicación y restringirla. |
 | `api_key` | verificador HMAC en la fila de usuario | eliminado | Se mueve a `api_keys.verifier_hmac`. Soporta varias claves y rotación sin alterar identidad. |
-| `maximas_consultas_mensuales` | contador límite mutable | eliminado | Pertenece al snapshot `subscription_periods.included_units`. |
-| `consultas_realizadas` | contador mensual mutable | eliminado | Se deriva de hechos `usage_ledger` para el período. |
+| `maximas_consultas_mensuales` | contador límite mutable | eliminado | Pertenece al cupo del período (`billing_account_periods`). |
+| `consultas_realizadas` | contador mensual mutable | eliminado | Se deriva de `billing_usage` para el período. |
 | `habilitado` | boolean nullable, default `False` | `habilitado boolean NOT NULL DEFAULT false` | Mantiene bloqueo explícito de la cuenta. |
-| `fecha_ultimo_reset` | fecha de reset de cuota | eliminado | El límite se reinicia al abrir un nuevo `subscription_periods`, no al autenticar. |
+| `fecha_ultimo_reset` | fecha de reset de cuota | eliminado | El límite se reinicia al abrir un nuevo `billing_account_periods`, no al autenticar. |
 | `created_at` | fecha Python de alta | eliminado | Remoción explícita solicitada. La evidencia temporal administrativa vive en `audit_log`. |
 | `updated_at` | fecha Python `onupdate` | eliminado | Remoción explícita solicitada. Los cambios auditables se registran como eventos. |
 Evidencia: V2 define las columnas en `app/models/user.py:8-24`. El inventario `.research/04-auth-admin-config.md` §4 confirma que `fecha_ultimo_reset` no resetea contraseña pese a su docstring, sino consumo mensual.
 ### 4.2 Del reset perezoso a períodos explícitos
 En V2 `validate_api_key` de `app/api/deps.py:102-155` autentica email y clave, rechaza `habilitado=False`, lee el reloj UTC y compara el año y mes de `fecha_ultimo_reset`. Si el mes cambió, ejecuta `consultas_realizadas = 0`, escribe `fecha_ultimo_reset = now` y hace `commit`. Luego rechaza con 429 si `consultas_realizadas >= maximas_consultas_mensuales`. El incremento ocurre más tarde y por ruta mediante `incrementar_consultas_realizadas`. Es un efecto lateral de autenticación, no una transacción de admisión.
 V3 elimina completamente esa conducta. Autenticar una API key solo identifica a un `users.id`, valida la vigencia de la clave y comprueba `users.habilitado`. Nunca cambia consumo y nunca abre o resetea períodos.
-Al crear o renovar una suscripción, el servicio de facturación crea un `subscription_periods` con límites congelados desde el plan: `starts_at`, `ends_at`, `included_units`, `credit_unit_price` y estado `ABIERTO`. El scheduler/admisor localiza el período que satisface `starts_at <= now() < ends_at` y `status='ABIERTO'`. La reserva de uso y la inserción del job se hacen en la misma transacción. Cada reserva crea una entrada `usage_ledger` de `units = 1`, `event_type='RESERVA'`, ligada al `job_id` y al `period_id`.
-La cuota consumida es una suma, no un contador. Para un período se suman unidades del ledger, donde `RESERVA` agrega unidades y `REEMBOLSO` agrega unidades negativas. Al completar, una entrada `CONFIRMACION` de cero unidades fija el hecho final sin duplicar consumo. Si se cancela o falla bajo una política reembolsable, `REEMBOLSO` compensa la reserva. La restricción única `(job_id, event_type)` vuelve idempotente cada paso.
-El período siguiente existe aunque nadie llame a la API: puede ser creado por webhook de renovación o por un job de facturación. No hay lógica basada en el primer request del mes. La zona y los límites son los de la suscripción, no UTC-calendario implícito.
-Un usuario sin suscripción activa no tiene `subscription_periods` abierto. La admisión no crea uno por autenticación y no consume una cuota imaginaria. Debe intentar débito de `credit_ledger` si el producto permite créditos sin suscripción. Si el saldo disponible no cubre la operación, el job se rechaza antes de insertarse con error de entitlement. No se deja un `PENDIENTE` que el scheduler reintente eternamente, defecto posible en V2 según `.research/02-jobs-workers.md` §1.4.
+El cupo lo gobierna `billing_accounts` según el tipo de cuenta (`PRUEBA`, `TESTING`, `NORMAL`, manuales), con períodos en `billing_account_periods` y consumo en `billing_usage`; ver `plans/04-billing/plan.md`. La reserva de uso y la inserción del job se hacen en la misma transacción. Si la cuenta no tiene cupo, el job se rechaza antes de insertarse con error de entitlement. No se deja un `PENDIENTE` que el scheduler reintente eternamente, defecto posible en V2 según `.research/02-jobs-workers.md` §1.4.
+
 ### 4.3 API keys separadas y rotables
 `api_keys` separa credencial de identidad. La aplicación entrega el secreto únicamente en la creación o rotación. Guarda `key_prefix` para selección y soporte, y `verifier_hmac` con formato versionado, por ejemplo `hmac-sha256$<hex>`, usando secreto rotado por key-id configurable. La comparación usa `hmac.compare_digest`.
 Una cuenta puede tener varias claves activas por automatización o transición. La rotación crea una fila nueva, opcionalmente con `replaces_key_id`, y revoca la previa mediante `revoked_at`. No se sobrescribe el verificador, lo que preserva trazabilidad. `last_used_at` se actualiza como telemetría acotada y es la única excepción operativa documentada a la inmutabilidad de credential metadata. Nunca se almacena el secreto en claro.
@@ -278,90 +276,9 @@ El claim necesita permanecer rápido cuando existan millones de jobs terminales.
 | `metrics` | `jsonb` | no | `'{}'::jsonb` | CHECK object | CPU, memoria y diagnóstico no canónico. |
 | `received_at` | `timestamptz` | no | `now()` | índice de retención | Hora de central. |
 ### 5.5 Facturación
-#### `plans`
-| Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
-|---|---|---:|---|---|---|
-| `id` | `uuid` | no | aplicación UUIDv7 | PK | Identidad de versión comercial. |
-| `code` | `varchar(64)` | no | ninguno | UQ | Código inmutable de plan. |
-| `name` | `varchar(120)` | no | ninguno | ninguno | Nombre visible. |
-| `included_units` | `integer` | no | ninguno | CHECK `>= 0` | Cuota por período. |
-| `period_days` | `smallint` | no | `30` | CHECK `1..366` | Longitud contractual. |
-| `price_cents` | `integer` | no | ninguno | CHECK `>= 0` | Precio ARS en centavos. |
-| `currency` | `char(3)` | no | `'ARS'` | CHECK ISO básico | Moneda. |
-| `active` | `boolean` | no | `true` | índice parcial | Puede dejar de venderse sin alterar contratos. |
-| `metadata` | `jsonb` | no | `'{}'::jsonb` | CHECK object | Metadatos no contables. |
-#### `subscriptions`
-| Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
-|---|---|---:|---|---|---|
-| `id` | `uuid` | no | aplicación UUIDv7 | PK | Suscripción del usuario. |
-| `user_id` | `uuid` | no | ninguno | FK `RESTRICT`, UQ activa parcial | Titular. |
-| `plan_id` | `uuid` | no | ninguno | FK `RESTRICT` | Plan contratado vigente. |
-| `status` | `varchar(16)` | no | ninguno | CHECK | Ciclo comercial. |
-| `provider` | `varchar(32)` | sí | ninguno | CHECK | `MERCADOPAGO` en fase inicial. |
-| `provider_subscription_id` | `varchar(160)` | sí | ninguno | UQ parcial | Referencia externa. |
-| `current_period_start` | `timestamptz` | sí | ninguno | ninguno | Cache de navegación, no fuente de cuota. |
-| `current_period_end` | `timestamptz` | sí | ninguno | ninguno | Cache de navegación. |
-| `cancel_at_period_end` | `boolean` | no | `false` | ninguno | Política de renovación. |
-| `created_at` | `timestamptz` | no | `now()` | ninguno | Alta contractual. |
-| `ended_at` | `timestamptz` | sí | ninguno | índice | Final real. |
-#### `subscription_periods`
-| Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
-|---|---|---:|---|---|---|
-| `id` | `uuid` | no | aplicación UUIDv7 | PK | Período facturable. |
-| `subscription_id` | `uuid` | no | ninguno | FK `RESTRICT`, índice | Suscripción origen. |
-| `starts_at` | `timestamptz` | no | ninguno | UQ con suscripción | Inicio inclusivo. |
-| `ends_at` | `timestamptz` | no | ninguno | CHECK `> starts_at`, índice | Fin exclusivo. |
-| `status` | `varchar(16)` | no | `'ABIERTO'` | CHECK | Apertura, cierre o anulación. |
-| `included_units` | `integer` | no | ninguno | CHECK `>= 0` | Snapshot del plan. |
-| `credit_unit_price_cents` | `integer` | no | `0` | CHECK `>= 0` | Precio de exceso congelado. |
-| `opened_at` | `timestamptz` | no | `now()` | ninguno | Auditoría de apertura. |
-| `closed_at` | `timestamptz` | sí | ninguno | ninguno | Cierre de ciclo. |
-#### `usage_ledger`
-| Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
-|---|---|---:|---|---|---|
-| `id` | `uuid` | no | aplicación UUIDv7 | PK | Hecho contable de cuota. |
-| `period_id` | `uuid` | no | ninguno | FK `RESTRICT`, índice | Período consumido. |
-| `job_id` | `uuid` | no | ninguno | FK `RESTRICT`, índice | Job causante. |
-| `event_type` | `varchar(16)` | no | ninguno | CHECK, UQ con job | `RESERVA`, `CONFIRMACION`, `REEMBOLSO`. |
-| `units` | `integer` | no | ninguno | CHECK por tipo | Positivo en reserva, cero confirmación, negativo reembolso. |
-| `reason` | `varchar(160)` | sí | ninguno | ninguno | Motivo de compensación. |
-| `created_at` | `timestamptz` | no | `now()` | índice | Hecho inmutable. |
-#### `credit_ledger`
-| Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
-|---|---|---:|---|---|---|
-| `id` | `uuid` | no | aplicación UUIDv7 | PK | Movimiento de créditos. |
-| `user_id` | `uuid` | no | ninguno | FK `RESTRICT`, índice | Saldo por cliente. |
-| `payment_id` | `uuid` | sí | ninguno | FK `RESTRICT`, índice | Origen de compra si aplica. |
-| `job_id` | `uuid` | sí | ninguno | FK `RESTRICT`, índice | Débito de ejecución si aplica. |
-| `entry_type` | `varchar(16)` | no | ninguno | CHECK | `COMPRA`, `DEBITO`, `REEMBOLSO`, `AJUSTE`. |
-| `units` | `integer` | no | ninguno | CHECK no cero | Crédito positivo o débito negativo. |
-| `idempotency_key` | `varchar(160)` | no | ninguno | UQ | Evita doble acreditación. |
-| `reason` | `varchar(160)` | sí | ninguno | ninguno | Explicación de ajuste. |
-| `created_at` | `timestamptz` | no | `now()` | índice | Hecho inmutable. |
-#### `payments`
-| Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
-|---|---|---:|---|---|---|
-| `id` | `uuid` | no | aplicación UUIDv7 | PK | Orden de pago interna. |
-| `user_id` | `uuid` | no | ninguno | FK `RESTRICT`, índice | Pagador. |
-| `subscription_id` | `uuid` | sí | ninguno | FK `RESTRICT` | Renovación asociada si existe. |
-| `provider` | `varchar(32)` | no | ninguno | CHECK | Proveedor de cobro. |
-| `provider_payment_id` | `varchar(160)` | sí | ninguno | UQ parcial | ID externo. |
-| `kind` | `varchar(16)` | no | ninguno | CHECK | Suscripción, crédito o reembolso. |
-| `status` | `varchar(16)` | no | `'PENDIENTE'` | CHECK, índice | Estado de pago. |
-| `amount_cents` | `integer` | no | ninguno | CHECK `>= 0` | Importe. |
-| `currency` | `char(3)` | no | `'ARS'` | CHECK | Moneda. |
-| `created_at` | `timestamptz` | no | `now()` | índice | Creación de intento. |
-| `approved_at` | `timestamptz` | sí | ninguno | ninguno | Aprobación final. |
-#### `payment_events`
-| Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
-|---|---|---:|---|---|---|
-| `id` | `uuid` | no | aplicación UUIDv7 | PK | Evento recibido. |
-| `payment_id` | `uuid` | sí | ninguno | FK `RESTRICT`, índice | Pago resuelto, puede llegar después. |
-| `provider` | `varchar(32)` | no | ninguno | CHECK | Emisor del evento. |
-| `provider_event_id` | `varchar(160)` | no | ninguno | UQ con proveedor | Idempotencia de webhook. |
-| `event_type` | `varchar(80)` | no | ninguno | ninguno | Tipo original saneado. |
-| `payload` | `jsonb` | no | ninguno | CHECK object | Webhook minimizado y firmado. |
-| `received_at` | `timestamptz` | no | `now()` | índice | Hecho append-only. |
+
+Las tablas `billing_accounts`, `billing_account_periods` y `billing_usage` se crean por migraciones Alembic (no forman parte del DDL de verificación de este plan). Ver `plans/04-billing/plan.md`.
+
 ### 5.6 Auditoría
 #### `audit_log`
 | Columna | Tipo | Nulo | Default | Constraint / índice | Nota |
@@ -464,13 +381,6 @@ La central y `packages/mrbot-contracts` son la fuente de constantes. El check es
 | `job_events.event_type` | `CREADO`, `RESERVADO`, `ASIGNADO`, `INICIADO`, `PROGRESO`, `LEASE_RENOVADO`, `REINTENTO`, `COMPLETADO`, `FALLIDO`, `CANCELADO`, `RESULTADO_RECIBIDO` | Hechos de transición y telemetría. |
 | `job_artifacts.kind` | `ARCHIVO`, `CAPTURA`, `TRACE`, `OTRO` | Tipo de object storage. |
 | `workers.status`, `worker_heartbeats.status` | `REGISTRANDO`, `SANO`, `DEGRADADO`, `DRENANDO`, `CAIDO` | `DRENANDO` no recibe asignaciones. |
-| `subscriptions.status` | `PENDIENTE`, `ACTIVA`, `PAUSADA`, `CANCELADA`, `VENCIDA` | Una UQ parcial limita activa o pendiente por usuario. |
-| `subscription_periods.status` | `ABIERTO`, `CERRADO`, `ANULADO` | Solo `ABIERTO` admite reservas. |
-| `usage_ledger.event_type` | `RESERVA`, `CONFIRMACION`, `REEMBOLSO` | Hechos inmutables de cuota. |
-| `credit_ledger.entry_type` | `COMPRA`, `DEBITO`, `REEMBOLSO`, `AJUSTE` | Movimientos positivos o negativos. |
-| `payments.provider`, `payment_events.provider` | `MERCADOPAGO` | Expandible por check en migración. |
-| `payments.kind` | `SUSCRIPCION`, `CREDITOS`, `REEMBOLSO` | Naturaleza comercial. |
-| `payments.status` | `PENDIENTE`, `APROBADO`, `RECHAZADO`, `CANCELADO`, `REEMBOLSADO` | Estado derivado de eventos verificados. |
 | `audit_log.actor_type` | `ADMIN`, `USER`, `SERVICE`, `SYSTEM` | Actor lógico auditado. |
 Las transiciones no se garantizan solo con checks de fila. El servicio ejecuta `UPDATE ... WHERE status IN (...)` dentro de transacción y agrega `job_events` en la misma transacción. Pruebas de integración ejercen el diagrama de estados del plan maestro §8.
 ## 8. DDL de referencia PostgreSQL 17
@@ -597,87 +507,7 @@ CREATE TABLE worker_heartbeats (     id uuid NOT NULL,
     CONSTRAINT ck_worker_heartbeats_queue CHECK (queued_jobs >= 0),     CONSTRAINT ck_worker_heartbeats_capacity CHECK (capacity BETWEEN 1 AND 10),
     CONSTRAINT ck_worker_heartbeats_load CHECK (running_jobs <= capacity),     CONSTRAINT ck_worker_heartbeats_metrics CHECK (jsonb_typeof(metrics) = 'object')
 ); CREATE INDEX ix_worker_heartbeats_worker_time ON worker_heartbeats (worker_id, received_at DESC);
-CREATE TABLE plans (     id uuid NOT NULL,
-    code varchar(64) NOT NULL,     name varchar(120) NOT NULL,
-    included_units integer NOT NULL,     period_days smallint NOT NULL DEFAULT 30,
-    price_cents integer NOT NULL,     currency char(3) NOT NULL DEFAULT 'ARS',
-    active boolean NOT NULL DEFAULT true,     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-    CONSTRAINT pk_plans PRIMARY KEY (id),     CONSTRAINT uq_plans_code UNIQUE (code),
-    CONSTRAINT ck_plans_units CHECK (included_units >= 0),     CONSTRAINT ck_plans_period CHECK (period_days BETWEEN 1 AND 366),
-    CONSTRAINT ck_plans_price CHECK (price_cents >= 0),     CONSTRAINT ck_plans_currency CHECK (currency ~ '^[A-Z]{3}$'),
-    CONSTRAINT ck_plans_metadata_object CHECK (jsonb_typeof(metadata) = 'object') );
-CREATE INDEX ix_plans_active ON plans (code) WHERE active; CREATE TABLE subscriptions (
-    id uuid NOT NULL,     user_id uuid NOT NULL,
-    plan_id uuid NOT NULL,     status varchar(16) NOT NULL,
-    provider varchar(32),     provider_subscription_id varchar(160),
-    current_period_start timestamptz,     current_period_end timestamptz,
-    cancel_at_period_end boolean NOT NULL DEFAULT false,     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    ended_at timestamptz,     CONSTRAINT pk_subscriptions PRIMARY KEY (id),
-    CONSTRAINT fk_subscriptions_user FOREIGN KEY (user_id)         REFERENCES users(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_subscriptions_plan FOREIGN KEY (plan_id)         REFERENCES plans(id) ON DELETE RESTRICT,
-    CONSTRAINT ck_subscriptions_status CHECK (         status IN ('PENDIENTE', 'ACTIVA', 'PAUSADA', 'CANCELADA', 'VENCIDA')
-    ),     CONSTRAINT ck_subscriptions_provider CHECK (
-        provider IS NULL OR provider IN ('MERCADOPAGO')     ),
-    CONSTRAINT ck_subscriptions_period CHECK (         current_period_end IS NULL OR current_period_start IS NULL
-        OR current_period_end > current_period_start     )
-); CREATE UNIQUE INDEX uq_subscriptions_active_user ON subscriptions (user_id)
-    WHERE status IN ('PENDIENTE', 'ACTIVA', 'PAUSADA'); CREATE UNIQUE INDEX uq_subscriptions_provider_external ON subscriptions (provider, provider_subscription_id)
-    WHERE provider_subscription_id IS NOT NULL; CREATE TABLE subscription_periods (
-    id uuid NOT NULL,     subscription_id uuid NOT NULL,
-    starts_at timestamptz NOT NULL,     ends_at timestamptz NOT NULL,
-    status varchar(16) NOT NULL DEFAULT 'ABIERTO',     included_units integer NOT NULL,
-    credit_unit_price_cents integer NOT NULL DEFAULT 0,     opened_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    closed_at timestamptz,     CONSTRAINT pk_subscription_periods PRIMARY KEY (id),
-    CONSTRAINT fk_subscription_periods_subscription FOREIGN KEY (subscription_id)         REFERENCES subscriptions(id) ON DELETE RESTRICT,
-    CONSTRAINT uq_subscription_periods_start UNIQUE (subscription_id, starts_at),     CONSTRAINT ck_subscription_periods_range CHECK (ends_at > starts_at),
-    CONSTRAINT ck_subscription_periods_status CHECK (status IN ('ABIERTO', 'CERRADO', 'ANULADO')),     CONSTRAINT ck_subscription_periods_units CHECK (included_units >= 0),
-    CONSTRAINT ck_subscription_periods_price CHECK (credit_unit_price_cents >= 0) );
-CREATE INDEX ix_subscription_periods_open ON subscription_periods (starts_at, ends_at)     WHERE status = 'ABIERTO';
-CREATE TABLE payments (     id uuid NOT NULL,
-    user_id uuid NOT NULL,     subscription_id uuid,
-    provider varchar(32) NOT NULL,     provider_payment_id varchar(160),
-    kind varchar(16) NOT NULL,     status varchar(16) NOT NULL DEFAULT 'PENDIENTE',
-    amount_cents integer NOT NULL,     currency char(3) NOT NULL DEFAULT 'ARS',
-    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,     approved_at timestamptz,
-    CONSTRAINT pk_payments PRIMARY KEY (id),     CONSTRAINT fk_payments_user FOREIGN KEY (user_id)
-        REFERENCES users(id) ON DELETE RESTRICT,     CONSTRAINT fk_payments_subscription FOREIGN KEY (subscription_id)
-        REFERENCES subscriptions(id) ON DELETE RESTRICT,     CONSTRAINT ck_payments_provider CHECK (provider IN ('MERCADOPAGO')),
-    CONSTRAINT ck_payments_kind CHECK (kind IN ('SUSCRIPCION', 'CREDITOS', 'REEMBOLSO')),     CONSTRAINT ck_payments_status CHECK (
-        status IN ('PENDIENTE', 'APROBADO', 'RECHAZADO', 'CANCELADO', 'REEMBOLSADO')     ),
-    CONSTRAINT ck_payments_amount CHECK (amount_cents >= 0),     CONSTRAINT ck_payments_currency CHECK (currency ~ '^[A-Z]{3}$')
-); CREATE UNIQUE INDEX uq_payments_provider_payment ON payments (provider, provider_payment_id)
-    WHERE provider_payment_id IS NOT NULL; CREATE INDEX ix_payments_user_created ON payments (user_id, created_at DESC);
-CREATE TABLE usage_ledger (     id uuid NOT NULL,
-    period_id uuid NOT NULL,     job_id uuid NOT NULL,
-    event_type varchar(16) NOT NULL,     units integer NOT NULL,
-    reason varchar(160),     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_usage_ledger PRIMARY KEY (id),     CONSTRAINT fk_usage_ledger_period FOREIGN KEY (period_id)
-        REFERENCES subscription_periods(id) ON DELETE RESTRICT,     CONSTRAINT fk_usage_ledger_job FOREIGN KEY (job_id)
-        REFERENCES jobs(id) ON DELETE RESTRICT,     CONSTRAINT uq_usage_ledger_job_event UNIQUE (job_id, event_type),
-    CONSTRAINT ck_usage_ledger_type CHECK (event_type IN ('RESERVA', 'CONFIRMACION', 'REEMBOLSO')),     CONSTRAINT ck_usage_ledger_units CHECK (
-        (event_type = 'RESERVA' AND units > 0)         OR (event_type = 'CONFIRMACION' AND units = 0)
-        OR (event_type = 'REEMBOLSO' AND units < 0)     )
-); CREATE INDEX ix_usage_ledger_period_created ON usage_ledger (period_id, created_at);
-CREATE TABLE credit_ledger (     id uuid NOT NULL,
-    user_id uuid NOT NULL,     payment_id uuid,
-    job_id uuid,     entry_type varchar(16) NOT NULL,
-    units integer NOT NULL,     idempotency_key varchar(160) NOT NULL,
-    reason varchar(160),     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_credit_ledger PRIMARY KEY (id),     CONSTRAINT fk_credit_ledger_user FOREIGN KEY (user_id)
-        REFERENCES users(id) ON DELETE RESTRICT,     CONSTRAINT fk_credit_ledger_payment FOREIGN KEY (payment_id)
-        REFERENCES payments(id) ON DELETE RESTRICT,     CONSTRAINT fk_credit_ledger_job FOREIGN KEY (job_id)
-        REFERENCES jobs(id) ON DELETE RESTRICT,     CONSTRAINT uq_credit_ledger_idempotency UNIQUE (idempotency_key),
-    CONSTRAINT ck_credit_ledger_type CHECK (entry_type IN ('COMPRA', 'DEBITO', 'REEMBOLSO', 'AJUSTE')),     CONSTRAINT ck_credit_ledger_units CHECK (units <> 0)
-); CREATE INDEX ix_credit_ledger_user_created ON credit_ledger (user_id, created_at DESC);
-CREATE TABLE payment_events (     id uuid NOT NULL,
-    payment_id uuid,     provider varchar(32) NOT NULL,
-    provider_event_id varchar(160) NOT NULL,     event_type varchar(80) NOT NULL,
-    payload jsonb NOT NULL,
-    received_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_payment_events_payment FOREIGN KEY (payment_id)         REFERENCES payments(id) ON DELETE RESTRICT,
-    CONSTRAINT uq_payment_events_provider_event UNIQUE (provider, provider_event_id),     CONSTRAINT ck_payment_events_provider CHECK (provider IN ('MERCADOPAGO')),
-    CONSTRAINT ck_payment_events_payload_object CHECK (jsonb_typeof(payload) = 'object') );
-CREATE INDEX ix_payment_events_received ON payment_events (received_at DESC); CREATE TABLE admin_users (
+CREATE TABLE admin_users (
     id uuid NOT NULL,     email text NOT NULL,
     password_hash text NOT NULL,     roles jsonb NOT NULL DEFAULT '[]'::jsonb,
     habilitado boolean NOT NULL DEFAULT true,     mfa_secret_ref text,
@@ -725,8 +555,6 @@ Para crear índices grandes en producción se utiliza `op.create_index(..., post
 3. `0003_workers`: crea `workers`, `worker_heartbeats` y sus índices de salud.
 4. `0004_jobs_core`: crea `jobs`, sus checks, FKs e índices parciales de cola e idempotencia.
 5. `0005_job_outputs`: crea `job_events`, `job_results`, GIN de payload y `job_artifacts`.
-6. `0006_billing_catalog`: crea `plans`, `subscriptions`, `subscription_periods` y carga planes de configuración versionada.
-7. `0007_billing_ledgers`: crea `payments`, `usage_ledger`, `credit_ledger`, `payment_events` e índices de conciliación.
 8. `0008_audit`: crea `audit_log`, índices por actor y destino, y permisos de append-only.
 9. `0009_operational_views_and_roles`: crea vistas de salud, usuario de runtime de mínimo privilegio y revoca DML directo a roles no centrales.
 10. `0010_legacy_import`: crea objetos `legacy`, importa copia V2 de solo lectura y construye `legacy.user_id_map`.
@@ -827,7 +655,7 @@ Reglas que se derivan y son obligatorias para cualquier implementación:
    semántica es obvia. Si el equipo prefiere legibilidad sobre atomicidad en una
    sola sentencia, esta opción es aceptable porque la transacción ya garantiza
    el aislamiento.
-La reserva de cuota o crédito se hace antes de que el job sea elegible, en la transacción de admisión. Por esa razón el claim no vuelve a consultar ni mutar contadores de usuario.
+La reserva de cuota se hace antes de que el job sea elegible, en la transacción de admisión. Por esa razón el claim no vuelve a consultar ni mutar contadores de usuario.
 ### 11.2 Vista de salud de flota
 ```sql
 CREATE OR REPLACE VIEW worker_fleet_health AS
@@ -856,28 +684,6 @@ FROM worker_fleet_health
 ORDER BY effective_health, heartbeat_age DESC NULLS FIRST, name;
 ```
 El panel muestra `effective_health`, pero nunca cambia `workers.status` solo por leer la vista. Un proceso de reconciliación puede marcar `CAIDO` y registrar auditoría si supera el umbral.
-### 11.3 Consumo de cuota de un período
-```sql
-SELECT sp.id AS period_id,
-       sp.included_units,
-       COALESCE(SUM(ul.units), 0) AS reserved_or_consumed_units,
-       sp.included_units - COALESCE(SUM(ul.units), 0) AS remaining_units
-FROM subscription_periods sp
-LEFT JOIN usage_ledger ul ON ul.period_id = sp.id
-WHERE sp.id = :period_id
-GROUP BY sp.id, sp.included_units;
-```
-Para reserva segura, la aplicación toma `FOR UPDATE` sobre el período y evalúa la suma bajo la misma transacción serializable o con lock de advisory por `user_id`. Inserta `RESERVA` solo si el resultado más `unit_cost` no excede `included_units`. Así no existe check e incremento separados como V2.
-### 11.4 Saldo de créditos
-```sql
-SELECT u.id AS user_id,
-       COALESCE(SUM(cl.units), 0) AS credit_balance
-FROM users u
-LEFT JOIN credit_ledger cl ON cl.user_id = u.id
-WHERE u.id = :user_id
-GROUP BY u.id;
-```
-Un débito usa `INSERT ... SELECT` con lock de advisory transaccional por usuario o una fila de agregación bloqueable diseñada en el plan de billing. Nunca se edita un saldo calculado para corregirlo. La auditoría explica cualquier `AJUSTE`.
 ### 11.5 Estadísticas de jobs por bot
 ```sql
 SELECT j.bot,
@@ -911,8 +717,6 @@ ORDER BY j.bot, j.operation;
 | Payload variable | `ix_job_results_payload_gin` | Contención JSONB de soporte. |
 | Artefactos | `ix_job_artifacts_expiry` | Poda por vencimiento. |
 | Workers | `ix_workers_schedulable` | Selección de sanos con heartbeat reciente. |
-| Ledger | índices `(period_id, created_at)` y `(user_id, created_at)` | Balance y cuota por período. |
-| Webhooks | UQ proveedor + evento | Idempotencia antes de efecto económico. |
 | Auditoría | actor, target, `occurred_at` | Investigación forense acotada. |
 No se indexa todo JSONB ni cada columna de texto. Cada índice se justifica por consulta, se mide con `EXPLAIN (ANALYZE, BUFFERS)` y se elimina si no demuestra uso. Los índices parciales se revisan cuando se agregue un estado.
 ### 12.2 Volumen inicial y particionamiento posterior
@@ -929,7 +733,7 @@ Un proceso de mantenimiento propiedad de `central-api` ejecuta lotes idempotente
 2. Retiene jobs terminales y `job_results` por la política contractual configurada. Primero exporta a archivo cifrado verificable si corresponde, luego borra en lotes por PK y fecha.
 3. Poda `worker_heartbeats` de alta frecuencia después de 30 días, conservando `workers.last_heartbeat_at` como snapshot actual.
 4. Retiene `job_events` el período operacional acordado, por ejemplo 90 días, excepto eventos vinculados a disputa o auditoría.
-5. Conserva `usage_ledger`, `credit_ledger`, `payments`, `payment_events` y `audit_log` conforme a retención legal y financiera. Nunca los poda por la política corta de logs técnicos.
+5. Conserva `billing_usage` y `audit_log` conforme a retención legal y financiera. Nunca los poda por la política corta de logs técnicos.
 6. Ejecuta `VACUUM (ANALYZE)` mediante autovacuum ajustado. No programa `VACUUM FULL` en producción normal.
 Cada lote limita filas, emite `audit_log` con conteo y rango temporal, y tiene dry-run. V2 permitía borrar logs dinámicamente desde el admin y limpiaba history por `finished_at`, según `.research/03-database-models.md` §7. V3 lo convierte en política explícita y no permite borrado ad hoc sin autorización y evidencia.
 ## 13. Criterios de aceptación
@@ -942,7 +746,7 @@ una observación. Reproducible con `infra/postgres/verify-ddl.sh`.
 
 | Criterio | Comprobación ejecutada | Resultado observado |
 |---|---|---|
-| 1 | `information_schema.tables` en `public` | 19 tablas, coincidencia exacta con la lista canónica. Cero faltantes, cero extras |
+| 1 | `information_schema.tables` en `public` | 12 tablas, coincidencia exacta con la lista canónica. Cero faltantes, cero extras |
 | 2, 3 | Tipo de toda PK vía `pg_index` | 18 de 18 PK son `uuid`. `job_results` usa `job_id` como PK |
 | 4 | `is_identity='YES' OR column_default LIKE 'nextval%'`, y `pg_class.relkind='S'` | 0 filas y 0 secuencias. **I-1 e I-2 confirmadas empíricamente** |
 | 5 | Columnas de `users` | Exactamente `id`, `email`, `habilitado`. Ninguna de las tres columnas prohibidas. **I-3 confirmada** |
@@ -1002,30 +806,30 @@ Confundir ambas produce pruebas intermitentes que el equipo acaba desactivando.
 
 ### 13.1 Lista completa
 
-1. PostgreSQL 17 contiene exactamente las **19** tablas V3 bajo `public`: `users`, `api_keys`, `admin_users`, `bots`, `bot_operations`, `jobs`, `job_events`, `job_results`, `job_artifacts`, `workers`, `worker_heartbeats`, `plans`, `subscriptions`, `subscription_periods`, `usage_ledger`, `credit_ledger`, `payments`, `payment_events`, `audit_log`. Esta es la lista canónica del plan maestro agrupada por dominio.
+1. PostgreSQL 17 contiene exactamente las **12** tablas V3 bajo `public`: `users`, `api_keys`, `admin_users`, `bots`, `bot_operations`, `jobs`, `job_events`, `job_results`, `job_artifacts`, `workers`, `worker_heartbeats`, `audit_log`. Esta es la lista canónica del plan maestro agrupada por dominio.
 2. `users.id` es `uuid` UUIDv4 generado por aplicación y no tiene secuencia, identidad ni default UUIDv7.
 3. Cada PK nueva fuera de `users` es `uuid` UUIDv7 generado por aplicación. La consulta de §3.4 devuelve cero filas para `public`.
 4. No existe `serial`, `bigserial`, `GENERATED AS IDENTITY` ni secuencia usada por una columna de `public`.
 5. `users` no contiene `fecha_ultimo_reset`, `created_at`, `updated_at`, `api_key`, `maximas_consultas_mensuales` ni `consultas_realizadas`.
 6. `api_keys` persiste solo HMAC verificable, permite dos claves activas y una rotación revocable para un usuario, y nunca devuelve el verificador por API.
-7. La autenticación de API key no escribe cuotas ni crea períodos. Un job admitido reserva cuota o crédito en una transacción atómica.
-8. Un usuario sin período abierto es rechazado por entitlement o consume crédito según política, y no queda permanentemente `PENDIENTE` sin reserva.
+7. La autenticación de API key no escribe cuotas ni crea períodos. Un job admitido reserva cuota en una transacción atómica.
+8. Un usuario sin período abierto es rechazado por entitlement y no queda permanentemente `PENDIENTE` sin reserva.
 9. La unicidad de idempotencia de job es `(user_id, bot, operation, idempotency_key)` cuando la clave no es NULL.
-10. Una creación repetida concurrente con la misma clave retorna el mismo `jobs.id` y solo genera una reserva de consumo.
+10. Una creación repetida concurrente con la misma clave retorna el mismo `jobs.id` y solo genera un consumo.
 11. `jobs` reemplaza `playwright_jobs_active` y `playwright_jobs_history`; un job finalizado conserva su misma fila y su timeline en `job_events`.
 12. `jobs` contiene `worker_id`, `assigned_at`, `lease_expires_at`, `attempts`, `max_attempts`, `app_version` y `protocol_version` con checks y FKs descritos.
 13. El claim concurrente con dos schedulers usa `FOR UPDATE SKIP LOCKED`, no entrega el mismo job dos veces y no excede capacidad cinco de un worker.
 14. Los índices parciales de cola existen y `EXPLAIN` de claim muestra uso de `ix_jobs_queue_pending` para una cola con historia terminal significativa.
 15. `job_results.payload` tiene GIN `jsonb_path_ops` y una consulta sobre `periodos_error` retorna resultados de `libros_iva` sin consultar tablas `consulta_*` nuevas.
 16. No se persisten credenciales fiscales, claves API en claro, URL prefirmadas ni secretos de worker en `jobs`, resultados, eventos, artefactos o auditoría.
-17. `usage_ledger`, `credit_ledger`, `payment_events`, `job_events` y `audit_log` se prueban append-only mediante permisos o trigger de protección y hechos de compensación.
-18. La suma de `usage_ledger` para una reserva seguida de reembolso devuelve el consumo neto correcto sin actualizar filas anteriores.
-19. El saldo de créditos se deriva de `credit_ledger` y los eventos MercadoPago duplicados no generan doble pago ni doble crédito.
+17. `job_events` y `audit_log` se prueban append-only mediante permisos o trigger de protección y hechos de compensación.
+18. (reservado)
+19. El cupo vigente lo gobierna `billing_accounts` (ver `plans/04-billing/plan.md`).
 20. `workers` y `worker_heartbeats` exponen en la vista de salud `SANO`, `SATURADO`, `DRENANDO` y `CAIDO` con umbral de 30 segundos.
 21. `alembic upgrade head` desde una base vacía completa con una sola cabeza y `alembic check` no reporta drift.
 22. `render_as_batch` está ausente o es explícitamente `False` en Alembic V3.
 23. La importación crea `legacy`, conserva los enteros V2 sin reescritura y llena `legacy.user_id_map` uno a uno para usuarios migrados.
 24. El rol runtime de central tiene solo `SELECT` sobre `legacy` y un intento de DML en ese esquema falla.
 25. No hay ningún DSN ni usuario de PostgreSQL en la configuración, imagen o secretos de `bot-worker`; una prueba de integración demuestra que el worker solo puede reportar por HTTP.
-26. La política de retención ejecuta dry-run, borra en lotes, no toca ledgers financieros y deja entrada de auditoría.
+26. La política de retención ejecuta dry-run, borra en lotes, no toca `billing_usage` y deja entrada de auditoría.
 27. El pool de conexiones se calcula como `N × (pool_size + max_overflow)`, se mantiene bajo el presupuesto PostgreSQL y se alarma antes de saturar.

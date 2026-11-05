@@ -1,7 +1,6 @@
 # Tipos de cuenta y cupo de requests
 
-La API v3 ya no administra pagos automáticos (no hay MercadoPago, webhooks,
-créditos ni planes comerciales). Cada usuario tiene **un** tipo de cuenta, que
+La API v3 no administra pagos. Cada usuario tiene **un** tipo de cuenta, que
 asigna un administrador desde el panel o con
 `POST /admin/billing/accounts/{user_id}/account-type`.
 
@@ -52,9 +51,8 @@ de la cuenta y es atómica con la creación del job. Los diccionarios de
 | `TIER` | `NORMAL`, con `max_requests` igual a las unidades del tier |
 | `LIBRE` | `NORMAL`, con su tope manual como cupo mensual |
 
-Las tablas de pagos, suscripciones y ledgers (`payments`, `payment_events`,
-`subscriptions`, `credit_ledger`, ...) **no se borran**: conservan el historial.
-El saldo de créditos deja de tener efecto. La migración es reversible.
+Las tablas del modelo anterior se eliminaron en la migración `0031`. Solo
+quedan `billing_accounts`, `billing_account_periods` y `billing_usage`.
 
 ## API pública
 

@@ -134,7 +134,7 @@ El contrato de datos, autenticación y acciones cambia de forma sustancial.
 | Reporting `desglose_cuit` | `reporte/query_desglose_cuit.sql` | **Se rediseña** | Mantener desglose autorizado, sin exponer credenciales ni datos innecesarios. |
 | Exportación CSV | `/admin/reporting/download` | **Se conserva** | Exportación asíncrona, auditada, con URL temporal y límite de filas. |
 | Auditoría de acceso fiscal | `admin_fiscal_credential_audits` | **Se generaliza** | Reemplazar por `audit_log` append-only para toda operación administrativa. |
-| Billing y MercadoPago | No existe en V2 | **Es nuevo** | Integrar la operación definida por el plan 04. |
+| Cuentas y cupo | No existe en V2 | **Es nuevo** | Asignar tipo de cuenta y cupo a mano, según el plan 04. |
 | Dashboard de workers | No existe como página propia | **Es nuevo** | Crear página, alertas y acciones de drenaje, R11. |
 | Sesiones y dispositivos | No existe | **Es nuevo** | Inventario, revocación y caducidad de sesiones administrativas. |
 | MFA y recuperación | No existe | **Es nuevo** | TOTP o WebAuthn, códigos de recuperación cifrados y flujo de soporte auditado. |
@@ -561,49 +561,25 @@ La razón se escapa y se registra inmutablemente.
 
 ---
 
-## 7. Suscripciones y cobros en el panel
+## 7. Cuentas y cupo en el panel
 
 El panel administrativo no implementa lógica de cobro paralela.
 
 Consume los servicios y estados descritos en `plans/04-billing/plan.md`.
 
-### 7.1 Vista de cuenta comercial
+### 7.1 Vista de cuenta
 
-Para cada usuario muestra:
-
-- plan actual, estado de suscripción y período vigente.
-- cuota de período, uso reservado, confirmado y disponible.
-- saldo de créditos y últimas entradas del ledger.
-- fuente de alta, precio, moneda y próxima renovación si aplica.
-- historial de pagos y eventos de MercadoPago.
-- discrepancias de conciliación y estado de investigación.
+Para cada usuario muestra el tipo de cuenta (`PRUEBA`, `TESTING`, `NORMAL`), el
+cupo (`max_requests`), el uso reservado, consumido y disponible, y el período
+mensual vigente si es `NORMAL`.
 
 | Acción | Regla de negocio |
 |---|---|
-| Cambiar plan | Define prorrateo y fecha efectiva mediante billing. |
-| Suspender suscripción | No elimina pagos ni ledger. |
-| Aplicar crédito manual | Entrada compensatoria con motivo, actor y autorización. |
-| Reprocesar webhook | Solo por ID, idempotente y con trazabilidad. |
-| Conciliar pago | Compara proveedor, `payments` y `payment_events`, sin editar el evento origen. |
-| Marcar discrepancia | Crea caso operativo con dueño, nota y SLA. |
+| Asignar tipo de cuenta | Exige motivo (10 a 500 caracteres) y queda auditada. Cambiar de tipo reinicia contadores; reasignar el mismo tipo los conserva. |
+| Ajustar `max_requests` (`NORMAL`) | Ajusta el mes en curso sin perder consumo. |
+| Cerrar períodos vencidos | Higiene; no es necesario para la renovación. |
 
-### 7.2 Conciliación MercadoPago
-
-La conciliación lista el identificador externo, importe, moneda, estado del proveedor, estado local, timestamps y motivo de diferencia.
-
-El panel no acepta que un operador pegue un webhook no verificado.
-
-La recuperación usa una consulta autenticada al proveedor desde el servicio de billing.
-
-La modificación de estado genera un evento compensatorio o de reconciliación.
-
-No se sobrescribe el hecho original.
-
-Las discrepancias posibles incluyen pago externo ausente, webhook duplicado, monto distinto, moneda distinta, pago revertido y plan no aplicado.
-
-La exportación financiera exige el permiso específico y queda auditada.
-
----
+No hay pagos, créditos, webhooks ni conciliación (ver `plans/04-billing/plan.md`).
 
 ## 8. Auditoría
 
@@ -801,5 +777,5 @@ Las vistas sensibles configuran `Cache-Control: no-store`.
 21. Toda lectura break-glass de credencial fiscal exige permiso, razón y evento de auditoría inmutable.
 22. `audit_log` registra quién, qué, cuándo, sobre qué, desde dónde y resultado para toda acción administrativa sensible.
 23. Los informes incluyen consumo por usuario y bot, éxito, duración, ingresos y exportación controlada.
-24. La conciliación de MercadoPago es idempotente, preserva los eventos fuente y presenta discrepancias.
+24. La asignación de tipo de cuenta exige motivo, es auditada y reasignar el mismo tipo conserva el consumo.
 25. Las pruebas cubren MFA, sesión revocable, CSRF, RBAC, auditoría, SEC-1, jobs y ciclo completo de alertas.

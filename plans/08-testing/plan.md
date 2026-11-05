@@ -355,8 +355,8 @@ completo.
 | S-2 | property test con N requests mismo user, key y `Idempotency-Key`: un `jobs.id`, una asignación y respuesta estable | integración | `tests/integration/test_job_idempotency.py` |
 | B-1 | property test: toda reserva, confirmación, reembolso o consumo produce exactamente una entrada append-only y conteo conciliable | integración | `tests/integration/test_usage_ledger.py` |
 | B-2 | crear job, reservar, provocar rechazo antes de correr y comprobar liberación exacta una vez | sistema | `tests/system/test_quota_reservation.py` |
-| B-3 | enviar webhook MercadoPago repetido y fuera de orden, luego verificar un único evento/efecto por ID | integración | `tests/integration/test_payment_webhook_idempotency.py` |
-| B-4 | lanzar transacciones concurrentes de gasto sobre saldo limitado y comprobar saldo final no negativo | integración Postgres | `tests/integration/test_credit_races.py` |
+| B-3 | reasignar el mismo tipo de cuenta y verificar que el consumo se conserva | integración | `tests/integration/test_account_type_reassign.py` |
+| B-4 | lanzar reservas concurrentes sobre un cupo limitado y comprobar que no se sobrepasa | integración Postgres | `tests/integration/test_quota_races.py` |
 | SEC-1 | reutilizar AST audit que prohíbe `str(exc)` y corpus de errores contra API, callback y panel | unit + seguridad | `tests/security/test_error_leak_gate.py` |
 | SEC-2 | enviar credenciales sentinel y buscar su valor en `jobs`, `job_results`, `job_events`, logs y artefactos | sistema + seguridad | `tests/security/test_fiscal_secret_nonpersistence.py` |
 | SEC-3 | inspección de manifiestos, mounts y procesos comprueba que clave privada RSA solo aparece en central | estático + sistema | `tests/security/test_rsa_key_isolation.py` |
@@ -397,7 +397,6 @@ Cada escenario registra métricas, eventos de job, estado de worker y ledger ant
 | disco lleno worker | llenar volumen `/work` controlado | error público seguro, cleanup, artefacto no parcial publicado | `tests/chaos/test_worker_disk_full.py` |
 | OOM Chromium | proceso simulador consume límite de memoria | job falla/reintenta solo si clase permite, slots y hijos se liberan | `tests/chaos/test_browser_oom.py` |
 | resultado duplicado | enviar dos callbacks iguales `(job_id, attempt)` | una transición terminal y un ledger, segundo responde idempotente | `tests/chaos/test_duplicate_result.py` |
-| webhook MercadoPago repetido/desordenado | reenvío y orden invertido | pago final correcto, una acreditación, audit de evento | `tests/chaos/test_webhook_ordering.py` |
 
 Para cada caos se fija un timeout corto y se captura diagnóstico sin PII.
 
@@ -584,7 +583,7 @@ La V3 se considera terminada solo cuando todos los siguientes puntos tienen evid
 12. S-2 demuestra idempotencia bajo requests concurrentes y reintentos HTTP.
 13. B-1 demuestra exactamente una fila append-only de ledger por consumo/ajuste relevante.
 14. B-2 demuestra reserva previa y liberación única si un job no comienza.
-15. B-3 demuestra webhook MercadoPago idempotente por ID, incluso repetido y desordenado.
+15. B-3 demuestra que reasignar el mismo tipo de cuenta conserva el consumo.
 16. B-4 demuestra saldo de créditos nunca negativo bajo carga concurrente PostgreSQL.
 17. SEC-1 supera corpus de errores, respuestas, panel, callbacks y AST sin fuga técnica.
 18. SEC-2 prueba que una credencial sentinel no llega a resultados, eventos, logs ni artefactos.

@@ -104,10 +104,10 @@ else
     bad "El DDL no se ejecuta"; tail -20 "$WORKDIR/ddl.log"; exit 1
 fi
 
-EXPECTED="admin_users api_keys audit_log bot_operations bots credit_ledger job_artifacts job_events job_results jobs payment_events payments plans subscription_periods subscriptions usage_ledger users worker_heartbeats workers"
+EXPECTED="admin_users api_keys audit_log bot_operations bots job_artifacts job_events job_results jobs users worker_heartbeats workers"
 ACTUAL=$(psqlq "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY 1;" | tr '\n' ' ' | sed 's/ $//')
 if [ "$ACTUAL" = "$EXPECTED" ]; then
-    ok "Criterio 1: las 19 tablas canonicas existen, sin faltantes ni extras"
+    ok "Criterio 1: las 12 tablas canonicas existen, sin faltantes ni extras"
 else
     bad "Criterio 1: la lista de tablas no coincide"
     printf "    esperado: %s\n    obtenido: %s\n" "$EXPECTED" "$ACTUAL"
@@ -141,7 +141,6 @@ FORBIDDEN=$(psqlq "SELECT count(*) FROM information_schema.columns WHERE table_s
 # --------------------------------------------------------------- semilla
 psqlf <<'SQL'
 INSERT INTO users(id,email,habilitado) VALUES ('11111111-1111-4111-8111-111111111111','verify@test.local',true);
-INSERT INTO plans(id,code,name,included_units,price_cents) VALUES ('22222222-2222-4222-8222-222222222222','free','Free',10,0);
 INSERT INTO bots(id,code,display_name) VALUES ('33333333-3333-4333-8333-333333333333','mis_comprobantes','Mis Comprobantes');
 INSERT INTO bots(id,code,display_name) VALUES ('77777777-7777-4777-8777-777777777777','libros_iva','Libros IVA');
 INSERT INTO bot_operations(id,bot_code,code,input_schema_version) VALUES ('44444444-4444-4444-8444-444444444444','mis_comprobantes','consulta','1');

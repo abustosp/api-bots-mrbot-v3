@@ -129,13 +129,6 @@ V3_TABLES = [
     "job_artifacts",
     "workers",
     "worker_heartbeats",
-    "plans",
-    "subscriptions",
-    "subscription_periods",
-    "usage_ledger",
-    "credit_ledger",
-    "payments",
-    "payment_events",
     "audit_log",
 ]
 

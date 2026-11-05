@@ -58,11 +58,10 @@ graph TB
     subgraph ext["Exterior"]
         CLI["Clientes API"]
         ADM["Admin"]
-        MP["MercadoPago"]
     end
 
     subgraph core["Plano de control"]
-        API["central-api<br/>· API publica v3<br/>· scheduler y load balancer<br/>· panel de administracion<br/>· suscripciones y creditos"]
+        API["central-api<br/>· API publica v3<br/>· scheduler y load balancer<br/>· panel de administracion<br/>· cuentas y cupo de requests"]
         PG[("PostgreSQL")]
     end
 
@@ -76,7 +75,6 @@ graph TB
 
     CLI --> API
     ADM --> API
-    MP -->|webhook| API
     API <--> PG
     API -->|asigna jobs| W1
     API -->|asigna jobs| W2
@@ -100,7 +98,7 @@ graph TB
 
 | Componente | Directorio | Descripción |
 |---|---|---|
-| **central-api** | [`services/central-api/`](services/central-api/) | API pública v3, autenticación, cuotas, planificación y reparto de jobs, registro de la flota, panel de administración, suscripciones y créditos |
+| **central-api** | [`services/central-api/`](services/central-api/) | API pública v3, autenticación, cuotas, planificación y reparto de jobs, registro de la flota, panel de administración, cuentas de cupo (`PRUEBA`, `TESTING`, `NORMAL`) |
 | **bot-worker** | [`services/bot-worker/`](services/bot-worker/) | Ejecutor puro. API secundaria privada que solo responde a la central. Corre los bots Playwright. Sin base de datos |
 | **mrbot-contracts** | [`packages/mrbot-contracts/`](packages/mrbot-contracts/) | Esquemas compartidos del protocolo entre la central y los workers |
 | **infra** | [`infra/`](infra/) | Imágenes, Docker Compose, PostgreSQL, despliegue |
@@ -118,7 +116,7 @@ api-bots-mrbot-v3/
 │   ├── 01-database/             # esquema PostgreSQL, IDs, migraciones
 │   ├── 02-central-api/          # API pública, scheduler, autenticación
 │   ├── 03-worker/               # API secundaria, contrato de bots, salud
-│   ├── 04-billing/              # tiers, créditos, MercadoPago
+│   ├── 04-billing/              # tipos de cuenta y cupo de requests
 │   ├── 05-admin-panel/          # panel y observabilidad de la flota
 │   ├── 06-infra/                # Docker, CI/CD, secretos, despliegue
 │   ├── 07-migracion/            # V2 → V3, portado de bots, cutover
@@ -145,7 +143,7 @@ comunican solo por HTTP con los esquemas de `mrbot-contracts`.
 | ID de usuario | entero autoincremental | UUIDv4 |
 | ID de jobs y bots | mixto | UUIDv7 en todo |
 | Tablas de resultados | 28 tablas `consulta_*_logs` | `jobs` + `job_results` con `JSONB` |
-| Monetización | contador de consultas mensuales | suscripciones por tier + créditos, vía MercadoPago |
+| Monetización | contador de consultas mensuales | tipo de cuenta (`PRUEBA`/`TESTING`/`NORMAL`) con cupo de requests, asignado a mano desde el panel admin |
 
 Detalle completo en [`plan.md`](plan.md) §2.
 
@@ -291,7 +289,7 @@ Detalle en [`plan.md`](plan.md) §9.
 | [`plans/01-database/plan.md`](plans/01-database/plan.md) | Esquema PostgreSQL, estrategia de UUID, migraciones |
 | [`plans/02-central-api/plan.md`](plans/02-central-api/plan.md) | API pública, planificador y balanceo, autenticación |
 | [`plans/03-worker/plan.md`](plans/03-worker/plan.md) | API secundaria, contrato de plugin de bot, salud |
-| [`plans/04-billing/plan.md`](plans/04-billing/plan.md) | Tiers, cuotas, créditos, MercadoPago |
+| [`plans/04-billing/plan.md`](plans/04-billing/plan.md) | Tipos de cuenta y cupo de requests |
 | [`plans/05-admin-panel/plan.md`](plans/05-admin-panel/plan.md) | Panel de administración y alertas de la flota |
 | [`plans/06-infra/plan.md`](plans/06-infra/plan.md) | Imágenes, Compose, secretos, CI/CD |
 | [`plans/07-migracion/plan.md`](plans/07-migracion/plan.md) | Migración de código, datos y clientes |
