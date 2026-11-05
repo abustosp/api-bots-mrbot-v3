@@ -122,6 +122,8 @@ def test_apoc_successful_v2_get_fixture_maps_to_v3_job(monkeypatch: pytest.Monke
     from central_api.api import bot_compat
 
     fixture = V2_REQUESTS / "apoc" / "apoc.jsonl"
+    if not fixture.is_file():
+        pytest.skip("fixture externa de V2 no disponible")
     records = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()]
     success = next(record for record in records if record.get("expected") == "ok")
     assert success.get("body") is None

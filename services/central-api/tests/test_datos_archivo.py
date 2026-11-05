@@ -144,6 +144,7 @@ MAPA_ACORDADO = {
     "arba": "retper-iibb-arba",
     "ccma_compensacion": "ccma",
     "carga_portal_iva": "portaliva",
+    "certificacion_primaria_granos": "liquidaciongranos",
     "libros_portal_iva": "librosiva",
     "vep_archivo": "vep",
     "ccma": "ccma",
@@ -159,7 +160,7 @@ def test_cada_modulo_usa_el_bucket_acordado(ajustes) -> None:
 
 
 def test_modulos_sin_bucket_definido_usan_el_general(ajustes) -> None:
-    for bot in ("apoc", "certificacion_primaria_granos", "compensaciones", "consulta_cuit", "inexistente", None):
+    for bot in ("apoc", "consulta_cuit", "inexistente", None):
         assert ajustes.bucket_para_bot(bot) == "bucket", bot
 
 
