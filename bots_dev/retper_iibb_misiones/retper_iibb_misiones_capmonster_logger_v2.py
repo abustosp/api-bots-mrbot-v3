@@ -373,7 +373,12 @@ async def _solve_recaptcha_v2_capmonster_proxyless(
     poll_seconds: int,
 ) -> dict[str, str]:
     task_types: list[str] = []
-    for candidate in (task_type_preference.strip(), "RecaptchaV2Task", "NoCaptchaTaskProxyless"):
+    for candidate in (
+        task_type_preference.strip(),
+        "RecaptchaV2TaskProxyless",
+        "RecaptchaV2Task",
+        "NoCaptchaTaskProxyless",
+    ):
         if candidate and candidate not in task_types:
             task_types.append(candidate)
 

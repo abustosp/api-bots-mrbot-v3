@@ -14,7 +14,11 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
-from shared.arca_captcha import get_arca_capmonster_config, try_solve_arca_captcha
+from shared.arca_captcha import (
+    get_arca_capmonster_config,
+    try_solve_arca_captcha,
+    wait_for_arca_captcha_page,
+)
 from shared.public_errors import safe_public_message, safe_public_text
 
 ARCA_LOGIN_URL = "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
@@ -113,6 +117,20 @@ def _merge_context_kwargs(context_kwargs: Optional[dict]) -> dict:
         return merged
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "y", "on")
+
+
+def _resolve_solve_captcha(flag: Optional[bool]) -> bool:
+    """Resolución de captcha activa por defecto; se desactiva con ARCA_SOLVE_CAPTCHA=false."""
+    if flag is not None:
+        return flag
+    return _env_flag("ARCA_SOLVE_CAPTCHA", True)
+
+
 @dataclass
 class ArcaLoginResult:
     success: bool
@@ -193,7 +211,7 @@ async def start_arca_session(
     context_kwargs: Optional[dict] = None,
     login_url: str = ARCA_LOGIN_URL,
     fail_on_captcha: bool = False,
-    solve_arca_captcha: bool = False,
+    solve_arca_captcha: Optional[bool] = None,
 ) -> Optional[ArcaSession]:
     browser = None
     context = None
@@ -212,7 +230,7 @@ async def start_arca_session(
             error_logs=error_logs,
             login_url=login_url,
             fail_on_captcha=fail_on_captcha,
-            solve_arca_captcha=solve_arca_captcha,
+            solve_arca_captcha=_resolve_solve_captcha(solve_arca_captcha),
         )
         if not login_result.success:
             await _safe_close_session(browser, context)
@@ -384,11 +402,12 @@ async def login_arca(
     login_url: str = ARCA_LOGIN_URL,
     login_error_prefix: str = "No se pudo iniciar sesión en ARCA. Verifique los datos ingresados",
     fail_on_captcha: bool = False,
-    solve_arca_captcha: bool = False,
+    solve_arca_captcha: Optional[bool] = None,
     click_ver_todos: bool = False,
     ver_todos_required: bool = False,
     ver_todos_error_message: str = "No se pudo abrir 'Ver todos' en ARCA",
 ) -> ArcaLoginResult:
+    solve_arca_captcha = _resolve_solve_captcha(solve_arca_captcha)
     logs = error_logs if error_logs is not None else []
     result = ArcaLoginResult(success=False, error_logs=logs)
 
@@ -438,14 +457,9 @@ async def login_arca(
 
     await wait_page_ready(page)
 
-    captcha_detected = await _has_visible_locator(
-        [
-            page.get_by_role("img", name=re.compile(r"Captcha", re.I)),
-            page.locator("img[alt*='captcha' i], img[src*='captcha' i]"),
-            page.locator("iframe[src*='captcha' i]"),
-            page.locator("[id*='captcha' i], [class*='captcha' i]"),
-        ]
-    )
+    # ARCA oculta el captcha 2,4 s. Se detecta por el DOM (form/action/input),
+    # no por visibilidad, para no enviar la clave con el captcha vacío.
+    captcha_detected = await wait_for_arca_captcha_page(page)
     if captcha_detected:
         logs.append("Captcha detectado")
         result.captcha_detected = True
@@ -520,11 +534,7 @@ async def login_arca(
 
         feedback_message = await _get_login_feedback_message(page)
 
-        if (
-            captcha_detected
-            and solve_arca_captcha
-            and _is_incorrect_captcha_message(feedback_message)
-        ):
+        if solve_arca_captcha and _is_incorrect_captcha_message(feedback_message):
             captcha_retry += 1
             if captcha_retry >= max_captcha_attempts:
                 logs.append("No se pudo resolver el captcha de ARCA con CapMonster")
@@ -533,15 +543,8 @@ async def login_arca(
             logs.append(
                 f"Captcha incorrecto, reintento {captcha_retry + 1}/{max_captcha_attempts}"
             )
-            captcha_detected = await _has_visible_locator(
-                [
-                    page.locator("img[src*='base64']"),
-                    page.locator("img[alt*='captcha' i], img[src*='captcha' i]"),
-                    page.locator("[id*='captcha' i], [class*='captcha' i]"),
-                ]
-            )
-            if not captcha_detected:
-                captcha_detected = True
+            captcha_detected = True
+            result.captcha_detected = True
             continue
 
         break

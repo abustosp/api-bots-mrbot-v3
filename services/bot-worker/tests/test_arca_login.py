@@ -24,7 +24,7 @@ class _Locator:
 
     async def fill(self, value: str, **_: object) -> None:
         self.page.filled[self.selector] = value
-        if "captcha" in self.selector.lower():
+        if "captcha" in self.selector.lower() and not self.page.keep_captcha:
             self.page.captcha = False
 
     async def click(self, **_: object) -> None:
@@ -40,6 +40,8 @@ class _Locator:
         self.page.pressed.append((self.selector, key))
 
     async def is_visible(self) -> bool:
+        if getattr(self.page, "hidden_captcha", False) and "captcha" in self.selector.lower():
+            return False
         if self.selector in {
             "input#F1\\:password",
             "input[name='F1:password']",
@@ -56,6 +58,8 @@ class _Locator:
         return b"fake-captcha-image"
 
     async def inner_text(self, **_: object) -> str:
+        if self.selector == "#F1\\:msg" and self.page.feedback_queue:
+            return self.page.feedback_queue.pop(0)
         return self.page.messages.get(self.selector, "")
 
     async def text_content(self) -> str:
@@ -71,6 +75,9 @@ class _Locator:
 class _Page:
     def __init__(self, *, captcha: bool = False) -> None:
         self.captcha = captcha
+        self.hidden_captcha = False
+        self.keep_captcha = False
+        self.feedback_queue: list[str] = []
         self.visited: list[str] = []
         self.filled: dict[str, str] = {}
         self.clicked: list[str] = []
@@ -87,6 +94,8 @@ class _Page:
             "button:has-text('Siguiente')",
             "button:has-text('Ingresar')",
         }
+        if selector == "#F1\\:msg" and (self.feedback_queue or self.messages.get(selector)):
+            exists = True
         if self.captcha and selector in {
             "#captcha",
             "#captcha img",
@@ -306,6 +315,33 @@ def test_captcha_usa_solver_inyectado_y_no_entorno() -> None:
 
     assert solver.received == [b"fake"]
     assert any("captchaSolutionInput" in selector for selector in page.filled)
+
+
+def test_captcha_oculto_por_arca_se_detecta_igual_y_se_resuelve() -> None:
+    # ARCA deja el bloque del captcha oculto 2,4 s; la detección no debe
+    # depender de la visibilidad ni enviar la clave con el captcha vacío.
+    page = _Page(captcha=True)
+    page.hidden_captcha = True
+    solver = _Solver()
+    session = ArcaSession(FiscalCredentials("20123456789", "clave-ficticia"), solver, page=page)
+
+    asyncio.run(session.login())
+
+    assert solver.received == [b"fake"]
+    assert any("captchaSolutionInput" in selector for selector in page.filled)
+
+
+def test_captcha_rechazado_se_reintenta_hasta_resolver() -> None:
+    page = _Page(captcha=True)
+    page.keep_captcha = True
+    page.feedback_queue = ["El captcha ingresado es incorrecto.", ""]
+    solver = _Solver()
+    session = ArcaSession(FiscalCredentials("20123456789", "clave-ficticia"), solver, page=page)
+
+    asyncio.run(session.login())
+
+    assert len(solver.received) == 2
+    assert page.filled["input#F1\\:captchaSolutionInput"] == "AB12"
 
 
 def test_captcha_sin_solver_falla_con_error_tipado() -> None:

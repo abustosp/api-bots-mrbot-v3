@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import List, Optional
@@ -34,6 +35,19 @@ CAPTCHA_INPUT_SELECTORS = [
     "input#F1\\:captchaSolutionInput",
     "input[name='F1:captchaSolutionInput']",
     "input[placeholder*='captcha' i], input[placeholder*='solución' i], input[placeholder*='solucion' i]",
+]
+# ARCA publica el formulario de captcha en `/loginCaptchaAfip.xhtml`. El
+# `action` del form es la señal más temprana y fiable: existe desde que se
+# parsea el HTML, aunque el captcha esté oculto durante los primeros 2,4 s.
+CAPTCHA_FORM_SELECTORS = [
+    "form#F1[action*='loginCaptchaAfip' i]",
+    "form[action*='loginCaptchaAfip' i]",
+]
+CAPTCHA_IMAGE_SELECTORS = [
+    "#captcha img[src*='base64']",
+    "img[src*='base64']",
+    "#captcha img[src^='data:image']",
+    "#captcha img",
 ]
 
 _CAPMONSTER_CREATE_TASK_URL = "https://api.capmonster.cloud/createTask"
@@ -141,11 +155,42 @@ async def is_arca_captcha_page(page: Page) -> bool:
         url = ""
     if ARCA_CAPTCHA_URL.split("//")[-1] in url or "logincaptchaafip" in url:
         return True
-    try:
-        input_count = await page.locator(",".join(CAPTCHA_INPUT_SELECTORS)).count()
-    except Exception:
-        input_count = 0
-    return input_count > 0
+    selectors = CAPTCHA_FORM_SELECTORS + [
+        "input#F1\\:captchaSolutionInput",
+        "input[name='F1:captchaSolutionInput']",
+    ]
+    for selector in selectors:
+        try:
+            if await page.locator(selector).count() > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def wait_for_arca_captcha_page(page: Page, timeout_ms: int = 6_000) -> bool:
+    """Espera la página de captcha sin bloquear un login normal.
+
+    ARCA muestra el captcha en `loginCaptchaAfip.xhtml`, pero también lo deja
+    oculto durante 2,4 s. Se detecta por el `action` del formulario o por el
+    input del captcha, ambos presentes en el DOM antes de hacerse visibles.
+    Si aparece un formulario de login normal, se corta la espera en el acto.
+    """
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while True:
+        if await is_arca_captcha_page(page):
+            return True
+        try:
+            form = page.locator("form#F1")
+            if await form.count() > 0:
+                action = (await form.first.get_attribute("action") or "").lower()
+                if "logincaptcha" not in action:
+                    return False
+        except Exception:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.2)
 
 
 def _extract_base64(src: str) -> Optional[str]:
@@ -168,7 +213,7 @@ def _extract_base64(src: str) -> Optional[str]:
 
 
 async def detect_arca_captcha_image_base64(page: Page) -> Optional[str]:
-    for selector in CAPTCHA_IMG_SELECTORS:
+    for selector in CAPTCHA_IMAGE_SELECTORS:
         try:
             locator = page.locator(selector)
             count = await locator.count()
@@ -187,6 +232,18 @@ async def detect_arca_captcha_image_base64(page: Page) -> Optional[str]:
     return None
 
 
+async def wait_for_arca_captcha_image(page: Page, timeout_ms: int = 8_000) -> Optional[str]:
+    """Espera a que ARCA reemplace el spinner por la imagen real del captcha."""
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while True:
+        image_b64 = await detect_arca_captcha_image_base64(page)
+        if image_b64:
+            return image_b64
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(0.25)
+
+
 async def fill_arca_captcha(page: Page, solution: str) -> bool:
     cleaned = (solution or "").strip()
     if not cleaned:
@@ -198,11 +255,16 @@ async def fill_arca_captcha(page: Page, solution: str) -> bool:
                 continue
             target = locator.first
             try:
-                await target.fill(cleaned, timeout=3_000)
+                # El contenedor del captcha recién se muestra a los 2,4 s.
+                try:
+                    await target.wait_for(state="visible", timeout=8_000)
+                except Exception:
+                    pass
+                await target.fill(cleaned, timeout=8_000)
             except Exception:
                 try:
                     await target.evaluate("(el) => { el.style.display='block'; el.style.visibility='visible'; }")
-                    await target.fill(cleaned, timeout=3_000)
+                    await target.fill(cleaned, timeout=8_000)
                 except Exception:
                     continue
             return True
@@ -220,7 +282,7 @@ async def try_solve_arca_captcha(
 ) -> bool:
     logs = error_logs if error_logs is not None else []
     try:
-        if not await is_arca_captcha_page(page):
+        if not await wait_for_arca_captcha_page(page):
             return True
     except Exception as exc:
         LOGGER.warning("arca_captcha_check_skipped: %s", exc)
@@ -238,7 +300,7 @@ async def try_solve_arca_captcha(
 
     attempts = max_attempts if max_attempts and max_attempts > 0 else cfg["max_attempts"]
     for attempt in range(1, attempts + 1):
-        image_b64 = await detect_arca_captcha_image_base64(page)
+        image_b64 = await wait_for_arca_captcha_image(page)
         if not image_b64:
             LOGGER.info("arca_captcha_image_not_found attempt=%d", attempt)
             continue

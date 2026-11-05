@@ -284,10 +284,11 @@ class ArcaSession:
 
     async def _captcha_image(self) -> bytes | None:
         for selector in (
+            "img[src^='data:image']",
+            "#captcha img[src^='data:image']",
             "#captcha img",
             "img[alt*='captcha' i]",
             "img[src*='captcha' i]",
-            "img[src^='data:image']",
         ):
             try:
                 locator = self.page.locator(selector)
@@ -303,8 +304,15 @@ class ArcaSession:
         return None
 
     async def _captcha_present(self) -> bool:
+        # ARCA oculta el captcha durante 2,4 s. Se detecta por presencia en el
+        # DOM (form/action/input), no por visibilidad: si se espera a que sea
+        # visible se envía la clave con el captcha vacío.
         for selector in (
+            "form#F1[action*='loginCaptchaAfip' i]",
+            "form[action*='loginCaptchaAfip' i]",
             "#captcha",
+            "input#F1\\:captchaSolutionInput",
+            "input[name='F1:captchaSolutionInput']",
             "img[alt*='captcha' i]",
             "img[src*='captcha' i]",
             "iframe[src*='captcha' i]",
@@ -313,7 +321,7 @@ class ArcaSession:
         ):
             try:
                 locator = self.page.locator(selector)
-                if await locator.count() and await locator.first.is_visible():
+                if await locator.count():
                     return True
             except Exception:
                 continue
@@ -553,56 +561,73 @@ class ArcaSession:
                 )
         await self._wait_ready()
 
-        if await self._captcha_present():
-            await self._solve_captcha()
-        if not await self._fill_first(
-            self.page,
-            (
-                "#F1\\:password",
-                "input[type='password']",
-                "input[name*='password' i], input[name*='clave' i]",
-            ),
-            self._credentials.clave,
-        ):
-            raise ArcaLoginError("no se encontró el campo de clave fiscal en ARCA")
-        if not await self._click_first(
-            self.page,
-            (
-                "button:has-text('Ingresar')",
-                "#ingresar",
-                "button[type='submit']",
-                "input#F1\\:btnIngresar",
-                "input[type='submit']",
-            ),
-        ):
-            try:
-                await self.page.locator("input[type='password']").press("Enter")
-            except Exception as exc:
-                raise TargetUnavailableError(
-                    "no se pudo enviar el login de ARCA",
-                    diagnostic_code="arca_password_submit_failed",
-                ) from exc
-        await self._wait_ready()
+        max_captcha_attempts = 1
+        if self._captcha is not None and getattr(self._captcha, "enabled", False):
+            max_captcha_attempts = max(
+                1, int(getattr(self._captcha, "max_attempts", 1) or 1)
+            )
+        captcha_retry = 0
 
-        feedback = (await self._feedback()).lower()
-        if re.search(r"captcha\s+ingresado\s+es\s+incorrecto", feedback):
-            raise BotCaptchaUnsolvableError("ARCA rechazó el CAPTCHA")
-        if await self._captcha_present():
-            await self._solve_captcha()
-            if await self._login_form_visible():
-                raise BotCaptchaUnsolvableError(
-                    "ARCA requiere resolver un CAPTCHA antes de continuar"
+        while True:
+            if await self._captcha_present():
+                await self._solve_captcha()
+            if not await self._fill_first(
+                self.page,
+                (
+                    "#F1\\:password",
+                    "input[type='password']",
+                    "input[name*='password' i], input[name*='clave' i]",
+                ),
+                self._credentials.clave,
+            ):
+                raise ArcaLoginError("no se encontró el campo de clave fiscal en ARCA")
+            if not await self._click_first(
+                self.page,
+                (
+                    "button:has-text('Ingresar')",
+                    "#ingresar",
+                    "button[type='submit']",
+                    "input#F1\\:btnIngresar",
+                    "input[type='submit']",
+                ),
+            ):
+                try:
+                    await self.page.locator("input[type='password']").press("Enter")
+                except Exception as exc:
+                    raise TargetUnavailableError(
+                        "no se pudo enviar el login de ARCA",
+                        diagnostic_code="arca_password_submit_failed",
+                    ) from exc
+            await self._wait_ready()
+
+            feedback = (await self._feedback()).lower()
+            if re.search(r"captcha\s+ingresado\s+es\s+incorrecto", feedback):
+                captcha_retry += 1
+                if (
+                    captcha_retry >= max_captcha_attempts
+                    or not await self._captcha_present()
+                ):
+                    raise BotCaptchaUnsolvableError("ARCA rechazó el CAPTCHA")
+                continue
+            if re.search(r"clave\s+o\s+usuario\s+incorrecto|clave incorrecta", feedback):
+                raise ArcaLoginError(
+                    "ARCA rechazó las credenciales fiscales",
+                    diagnostic_code="arca_login_credentials_rejected",
                 )
-        if re.search(r"clave\s+o\s+usuario\s+incorrecto|clave incorrecta", feedback):
-            raise ArcaLoginError(
-                "ARCA rechazó las credenciales fiscales",
-                diagnostic_code="arca_login_credentials_rejected",
-            )
-        if feedback:
-            raise ArcaLoginError(
-                "ARCA rechazó el inicio de sesión",
-                diagnostic_code="arca_login_feedback_rejected",
-            )
+            if feedback:
+                raise ArcaLoginError(
+                    "ARCA rechazó el inicio de sesión",
+                    diagnostic_code="arca_login_feedback_rejected",
+                )
+            if await self._captcha_present() and await self._login_form_visible():
+                captcha_retry += 1
+                if captcha_retry >= max_captcha_attempts:
+                    raise BotCaptchaUnsolvableError(
+                        "ARCA requiere resolver un CAPTCHA antes de continuar"
+                    )
+                continue
+            break
+
         try:
             login_url = urlparse(str(self.page.url))
         except Exception:

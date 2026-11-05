@@ -269,11 +269,12 @@ async def _solve_recaptcha_v2_capmonster_proxyless(
     site_key: str,
     timeout_seconds: int,
     poll_seconds: int,
+    task_type: str = "RecaptchaV2Task",
 ) -> Optional[str]:
     create_payload = {
         "clientKey": api_key,
         "task": {
-            "type": "RecaptchaV2Task",
+            "type": (task_type or "RecaptchaV2Task"),
             "websiteURL": website_url,
             "websiteKey": site_key,
         },
@@ -355,6 +356,7 @@ async def _solve_captcha_if_needed(
     task_candidates = []
     for candidate in (
         os.getenv("RETPER_CAPMONSTER_TASK_TYPE", "RecaptchaV2Task").strip(),
+        "RecaptchaV2TaskProxyless",
         "RecaptchaV2Task",
         "NoCaptchaTaskProxyless",
     ):
@@ -370,6 +372,7 @@ async def _solve_captcha_if_needed(
             site_key=sitekey,
             timeout_seconds=timeout_s,
             poll_seconds=poll_s,
+            task_type=task_type,
         )
         if not token:
             if dc:

@@ -226,6 +226,7 @@ async def _solve_recaptcha_v2_capmonster_proxyless(
     task_types: list[str] = []
     for candidate in (
         os.getenv("SRT_CAPMONSTER_TASK_TYPE", "RecaptchaV2Task").strip(),
+        "RecaptchaV2TaskProxyless",
         "RecaptchaV2Task",
         "NoCaptchaTaskProxyless",
     ):
