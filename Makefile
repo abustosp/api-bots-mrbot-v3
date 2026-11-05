@@ -20,8 +20,11 @@ install:
 	$(VENV_PYTHON) -m pip install -e packages/mrbot-contracts -e services/central-api -e services/bot-worker
 	$(VENV_PYTHON) -m pip install pytest
 
+# Un pytest por paquete: dos test_worker_capacity.py comparten basename y colisionan en una sola colección.
+TEST_DIRS := packages/mrbot-contracts services/central-api services/bot-worker tests
+
 test:
-	$(VENV_PYTHON) -m pytest -q
+	@rc=0; for d in $(TEST_DIRS); do echo "== $$d"; $(VENV_PYTHON) -m pytest -q $$d || rc=1; done; exit $$rc
 
 verify:
 	./infra/verify-all.sh

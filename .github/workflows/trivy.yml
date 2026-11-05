@@ -6,6 +6,8 @@ name: trivy-scan
 # externas del compose) + filesystem del repo (deps Python, secretos,
 # misconfigurations de Dockerfiles/Compose).
 #
+# Gate: los pasos de tabla fallan (exit-code 1) con HIGH/CRITICAL corregibles;
+# excepciones aceptadas en docs/trivy-exceptions.md (IDs en .trivyignore).
 # Resultados: tabla en el log + SARIF en la pestaña Security del repo.
 # Si el build de bot-worker necesita la base privada
 # (docker.abp.net.ar), definir estos secrets en el repo:
@@ -45,9 +47,10 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           format: table
-          exit-code: "0"
+          exit-code: "1"
 
       - name: Trivy FS (SARIF)
+        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -60,6 +63,7 @@ jobs:
           exit-code: "0"
 
       - name: Subir SARIF (filesystem)
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-fs.sarif
@@ -125,10 +129,7 @@ jobs:
           # reportaba versiones de una imagen anterior (fantasmas).
           cache: false
           format: table
-          # Report-only: el gate real es Security (SARIF). La tabla
-          # agregada mostró versiones viejas aun con la imagen probada
-          # limpia (pip list + dist-infos + per-file + SARIF coinciden).
-          exit-code: "0"
+          exit-code: "1"
 
       - name: Trivy image (SARIF)
         id: trivy_sarif
@@ -181,9 +182,10 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           format: table
-          exit-code: "0"
+          exit-code: "1"
 
       - name: Trivy image (SARIF)
+        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -196,6 +198,7 @@ jobs:
           exit-code: "0"
 
       - name: Subir SARIF (${{ matrix.image }})
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-external.sarif

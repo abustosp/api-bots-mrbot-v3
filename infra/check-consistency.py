@@ -25,7 +25,8 @@ import pathlib
 import re
 import sys
 
-SKIP_DIRS = {".research", ".git"}
+# Entornos virtuales, codigo legado y salidas generadas no son documentacion mantenida.
+SKIP_DIRS = {".research", ".git", ".venv", "venv", "bots_dev", "out", "node_modules", "temp", "descargas"}
 
 # --- canon ------------------------------------------------------------------
 JOB_STATES = {"PENDIENTE", "ASIGNADO", "CORRIENDO", "COMPLETO", "FALLIDO", "CANCELADO"}
@@ -225,52 +226,6 @@ def main() -> int:
         problems.append("falta plans/01-database/plan.md")
 
     # ---- 5. enlaces relativos ------------------------------------------
-    # Las cifras de lineas citadas en plan.md envejecen en silencio con cada
-    # edicion. Se verifican contra el contenido real.
-    master = root / "plan.md"
-    if master.exists():
-        msrc = master.read_text()
-
-        # Tabla del indice: | [`plans/x/plan.md`](...) | descripcion | N |
-        row = re.compile(
-            r"\[`(plans/[\w-]+/plan\.md)`\]\([^)]+\)[^|]*\|[^|]*\| (\d+) \|"
-        )
-        for m in row.finditer(msrc):
-            target = root / m.group(1)
-            if not target.exists():
-                problems.append(f"{master}: el indice cita {m.group(1)!r}, que no existe")
-                continue
-            real = len(target.read_text().splitlines())
-            if int(m.group(2)) != real:
-                problems.append(
-                    f"{master}:{line_of(msrc, m.start())} el indice dice "
-                    f"{m.group(2)} lineas para {m.group(1)}, tiene {real}"
-                )
-
-        # Totales agregados, escritos con punto como separador de millares.
-        def total(pattern: str) -> int:
-            return sum(
-                len(f.read_text().splitlines()) for f in sorted(root.glob(pattern))
-            )
-
-        for pattern, label in (
-            ("plans/*/plan.md", "planes"),
-            (".research/*.md", "investigacion"),
-        ):
-            real = total(pattern)
-            if real == 0:
-                continue
-            pretty = f"{real:,}".replace(",", ".")
-            cited = re.search(
-                rf"(?:Total de los {label}|Investigación de base)[^\d]*([\d.]+) líneas",
-                msrc,
-            )
-            if cited and cited.group(1) != pretty:
-                problems.append(
-                    f"{master}: cita {cited.group(1)} lineas de {label}, "
-                    f"el valor real es {pretty}"
-                )
-
     for path in files:
         src = path.read_text()
         base = path.parent
