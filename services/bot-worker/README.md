@@ -1,183 +1,102 @@
 # bot-worker
 
-Servicio ejecutor de la V3. Corre los bots Playwright que automatizan los sitios
-de los organismos.
+Plano de ejecución de la V3. Recibe de la central un sobre de job firmado, corre
+el bot Playwright correspondiente, sube los artefactos por URL prefirmada y
+reporta el resultado. **No decide qué ejecutar ni guarda estado.**
 
-> **Estado: sin implementar.** Diseño en
-> [`../../plans/03-worker/plan.md`](../../plans/03-worker/plan.md).
+> Implementado. El registro actual (`bot_worker.bots.registry.REGISTRY`) tiene
+> **35 plugins**. Si este README y el código difieren, manda el código.
 
----
+## Reglas que definen el servicio
 
-## Qué es
+- **Sin base de datos (W-1).** No instala `psycopg`, `sqlalchemy` ni `alembic`;
+  el build de la imagen lo comprueba.
+- **Sin secretos propios ni entorno.** Se configura solo por CLI y falla si ve
+  secretos en el entorno. Credenciales, proxy, captcha y URLs prefirmadas llegan
+  en cada asignación sellada de la central.
+- **Solo ejecuta asignaciones firmadas** (Ed25519) por la central.
+- **Tope de concurrencia (W-2):** `--concurrency` de 1 a 10 (por defecto 5). Con
+  el worker saturado responde `409`.
+- **Puerto no publicado (W-3):** solo la central lo alcanza.
 
-Un **ejecutor puro**. Recibe de la API central un sobre de job autocontenido,
-ejecuta el bot, sube los archivos que genera al almacenamiento de objetos usando
-URLs prefirmadas, y reporta el resultado.
+## API secundaria (privada)
 
-No decide qué ejecutar. No busca trabajo. No guarda nada.
+Definida en `src/bot_worker/main.py`. Rutas bajo `/internal/v1`:
 
-## Invariantes
+- `POST /jobs` recibe una asignación (`202`, o `409` si está saturado o drenando).
+- `GET /jobs` lista los jobs en curso.
+- `POST /jobs/{job_id}/cancel` cancela un job en vuelo.
+- `GET /health` vivacidad, sin dependencias.
+- `GET /status` capacidad, jobs en ejecución y versiones.
+- `GET /bots` manifiesto de los plugins de la imagen.
 
-Estas cuatro reglas no son recomendaciones, son condiciones de aceptación del
-servicio:
+Además el worker empuja latidos, eventos y resultados a la central
+(`reporting/`). Ante `SIGTERM` drena: pasa a `DRENANDO`, rechaza trabajo nuevo y
+espera a los jobs en vuelo (`--drain-timeout`, 120 s por defecto).
 
-| | Invariante | Verificación |
-|---|---|---|
-| **W-1** | No accede a ninguna base de datos | La imagen no instala driver de PostgreSQL ni ORM. Un test recorre el grafo de módulos y falla si aparece un import de base de datos |
-| **W-2** | Nunca ejecuta más de 10 jobs concurrentes | Semáforo configurable de 1 a 10 y rechazo `409` cuando está lleno. Workers con capacidad 5 mantienen el comportamiento previo |
-| **W-3** | Solo responde a la API central | Token emitido en el registro más aislamiento de red. Sin ingreso desde internet |
-| **W-4** | Un worker que deja de reportar salud libera sus jobs | La central reencola por vencimiento del lease, sin intervención manual |
+## Contrato de plugin
 
-## Lo que este servicio NO tiene
+Cada bot es un paquete en `src/bot_worker/bots/<bot>/` con un `plugin.py` que
+implementa `BotPlugin` (`manifest`, `validate`, `execute`) y se registra en
+`bots/_plugins.py`. El plugin escribe solo en `runtime.work_dir`, no abre
+conexiones a base de datos, no lee el entorno, no loguea credenciales y no arma
+el mensaje de error público (devuelve categoría y diagnóstico). Diseño original:
+[`plans/03-worker/plan.md`](../../plans/03-worker/plan.md) §7.
 
-- `DATABASE_URL`, ni driver, ni modelos ORM, ni tabla de logs.
-- Credenciales del almacenamiento de objetos. Recibe URLs prefirmadas.
-- La clave privada RSA.
-- Credenciales SMTP ni de MercadoPago.
-
-Sí tiene: la URL de la central, su token, las claves de los resolvedores de
-captcha y la configuración de proxies.
-
-## API secundaria
-
-Privada. Solo la central la consume.
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| `POST` | `/internal/v1/jobs` | Recibe una asignación. `202` si acepta, `409` si está saturado |
-| `GET` | `/internal/v1/jobs` | Jobs en curso en este worker |
-| `POST` | `/internal/v1/jobs/{job_id}/cancel` | Cancela un job en vuelo |
-| `GET` | `/internal/v1/health` | Vivacidad. Sin dependencias |
-| `GET` | `/internal/v1/status` | Salud detallada: en ejecución, en cola, capacidad, versiones, recursos |
-| `GET` | `/internal/v1/bots` | Manifiesto de los bots que esta imagen soporta |
-
-Además del API, el worker **empuja latidos** a la central. Las dos direcciones
-son complementarias: el latido da vivacidad sin que la central tenga que sondear
-N workers, y el API da detalle a demanda y permite asignar.
-
-## Ciclo de vida de un job
-
-```mermaid
-sequenceDiagram
-    participant A as central-api
-    participant W as bot-worker
-    participant B as bot
-    participant O as almacenamiento
-
-    A->>W: POST /internal/v1/jobs (sobre)
-    W->>W: valida sobre, toma el semaforo
-    W-->>A: 202 aceptado
-    W->>W: crea espacio de trabajo, carga credenciales en memoria
-    W->>B: execute(payload, runtime)
-    B->>O: PUT artefactos (URL prefirmada)
-    B-->>W: resultado
-    W->>A: POST /jobs/{id}/result
-    W->>W: borra el espacio de trabajo, libera el semaforo
-```
-
-La limpieza del espacio de trabajo está garantizada incluso si el bot falla o el
-proceso recibe una señal.
-
-## Estados del worker
-
-```mermaid
-stateDiagram-v2
-    [*] --> REGISTRANDO
-    REGISTRANDO --> SANO
-    SANO --> SATURADO: 5 jobs en ejecucion
-    SATURADO --> SANO
-    SANO --> DEGRADADO: latido tardio o errores
-    DEGRADADO --> SANO
-    DEGRADADO --> CAIDO: sin latido
-    SANO --> DRENANDO: despliegue
-    DRENANDO --> RETIRADO
-    CAIDO --> RETIRADO
-    RETIRADO --> [*]
-```
-
-`SATURADO`, `DEGRADADO` y `CAIDO` disparan aviso al administrador.
-
-## Contrato de plugin de bot
-
-Cada bot es un plugin con un manifiesto declarativo y una función `execute`. El
-worker le inyecta un contexto de ejecución que es dueño de todos los efectos
-laterales.
-
-```python
-class BotPlugin(Protocol):
-    manifest: PluginManifest
-
-    async def validate(self, payload: Mapping[str, Any]) -> ValidatedPayload: ...
-
-    async def execute(
-        self,
-        payload: ValidatedPayload,
-        runtime: BotRuntime,
-    ) -> BotResult: ...
-```
-
-Prohibiciones del plugin, cada una con su motivo:
-
-| Prohibido | Motivo |
-|---|---|
-| Abrir conexiones a base de datos | Invariante W-1 |
-| Usar `os.getcwd()` o rutas absolutas | Debe escribir solo en `runtime.work_dir` |
-| Leer variables de entorno en la lógica de negocio | Toda la configuración llega por el contexto |
-| Subir a claves de bucket arbitrarias | Solo las URLs prefirmadas que recibió |
-| Loguear credenciales | Invariante SEC-2 |
-| Construir el mensaje de error público | Devuelve categoría y diagnóstico; la central decide qué se expone |
-
-Contrato completo en
-[`../../plans/03-worker/plan.md`](../../plans/03-worker/plan.md) §7.
-
-## Recursos
-
-Chromium consume entre 300 y 500 MB por instancia. Con el tope de 10 jobs
-concurrentes:
-
-| Recurso | Mínimo | Recomendado |
-|---|---|---|
-| Memoria | 2.5 GB | 4 GB |
-| CPU | 1 núcleo | 2 núcleos |
-| `/dev/shm` | 512 MB en memoria | 1 GB en memoria |
-
-`/dev/shm` respaldado en memoria no es opcional: sin eso Chromium se cae bajo
-concurrencia. Es el error más común al contenerizar Playwright.
-
-## Estructura prevista
+## Estructura
 
 ```
 services/bot-worker/
-├── README.md
 ├── Dockerfile
+├── DEPLOY.md
 ├── pyproject.toml
+├── tests/                       # una prueba por plugin y por capa del runtime
 └── src/bot_worker/
-    ├── main.py
-    ├── api/                 # API secundaria
-    ├── runtime/             # contexto de ejecucion, navegador, artefactos
-    │   ├── arca_login.py    # login compartido, portado de la V2
-    │   ├── captcha.py
-    │   └── proxies.py
-    ├── scheduler/           # semaforo, cola local, drenaje
-    ├── reporting/           # latidos, eventos, resultado
-    └── bots/                # un paquete por bot
-        ├── mis_comprobantes/
-        ├── hacienda/
-        └── ...
+    ├── __main__.py, main.py     # CLI y aplicación FastAPI (bot_worker.main:app)
+    ├── config.py                # argumentos CLI y validación
+    ├── security/                # firma de asignaciones (assignments), TLS/mTLS
+    ├── runtime/                 # contexto, navegador, login ARCA, captcha,
+    │                            # proxies, espacio de trabajo, portals/
+    ├── scheduler/               # supervisor de jobs en ejecución
+    ├── reporting/               # latidos, resultados, comunicación con la central
+    ├── bots/                    # un paquete por bot + registry.py, _plugins.py
+    ├── bots_dev/                # NOTA.md y payload_ejemplo.json por plugin
+    └── bots_logger/             # scripts de logger por bot
 ```
 
-## Cómo correrlo
+## Cómo correrlo y probarlo
 
-> Pendiente de la fase F0.
+Pruebas (desde la raíz del monorepo):
 
 ```bash
-# previsto
-docker compose -f ../../infra/compose/docker-compose.yml up --scale bot-worker=2
+make install     # crea .venv e instala contratos, central y worker
+make test        # toda la suite
+.venv/bin/python -m pytest -q services/bot-worker/tests
 ```
+
+Los tests usan fakes de Playwright (`tests/fakes_playwright.py`) y no abren
+navegador ni llaman a organismos. Sin Playwright instalado el worker usa un
+navegador stub, solo válido para desarrollo.
+
+Imagen y stack local:
+
+```bash
+docker build -f services/bot-worker/Dockerfile -t mrbot-bot-worker:dev .
+docker compose -f infra/compose/docker-compose.yml up -d --scale bot-worker=2
+```
+
+Arranque manual: `python -m bot_worker --central-url <url> --advertised-url <url>`
+(ver `config.py` para todas las opciones).
+
+## Recursos
+
+Cada Chromium consume 300-500 MB. Mínimo 2.5 GB de memoria y 1 núcleo;
+recomendado 4 GB y 2 núcleos. `/dev/shm` debe ser de memoria (el compose usa
+2 GB); sin eso Chromium se cae bajo concurrencia.
 
 ## Documentos relacionados
 
-- [`plans/03-worker/plan.md`](../../plans/03-worker/plan.md) - diseño de este servicio
-- [`plans/00-arquitectura/plan.md`](../../plans/00-arquitectura/plan.md) - protocolo con la central
-- [`plans/07-migracion/plan.md`](../../plans/07-migracion/plan.md) - portado de los bots de la V2
-- [`plans/06-infra/plan.md`](../../plans/06-infra/plan.md) - imagen y dimensionamiento
+- [`DEPLOY.md`](DEPLOY.md): imagen, arranque, drenaje y producción.
+- [`../worker-updater/README.md`](../worker-updater/README.md): actualización de workers manuales.
+- [`../../infra/deploy/runbooks/despliegue-worker.md`](../../infra/deploy/runbooks/despliegue-worker.md): runbook de despliegue.
+- Diseño histórico: [`plans/03-worker/plan.md`](../../plans/03-worker/plan.md) y [`plans/07-migracion/plan.md`](../../plans/07-migracion/plan.md).

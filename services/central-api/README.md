@@ -17,7 +17,7 @@ Servicio central de la V3. Es el **plano de control** completo del sistema.
 | Planificación | Cola de jobs en PostgreSQL y reparto entre workers sanos |
 | Gobierno de la flota | Registro de workers, ingesta de latidos, clasificación de salud |
 | Panel de administración | Usuarios, jobs, flota, suscripciones, auditoría |
-| Cuentas | Tipos PRUEBA, TESTING y NORMAL con cupo de requests (sin pagos automáticos) |
+| Cuentas | Tipos PRUEBA, TESTING y NORMAL con cupo de requests, administrados manualmente desde el panel (ver [`BILLING.md`](BILLING.md)) |
 
 ## Lo que este servicio es el único en tener
 
@@ -25,7 +25,6 @@ Servicio central de la V3. Es el **plano de control** completo del sistema.
 - La clave privada RSA con la que se descifran las credenciales fiscales.
 - Las credenciales del almacenamiento de objetos. Los workers reciben URLs
   prefirmadas, nunca las llaves.
-- Los tokens de MercadoPago.
 - Las credenciales SMTP.
 
 ## Superficie HTTP
@@ -51,32 +50,10 @@ clave API, ownership, cuota e idempotencia, persiste el job en PostgreSQL y el
 planificador lo asigna al worker sano que tenga capacidad. La central no importa
 plugins de bots ni expone al worker directamente.
 
-Para facilitar la migración de clientes V2, el router de compatibilidad publica
-los 36 endpoints históricos de ejecución como aliases bajo `/api/v3`:
-
-```text
-/mis_comprobantes/consulta
-/mis_comprobantes/solicitar_consulta
-/mis_comprobantes/historial
-/ccma/consulta                         /siper/consulta
-/sct/consulta                          /sct/compensaciones/consulta
-/portal_iva/consulta                    /portal_iva/carga
-/rcel/consulta                          /hacienda/consulta
-/sifere/consulta                        /aportes-en-linea/consulta
-/declaracion-en-linea/consulta          /mis_facilidades/consulta
-/mis_retenciones/consulta               /mis_retenciones_iva_simple/consulta
-/retenciones_percepciones_iibb/misiones/consulta
-/retenciones_percepciones_iibb/agip/consulta
-/retenciones_percepciones_iibb/arba/consulta
-/arba/consulta                           /pago_devoluciones/consulta
-/moa/consulta                            /libros_iva/consulta
-/facturometro/consulta                   /controladores-fiscales/carga
-/certificado-mipyme/consulta             /srt/alicuotas/consulta
-/vep/carga                               /vep_archivo/carga
-/vep-ccma/generar                        /vep/consulta-pagos
-/liquidacion_granos/consulta              /consulta_cuit/individual
-/consulta_cuit/masivo
-```
+Para facilitar la migración de clientes V2, el router de compatibilidad
+(`api/bot_compat.py`, `BOT_ROUTE_ALIASES`) publica 35 endpoints históricos de
+ejecución como aliases bajo `/api/v3` (por ejemplo `/mis_comprobantes/consulta`,
+`/vep/carga`, `/consulta_cuit/masivo`). La lista vigente está en ese archivo.
 
 Cada alias `POST` devuelve un `job_id` y comparte las rutas de estado y
 cancelación con el formato `/{job_id}` y `/cancelar/{job_id}`. También se
@@ -156,7 +133,7 @@ Se conservan nombres como `clave`, `clave_representante`, `contrasena`,
 `cuit_representado`, `desde`, `hasta`, `movimientos`, `pdf` y
 `clave_encriptada`. La central normaliza esos campos al contrato del worker.
 
-El body documentado de cada uno de los 36 aliases se toma del snapshot
+El body documentado de cada uno de los 35 aliases se toma del snapshot
 `src/central_api/api/v1_request_schemas.json`, generado desde los modelos de
 `/home/abp/Desktop/Proyectos Python/Scripts/Mr bot/api/api-bots-mrbot`. El
 snapshot conserva el orden de propiedades, nombres, campos requeridos,
@@ -217,32 +194,25 @@ sequenceDiagram
 `FOR UPDATE SKIP LOCKED` permite correr N réplicas de este servicio sin que dos
 asignen el mismo job.
 
-## Estructura prevista
+## Estructura
 
 ```
-services/central-api/
-├── README.md
-├── Dockerfile
-├── pyproject.toml
-├── alembic/                 # migraciones
-└── src/central_api/
-    ├── main.py
-    ├── api/                 # rutas publicas v3
-    ├── internal/            # rutas para workers
-    ├── admin/               # panel
-    ├── scheduler/           # cola, seleccion de worker, reaper
-    ├── domain/              # servicios de negocio
-    ├── repositories/        # acceso a datos
-    ├── models/              # ORM
-    ├── schemas/             # entrada y salida
-    ├── security/            # claves API, RSA, sesiones
-    ├── billing/             # tipos de cuenta y cupo de requests
-    └── observability/       # logging, metricas
+src/central_api/
+├── main.py, settings.py, db.py, migrate.py
+├── api/            # rutas públicas v3 y aliases V2
+├── internal/       # rutas para workers
+├── admin/          # panel y endpoints /admin (incl. subscriptions.py: cuentas)
+├── scheduler/      # cola, selección de worker, reaper
+├── autoscaler/     # autoescalado de workers
+├── billing/        # tipos de cuenta y cupo de requests
+├── repositories/   # acceso a datos
+├── models/         # ORM
+├── security/       # claves API, RSA, sesiones, sellado
+└── services/, tools/, storage.py, worker_updates.py, ...
 ```
 
-Regla de capas: las rutas llaman a servicios, los servicios llaman a
-repositorios, y **ninguna ruta toca el ORM directamente**. La V2 no tenía esta
-separación y las rutas usaban el manager y el ORM en el mismo archivo.
+Las rutas usan `repositories/` y `services/`, pero varios módulos de `api/`,
+`admin/` e `internal/` también consultan SQLAlchemy directamente.
 
 ## Base de datos y migraciones (job one-off `migrate`)
 
@@ -251,7 +221,7 @@ en memoria (fallback para `JOBS`/`WORKERS`). Con `DATABASE_URL` configurada,
 `api`, `internal`, `scheduler` y `admin` usan `repositories` + `models`
 contra PostgreSQL, único source of truth (el worker nunca toca la base, W-1).
 
-Las migraciones viven en `alembic/versions/` (`0001`–`0013`) y se aplican
+Las migraciones viven en `alembic/versions/` (`0001`–`0030`) y se aplican
 **solo** como job efímero con la misma imagen, nunca en el arranque:
 
 ```bash
@@ -265,35 +235,28 @@ docker compose -f infra/compose/docker-compose.yml \
 
 ## Secretos centralizados (`settings.py`)
 
-Todo secreto se lee solo desde `central_api.settings`: `DATABASE_URL`,
-`API_KEY_HMAC_SECRET`, `ADMIN_TOKEN`, `INTERNAL_JWT_SIGNING_KEY`,
-`RSA_PRIVATE_KEY`, `MP_WEBHOOK_SECRET`, `MP_ENVIRONMENT` (`sandbox`/`production`)
-y `MP_ACCESS_TOKEN`. Ningún router lee el entorno directo.
-
-## Facturación
-
-`billing/` implementa ajustes append-only (`AJUSTE` con motivo y actor),
-períodos forzados por admin, cierre de vencidos y conciliación periódica
-contra recursos reconsultados de MercadoPago (contraste exacto en centavos,
-sin editar el hecho origen). El admin de suscripciones vive en
-`/admin/billing/*` (cuenta, plan, suspensión, crédito manual, reproceso de
-webhooks, conciliación y discrepancias).
+Todos los secretos y parámetros se leen solo desde `central_api.settings`
+(`DATABASE_URL`, `API_KEY_HMAC_SECRET`, `ADMIN_TOKEN`, `INTERNAL_JWT_SIGNING_KEY`,
+`RSA_PRIVATE_KEY`, `OBJECT_STORAGE_*`, `SMTP_*`, ...). Ningún router lee el
+entorno directo.
 
 ## Configuración
 
 Inventario completo en
-[`../../plans/06-infra/plan.md`](../../plans/06-infra/plan.md) §6. Resumen:
+[`../../plans/06-infra/plan.md`](../../plans/06-infra/plan.md) §6 y en
+[`settings.py`](src/central_api/settings.py). Resumen:
 
 | Variable | Propósito |
 |---|---|
 | `DATABASE_URL` | Conexión a PostgreSQL |
 | `API_KEY_HMAC_SECRET` | Secreto del verificador de claves API |
-| `RSA_PRIVATE_KEY_FILE` | Secreto PEM privado RSA de custodia de credenciales |
-| `MINIO_*` | Credenciales y buckets del almacenamiento de objetos |
-| `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USER`, `SMTP_FROM`, `SMTP_PASSWORD_FILE`, `SMTP_STARTTLS` | Envío opcional de credenciales y avisos desde la central. STARTTLS es obligatorio. |
-| `MERCADOPAGO_*` | Tokens de cobro y validación de webhooks |
-| `WORKER_TOKEN_SECRET` | Emisión de tokens para los workers |
-| `SCHEDULER_*` | Intervalos, umbrales de salud, TTL del lease |
+| `RSA_PRIVATE_KEY` / `RSA_PRIVATE_KEY_FILE` | Clave privada RSA de custodia de credenciales |
+| `OBJECT_STORAGE_ENDPOINT`, `_PUBLIC_ENDPOINT`, `_REGION`, `_BUCKET`, `_UPLOADS_BUCKET`, `_LOGGER_BUCKET`, `_ACCESS_KEY`, `_SECRET_KEY`, `_USE_SSL` | Almacenamiento de objetos S3 compatible |
+| `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USER`, `SMTP_FROM`, `SMTP_PASSWORD`, `SMTP_STARTTLS` | Envío opcional de credenciales y avisos. STARTTLS es obligatorio |
+| `ADMIN_TOKEN`, `INTERNAL_JWT_SIGNING_KEY`, `ASSIGNMENT_SIGNING_KEY`, `WORKER_TOKEN` | Autenticación del panel y de los workers |
+| `WORKER_NODES`, `WORKER_*`, `RELAY_*` | Flota, actualizaciones y workers relay |
+| `SCHEDULER_*`, `AUTOSCALE_*` | Planificador y autoescalado |
+| `PROXY_*`, `CAPMONSTER_*`, `CUIT_SERVICE_*`, `APOC_*` | Servicios externos |
 
 ## Cómo correrlo
 
@@ -307,5 +270,4 @@ docker compose -f ../../infra/compose/docker-compose.yml up central-api
 - [`plans/02-central-api/plan.md`](../../plans/02-central-api/plan.md) - diseño de este servicio
 - [`plans/00-arquitectura/plan.md`](../../plans/00-arquitectura/plan.md) - protocolo con los workers
 - [`plans/01-database/plan.md`](../../plans/01-database/plan.md) - esquema que este servicio posee
-- [`plans/04-billing/plan.md`](../../plans/04-billing/plan.md) - facturación
 - [`plans/05-admin-panel/plan.md`](../../plans/05-admin-panel/plan.md) - panel

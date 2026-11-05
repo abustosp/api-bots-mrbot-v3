@@ -731,7 +731,7 @@ No se permite que HTMX se convierta en una API pública no documentada.
 
 ### 10.2 Montaje y separación
 
-`services/central-api/app/admin/router.py` monta el router bajo `/admin`.
+El paquete `services/central-api/src/central_api/admin/` se monta bajo `/admin` desde `central_api/main.py`.
 
 Las rutas se excluyen de OpenAPI pública.
 

@@ -2,8 +2,9 @@
 
 Paquete de contratos compartidos entre `central-api` y `bot-worker`.
 
-> **Estado: sin implementar.** Especificación normativa del protocolo en
-> [`../../plans/00-arquitectura/plan.md`](../../plans/00-arquitectura/plan.md) §5.
+> **Estado: implementado (v1.0.0).** Diseño original del protocolo en
+> [`../../plans/00-arquitectura/plan.md`](../../plans/00-arquitectura/plan.md) §5;
+> si difiere del código, manda el código.
 
 ---
 
@@ -62,21 +63,29 @@ graph LR
 | `JobCancellation` | central → worker | Cancelación de un job en vuelo |
 | `PresignedUploadRequest` | worker → central | Pide URLs prefirmadas de subida |
 
-## Estructura prevista
+## Estructura
 
 ```
 packages/mrbot-contracts/
-├── README.md
-├── pyproject.toml
+├── pyproject.toml               # versión 1.0.0, depende solo de pydantic
+├── tests/                       # test_datos_csv, test_log_redaction, test_worker_capacity
 └── src/mrbot_contracts/
-    ├── __init__.py
-    ├── version.py           # PROTOCOL_VERSION y la regla de compatibilidad
-    ├── enums.py             # JobStatus, JobResult, WorkerStatus, ErrorCategory
-    ├── worker.py            # registro, latido
-    ├── jobs.py              # sobre, aceptacion, eventos, resultado, cancelacion
-    ├── artifacts.py         # URLs prefirmadas, descriptor de artefacto
-    └── errors.py            # categorias y su mapeo a HTTP
+    ├── __init__.py              # reexporta los modelos públicos
+    ├── version.py               # PROTOCOL_VERSION y regla de compatibilidad
+    ├── enums.py                 # estados de job y worker, JobResult, ErrorCategory
+    ├── worker.py                # registro, latido, nodos
+    ├── jobs.py                  # sobre, aceptación, eventos, resultado, cancelación
+    ├── artifacts.py             # URLs prefirmadas, descriptor de artefacto
+    ├── errors.py                # categorías y su mapeo a HTTP
+    ├── request_fields.py        # campos por operación (alimenta los schemas de la API)
+    ├── log_redaction.py         # redacción de URLs prefirmadas en logs
+    ├── datos_csv.py             # CSV `|` de datos scrapeados (RCEL, CCMA) y su inversa
+    └── planillas.py             # lectura y filtrado de planillas CSV/ZIP de ARCA
 ```
+
+`datos_csv.py`, `planillas.py` y `log_redaction.py` son utilidades compartidas
+(las usan el worker al escribir o descargar y la central al reconstruir), no
+mensajes del protocolo.
 
 ## Uso
 
@@ -89,12 +98,15 @@ from mrbot_contracts.jobs import JobEnvelope, JobResultReport
 ## Reglas del paquete
 
 1. No depende de ningún otro módulo del repositorio.
-2. No contiene lógica de negocio, solo definiciones de datos y validación.
-3. No conoce PostgreSQL, ni Playwright, ni FastAPI. Solo Pydantic.
+2. Los mensajes son solo definiciones de datos y validación. Las utilidades
+   (`datos_csv`, `planillas`, `log_redaction`, `request_fields`) sí tienen lógica
+   de parseo y normalización compartida, pero sin red ni secretos.
+3. No conoce PostgreSQL, ni Playwright, ni FastAPI. Depende solo de Pydantic y de
+   la biblioteca estándar.
 4. Los dos servicios lo declaran como dependencia con la misma versión.
 
 ## Documentos relacionados
 
 - [`plans/00-arquitectura/plan.md`](../../plans/00-arquitectura/plan.md) §5 - especificación del protocolo
 - [`plans/00-arquitectura/plan.md`](../../plans/00-arquitectura/plan.md) §6 - este paquete
-- [`plans/08-testing/plan.md`](../../plans/08-testing/plan.md) §4 - pruebas de contrato
+- Pruebas: `.venv/bin/python -m pytest -q packages/mrbot-contracts/tests`

@@ -100,7 +100,7 @@ acepta (`cuit_login`, `clave`, `cuit_representado`).
 | 3 | credenciales C | 202 | `COMPLETO` / `OK` | 1 PDF | 27,1 s |
 | 4 | A + `b64:null`, `carga_b64:false`, `archivo_b64:""`, `incluir_base64:false`, `carga_s3:false` | 202 | `COMPLETO` / `OK` | 1 PDF | 29,1 s |
 | 5 | A + los mismos campos vacíos con `carga_s3:true` | 202 | `COMPLETO` / `OK` | 1 PDF | 27,5 s |
-| 6 | A + `archivo_b64:"QQ=="` | 422 | — | — | 0,3 s |
+| 6 | A + `archivo_b64:"QQ=="` | 422 |, |, | 0,3 s |
 
 Los casos 4 y 5 confirman que los campos legados vacíos ya no se confunden con
 "archivo no subido" y que el job corre el flujo completo (antes quedaban
@@ -125,10 +125,10 @@ y el cliente no recibía nada.
 
 | Caso | HTTP | Estado / result | `error_code` | Datos | Tiempo |
 |---:|---:|---|---|---|---:|
-| 1 | 202 | `COMPLETO` / `ERROR` | `target_unavailable` | — | 266,9 s |
-| 2 | 202 | `COMPLETO` / `OK` | — | consolidados + jurisdicciones | 407,2 s |
-| 3 | 202 | `COMPLETO` / `OK` | — | consolidados + jurisdicciones | 408,3 s |
-| 1 (reintento) | 202 | `COMPLETO` / `PARCIAL` | — | consolidados + jurisdicciones | 410,3 s |
+| 1 | 202 | `COMPLETO` / `ERROR` | `target_unavailable` |, | 266,9 s |
+| 2 | 202 | `COMPLETO` / `OK` |, | consolidados + jurisdicciones | 407,2 s |
+| 3 | 202 | `COMPLETO` / `OK` |, | consolidados + jurisdicciones | 408,3 s |
+| 1 (reintento) | 202 | `COMPLETO` / `PARCIAL` |, | consolidados + jurisdicciones | 410,3 s |
 
 El caso 1 es la **tercera medición** del hallazgo principal: el mismo cuerpo,
 la misma cuenta y el mismo tag fallan con `target_unavailable` en el primer

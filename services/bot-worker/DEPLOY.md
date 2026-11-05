@@ -75,20 +75,20 @@ compose). El tope de 10 jobs concurrentes (invariante W-2) lo aplica
   imagen del servicio.
 - Ante `SIGTERM` el worker drena: avisa `DRENANDO` a la central,
   rechaza asignaciones nuevas con `409 WORKER_DRENANDO` y espera a los
-  jobs en vuelo hasta `WORKER_DRAIN_TIMEOUT_SECONDS` (120 s) sin
+  jobs en vuelo hasta `--drain-timeout` (120 s por defecto) sin
   perderlos; al vencer pide cancelación cooperativa y reporta.
 
 ## Servicio externo: real en producción, stub solo en dev
 
 - El plugin `consulta_cuit` llama al servicio público de constancias
-  (`https://api-constancias-de-inscripcion.mrbot.com.ar`). Sin salida a
-  internet el job termina `FALLIDO` por `ConnectError`.
-- Para el ciclo E2E local, `infra/compose` provee `stub-constancias`
-  (perfil `stub`, solo stdlib, red `control`): el worker lo usa cuando
-  `CONSULTA_CUIT_BASE_URL` / `CONSULTA_CUIT_MASIVA_URL` apuntan ahí
-  (default del compose de desarrollo). Nunca usar el stub en
-  producción: con esas variables vacías el plugin usa el endpoint
-  público.
+  (`https://api-constancias-de-inscripcion.mrbot.com.ar`, fijado en
+  `bots/consulta_cuit/plugin.py`). Sin salida a internet el job termina
+  `FALLIDO` por `ConnectError`. Las credenciales del servicio las inyecta la
+  central en la asignación; el worker no lee variables de entorno.
+- `infra/compose` incluye `stub-constancias` (perfil `stub`) para pruebas
+  locales; el worker no tiene variables `CONSULTA_CUIT_*`, así que revisar el
+  [runbook de arranque local](../../infra/deploy/runbooks/arranque-local.md)
+  antes de depender de él. Nunca usar el stub en producción.
 
 ## Produccion
 

@@ -20,8 +20,8 @@ Directorio solo para desarrollo: NO altera `registry.py`.
 ## Notas del port
 
 - Con más de un representado el servicio abre en `IndexContribuyente.aspx`
-  (combo `ddlCUIT` + botón `Aceptar`): el portal selecciona el CUIT pedido —o
-  el primero, la preselección del sitio, si el sobre no lo explicita— y el
+  (combo `ddlCUIT` + botón `Aceptar`): el portal selecciona el CUIT pedido :o
+  el primero, la preselección del sitio, si el sobre no lo explicita: y el
   plugin verifica el empleador resultante antes de descargar. Con un solo
   representado el servicio abre directo en el empleador de la sesión.
 - El portal pagina de a 1 período por defecto: el port selecciona 5 por

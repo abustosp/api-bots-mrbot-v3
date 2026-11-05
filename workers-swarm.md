@@ -1,4 +1,4 @@
-# workers-swarm.md — Reparto de trabajo en flota EC2 efímera
+# workers-swarm.md, Reparto de trabajo en flota EC2 efímera
 
 > **Estado:** documento de diseño + resultados de prueba de concepto (2026-10-01).
 >
@@ -106,7 +106,7 @@ Topología de red usada (todas en el **default VPC**, misma subred privada `172.
 
 Estos son hallazgos **observados**, no teóricos. Se listan con la corrección propuesta.
 
-### D-1 — El worker se registra con identidad temporal `sin-asignar`
+### D-1, El worker se registra con identidad temporal `sin-asignar`
 
 **Síntoma:** `POST /internal/v1/workers/sin-asignar/heartbeat` → `404`.
 **Causa:** tras un registro fallido, el worker conserva el `worker_id` por defecto
@@ -115,7 +115,7 @@ Estos son hallazgos **observados**, no teóricos. Se listan con la corrección p
 registro) y **reintente el registro** antes de latir; hoy `advertised_url` es estable,
 así que el nodo es la clave correcta.
 
-### D-2 — Firma de asignaciones: `ASSIGNMENT_SIGNING_KEY` no puede ir en `environment` de Compose
+### D-2, Firma de asignaciones: `ASSIGNMENT_SIGNING_KEY` no puede ir en `environment` de Compose
 
 **Síntoma:** `500` en `POST /workers/register` con
 `AssignmentSignError: ASSIGNMENT_SIGNING_KEY inválida`.
@@ -126,14 +126,14 @@ con el PEM montado como archivo (Docker secret). Ya existe en `settings.py`
 (`_secret_file_content`); hay que **documentarlo como obligatorio** y no aceptar el
 valor inline para PEM.
 
-### D-3 — El archivo de la clave debe ser legible por el usuario del contenedor
+### D-3, El archivo de la clave debe ser legible por el usuario del contenedor
 
 **Síntoma:** el PEM montado `chmod 600` de `ec2-user` da `Permission denied` dentro
 del contenedor (corre como usuario no root).
 **Corrección V3:** montar el secreto con `mode: 0444` (o propiedad correcta) y validar
 al arranque que la clave es legible; si no, fallar con mensaje claro.
 
-### D-4 — **Bug de facturación**: los créditos del admin no habilitan jobs
+### D-4, **Bug de facturación**: los créditos del admin no habilitan jobs
 
 Este es el defecto más importante.
 
@@ -164,7 +164,7 @@ aunque se le cargaran 5000–10000 créditos por admin.
 `POST /admin/billing/accounts/{user_id}/period/force` con `{"plan":"empresa"}` abre un
 período nuevo con **cuota 20000**, que sí alcanza para 83 jobs.
 
-### D-5 — La cuota es por período, no por "jobs pendientes"
+### D-5, La cuota es por período, no por "jobs pendientes"
 
 **Observación:** al subir el plan del usuario sin forzar período, los jobs siguen
 bloqueados a 20 (el período `free` ya abierto no se recrea).
@@ -172,7 +172,7 @@ bloqueados a 20 (el período `free` ya abierto no se recrea).
 con la cuota del plan nuevo, o permitir "recargar" la cuota del período vigente de forma
 explícita y trazable.
 
-### D-6 — Límite de vCPU de la cuenta (restricción de AWS, no de la V3)
+### D-6, Límite de vCPU de la cuenta (restricción de AWS, no de la V3)
 
 La cuenta tenía **16 vCPU totales** (todas las familias comparten el mismo bucket).
 8 × 4 vCPU + central = 36 vCPU es imposible. El dimensionamiento de la flota depende de
@@ -183,7 +183,7 @@ la cuota de la cuenta; la V3 debe **leer el límite** (Service Quotas) o al meno
 
 ## 4. Procedimiento reproducible (PoC)
 
-> Todos los scripts viven en `/home/abp/Desktop/test-aws/deploy/` y usan `paramiko` +
+> Los scripts del PoC (`deploy/*.py`) **no están en este repositorio**: viven en un directorio de trabajo local del autor (`<dir-poc>/deploy/`) y usan `paramiko` +
 > `boto3` con el usuario IAM `ec2-test-user` (solo `AmazonEC2FullAccess`).
 
 ### 4.0 Requisitos previos
@@ -242,7 +242,7 @@ POST /admin/billing/accounts/{id}/period/force  {"plan":"empresa","motivo":"..."
 
 ### 4.5 Corrida
 
-`mc_client.py` (en `/home/abp/Desktop/test-aws/`):
+`mc_client.py` (en `<dir-poc>/`, fuera del repo):
 
 - Lee `Listado Mis Comprobantes 2.0.xlsx` (hoja `Listado`; columnas `Cliente`,
   `CUIT AFIP`, `CUIT en pagina`, `CLAVE`, `Desde`, `Hasta`).

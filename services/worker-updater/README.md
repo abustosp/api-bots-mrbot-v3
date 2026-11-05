@@ -14,8 +14,9 @@ conexiones salientes) y, cuando hay una orden para su nodo, ejecuta:
 5. espera a que el contenedor esté `healthy`;
 6. si falla, restaura los valores anteriores y reporta `REVERTIDO`.
 
-Variables: ver `infra/compose/worker.env.example` y el servicio `worker-updater`
-de `infra/compose/worker.compose.yaml`. En la central: `UPDATER_TOKEN`,
+Se activa con el perfil `updater` (`--profile updater`). Variables: ver
+`infra/compose/worker.env.example` y el servicio `worker-updater` de
+`infra/compose/worker.compose.yaml`. En la central: `UPDATER_TOKEN`,
 `WORKER_IMAGE_REF`, `WORKER_LATEST_VERSION`, `WORKER_UPDATE_MAX_PARALLEL`.
 
 Pruebas: `python -m pytest services/worker-updater/tests`.

@@ -26,7 +26,7 @@ avisos y broker de artefactos. Variables en
 
 - `DATABASE_URL` (via secreto `database_url`), `API_KEY_HMAC_SECRET`,
   `SESSION_SIGNING_KEY`, clave privada RSA, `SMTP_*`,
-  credenciales MinIO de firma.
+  credenciales de object storage (`OBJECT_STORAGE_*`).
 - `WORKER_NODES`: lista de IPs o DNS de workers permitidos, unica
   informacion que la central necesita de la flota.
 

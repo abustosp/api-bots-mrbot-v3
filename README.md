@@ -6,7 +6,7 @@ microservicios.
 
 ## Documentación de uso y funcionamiento
 
-La documentación revisada del comportamiento de los 34 bots está en
+La documentación revisada del comportamiento de los bots registrados (35 plugins) está en
 [`docs/`](docs/README.md):
 
 - [`docs/externa/`](docs/externa/README.md): manual para usuarios e integradores,
@@ -32,6 +32,8 @@ el contrato observado y sus limitaciones documentadas.
 > ./infra/verify-all.sh
 > make test
 > ```
+>
+> Un CI en GitHub Actions corre las pruebas y el análisis Trivy.
 >
 > Ese ejercicio encontró y corrigió siete defectos reales, entre ellos una fuga
 > de capacidad en la consulta de la cola y un `docker-compose` que Docker
@@ -175,7 +177,7 @@ El flujo reproducible está documentado en
 local:
 
 ```bash
-cp .env.example .env
+cp infra/compose/.env.example infra/compose/.env
 docker compose -f infra/compose/docker-compose.yml up --build
 ```
 
@@ -272,7 +274,7 @@ X-API-Key: <clave>
 | F0 | Fundaciones del monorepo, contratos, Compose y CI |
 | F1 | Esquema PostgreSQL y migraciones |
 | F2 | Plano de control mínimo y un bot de punta a punta |
-| F3 | Portado de los ~30 bots |
+| F3 | Portado de los bots (hoy 35 plugins registrados) |
 | F4 | Cuentas PRUEBA/TESTING/NORMAL con cupo de requests (sin pagos automáticos) |
 | F5 | Panel de administración y observabilidad de la flota |
 | F6 | Endurecimiento, pruebas de carga y caos, cutover |

@@ -29,20 +29,20 @@ se ejecutó con una fila más reciente.
 
 | Endpoint | Caso | Credencial | HTTP | Estado / result | Artefactos | Tiempo | Motivo |
 |---|---|---:|---:|---|---:|---:|---|
-| `sct/consulta` | 1 | nueva | 202 | `COMPLETO`/`OK` | **6** | 88,7 s | — |
-| `sct/consulta` | 2 | nueva | 202 | `COMPLETO`/`OK` | **6** | 442,2 s | — |
-| `sifere/consulta` | 1 | nueva | 202 | `COMPLETO`/`OK` | **102** | 769,6 s | — |
+| `sct/consulta` | 1 | nueva | 202 | `COMPLETO`/`OK` | **6** | 88,7 s |, |
+| `sct/consulta` | 2 | nueva | 202 | `COMPLETO`/`OK` | **6** | 442,2 s |, |
+| `sifere/consulta` | 1 | nueva | 202 | `COMPLETO`/`OK` | **102** | 769,6 s |, |
 | `mis_facilidades/consulta` | 1 | nueva | 202 | `COMPLETO`/**`PARCIAL`** | **144** | ~27 min | Tolerancia por sección: entregó 144 archivos |
-| `mis_retenciones/consulta` | 1 | nueva | 202 | `COMPLETO`/`OK` | 5 | 263,8 s | — |
+| `mis_retenciones/consulta` | 1 | nueva | 202 | `COMPLETO`/`OK` | 5 | 263,8 s |, |
 | `mis_retenciones/consulta` | 2 | 3 filas | 202 | `COMPLETO`/`ERROR` | 0 | 708,9 s | 2 credenciales rechazadas y luego `ConnectTimeout` (transitorio) |
-| `portal_iva/consulta` | 2 y 3 | nuevas | 202 | `COMPLETO`/`OK` | 2 + 2 | 102 / 116,7 s | — |
+| `portal_iva/consulta` | 2 y 3 | nuevas | 202 | `COMPLETO`/`OK` | 2 + 2 | 102 / 116,7 s |, |
 | `portal_iva/consulta` | 1, 4, 5 | nuevas | 202 | `COMPLETO`/`ERROR` | 0 | 27,7-256 s | `portal_iva_period_not_available` (**DATOS**: la cuenta solo ofrece otro período) |
 | `portal_iva/consulta` | 6 | nueva | 202 | `COMPLETO`/`ERROR` | 0 | 93,5 s | `ConnectTimeout` (transitorio) |
-| `libros_portal_iva/descargar` | 1 | nueva | 202 | `COMPLETO`/`OK` | 2 | 442,7 s | — |
+| `libros_portal_iva/descargar` | 1 | nueva | 202 | `COMPLETO`/`OK` | 2 | 442,7 s |, |
 | `rcel/descargar` | 1 y 2 | nuevas | 202 | `COMPLETO`/`OK` | 0 | 218 / 345 s | Sin `minio_upload` en la primera pasada (ver límites) |
-| `srt/consultar_alicuotas` | 1 | nueva | 202 | `COMPLETO`/`OK` | 1 | 93,3 s | — |
-| `mis_comprobantes/consultar` | 1 | nueva | 202 | `COMPLETO`/`OK` | 2 | 289,9 s | — |
-| `consulta_pagos_vep/consultar` | 1 | misma cuenta, fila nueva | 202 | `COMPLETO`/`OK` | 1 | 40,2 s | — |
+| `srt/consultar_alicuotas` | 1 | nueva | 202 | `COMPLETO`/`OK` | 1 | 93,3 s |, |
+| `mis_comprobantes/consultar` | 1 | nueva | 202 | `COMPLETO`/`OK` | 2 | 289,9 s |, |
+| `consulta_pagos_vep/consultar` | 1 | misma cuenta, fila nueva | 202 | `COMPLETO`/`OK` | 1 | 40,2 s |, |
 | `aportes_en_linea/descargar` | 1 | 2 filas | 202 | `COMPLETO`/`OK` | 1 | 16,7 s + 50,5 s | **1.ª credencial rechazada → 2.ª OK** |
 | `liquidacion_granos/consultar` | 1 | nueva | 202 | `COMPLETO`/`OK` | 0 | 349,8 s | Sin flag de subida en la primera pasada (ver límites) |
 
@@ -50,8 +50,8 @@ se ejecutó con una fila más reciente.
 
 | Caso | Intento 1 | Intento 2 | Intento 3 |
 |---|---|---|---|
-| `aportes_en_linea` caso 1 | `credentials_rejected` (234,6 s) | **`OK`, 1 artefacto** (366,4 s) | — |
-| `aportes_en_linea` caso 1 (cierre) | `credentials_rejected` (16,7 s) | **`OK`, 1 artefacto** (50,5 s) | — |
+| `aportes_en_linea` caso 1 | `credentials_rejected` (234,6 s) | **`OK`, 1 artefacto** (366,4 s) |, |
+| `aportes_en_linea` caso 1 (cierre) | `credentials_rejected` (16,7 s) | **`OK`, 1 artefacto** (50,5 s) |, |
 | `aportes_en_linea` caso 2 | `credentials_rejected` (235,8 s) | `credentials_rejected` (11,3 s) | HTTP 429 (cupo agotado) |
 | `mis_retenciones` caso 2 | `credentials_rejected` | `credentials_rejected` | `target_unavailable` (`ConnectTimeout`) |
 
@@ -64,18 +64,18 @@ ARCA ya no acepta) entre `mis_comprobantes` (6), `aportes_en_linea` (4) y
 
 | Bot | `OK` | `PARCIAL` | `ERROR` | `error_code` y diagnóstico de los `ERROR` |
 |---|---:|---:|---:|---|
-| `sct` | 3 | | | — |
-| `sifere` | 1 | | | — |
+| `sct` | 3 | | |, |
+| `sifere` | 1 | | |, |
 | `mis_facilidades` | 1 | 4 | 1 | 1 `CREDENTIALS_REJECTED` |
 | `mis_retenciones` | 1 | | 1 | `TARGET_UNAVAILABLE` `target_unavailable_unclassified` (ConnectTimeout) |
 | `rcel` | 2 | | 1 | `TARGET_UNAVAILABLE` (ConnectTimeout) |
 | `portal_iva` | 3 | | 4 | 3 `portal_iva_period_not_available` (DATOS) + 1 (ConnectTimeout) |
-| `libros_portal_iva` | 1 | | | — |
-| `srt` | 2 | | | — |
+| `libros_portal_iva` | 1 | | |, |
+| `srt` | 2 | | |, |
 | `mis_comprobantes` | 2 | | 6 | `CREDENTIALS_REJECTED` |
 | `aportes_en_linea` | 2 | | 4 | `CREDENTIALS_REJECTED` |
-| `consulta_pagos_vep` | 1 | | | — |
-| `liquidacion_granos` | 1 | | | — |
+| `consulta_pagos_vep` | 1 | | |, |
+| `liquidacion_granos` | 1 | | |, |
 
 Clasificación de los fallos de esta ronda: **clave incorrecta / cuenta no
 habilitada** 11, **DATOS** (período no ofrecido por el portal) 3, **transitorio

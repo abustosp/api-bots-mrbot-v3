@@ -1,13 +1,14 @@
-# plan.md - Borrador maestro de la V3 (MrBot API)
+# plan.md - Plan maestro de la V3 (MrBot API)
 
-> **Estado:** BORRADOR. Este documento es el plan raíz. Cada sección tiene un
+> **Documentación histórica de diseño; el código manda.** La V3 ya tiene implementación (central, worker, contratos, infra). Este documento conserva el diseño y su evolución; ante cualquier diferencia vale el código y los READMEs de `services/`, `packages/` e `infra/`.
+
+> **Estado original:** BORRADOR. Este documento es el plan raíz. Cada sección tiene un
 > plan detallado en `plans/<NN>-<seccion>/plan.md`.
 > **Fecha:** 2026-09-16.
 > **Origen:** V2 en `../api-bots-mrbot-v2` (~175k LOC, 59k en `app/`).
 > **Investigación de base:** `.research/01..06-*.md` (4.584 líneas, generadas por
 > subagentes en swarm sobre el repo V2 en modo lectura).
-> **Regla operativa de este plan:** no se crean commits. Nada de este repositorio
-> está versionado todavía.
+> **Regla operativa original (obsoleta):** "no se crean commits". El repositorio ya está versionado.
 
 ---
 
@@ -130,8 +131,8 @@ graph TB
 
 | Activo V2 | Ubicación V2 | Destino V3 |
 |---|---|---|
-| Los ~30 bots Playwright | `app/bot/*.py` (~25k LOC) | `services/bot-worker/bots/`. **Sin acceso a DB ya hoy**, migración casi mecánica |
-| Login ARCA compartido | `app/utils/arca_login.py` (672 líneas) | `services/bot-worker/runtime/arca_login.py` |
+| Los bots Playwright (hoy 35 plugins) | `app/bot/*.py` (~25k LOC) | `services/bot-worker/src/bot_worker/bots/`. **Sin acceso a DB ya hoy**, migración casi mecánica |
+| Login ARCA compartido | `app/utils/arca_login.py` (672 líneas) | `services/bot-worker/src/bot_worker/runtime/arca_login.py` |
 | Resolución de captcha | `app/utils/arca_captcha.py`, `capmonster.py` | worker. Las API keys de captcha son del worker, no de la central |
 | Cola persistente con claim | `app/jobs/manager.py` | `central-api`, con `FOR UPDATE SKIP LOCKED` y asignación push |
 | `job_id` UUIDv7 + idempotencia | `app/utils/uuid7.py`, `uq_..._idempotency` | se conserva y se extiende a todas las tablas |

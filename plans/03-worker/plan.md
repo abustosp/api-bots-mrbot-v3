@@ -2,7 +2,7 @@
 > **Estado:** plan de diseño para F2 y F3.
 > **Servicio:** `services/bot-worker/`.
 > **Propósito:** ejecutar bots y reportar hechos al plano de control.
-> **No crea commits.**
+> **No crea commits.** (regla original; ya hay implementación)
 ---
 ## 1. Objetivo y alcance
 El `bot-worker` es el ejecutor remoto, efímero y sin estado persistente de MrBot API V3. Recibe un sobre de trabajo autocontenido desde `central-api`, ejecuta un plugin de bot dentro de límites de recursos, sube los artefactos a destinos ya autorizados y comunica progreso, resultado y salud a la central.

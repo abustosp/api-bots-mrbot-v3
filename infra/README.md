@@ -22,7 +22,8 @@ infra/
 │   ├── compose.yaml              # entrada estándar desde infra/compose
 │   ├── docker-compose.yml        # stack completo de desarrollo
 │   ├── docker-compose.prod.yml   # superposicion de produccion
-│   └── .env.example              # WORKER_NODES, CENTRAL_URL, secretos por destino
+│   ├── central/db/worker/relay *.compose.yaml y *.env.example  # despliegue por rol
+│   └── .env.example              # WORKER_NODES, CENTRAL_URL, secretos por destino (archivo oculto)
 ├── postgres/
 │   ├── verify-ddl.sh             # valida el esquema del plan contra PG 17 real
 │   ├── _extract_claim.py         # extrae la consulta de cola desde el plan
@@ -159,8 +160,8 @@ La separación de dependencias no es cosmética, hace cumplir el invariante W-1.
 | minio | sí (firma URLs) | no (usa URLs prefirmadas) |
 | jinja2 | sí (panel) | no |
 
-Una verificación de integración continua comprueba que la imagen del worker no
-tiene driver de base de datos instalado.
+El build del `Dockerfile` del worker falla si `psycopg`, `sqlalchemy` o `alembic`
+son importables, y `verify-worker-isolation.sh` lo comprueba sobre los archivos reales.
 
 ## Puntos críticos de Playwright en contenedores
 
@@ -182,7 +183,6 @@ Regla: cada secreto va **solo** al servicio que lo necesita.
 | Clave privada RSA | sí | **nunca** |
 | Credenciales de MinIO | sí | **nunca** |
 | `SMTP_*` | sí | **nunca** |
-| `MERCADOPAGO_*` | sí | **nunca** |
 | Credenciales del panel admin | sí | **nunca** |
 | Claves de resolución de captcha | no | sí |
 | Configuración de proxies | no | sí |

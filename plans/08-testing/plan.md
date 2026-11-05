@@ -1,5 +1,7 @@
 # Plan 08: estrategia de pruebas y aceptación V3
 
+> **Nota:** los archivos de prueba de las columnas "Archivo propuesto" y "Nueva ubicación propuesta" son diseño y en su mayoría no existen con ese nombre. La suite real está en `services/central-api/tests/`, `services/bot-worker/tests/`, `services/worker-updater/tests/`, `packages/mrbot-contracts/tests/` y `tests/`; se ejecuta con `make test`.
+
 ## 1. Objetivo y alcance
 
 Este plan define cómo demostrar que la reescritura V3 funciona como un sistema distribuido, seguro y compatible en los comportamientos públicos que se decidan conservar.

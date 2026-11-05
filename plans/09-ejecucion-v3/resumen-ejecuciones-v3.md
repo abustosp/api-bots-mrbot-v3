@@ -8,13 +8,13 @@ corpus V1/V2; no hay datos sintéticos.
 
 ## Cómo leer los estados
 
-- **`OK`** — la corrida terminó completa con todos los artefactos esperados.
-- **`PARCIAL`** — la corrida entregó artefactos pero alguna sección, formato o
+- **`OK`**, la corrida terminó completa con todos los artefactos esperados.
+- **`PARCIAL`**, la corrida entregó artefactos pero alguna sección, formato o
   período falló. **El cliente recibe los archivos**: la central proyecta
   `PARCIAL` como estado público `COMPLETO`.
-- **`ERROR`** — la corrida no entregó resultado. Estado público `FALLIDO`.
-- **`422` / `401`** — rechazo en la creación del job: nunca llegó al worker.
-- **Motivo** — separo siempre **código** (defecto del port/central),
+- **`ERROR`**, la corrida no entregó resultado. Estado público `FALLIDO`.
+- **`422` / `401`**, rechazo en la creación del job: nunca llegó al worker.
+- **Motivo**, separo siempre **código** (defecto del port/central),
   **transitorio** (el portal no respondió a tiempo; el mismo cuerpo pasa después),
   **datos** (cuenta sin servicio, período inexistente, credenciales vencidas) e
   **infra/config** (proxy, red, clave de prueba).
@@ -26,17 +26,17 @@ Cada bloque contrasta el comportamiento **antes** de los cambios del día y
 
 | Endpoint (3 casos salvo indicación) | Antes del cambio | Después del cambio | Motivo del error residual |
 |---|---|---|---|
-| `POST /sct/consulta` (3 cuentas) | 2/3 `OK`; 1 falló con `sct_frame_missing` (defecto 4) | **3/3 `OK`**, 1 PDF cada uno (27-33 s) | — |
+| `POST /sct/consulta` (3 cuentas) | 2/3 `OK`; 1 falló con `sct_frame_missing` (defecto 4) | **3/3 `OK`**, 1 PDF cada uno (27-33 s) |, |
 | `POST /sct/consulta` (3 variantes de campos legados vacíos) | 422 `file_not_uploaded` con `b64`/`carga_s3` vacíos (defecto 6) | **2/3 `OK`** (29,1 s y 27,5 s); el 3.º es 422 **esperado** con `archivo_b64:"QQ=="` | El 422 restante es la protección correcta: hay contenido real sin `object_key` |
 | `POST /mis_facilidades/consulta` (3 filas) | `ERROR` / `target_unavailable` (`ConnectTimeout` y excepciones de sección) | **2 `OK` (50 y 50 artefactos) + 1 `PARCIAL` (42 artefactos)** | El caso `PARCIAL` es la tolerancia funcionando: una sección no se pudo capturar y la corrida igual entregó 42 archivos |
 | `POST /mis_retenciones/consulta` (3 filas) | 3.º con `represented_cuit_not_selectable` (10 fallos en producción) | **2/3 `OK`** (5 CSV); el 3.º falló con `target_unavailable` y **pasó en el reintento** (5 CSV, 208,6 s) | Transitorio: mismo cuerpo, mismo tag, segundo intento OK |
-| `POST /rcel/consulta` (3 filas, `minio_upload=true`) | `represented_cuit_not_selectable` (77 fallos en producción) | **3/3 `OK`** con 148, 15 y 26 PDF | — |
-| `POST /portal_iva/consulta` (3 filas/users) | **0/3 `ERROR` `envelope_invalid`** (defecto 12: la ruta alias descartaba los flags canónicos) | **3/3 `OK`** con 2 CSV cada uno (96-118 s) en `testing-fixes6` | — |
-| `POST /libros_iva/consulta` (3 filas) | `libros_period_not_found` (defecto 8, representado no confirmado) | **3/3 `OK`** con 2 `.bin` (libros + DDJJ) (86-91 s) | — |
+| `POST /rcel/consulta` (3 filas, `minio_upload=true`) | `represented_cuit_not_selectable` (77 fallos en producción) | **3/3 `OK`** con 148, 15 y 26 PDF |, |
+| `POST /portal_iva/consulta` (3 filas/users) | **0/3 `ERROR` `envelope_invalid`** (defecto 12: la ruta alias descartaba los flags canónicos) | **3/3 `OK`** con 2 CSV cada uno (96-118 s) en `testing-fixes6` |, |
+| `POST /libros_iva/consulta` (3 filas) | `libros_period_not_found` (defecto 8, representado no confirmado) | **3/3 `OK`** con 2 `.bin` (libros + DDJJ) (86-91 s) |, |
 | `POST /sifere/consulta` (3 filas) | 1.º intento `target_unavailable` a los 287 s, 2.º OK (455 s) | 2/3 `OK` (407,2 s y 408,3 s); el 1.º `ERROR` `target_unavailable` a los 266,9 s y **en el reintento `PARCIAL` con datos** (410,3 s) | Transitorio: 3 de 4 corridas terminan con datos, pero el primer intento sigue muriendo por falta de reintento automático |
-| `POST /vep/consulta-pagos` (1 caso, local + E2E) | `portal_download_missing` (defecto 9: representado no verificado) | **`OK`** (27 s E2E; local 84 filas, CSV de 6.803 B) | — |
-| `POST /aportes-en-linea/consulta` | `ENVELOPE_INVALID` con `archivo_historico_minio=false` | **`OK`** (genera `AEL - <cuit> - <fecha>.xls`) | — |
-| `GET /utilidades/apoc/{cuit}` (4 casos) | 503 `Base de apócrifos no configurada` | **3/3 `apoc=true`** con fechas reales de AFIP + 1 `apoc=false` para un CUIT válido fuera de la tabla; sin copia provisionada | — |
+| `POST /vep/consulta-pagos` (1 caso, local + E2E) | `portal_download_missing` (defecto 9: representado no verificado) | **`OK`** (27 s E2E; local 84 filas, CSV de 6.803 B) |, |
+| `POST /aportes-en-linea/consulta` | `ENVELOPE_INVALID` con `archivo_historico_minio=false` | **`OK`** (genera `AEL - <cuit> - <fecha>.xls`) |, |
+| `GET /utilidades/apoc/{cuit}` (4 casos) | 503 `Base de apócrifos no configurada` | **3/3 `apoc=true`** con fechas reales de AFIP + 1 `apoc=false` para un CUIT válido fuera de la tabla; sin copia provisionada |, |
 
 ## Consolidado numérico
 
@@ -58,14 +58,14 @@ build actual en las 25 ejecuciones de la segunda vuelta.
 
 | Flujo del cliente | Creación | Estado / result | Descargas | Motivo |
 |---|---|---:|---|---|
-| `sct` (control) | 202 | `COMPLETO` / `OK` | 2/2 directas y 2/2 autenticadas | — |
-| `mis_facilidades` fila A | 202 | `COMPLETO` / `OK` | 50/50 | — |
+| `sct` (control) | 202 | `COMPLETO` / `OK` | 2/2 directas y 2/2 autenticadas |, |
+| `mis_facilidades` fila A | 202 | `COMPLETO` / `OK` | 50/50 |, |
 | `mis_facilidades` fila B | 202 | `COMPLETO` / `PARCIAL` | 78/78 directas | Tolerancia por sección: entrega parcial completa |
-| `mis_facilidades` fila C | 202 | `COMPLETO` / `OK` | 17/17 | — |
-| `liquidacion_granos` (control) | 202 | `COMPLETO` / `OK` | el job no ofreció archivos | — |
-| `mis_comprobantes` | 202 | `COMPLETO` / `OK` | 2/2 directas y 2/2 autenticadas | — |
+| `mis_facilidades` fila C | 202 | `COMPLETO` / `OK` | 17/17 |, |
+| `liquidacion_granos` (control) | 202 | `COMPLETO` / `OK` | el job no ofreció archivos |, |
+| `mis_comprobantes` | 202 | `COMPLETO` / `OK` | 2/2 directas y 2/2 autenticadas |, |
 | `siper` | 202 | `ERROR` / `ERROR` | 0 | **Datos**: las 7 filas del corpus comparten credenciales vencidas (`credentials_rejected`) |
-| `sct_compensaciones` | 422 | — | — | **Cliente**: el formulario permite enviar sin marcar Excel/CSV/PDF y el worker exige al menos un formato |
+| `sct_compensaciones` | 422 |, |, | **Cliente**: el formulario permite enviar sin marcar Excel/CSV/PDF y el worker exige al menos un formato |
 
 Contrato: OpenAPI remoto 179 rutas `/api/v3`, alias 38/38 alineados, QA de
 contrato 162/163 y QA offline 1334/1336. El único fallo es un **falso positivo del
@@ -113,10 +113,10 @@ Esta es la foto del **antes**, y sirve para saber cuánto de eso ya está cubier
 
 ## Documentación de respaldo
 
-- `plans/09-ejecucion-v3/verificacion-modulos-2026-10-17.md` — resultados por
+- `plans/09-ejecucion-v3/verificacion-modulos-2026-10-17.md`, resultados por
   módulo, matriz de 3 casos, salida del cliente.
-- `plans/09-ejecucion-v3/analisis-v1v2-vs-v3.md` — por qué V1/V2 andaban y V3 no.
-- `plans/09-ejecucion-v3/auditoria-tolerancia-v1v2-v3.md` — auditoría estática de
+- `plans/09-ejecucion-v3/analisis-v1v2-vs-v3.md`, por qué V1/V2 andaban y V3 no.
+- `plans/09-ejecucion-v3/auditoria-tolerancia-v1v2-v3.md`, auditoría estática de
   los 34 bots con fix mínimo propuesto por módulo.
 - Informes por módulo en `~/.jcode/scratch/report_div_*` y
   `report_3casos_*` (permisos 600, sin CUIT, nombres ni claves).
