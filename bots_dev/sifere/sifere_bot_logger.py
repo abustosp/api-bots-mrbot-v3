@@ -445,10 +445,38 @@ async def sifere_consultas(
             target_frame, select_cuit = await _find_cuit_selector(page1)
             if select_cuit is not None:
                 await select_cuit.select_option(cuit_representado)
-                action_target = target_frame if target_frame is not None else page1
-                await action_target.get_by_role("button", name="Seleccionar").click(timeout=8000, no_wait_after=True)
-                await asyncio.sleep(3)
+                # click() queda esperando la navegacion lenta de COMARB: se envia el
+                # formulario desde la pagina (igual que el worker V3) y se sondea el encabezado.
+                enviado = await select_cuit.evaluate(
+                    "select => { const f = select.form; if (!f) return false;"
+                    " setTimeout(() => f.requestSubmit ? f.requestSubmit() : f.submit(), 0); return true; }"
+                )
+                if not enviado:
+                    action_target = target_frame if target_frame is not None else page1
+                    await action_target.get_by_role("button", name="Seleccionar").click(timeout=8000, no_wait_after=True)
+                for _ in range(20):
+                    await asyncio.sleep(2)
+                    if page1.url.startswith("chrome-error:"):
+                        # El 302 del POST apunta a http://...mainMenu.do (sin respuesta): la seleccion
+                        # ya quedo en la sesion, se reabre el menu por https.
+                        if debug: debug.log("Redirect http fallido tras seleccionar; abriendo mainMenu.do por https")
+                        try:
+                            await page1.goto("https://app1.comarb.gob.ar/siferewebconsultas/mainMenu.do", timeout=30000)
+                        except Exception as exc_goto:
+                            if debug: debug.log(f"goto mainMenu.do fallo: {exc_goto}")
+                    if await _representado_vigente(page1) == re.sub(r"\D", "", cuit_representado):
+                        break
                 await _wait_ready(page1, timeout_ms=8000)
+                if debug:
+                    try:
+                        txt = (await page1.locator("body").inner_text(timeout=3000))[:300].replace("\n", " | ")
+                    except Exception as exc_txt:
+                        txt = f"<sin texto: {exc_txt}>"
+                    debug.log(f"Tras seleccionar: url={page1.url} cuerpo={txt}")
+                    try:
+                        await page1.screenshot(path=str(debug.screenshots_dir / "tras_seleccionar.png"), timeout=5000)
+                    except Exception:
+                        pass
             # Sin selector (un único CUIT) COMARB ya entra "representando a" ese CUIT; en ambos casos se verifica.
             await _verificar_representado(page1, cuit_representado)
             if debug: await debug.capture(page1, "representado_seleccionado")
