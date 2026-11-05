@@ -34,7 +34,7 @@ Los módulos auxiliares de utilidades, extracción PDF, VEP y logs también est�
 
 ## 2. Catálogo, operaciones y aliases
 
-`CATALOGUE` declara 34 claves de bot y 45 pares bot/operación. `OPERATIONS` contiene las reglas de operación y costo publicado. En el catálogo detallado el código asigna `estado: HABILITADO` al construir cada item. `GET /bots/{bot}` entrega `planes`, pero no una comprobación de cupo disponible de la cuenta. `costo_creditos` es informativo y no garantiza un cálculo proporcional del consumo por bot. Cada creación aceptada reserva una unidad de uso (`services/central-api/src/central_api/api/bots.py:239-319,312-421,820-952`; reserva en `services/central-api/src/central_api/billing/reservation.py:60-99`).
+`CATALOGUE` declara 35 claves de bot y 46 pares bot/operación. `OPERATIONS` contiene las reglas de operación y costo publicado. En el catálogo detallado el código asigna `estado: HABILITADO` al construir cada item. `GET /bots/{bot}` entrega `planes`, pero no una comprobación de cupo disponible de la cuenta. `costo_creditos` es informativo y no garantiza un cálculo proporcional del consumo por bot. Cada creación aceptada reserva una unidad de uso (`services/central-api/src/central_api/api/bots.py:239-319,312-421,820-952`; reserva en `services/central-api/src/central_api/billing/reservation.py:60-99`).
 
 `comprobantes` está marcado en `bots[]` como `deprecated: true`, `alias_de: mis_comprobantes`. Las operaciones canónicas de ambos aparecen en la lista histórica de operaciones, pero los paths V1 duplicados `/comprobantes/{consultar,solicitar,historial}` están ocultos de OpenAPI. El endpoint genérico todavía resuelve las claves que estén en `OPERATIONS`. Los tests fuerzan que cada capacidad canónica aparezca una sola vez en OpenAPI (`services/central-api/src/central_api/api/bots.py:378-421`; `services/central-api/src/central_api/api/bot_routes.py:638-649`; `services/central-api/tests/test_bot_routes.py:109-147`).
 
@@ -84,7 +84,7 @@ Cada path de la primera columna es una ruta de creación POST con cuerpo plano h
 | `/consulta_cuit/individual` | `consulta_cuit/consultar` |
 | `/consulta_cuit/masivo` | `consulta_cuit/consultar_masivo` |
 
-Además de los 38 aliases registrados, el constructor agrega rutas `/{bot}/{operacion}` para capacidades sin alias. Mantiene ejecutables pero oculta de OpenAPI los tres paths de creación bajo `/comprobantes`. Por tanto, runtime y OpenAPI no tienen conjunto idéntico de rutas. `test_bot_routes.py` confirma las rutas y excepciones del esquema (`services/central-api/src/central_api/api/bot_routes.py:633-749`; `services/central-api/tests/test_bot_routes.py:34-108`).
+Además de los 39 aliases registrados, el constructor agrega rutas `/{bot}/{operacion}` para capacidades sin alias. Mantiene ejecutables pero oculta de OpenAPI los tres paths de creación bajo `/comprobantes`. Por tanto, runtime y OpenAPI no tienen conjunto idéntico de rutas. `test_bot_routes.py` confirma las rutas y excepciones del esquema (`services/central-api/src/central_api/api/bot_routes.py:633-749`; `services/central-api/tests/test_bot_routes.py:34-108`).
 
 ## 3. Autenticación y correlación
 
@@ -166,7 +166,7 @@ Los resultados conservan campos V2 `name`, `url`, `size` y añaden `artifact_id`
 
 - Auth: Basic, cabeceras V1, rechazo Bearer, 401 sin credencial y publicación OpenAPI (`services/central-api/tests/test_auth_metodos.py:51-102`).
 - Aliases: tripletes create/status/cancel, ocultamiento de duplicados, un solo path canónico por operación, mapping de `comprobantes` (`services/central-api/tests/test_bot_routes.py:34-147`).
-- Schemas: 45 pares, modelos operation-specific, ejemplos válidos como instancias de DTO y comparación de campos contra schemas del ejecutor; no valida todas las reglas del plugin/archivos (`services/central-api/tests/test_bot_schemas.py:34-147`).
+- Schemas: 46 pares, modelos operation-specific, ejemplos válidos como instancias de DTO y comparación de campos contra schemas del ejecutor; no valida todas las reglas del plugin/archivos (`services/central-api/tests/test_bot_schemas.py:34-147`).
 - OpenAPI de alias/canónico, archivos, estados y ejemplos (`services/central-api/tests/test_swagger_contracts.py:35-233`).
 - Estados compatibles, errores sanitizados, archivos y consistencia get/batch/list (`services/central-api/tests/test_job_status_v2_compat.py:44-281`).
 - Upload ticket, object keys, formatos y archivo faltante (`services/central-api/tests/test_artifact_local_flow.py:27-70`; `services/central-api/tests/test_file_input_pipeline.py:98-277`).

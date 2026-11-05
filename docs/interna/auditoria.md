@@ -1,8 +1,8 @@
-What this repo does: MrBot accepts requests for 34 tax and social-security bots, runs them in the background, and returns data and files. Some bots only read data. Others submit files, import records, confirm offsets, or create payment slips.
+What this repo does: MrBot accepts requests for 35 tax and social-security bots, runs them in the background, and returns data and files. Some bots only read data. Others submit files, import records, confirm offsets, or create payment slips.
 
 **Load assumed:** many users, several jobs at once, workers running five jobs by default, and processes that stay up for days or weeks. The stored production path matters more than the in-memory test path. This is a report only: no application code, models, dependencies, or migrations were changed.
 
-Review date: 20 October 2026. See [validation evidence](validacion.md), [API analysis](api.md), [worker analysis](workers.md), and the [34 bot reviews](README.md).
+Review date: 20 October 2026. See [validation evidence](validacion.md), [API analysis](api.md), [worker analysis](workers.md), and the [35 bot reviews](README.md).
 
 ## Must fix
 

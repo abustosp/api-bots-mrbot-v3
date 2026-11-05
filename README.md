@@ -6,7 +6,7 @@ microservicios.
 
 ## Documentación de uso y funcionamiento
 
-La documentación revisada del comportamiento de los bots registrados (35 plugins) está en
+La documentación revisada del comportamiento de los bots registrados (35 plugins, 46 operaciones) está en
 [`docs/`](docs/README.md):
 
 - [`docs/externa/`](docs/externa/README.md): manual para usuarios e integradores,
@@ -18,13 +18,11 @@ Para compartir con usuarios, distribuir **únicamente `docs/externa/`**.
 Los planes históricos que siguen describen diseño y evolución, no sustituyen
 el contrato observado y sus limitaciones documentadas.
 
-> **Estado: implementación inicial F0-F2.** Las fundaciones, los contratos, el
+> **Estado: implementación verificable.** Las fundaciones, los contratos, el
 > plano central, el worker y la infraestructura de desarrollo ya tienen una
-> implementación verificable. El plan completo está en [`plan.md`](plan.md),
-> los planes por sección en [`plans/`](plans/) y el ciclo operativo actual en
-> [`plans/09-ejecucion-v3/plan.md`](plans/09-ejecucion-v3/plan.md). La V3
-> sucede a la [V2](../api-bots-mrbot-v2), un monolito FastAPI + SQLite con el
-> worker embebido en el proceso de la API.
+> implementación verificable. El diseño histórico se describe en los planes
+> (ver [`docs/`](docs/README.md)). La V3 sucede a la V2 (monolito con el
+> worker embebido en el proceso de la API).
 >
 > Las verificaciones de infraestructura y la suite de pruebas se ejecutan con:
 >
@@ -66,8 +64,8 @@ graph TB
     end
 
     subgraph data["Plano de datos"]
-        W1["bot-worker 1<br/>max 5 jobs"]
-        W2["bot-worker 2<br/>max 5 jobs"]
+        W1["bot-worker 1<br/>hasta 10 jobs"]
+        W2["bot-worker 2<br/>hasta 10 jobs"]
         WN["bot-worker N"]
     end
 
@@ -105,22 +103,15 @@ graph TB
 
 ## Estructura del repositorio
 
+Estructura real del repositorio (los planes de diseño `plan.md`, `plans/` y
+`workers-swarm.md` fueron retirados del árbol; el diseño vigente se describe
+en [`docs/`](docs/README.md)):
+
 ```
 api-bots-mrbot-v3/
 ├── README.md                    # este archivo
-├── plan.md                      # plan maestro de la V3
-├── workers-swarm.md             # flota EC2 efímera: diseño + PoC + modificaciones
-├── .research/                   # investigación sobre la V2 (insumo del plan)
-├── plans/                       # planes detallados por sección
-│   ├── 00-arquitectura/         # decisiones transversales, ADRs, protocolo
-│   ├── 01-database/             # esquema PostgreSQL, IDs, migraciones
-│   ├── 02-central-api/          # API pública, scheduler, autenticación
-│   ├── 03-worker/               # API secundaria, contrato de bots, salud
-│   ├── 04-billing/              # tipos de cuenta y cupo de requests
-│   ├── 05-admin-panel/          # panel y observabilidad de la flota
-│   ├── 06-infra/                # Docker, CI/CD, secretos, despliegue
-│   ├── 07-migracion/            # V2 → V3, portado de bots, cutover
-│   └── 08-testing/              # estrategia de pruebas y aceptación
+├── .research/                   # investigación sobre la V2 (insumo del diseño)
+├── docs/                        # documentación externa e interna vigente
 ├── packages/mrbot-contracts/    # contratos compartidos
 ├── services/central-api/        # servicio central
 ├── services/bot-worker/         # servicio worker
@@ -138,14 +129,14 @@ comunican solo por HTTP con los esquemas de `mrbot-contracts`.
 | Base de datos | SQLite, un archivo | PostgreSQL |
 | Worker | embebido en la API | servicio separado, sin base de datos |
 | Reparto de trabajo | el worker se auto-asigna desde la base | la central asigna al worker sano |
-| Concurrencia | `MAX_BOTS` × `BROWSER_CONCURRENCY` por proceso, sin coordinar | 5 jobs por worker, tope conocido por el planificador |
+| Concurrencia | `MAX_BOTS` × `BROWSER_CONCURRENCY` por proceso, sin coordinar | hasta 10 jobs por worker (5 por defecto), tope conocido por el planificador |
 | Ejecución síncrona | sí, en `/api/v1` | deprecada |
 | ID de usuario | entero autoincremental | UUIDv4 |
 | ID de jobs y bots | mixto | UUIDv7 en todo |
 | Tablas de resultados | 28 tablas `consulta_*_logs` | `jobs` + `job_results` con `JSONB` |
 | Monetización | contador de consultas mensuales | tipo de cuenta (`PRUEBA`/`TESTING`/`NORMAL`) con cupo de requests, asignado a mano desde el panel admin |
 
-Detalle completo en [`plan.md`](plan.md) §2.
+Comparar con la V2 excede el alcance de este documento.
 
 ## Estado de las ejecuciones
 
@@ -170,9 +161,7 @@ stateDiagram-v2
 
 ## Cómo levantar el entorno
 
-El flujo reproducible está documentado en
-[`plans/09-ejecucion-v3/plan.md`](plans/09-ejecucion-v3/plan.md). Para desarrollo
-local:
+Para desarrollo local:
 
 ```bash
 cp infra/compose/.env.example infra/compose/.env
@@ -184,7 +173,6 @@ monorepo y aplicar las migraciones como job one-off antes de usar PostgreSQL.
 
 ## Uso de la API
 
-> Contrato definido en [`plans/02-central-api/plan.md`](plans/02-central-api/plan.md).
 > Los endpoints de bots están implementados como jobs asíncronos y sus schemas
 > completos se pueden explorar en `GET /api/v3/bots` y `GET /api/v3/bots/{bot}`.
 
@@ -272,29 +260,20 @@ X-API-Key: <clave>
 | F0 | Fundaciones del monorepo, contratos, Compose y CI |
 | F1 | Esquema PostgreSQL y migraciones |
 | F2 | Plano de control mínimo y un bot de punta a punta |
-| F3 | Portado de los bots (hoy 35 plugins registrados) |
+| F3 | Portado de los bots (35 plugins, 46 operaciones) |
 | F4 | Cuentas PRUEBA/TESTING/NORMAL con cupo de requests (sin pagos automáticos) |
 | F5 | Panel de administración y observabilidad de la flota |
 | F6 | Endurecimiento, pruebas de carga y caos, cutover |
-
-Detalle en [`plan.md`](plan.md) §9.
 
 ## Documentación
 
 | Documento | Contenido |
 |---|---|
-| [`plan.md`](plan.md) | Plan maestro: arquitectura, invariantes, fases, riesgos |
-| [`workers-swarm.md`](workers-swarm.md) | Reparto de trabajo en flota EC2 efímera: arquitectura, defectos hallados (facturación/registro), PoC reproducible y modificaciones propuestas para la V3 |
-| [`plans/00-arquitectura/plan.md`](plans/00-arquitectura/plan.md) | Decisiones transversales, ADRs, protocolo central↔worker |
-| [`plans/01-database/plan.md`](plans/01-database/plan.md) | Esquema PostgreSQL, estrategia de UUID, migraciones |
-| [`plans/02-central-api/plan.md`](plans/02-central-api/plan.md) | API pública, planificador y balanceo, autenticación |
-| [`plans/03-worker/plan.md`](plans/03-worker/plan.md) | API secundaria, contrato de plugin de bot, salud |
-| [`plans/04-billing/plan.md`](plans/04-billing/plan.md) | Tipos de cuenta y cupo de requests |
-| [`plans/05-admin-panel/plan.md`](plans/05-admin-panel/plan.md) | Panel de administración y alertas de la flota |
-| [`plans/06-infra/plan.md`](plans/06-infra/plan.md) | Imágenes, Compose, secretos, CI/CD |
-| [`plans/07-migracion/plan.md`](plans/07-migracion/plan.md) | Migración de código, datos y clientes |
-| [`plans/08-testing/plan.md`](plans/08-testing/plan.md) | Pruebas y criterios de aceptación |
-| [`.research/`](.research/) | Investigación sobre la V2 que fundamenta el plan |
+| [`docs/`](docs/README.md) | Índice: documentación externa (usuarios) e interna (desarrollo) |
+| [`docs/externa/`](docs/externa/README.md) | Manual para usuarios e integradores |
+| [`docs/interna/`](docs/interna/README.md) | API, workers, análisis por bot, auditoría y validación |
+| [`infra/README.md`](infra/README.md) | Imágenes, Compose, verificaciones y despliegue |
+| [`.research/`](.research/) | Investigación sobre la V2 que fundamenta el diseño |
 
 ## Licencia
 

@@ -22,7 +22,7 @@ Ruta canónica: `POST /api/v3/bots/hacienda/consultar`. Alias plano: `/hacienda/
 | `cuit_representante` | texto | No | `null` | Contexto heredado de sesión. Aliases: `cuit_inicio_sesion`, `cuit_login`. La sesión va en `credentials`. Omitido, `null` o vacío se omite; si se informa se limpia y valida. | `"20123456786"` |
 | `eliminar_descargas` | booleano | No | `true` | Se elimina antes de procesar la operación, por lo que no tiene efecto. En la ruta canónica también se ignoran `null` y valores no booleanos. | `true` |
 | `proxy_request` | booleano | No | `null` | Legado. No selecciona conexión ni altera el resultado. `null` válido. | `false` |
-| `headless` | booleano | No | `null` | Legado. No selecciona conexión ni altera el resultado. `null` válido. | `false` |
+| `headless` | booleano | No | `null` | Heredado. Se acepta y se ignora; no altera el resultado. `null` válido. | `false` |
 
 Debe activarse al menos un tipo de consulta y al menos una salida (`incluir_json` o `subir_excel`). Los booleanos deben enviarse como booleanos JSON. La validación canónica es la del bot, no la del DTO del alias plano.
 

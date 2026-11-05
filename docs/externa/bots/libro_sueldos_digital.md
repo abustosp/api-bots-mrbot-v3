@@ -19,7 +19,7 @@ Ruta canónica: `POST /api/v3/bots/libro_sueldos_digital/descargar`. El alias pl
 | `cuit_inicio_sesion` | texto | No | ninguno | Alias de `cuit_representante` para el CUIT de sesión o contexto heredado, normalmente en `credentials`. No se repite en `payload` si la sesión va en `credentials`. `null` o vacío se omite. | `"20123456786"` |
 | `cuit_login` | texto | No | ninguno | Alias de `cuit_representante` para el CUIT de sesión o contexto heredado, normalmente en `credentials`. No se repite en `payload` si la sesión va en `credentials`. `null` o vacío se omite. | `"20123456786"` |
 | `proxy_request` | booleano | No | `null` | Campo nullable opcional legado. No cambia la selección ni el resultado; `null` es válido. | `false` |
-| `headless` | booleano | No | `null` | Campo nullable opcional legado. No cambia la selección ni el resultado; `null` es válido. | `false` |
+| `headless` | booleano | No | `null` | Campo heredado opcional. Se acepta y se ignora; `null` es válido. | `false` |
 
 El esquema de ejecución tolera campos adicionales; se recomienda enviar solo los documentados. La operación la fija la ruta. El esquema del catálogo es descriptivo y el alias HTTP plano tiene su propio modelo de entrada.
 

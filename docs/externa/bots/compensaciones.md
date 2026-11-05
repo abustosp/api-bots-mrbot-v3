@@ -22,7 +22,7 @@ Consulta compensaciones y afectaciones para un CUIT en un rango de fechas y pued
 | `cuit_representante` | texto | No | `null` | Compatibilidad antigua, no se usa para iniciar sesión. Aliases: `cuit_inicio_sesion`, `cuit_login`. Se acepta y se ignora. `null` permitido; `false` inválido. Use `credentials` para credenciales. | `"20123456786"` |
 | `clave_representante` | texto | No | `null` | Compatibilidad antigua, no se usa para iniciar sesión. Aliases: `contrasena`, `clave`. Se acepta y se ignora. `null` permitido; `false` inválido. Use `credentials` para la clave. | `"CLAVE_FICTICIA_NO_USAR"` |
 | `proxy_request` | booleano | No | `null` | Compatibilidad antigua. Se acepta y se ignora; `null` permitido. `false` no cambia el acceso. | `false` |
-| `headless` | booleano | No | `null` | Compatibilidad antigua. Se acepta y se ignora; `null` permitido. `false` no cambia la ejecución. | `false` |
+| `headless` | booleano | No | `null` | Compatibilidad antigua. Se acepta y se ignora; `null` permitido. `false` no cambia el resultado. | `false` |
 
 Debe activarse al menos uno de `excel`, `csv` o `pdf`. Enviar alias y campo canónico simultáneamente puede producir un pedido inválido; use un solo nombre por dato.
 

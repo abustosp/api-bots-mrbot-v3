@@ -16,7 +16,7 @@ Para otros tipos de consulta (depositario, emisor, corredor) o para liquidacione
 | `representado_nombre` | texto | Sí | ninguno | Nombre con el que se elige al representado en el portal (1 a 128 caracteres). Alias: `denominacion`. El orden de las palabras y los acentos no importan. | `"Gimenez Andres Nicolas"` |
 | `fecha_desde` | texto | Sí | ninguno | Inicio del rango, `dd/mm/aaaa`. Alias: `desde`. | `"01/08/2025"` |
 | `fecha_hasta` | texto | Sí | ninguno | Fin inclusive, `dd/mm/aaaa`, igual o posterior a `fecha_desde`. Alias: `hasta`. | `"31/10/2025"` |
-| `subir_archivos` | booleano | No | `true` | Adjunta la planilla y los PDF al resultado (`files[]`). Alias: `minio_upload`. | `true` |
+| `subir_archivos` | booleano | No | `true` | Adjunta la planilla y los PDF al resultado (`files[]`). | `true` |
 
 Los campos desconocidos se rechazan. Las credenciales (`cuit_representante`, `clave`, `clave_encriptada`, mismos alias que `liquidacion_granos`) van en `credentials`, no en `payload`.
 

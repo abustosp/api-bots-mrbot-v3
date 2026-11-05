@@ -14,7 +14,7 @@ Ruta canónica: `POST /api/v3/bots/facturometro/consultar`. El alias plano `/fac
 | `incluir_captura` | booleano | No | `true` | `false` evita la captura PNG y su entrada en `files[]`; no cambia los datos consultados. Omitido aplica `true`; `null` explícito se rechaza. | `true` |
 | `cuit_representante` | texto | No | ninguno | CUIT opcional de sesión o contexto; alias `cuit_inicio_sesion` y `cuit_login`. La sesión fiscal se envía en `credentials`. Si se informa aquí, se normaliza como CUIT; `null` se omite y vacío se rechaza. No enviar secretos en este campo. | `"20123456786"` |
 | `proxy_request` | booleano | No | ninguno | Campo legado: no cambia el resultado. `null` es válido; si se omite no tiene efecto. | `false` |
-| `headless` | booleano | No | ninguno | Campo legado: no cambia el resultado. `null` es válido; si se omite no tiene efecto. | `false` |
+| `headless` | booleano | No | ninguno | Campo heredado: se acepta y se ignora. `null` es válido; si se omite no tiene efecto. | `false` |
 
 Los campos ajenos al contrato se rechazan al procesar la solicitud. La publicación de la captura puede no producir archivo si el servicio no muestra el panel, aunque los datos se hayan consultado.
 

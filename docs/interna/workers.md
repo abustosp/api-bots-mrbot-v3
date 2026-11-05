@@ -4,7 +4,7 @@ Revisión: 20 de octubre de 2026. Este documento es interno. Describe la impleme
 
 ## Responsabilidades y fuentes
 
-La central valida la solicitud pública, conserva el estado canónico, reserva consumo, elige un worker y le entrega una asignación. El worker no consulta la base de datos: recibe un sobre autocontenido, ejecuta un plugin, entrega archivos y reporta el resultado. El registro carga 34 plugins y una variante de AGIP. Los prototipos de `bots_dev/` no son automáticamente bots publicados.
+La central valida la solicitud pública, conserva el estado canónico, reserva consumo, elige un worker y le entrega una asignación. El worker no consulta la base de datos: recibe un sobre autocontenido, ejecuta un plugin, entrega archivos y reporta el resultado. El registro carga 35 plugins y una variante de AGIP. Los prototipos de `bots_dev/` no son automáticamente bots publicados.
 
 Fuentes principales:
 
