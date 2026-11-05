@@ -274,6 +274,7 @@ def test_presign_cuerpo_y_respuesta_coinciden_en_ambos_lados():
         "artifact_id",
         "content_type",
         "size_bytes",
+        "filename",
     }
     central = (
         RAIZ / "services/central-api/src/central_api/internal/uploads.py"
