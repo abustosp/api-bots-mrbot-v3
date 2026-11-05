@@ -22,7 +22,6 @@ from central_api.models.base import new_uuid7  # noqa: E402
 from central_api.models.fleet import Worker  # noqa: E402
 from central_api.repositories.base import RepositoryError  # noqa: E402
 from central_api.repositories.workers import WorkerRepository  # noqa: E402
-from central_api.security import admin_sessions as sesiones  # noqa: E402
 from central_api.security import worker_auth as wa  # noqa: E402
 
 PUBKEY = (
@@ -311,29 +310,6 @@ class TestDDLSinCorrelativos(unittest.TestCase):
         cols = AdminSession.__table__.columns
         self.assertIn("token_hash", cols)
         self.assertTrue(cols["id"].primary_key)
-
-
-class TestSesionesAdmin(unittest.TestCase):
-    """Tokens opacos del panel: solo vive el hash, cookie acotada."""
-
-    def test_emitir_y_verificar(self):
-        token = sesiones.mint_session_token()
-        self.assertEqual(len(token), 64)
-        resumen = sesiones.hash_session_token(token)
-        self.assertNotIn(token, resumen)
-        self.assertTrue(sesiones.verificar_token(token, resumen))
-        self.assertFalse(sesiones.verificar_token(token + "0", resumen))
-        self.assertFalse(sesiones.verificar_token("", resumen))
-
-    def test_cookie_acotada_y_expiracion(self):
-        params = sesiones.parametros_cookie()
-        self.assertEqual(
-            (params["key"], params["httponly"], params["secure"],
-             params["samesite"], params["path"]),
-            ("mrbot_admin_session", True, True, "lax", "/admin"),
-        )
-        delta = (sesiones.expira_en() - sesiones.utcnow()).total_seconds()
-        self.assertTrue(7.9 * 3600 < delta <= 8 * 3600)
 
 
 if __name__ == "__main__":

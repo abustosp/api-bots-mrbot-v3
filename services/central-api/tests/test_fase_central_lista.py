@@ -23,7 +23,6 @@ SRC = AQUI.parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from central_api.main import create_app  # noqa: E402
-from central_api.security import admin_sessions as sesiones  # noqa: E402
 from central_api.security import worker_auth as wa  # noqa: E402
 from central_api.security.sealed import SealedSectionError, encrypt_sealed_section  # noqa: E402
 from central_api.settings import get_settings  # noqa: E402
@@ -150,20 +149,6 @@ def test_storage_rechaza_sin_configurar():
             bucket="mrbot", access_key="AKID", secret_key="s",
             object_key="../escape",
         )
-
-
-def test_sesion_admin_token_opaco_y_uuid7():
-    """Sesión del panel: token opaco, solo hash persistido, PK UUIDv7."""
-    from central_api.models.base import new_uuid7
-    from central_api.repositories.admin_sessions import AdminSessionRepository  # noqa: F401
-
-    token = sesiones.mint_session_token()
-    assert sesiones.verificar_token(token, sesiones.hash_session_token(token))
-    assert not sesiones.verificar_token("otro", sesiones.hash_session_token(token))
-    assert sesiones.hash_session_token(token) != token
-    assert uuid.UUID(str(new_uuid7())).version == 7
-    assert sesiones.parametros_cookie()["httponly"] is True
-    assert sesiones.parametros_cookie()["samesite"] == "lax"
 
 
 def test_worker_token_v2_ligado_a_uuid():

@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from functools import partial
 from itertools import count
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field, create_model, model_validator
+from pydantic import BaseModel, Field, model_validator
 
-from central_api.admin._common import require_admin, validar_motivo
+from central_api.admin._common import (
+    errores_admin,
+    require_admin,
+    respuesta_json,
+    validar_motivo,
+)
 from central_api.admin.audit import log_event
 from central_api.autoscaler import controller
 from central_api.settings import get_settings
@@ -173,59 +179,12 @@ _DESCRIPCIONES_CAMPOS_RESPUESTA = {
 }
 
 
-def _tipo_campo_respuesta(valor: object) -> Any:
-    """Infiere el tipo JSON de primer nivel de un ejemplo de salida."""
-    if isinstance(valor, bool):
-        return bool
-    if isinstance(valor, (str, int, float)):
-        return type(valor)
-    if isinstance(valor, list):
-        return list[Any]
-    if isinstance(valor, dict):
-        return dict[str, Any]
-    return Any
-
-
-def _respuesta_json(descripcion: str, ejemplo: dict) -> dict:
-    """Prepara la descripción de cada campo sin filtrar la respuesta real."""
-    campos = {
-        nombre: (
-            _tipo_campo_respuesta(valor),
-            Field(
-                description=_DESCRIPCIONES_CAMPOS_RESPUESTA.get(
-                    nombre, f"Campo «{nombre}» incluido en la respuesta de la operación."
-                ),
-                examples=[valor],
-            ),
-        )
-        for nombre, valor in ejemplo.items()
-    }
-    modelo = create_model(
-        f"AutoscaleOpenApiResponse{next(_SECUENCIA_MODELOS_OPENAPI)}", **campos
-    )
-    return {
-        "description": descripcion,
-        "model": modelo,
-        "content": {"application/json": {"example": ejemplo}},
-    }
-
-
-def _errores_admin() -> dict:
-    """Respuestas de autenticación comunes a las rutas administrativas."""
-    return {
-        401: {
-            "description": (
-                "No se recibió una cabecera Bearer válida. Envíe "
-                "Authorization: Bearer <ADMIN_TOKEN>."
-            )
-        },
-        403: {
-            "description": (
-                "El token administrativo no está configurado o no coincide. "
-                "Configure ADMIN_TOKEN en el servicio o use el valor vigente."
-            )
-        },
-    }
+_respuesta_json = partial(
+    respuesta_json,
+    descripciones=_DESCRIPCIONES_CAMPOS_RESPUESTA,
+    prefijo="AutoscaleOpenApiResponse",
+    secuencia=_SECUENCIA_MODELOS_OPENAPI,
+)
 
 
 _ERROR_VALIDACION = {
@@ -423,7 +382,7 @@ def _serialize_ephemeral(instance_id: str, item: dict) -> dict:
         "Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json(
             "Estado y configuración del escalado automático; aws_error puede indicar que faltan datos externos.",
             {
@@ -508,7 +467,7 @@ async def get_autoscale(authorization: str | None = Header(default=None)) -> dic
         "máximo. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         **_ERROR_MOTIVO,
         200: _respuesta_json(
@@ -596,7 +555,7 @@ async def autoscale_scale_up(
         "y aportar un motivo válido. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         200: _respuesta_json(
             "Resultado de la terminación de las instancias seleccionadas.",
@@ -679,7 +638,7 @@ async def _set_enabled(enabled: bool, motivo: str, actor: str, request_id: str) 
         "Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         **_ERROR_MOTIVO,
         200: _respuesta_json("Autoscaler habilitado.", {"success": True, "enabled": True}),
@@ -704,7 +663,7 @@ async def autoscale_enable(
         "Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         **_ERROR_MOTIVO,
         200: _respuesta_json("Autoscaler deshabilitado.", {"success": True, "enabled": False}),
@@ -730,7 +689,7 @@ async def autoscale_disable(
         "en lugar de interrumpir la respuesta. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json(
             "Informe de auditoría; audit_orphans y error informan si la revisión pudo completarse.",
             {"success": True, "audit_orphans": {"orphans": []}, "error": None, "eventos": []},
@@ -818,7 +777,7 @@ def _policy_view(pending: int | None = None, snapshot: dict | None = None) -> di
         "solicitudes por instancia. Con ?pending=N simula una cola distinta. "
         "Requiere autorización administrativa."
     ),
-    responses={**_errores_admin()},
+    responses={**errores_admin()},
 )
 async def get_autoscale_policy(
     pending: int | None = None, authorization: str | None = Header(default=None)
@@ -839,7 +798,7 @@ async def get_autoscale_policy(
         "máximos, esperas) sin reiniciar el servicio. Se persisten en la base. "
         "'reset' devuelve parámetros al valor del entorno. Requiere motivo."
     ),
-    responses={**_errores_admin(), **_ERROR_VALIDACION, **_ERROR_MOTIVO},
+    responses={**errores_admin(), **_ERROR_VALIDACION, **_ERROR_MOTIVO},
 )
 async def put_autoscale_policy(
     body: PolicyBody,
@@ -884,7 +843,7 @@ async def put_autoscale_policy(
         "manuales es c5.xlarge. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         400: {
             "description": (
                 "La zona indicada no existe. Consulte GET /admin/autoscale/zones "
@@ -922,7 +881,7 @@ async def get_instance_types(
         "error y las demás siguen disponibles. Requiere autorización "
         "administrativa."
     ),
-    responses={**_errores_admin()},
+    responses={**errores_admin()},
 )
 async def get_zones(
     with_types: bool = False, authorization: str | None = Header(default=None)
@@ -958,7 +917,7 @@ async def get_zones(
         "creadas siguen en su zona. Requiere motivo de al menos 10 caracteres."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_MOTIVO,
         400: {
             "description": (

@@ -14,12 +14,8 @@ import secrets
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from central_api.admin.workers import (
-    _errores_admin,
-    _respuesta_json,
-    reactivar_nodo,
-    require_admin,
-)
+from central_api.admin._common import errores_admin, require_admin
+from central_api.admin.workers import _respuesta_json, reactivar_nodo
 from central_api.db import db_configurado, nueva_sesion
 from central_api.settings import get_settings
 from central_api.store import ADMIN_NODES, RELAY_WORKERS, WORKER_ALIAS_OVERRIDES
@@ -145,7 +141,7 @@ class RelayBody(BaseModel):
         "administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         201: _respuesta_json("Worker relay creado.", _EJEMPLO),
         409: {"description": "No quedan puertos libres en RELAY_PORT_RANGE."},
     },
@@ -178,7 +174,7 @@ async def alta_relay(body: RelayBody, authorization: str | None = Header(default
         "administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json("Token rotado.", _EJEMPLO),
         404: {"description": "El nodo no es un worker relay."},
     },

@@ -15,16 +15,17 @@ criterio que el selector: SANO+SATURADO exigen latido fresco.
 
 from __future__ import annotations
 
-import hmac
 from datetime import datetime, timedelta
+from functools import partial
 from itertools import count
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field
 
 from central_api.db import db_configurado, nueva_sesion
 from central_api.scheduler import dispatcher
+from central_api.admin._common import errores_admin, require_admin, respuesta_json
 from central_api.settings import get_settings
 from central_api.store import (
     ADMIN_NODES,
@@ -117,59 +118,12 @@ _DESCRIPCIONES_CAMPOS_RESPUESTA = {
 }
 
 
-def _tipo_campo_respuesta(valor: object) -> Any:
-    """Infiere el tipo JSON de primer nivel de un ejemplo de salida."""
-    if isinstance(valor, bool):
-        return bool
-    if isinstance(valor, (str, int, float)):
-        return type(valor)
-    if isinstance(valor, list):
-        return list[Any]
-    if isinstance(valor, dict):
-        return dict[str, Any]
-    return Any
-
-
-def _respuesta_json(descripcion: str, ejemplo: dict) -> dict:
-    """Prepara la descripción de cada campo sin filtrar la respuesta real."""
-    campos = {
-        nombre: (
-            _tipo_campo_respuesta(valor),
-            Field(
-                description=_DESCRIPCIONES_CAMPOS_RESPUESTA.get(
-                    nombre, f"Campo «{nombre}» incluido en la respuesta de la operación."
-                ),
-                examples=[valor],
-            ),
-        )
-        for nombre, valor in ejemplo.items()
-    }
-    modelo = create_model(
-        f"WorkersOpenApiResponse{next(_SECUENCIA_MODELOS_OPENAPI)}", **campos
-    )
-    return {
-        "description": descripcion,
-        "model": modelo,
-        "content": {"application/json": {"example": ejemplo}},
-    }
-
-
-def _errores_admin() -> dict:
-    """Respuestas de autenticación comunes a las rutas del inventario."""
-    return {
-        401: {
-            "description": (
-                "No se recibió una cabecera Bearer válida. Envíe "
-                "Authorization: Bearer <ADMIN_TOKEN>."
-            )
-        },
-        403: {
-            "description": (
-                "El token administrativo no está configurado o no coincide. "
-                "Configure ADMIN_TOKEN en el servicio o use el valor vigente."
-            )
-        },
-    }
+_respuesta_json = partial(
+    respuesta_json,
+    descripciones=_DESCRIPCIONES_CAMPOS_RESPUESTA,
+    prefijo="WorkersOpenApiResponse",
+    secuencia=_SECUENCIA_MODELOS_OPENAPI,
+)
 
 
 _ERROR_VALIDACION = {
@@ -314,17 +268,6 @@ def worker_overview(node: str) -> dict:
     }
 
 
-def require_admin(authorization: str | None) -> None:
-    token = get_settings().admin_token
-    if not token:
-        raise HTTPException(status_code=403, detail="ADMIN_TOKEN no configurado")
-    scheme, _, presented = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not presented:
-        raise HTTPException(status_code=401, detail="Falta bearer ADMIN_TOKEN")
-    if not hmac.compare_digest(presented, token):
-        raise HTTPException(status_code=403, detail="ADMIN_TOKEN inválido")
-
-
 def reactivar_nodo(node: str) -> None:
     """Alta de un nodo ya quitado: limpia el DRENANDO que dejó la baja anterior."""
     entry = WORKERS.get(node)
@@ -352,7 +295,7 @@ def _coerce_node(raw: str) -> str:
         "trabajos en ejecución y último latido. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json(
             "Inventario actual de workers.",
             {"success": True, "workers": [{"node": "10.0.0.13:8080", "worker_id": "worker-01", "origen": "panel", "registrado": True, "estado": "SANO", "en_ejecucion": 1, "capacidad": 5, "sellado": False, "ultimo_latido": "2026-10-12T16:30:00+00:00", "fuente": "memoria"}]},
@@ -377,7 +320,7 @@ async def list_workers(authorization: str | None = Header(default=None)) -> dict
         "respuesta informa alcanzable=false. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         **_ERROR_NODO,
         201: _respuesta_json(
@@ -423,7 +366,7 @@ async def add_worker(body: AddWorkerBody, authorization: str | None = Header(def
         "Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_NODO,
         200: _respuesta_json(
             "Nodo quitado del inventario administrado.",

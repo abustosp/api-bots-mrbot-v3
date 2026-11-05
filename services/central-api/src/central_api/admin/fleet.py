@@ -19,13 +19,19 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from itertools import count
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field
 
-from central_api.admin._common import require_admin, validar_motivo
+from central_api.admin._common import (
+    errores_admin,
+    require_admin,
+    respuesta_json,
+    validar_motivo,
+)
 from central_api.admin.audit import log_event, nuevo_uuid7
 from central_api.admin.workers import derive_state, worker_overview
 from central_api.settings import get_settings
@@ -431,59 +437,12 @@ _DESCRIPCIONES_CAMPOS_RESPUESTA = {
 }
 
 
-def _tipo_campo_respuesta(valor: object) -> Any:
-    """Infiere el tipo JSON de primer nivel de un ejemplo de salida."""
-    if isinstance(valor, bool):
-        return bool
-    if isinstance(valor, (str, int, float)):
-        return type(valor)
-    if isinstance(valor, list):
-        return list[Any]
-    if isinstance(valor, dict):
-        return dict[str, Any]
-    return Any
-
-
-def _respuesta_json(descripcion: str, ejemplo: dict) -> dict:
-    """Prepara la descripción de cada campo sin filtrar la respuesta real."""
-    campos = {
-        nombre: (
-            _tipo_campo_respuesta(valor),
-            Field(
-                description=_DESCRIPCIONES_CAMPOS_RESPUESTA.get(
-                    nombre, f"Campo «{nombre}» incluido en la respuesta de la operación."
-                ),
-                examples=[valor],
-            ),
-        )
-        for nombre, valor in ejemplo.items()
-    }
-    modelo = create_model(
-        f"FleetOpenApiResponse{next(_SECUENCIA_MODELOS_OPENAPI)}", **campos
-    )
-    return {
-        "description": descripcion,
-        "model": modelo,
-        "content": {"application/json": {"example": ejemplo}},
-    }
-
-
-def _errores_admin() -> dict:
-    """Respuestas de autenticación comunes a las rutas administrativas."""
-    return {
-        401: {
-            "description": (
-                "No se recibió una cabecera Bearer válida. Envíe "
-                "Authorization: Bearer <ADMIN_TOKEN>."
-            )
-        },
-        403: {
-            "description": (
-                "El token administrativo no está configurado o no coincide. "
-                "Configure ADMIN_TOKEN en el servicio o use el valor vigente."
-            )
-        },
-    }
+_respuesta_json = partial(
+    respuesta_json,
+    descripciones=_DESCRIPCIONES_CAMPOS_RESPUESTA,
+    prefijo="FleetOpenApiResponse",
+    secuencia=_SECUENCIA_MODELOS_OPENAPI,
+)
 
 
 _ERROR_VALIDACION = {
@@ -505,7 +464,7 @@ _ERROR_VALIDACION = {
         "Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json(
             "Inventario y resúmenes de la flota.",
             {
@@ -584,7 +543,7 @@ def ver_flota(authorization: str | None = Header(default=None)) -> dict:
         "Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json(
             "Detalle del worker solicitado.",
             {
@@ -629,7 +588,7 @@ def ver_worker(node: str, authorization: str | None = Header(default=None)) -> d
         "estado exacto. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json(
             "Alertas que coinciden con el filtro solicitado.",
             {"success": True, "alertas": [{"id": "019abc", "tipo": "worker_degradado", "worker": "10.0.0.13:8080", "severidad": "advertencia", "estado": "NOTIFICADA", "contador": 1, "historial": []}]},
@@ -657,7 +616,7 @@ def listar_alertas(
         "registrada en la auditoría y requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         200: _respuesta_json(
             "Resultado de la evaluación inmediata.",
             {"success": True, "activas": [{"id": "019abc", "tipo": "worker_caido", "worker": "10.0.0.13:8080", "severidad": "critica", "estado": "NOTIFICADA", "contador": 1}]},
@@ -687,7 +646,7 @@ def forzar_evaluacion(
         "de la alerta. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         200: _respuesta_json(
             "Alerta reconocida con el comentario aportado.",
@@ -732,7 +691,7 @@ def reconocer_alerta(
         "El silencio no resuelve la alerta. Requiere autorización administrativa."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         200: _respuesta_json(
             "Alerta silenciada hasta la fecha indicada.",
@@ -787,7 +746,7 @@ def silenciar_alerta(
         "los trabajos existentes. Requiere autorización administrativa y motivo."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         200: _respuesta_json(
             "Worker marcado para drenaje.",
@@ -841,7 +800,7 @@ def drenar_worker(
         "a que termine. Requiere autorización administrativa y motivo."
     ),
     responses={
-        **_errores_admin(),
+        **errores_admin(),
         **_ERROR_VALIDACION,
         200: _respuesta_json(
             "Worker retirado.",

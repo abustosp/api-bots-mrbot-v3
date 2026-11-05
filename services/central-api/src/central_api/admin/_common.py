@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import hmac
 import re
+from typing import Any
 
 from fastapi import HTTPException
+from pydantic import Field, create_model
 
 from central_api.settings import get_settings
 
@@ -45,6 +47,66 @@ def require_admin(authorization: str | None) -> str:
     if not hmac.compare_digest(presented, token):
         raise HTTPException(status_code=403, detail="ADMIN_TOKEN inválido")
     return "admin:token"
+
+
+def tipo_campo_respuesta(valor: object) -> Any:
+    """Infiere el tipo JSON de primer nivel de un ejemplo de salida."""
+    if isinstance(valor, bool):
+        return bool
+    if isinstance(valor, (str, int, float)):
+        return type(valor)
+    if isinstance(valor, list):
+        return list[Any]
+    if isinstance(valor, dict):
+        return dict[str, Any]
+    return Any
+
+
+def respuesta_json(
+    descripcion: str,
+    ejemplo: dict,
+    *,
+    descripciones: dict[str, str],
+    prefijo: str,
+    secuencia: Any,
+) -> dict:
+    """Prepara la descripción de cada campo sin filtrar la respuesta real."""
+    campos = {
+        nombre: (
+            tipo_campo_respuesta(valor),
+            Field(
+                description=descripciones.get(
+                    nombre, f"Campo «{nombre}» incluido en la respuesta de la operación."
+                ),
+                examples=[valor],
+            ),
+        )
+        for nombre, valor in ejemplo.items()
+    }
+    modelo = create_model(f"{prefijo}{next(secuencia)}", **campos)
+    return {
+        "description": descripcion,
+        "model": modelo,
+        "content": {"application/json": {"example": ejemplo}},
+    }
+
+
+def errores_admin() -> dict:
+    """Respuestas de autenticación comunes a las rutas administrativas."""
+    return {
+        401: {
+            "description": (
+                "No se recibió una cabecera Bearer válida. Envíe "
+                "Authorization: Bearer <ADMIN_TOKEN>."
+            )
+        },
+        403: {
+            "description": (
+                "El token administrativo no está configurado o no coincide. "
+                "Configure ADMIN_TOKEN en el servicio o use el valor vigente."
+            )
+        },
+    }
 
 
 MOTIVO_MINIMO = 10
