@@ -175,6 +175,13 @@ class SiferePortal(PortalArca):
         except Exception:
             pass
         await self._esperar(2_500)
+        if (await self._url()).startswith("chrome-error:"):
+            # El 302 del envío apunta a http://app1.comarb.gob.ar/...mainMenu.do, sin
+            # respuesta: la selección ya quedó en la sesión, se reabre el menú por https.
+            await self.paso(
+                "reabrir_menu_sifere",
+                self.abrir_url(f"{BASE_COMARB}/mainMenu.do", timeout_ms=30_000),
+            )
         self._representado_listo = True
 
     async def _resolver_entry_point(self) -> None:

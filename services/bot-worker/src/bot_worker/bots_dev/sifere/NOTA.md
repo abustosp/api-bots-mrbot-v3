@@ -17,6 +17,7 @@ el ejemplo de payload. El código vive en:
 - La regla es idempotente por sesión y solo intercepta `**://app1.comarb.gob.ar/**` para pasar `http://` a `https://`.
 - Ambos cambios se probaron en vivo contra ARCA el 09/10/2026. Cobertura: `tests/test_arca_login_servicio_sifere.py`.
 - Autorrepresentación sin otros representados: COMARB entra directo a `mainMenu.do` con "X (CUIT) representando a X (CUIT)" y no muestra `#selectedCuit`. Si el CUIT del encabezado coincide con el pedido, `seleccionar_representado` lo da por elegido. Probado en vivo el 13/10/2026 (V1, V2 y V3 tienen el mismo fix).
+- Selección de representado: el 302 del envío de `#selectedCuit` apunta a `http://app1.comarb.gob.ar/.../mainMenu.do`, que da timeout y deja la página en `chrome-error://` (la regla https no intercepta ese redirect). El portal V3 y los bots de `bots_dev/sifere` reabren `https://.../mainMenu.do`; la selección ya está en la sesión. Probado en vivo con el logger el 05/11/2026.
 
 ## Operación `consultar`
 

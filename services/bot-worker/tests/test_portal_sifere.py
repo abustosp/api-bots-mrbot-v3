@@ -201,6 +201,19 @@ def test_seleccionar_representado_envia_formulario_sin_esperar_navegacion() -> N
     assert listo
 
 
+def test_seleccionar_representado_reabre_el_menu_si_el_redirect_http_falla() -> None:
+    portal = _SiferePortalTest(_SelectorRepresentado())
+    portal.page.url = "chrome-error://chromewebdata/"
+    abiertas: list[str] = []
+
+    async def _abrir(url: str, **kwargs: Any) -> None:
+        abiertas.append(url)
+
+    portal.abrir_url = _abrir  # type: ignore[method-assign]
+    asyncio.run(portal.seleccionar_representado("20123456789"))
+    assert abiertas[-1] == "https://app1.comarb.gob.ar/siferewebconsultas/mainMenu.do"
+
+
 class _PortalSinSelector(_SiferePortalTest):
     """COMARB sin otros representados: mainMenu.do sin ``#selectedCuit``."""
 
