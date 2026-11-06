@@ -54,6 +54,11 @@ URL_PADRON = (
     "https://seti.afip.gob.ar/padron-puc-consulta-internet/"
     "ResponsiveIndexInternetAction.do"
 )
+#: SIPER no hereda la sesión del portal general: el login debe ir por su sistema.
+URL_LOGIN_SIPER = (
+    "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
+    "?action=SYSTEM&system=padron-puc-consulta-internet"
+)
 
 try:
     from bot_worker.runtime.context import BotResult, BotRuntime
@@ -176,6 +181,7 @@ class SiperRealPlugin:
         try:
             async with runtime.browser_factory.arca_session(
                 credentials=runtime.credentials,
+                login_url=URL_LOGIN_SIPER,
                 proxy=runtime.proxy,
                 deadline=runtime.deadline,
                 cancellation=runtime.cancellation,

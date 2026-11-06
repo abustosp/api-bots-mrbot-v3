@@ -370,7 +370,8 @@ class PlaywrightBrowserFactory:
             async with factory.new_context() as (_, context):
                 page = await context.new_page()
                 session = ArcaSession(
-                    credentials, captcha, page=page, context=context
+                    credentials, captcha, page=page, context=context,
+                    login_url=kwargs.get("login_url"),
                 )
                 try:
                     await session.login()

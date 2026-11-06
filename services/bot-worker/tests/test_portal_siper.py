@@ -118,6 +118,12 @@ class _Locator:
     def first(self) -> _Locator:
         return self
 
+    def locator(self, _: str) -> _Locator:
+        return self
+
+    async def inner_text(self, **_: Any) -> str:
+        return ""
+
     async def count(self) -> int:
         return 1
 
@@ -319,3 +325,18 @@ def test_fallo_de_campos_siper_no_pierde_las_capturas(tmp_path: Path) -> None:
 
 def test_siper_sigue_registrado_en_el_catalogo_de_portales() -> None:
     assert portal_para("siper") is SiperPortal
+
+
+def test_categoria_en_td_sin_clase_del_portal_real() -> None:
+    html = (
+        '<table><tr><td class="conductaFiscalName"> Categor\u00eda SIPER </td>'
+        '<td class="icon" width="1%">&nbsp;</td><td><div class="conductaFiscalLink">'
+        '<span class="calificacion">B</span> <span> - Bajo Riesgo</span></div></td></tr>'
+        '<tr><td class="conductaFiscalName">Motivo</td><td class="icon">&nbsp;</td>'
+        '<td class="conductaFiscalValue"><div>Mensual</div></td></tr></table>'
+    )
+
+    assert extraer_detalle_siper(html) == {
+        "categoria_siper": "B - Bajo Riesgo",
+        "motivo": "Mensual",
+    }

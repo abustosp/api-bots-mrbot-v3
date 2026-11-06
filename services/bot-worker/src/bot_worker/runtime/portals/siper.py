@@ -67,6 +67,15 @@ class _DetalleHTML(HTMLParser):
         elif tag == "td" and "conductaFiscalValue" in clases:
             self._en_valor = True
             self._valor = []
+        elif (
+            tag == "div"
+            and "conductaFiscalLink" in clases
+            and self._pendiente
+            and not self._en_valor
+        ):
+            # Categoría SIPER: el portal real la pone en un <td> sin clase.
+            self._en_valor = True
+            self._valor = []
 
     def handle_endtag(self, tag: str) -> None:
         if tag != "td":
@@ -130,8 +139,11 @@ class SiperPortal(PortalArca):
                 "CUIT inválido para el detalle SIPER",
                 diagnostic_code="siper_cuit_invalid",
             )
+        # Los campos están en la página de Conducta Fiscal; se abre primero el
+        # detalle del contribuyente para fijar la persona (igual que V1/logger).
         await self.paso("abrir_detalle", self._abrir(f"{URL_DETALLE}?idPersona={cuit}"))
-        html = await self.paso("leer_detalle", self._html_seccion())
+        await self.paso("abrir_conducta_fiscal", self._abrir(URL_CATEGORIAS))
+        html = await self.paso("leer_detalle", self._html_conducta())
         campos = extraer_detalle_siper(html)
         if not campos:
             raise TargetUnavailableError(
@@ -139,6 +151,17 @@ class SiperPortal(PortalArca):
                 diagnostic_code="siper_detalle_vacio",
             )
         return campos
+
+    async def _html_conducta(self) -> str:
+        """HTML de la tabla de conducta fiscal (esa página no tiene #sectionContainer)."""
+        try:
+            fila = self.page.locator("td.conductaFiscalName").first
+            await fila.wait_for(state="attached", timeout=15_000)
+            return str(
+                await fila.locator("xpath=ancestor::table[1]").inner_html() or ""
+            )
+        except Exception:
+            return ""
 
     async def _html_seccion(self) -> str:
         try:
@@ -181,6 +204,15 @@ class SiperPortal(PortalArca):
                 break
             await self._esperar(500)
         await self._esperar(1_200)
+        try:
+            texto = await self.page.locator("body").inner_text(timeout=3_000)
+        except Exception:
+            texto = ""
+        if "demasiado tiempo sin actividad" in texto.lower():
+            raise TargetUnavailableError(
+                "SIPER informó sesión inactiva: la captura no es válida",
+                diagnostic_code="siper_sesion_expirada",
+            )
 
     async def _capturar(self, destino: Path, vista: str) -> dict[str, Any]:
         destino = Path(destino)

@@ -237,9 +237,13 @@ class ArcaSession:
         *,
         page: Any = None,
         context: Any = None,
+        login_url: str | None = None,
     ) -> None:
         if credentials is None:
             raise ArcaLoginError("el plugin requiere credenciales fiscales")
+        # Algunos portales (SIPER) no heredan la sesión del portal general y exigen
+        # loguearse por su propia URL ``?action=SYSTEM&system=...``.
+        self._login_url = login_url or ARCA_LOGIN_URL
         self._credentials: FiscalCredentials | None = credentials
         self._captcha = captcha
         self._page = page
@@ -508,7 +512,7 @@ class ArcaSession:
                 diagnostic_code="arca_browser_context_missing",
             )
         try:
-            await self.page.goto(ARCA_LOGIN_URL, timeout=45_000)
+            await self.page.goto(self._login_url, timeout=45_000)
             await self._wait_ready()
         except Exception as exc:
             raise TargetUnavailableError(
