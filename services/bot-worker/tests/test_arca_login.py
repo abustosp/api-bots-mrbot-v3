@@ -429,3 +429,22 @@ def test_solver_error_no_se_filtra_al_diagnostico() -> None:
     with pytest.raises(CaptchaUnsolvableError) as exc:
         asyncio.run(session.login())
     assert "sensitive provider response" not in str(exc.value)
+
+
+def test_input_captcha_oculto_de_arca_no_cuenta_como_captcha() -> None:
+    class _Loc:
+        def __init__(self, n: int) -> None:
+            self._n = n
+
+        async def count(self) -> int:
+            return self._n
+
+    class _HiddenOnlyPage:
+        # Solo existe <input type=hidden id=F1:captcha>: matchea el selector
+        # genérico únicamente si este no excluye los hidden.
+        def locator(self, selector: str) -> _Loc:
+            hit = "input[id*='captcha' i]" in selector and ":not([type='hidden'])" not in selector
+            return _Loc(1 if hit else 0)
+
+    session = ArcaSession(FiscalCredentials("20123456789", "clave-ficticia"), page=_HiddenOnlyPage())
+    assert asyncio.run(session._captcha_present()) is False

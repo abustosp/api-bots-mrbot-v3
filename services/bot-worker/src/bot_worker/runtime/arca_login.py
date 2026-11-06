@@ -316,8 +316,9 @@ class ArcaSession:
             "img[alt*='captcha' i]",
             "img[src*='captcha' i]",
             "iframe[src*='captcha' i]",
-            "input[id*='captcha' i]",
-            "input[name*='captcha' i]",
+            # ARCA siempre incluye <input type=hidden id=F1:captcha>: no es un captcha.
+            "input[id*='captcha' i]:not([type='hidden'])",
+            "input[name*='captcha' i]:not([type='hidden'])",
         ):
             try:
                 locator = self.page.locator(selector)
