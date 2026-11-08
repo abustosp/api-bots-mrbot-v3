@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import sqlite3
@@ -55,7 +56,6 @@ CENTRAL_CTR = "mrbot-v3-central-api-1"
 PG_CTR = "mrbot-v3-postgres-1"
 PG_USER, PG_DB = "mrbot_app_v3", "mrbot_v3"
 REMOTE_COMPOSE = "/home/abp/api-bots-mrbot-v3/infra/compose"
-NEW_ADMIN_TOKEN = "pWVxsuqrA5oXag6mMUimAI3GY4dhQyOZmc0QgNtT"
 
 DELETE_USERS = """
 f345fe9c-a721-4122-802b-6f84aea40f63 30b4920b-2944-46c9-96d4-4594001ecf57
@@ -428,11 +428,32 @@ def do_apply(dbs: Path, send: bool) -> dict:
     return rep
 
 
+def _ssh_con_token(remote: str, token: str) -> str:
+    """Envía el token por stdin y nunca incluye su valor en comandos ni errores."""
+    result = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", HOST, remote], input=token,
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode:
+        raise SystemExit("fallo la operacion remota de ADMIN_TOKEN")
+    return result.stdout.strip()
+
+
 def set_admin_token(token: str) -> None:
     log("cambiando ADMIN_TOKEN en la central")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     env = f"{REMOTE_COMPOSE}/.env"
-    ssh(f"cp {env} {env}.bak-{ts} && sed -i 's|^ADMIN_TOKEN=.*|ADMIN_TOKEN={token}|' {env} && grep -c '^ADMIN_TOKEN=' {env}")
+    script = r"""import pathlib, shutil, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+lines = text.splitlines(keepends=True)
+if sum(line.startswith('ADMIN_TOKEN=') for line in lines) != 1:
+    sys.exit(1)
+shutil.copy2(path, str(path) + '.bak-' + sys.argv[2])
+token = sys.stdin.read()
+path.write_text(''.join('ADMIN_TOKEN=' + token + '\n' if line.startswith('ADMIN_TOKEN=') else line for line in lines))
+"""
+    _ssh_con_token(f"python3 -c {shlex.quote(script)} {shlex.quote(env)} {shlex.quote(ts)}", token)
     ssh(f"cd {REMOTE_COMPOSE} && docker compose up -d --no-deps --force-recreate central-api")
     import time
     for _ in range(30):
@@ -442,12 +463,22 @@ def set_admin_token(token: str) -> None:
             break
     else:
         raise SystemExit("la central no volvio a responder /health")
-    base = "curl -s -o /dev/null -w '%{http_code}' 'localhost:8000/admin/users?limit=1'"
-    bueno = ssh(f"{base} -H 'Authorization: Bearer {token}'", capture=True, check=False).stdout.strip()
-    malo = ssh(f"{base} -H 'Authorization: Bearer token-incorrecto'", capture=True, check=False).stdout.strip()
-    log(f"token nuevo -> HTTP {bueno} (esperado 200), token invalido -> HTTP {malo} (esperado 403)")
-    if bueno != "200" or malo != "403":
+    script = """import sys, urllib.error, urllib.request
+token = sys.stdin.read()
+url = 'http://localhost:8000/admin/users?limit=1'
+def status(value):
+    request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + value})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+print(status(token), status('token-incorrecto'))
+"""
+    estados = _ssh_con_token(f"python3 -c {shlex.quote(script)}", token).split()
+    if estados != ["200", "403"]:
         raise SystemExit("verificacion del ADMIN_TOKEN fallida")
+    log("token nuevo -> HTTP 200, token invalido -> HTTP 403")
 
 
 # ---------------------------------------------------------------------- cli
@@ -461,6 +492,12 @@ def main() -> int:
     p.add_argument("--yes", action="store_true", help="confirma operaciones sobre la central real")
     a = p.parse_args()
     d: Path = a.dbs_dir
+    token = os.environ.get("NEW_ADMIN_TOKEN", "") if a.cmd in ("token", "all") else ""
+    if a.cmd in ("token", "all"):
+        if not a.yes:
+            raise SystemExit("token modifica la central real: repetir con --yes")
+        if not re.fullmatch(r"[A-Za-z0-9._~+/=-]+", token):
+            raise SystemExit("NEW_ADMIN_TOKEN debe contener un token Bearer valido")
 
     if a.cmd in ("stage", "all"):
         s = stage(d, d / "bkp_local_v3.db")
@@ -475,9 +512,7 @@ def main() -> int:
         do_apply(d, a.send_emails)
         dump_central(d / "central-v3-dump-after-migration.db")
     if a.cmd in ("token", "all"):
-        if not a.yes:
-            raise SystemExit("token modifica la central real: repetir con --yes")
-        set_admin_token(NEW_ADMIN_TOKEN)
+        set_admin_token(token)
     return 0
 
 
