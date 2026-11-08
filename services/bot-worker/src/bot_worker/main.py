@@ -787,6 +787,7 @@ def create_app(settings: WorkerConfig | None = None) -> FastAPI:
             operation=env.operation,
             accepted_at=accepted_at,
             deadline_at=env.deadline_at,
+            assignment_expires_at=env.assignment_expires_at,
         )
         try:
             acceptance = await supervisor.accept(job, body, force=bool(env.force))
@@ -1565,19 +1566,37 @@ async def _run_job(app: FastAPI, env: JobEnvelope, job: LocalJob) -> None:
             callback_base = (env.callback or {}).get(
                 "base_url", settings.central_url
             )
-            ok = await send_result(
-                client,
-                callback_base,
-                job.job_id,
-                payload,
-                timeout_seconds=settings.callback_timeout_seconds,
-                worker_node=central_node,
-                service_token=service_token,
-            )
-            if ok:
-                await store.mark_reported(job.job_id, job.attempt, payload)
-            else:
-                log.warning("resultado sin confirmar; se conserva la tarea")
+            # El plugin ya terminó. Descarta las referencias locales a sus
+            # secretos antes de esperar la confirmación del resultado.
+            env.credentials = None
+            env.proxy_profile = None
+            env.captcha_profile = None
+            env.service_profile = None
+            credentials = runtime = plugin = base_plugin = result = validated = None
+            proxy_cfg = captcha_profile = service_profile = _prov = None
+            secrets.clear()
+            captura = None  # _subir_logger ya cerró y borró la evidencia
+            retry_delay = 5.0
+            while True:
+                ok = await send_result(
+                    client,
+                    callback_base,
+                    job.job_id,
+                    payload,
+                    timeout_seconds=settings.callback_timeout_seconds,
+                    worker_node=central_node,
+                    service_token=service_token,
+                )
+                if ok:
+                    await store.mark_reported(job.job_id, job.attempt)
+                    break
+                cleanup_workdir(workdir)
+                workdir = None
+                log.warning(
+                    "resultado sin confirmar; se reintentara el reporte sin repetir el bot"
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60.0)
         finally:
             # Cleanup garantizado: browser via factory, workspace, secreto.
             if renovacion_lease is not None:

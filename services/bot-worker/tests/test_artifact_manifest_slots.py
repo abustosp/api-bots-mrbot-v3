@@ -191,6 +191,32 @@ def test_upload_confirma_http_y_normaliza_error_sin_url_firmada(tmp_path, fallo)
     asyncio.run(ejecutar())
 
 
+def test_upload_transmite_en_bloques_y_con_longitud(tmp_path):
+    import hashlib
+
+    contenido = b"abcde" * 50_000
+    (tmp_path / "historico.xls").write_bytes(contenido)
+    bloques = []
+
+    class Client:
+        async def put(self, url, *, content, headers):
+            assert headers["Content-Length"] == str(len(contenido))
+            assert headers["Content-Type"] == "application/vnd.ms-excel"
+            async for bloque in content:
+                bloques.append(bloque)
+            return httpx.Response(200, request=httpx.Request("PUT", url))
+
+    store = ArtifactStore(
+        tmp_path,
+        {"historico.xls": ArtifactSlot("historico.xls", "https://bucket.invalid/put", "key")},
+        http_client=Client(),
+    )
+    result = asyncio.run(store.upload("historico.xls", "historico.xls"))
+    assert len(bloques) > 1 and max(map(len, bloques)) <= 65536
+    assert b"".join(bloques) == contenido
+    assert result["sha256"] == hashlib.sha256(contenido).hexdigest()
+
+
 def test_el_worker_le_manda_a_la_central_el_nombre_real_del_archivo_en_cada_subida(tmp_path: Path) -> None:
     """ArtifactStore.upload -> presign(artifact_id, tipo, tamano, nombre): el nombre es el del archivo, no el artifact_id."""
     vistos: list[tuple[str, str]] = []

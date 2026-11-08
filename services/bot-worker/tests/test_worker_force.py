@@ -123,6 +123,17 @@ def test_post_jobs_force_saturado_y_firma_incorrecta() -> None:
     respuesta = cliente.post("/internal/v1/jobs", json=forzado)
     assert respuesta.status_code == 202
     assert respuesta.json()["accepted"] is True
+    replay = cliente.post("/internal/v1/jobs", json=forzado)
+    assert replay.status_code == 202
+    assert replay.json() == respuesta.json()
+    from datetime import datetime
+    from bot_worker.security.assignments import CLOCK_SKEW_SECONDS
+
+    key = (forzado["job_id"], forzado["attempt"], forzado["lease_id"])
+    assert app.state.supervisor._acceptance_cache[key][1] == (
+        datetime.fromisoformat(forzado["assignment_expires_at"].replace("Z", "+00:00"))
+        .timestamp() + CLOCK_SKEW_SECONDS
+    )
 
     # Forzado con firma de alcance normal: se rechaza (403), no se ejecuta.
     trucho = _sobre_firmado(app, privada, force=True, scope=ASSIGNMENT_SCOPE_ASSIGN)

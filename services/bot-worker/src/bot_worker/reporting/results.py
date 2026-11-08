@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from typing import Any
 
 log = logging.getLogger("bot_worker.results")
@@ -18,23 +19,32 @@ def idempotency_key(job_id: str, attempt: int) -> str:
 
 
 class ResultStore:
-    """Deduplica reportes por (job_id, attempt)."""
+    """Deduplica reportes recientes sin retener sus cuerpos completos."""
+
+    MAX_REPORTED = 4096
 
     def __init__(self) -> None:
-        self._reported: dict[tuple[str, int], dict[str, Any]] = {}
+        self._reported: set[tuple[str, int]] = set()
+        self._order: deque[tuple[str, int]] = deque()
         self._lock = asyncio.Lock()
 
     async def already_reported(
         self, job_id: str, attempt: int
-    ) -> dict[str, Any] | None:
+    ) -> bool:
         async with self._lock:
-            return self._reported.get((job_id, attempt))
+            return (job_id, attempt) in self._reported
 
     async def mark_reported(
-        self, job_id: str, attempt: int, body: dict[str, Any]
+        self, job_id: str, attempt: int
     ) -> None:
         async with self._lock:
-            self._reported.setdefault((job_id, attempt), body)
+            key = (job_id, attempt)
+            if key in self._reported:
+                return
+            self._reported.add(key)
+            self._order.append(key)
+            if len(self._order) > self.MAX_REPORTED:
+                self._reported.discard(self._order.popleft())
 
 
 async def send_result(
@@ -65,8 +75,26 @@ async def send_result(
             resp = await client.post(
                 url, json=payload, timeout=timeout_seconds, **extra
             )
-            if resp.status_code < 500:
-                return True
+            if 200 <= resp.status_code < 300:
+                try:
+                    confirmation = resp.json()
+                except (AttributeError, ValueError):
+                    confirmation = None
+                if (
+                    isinstance(confirmation, dict)
+                    and confirmation.get("success") is True
+                    and confirmation.get("job_id") == job_id
+                ):
+                    return True
+                log.warning(
+                    "reporte de resultado sin confirmacion valida status=%s",
+                    resp.status_code,
+                )
+            elif resp.status_code < 500 and resp.status_code not in (408, 425, 429):
+                log.warning(
+                    "reporte de resultado rechazado status=%s", resp.status_code
+                )
+                return False
         except Exception as exc:
             log.warning(
                 "reporte de resultado intento %d fallido: %s",

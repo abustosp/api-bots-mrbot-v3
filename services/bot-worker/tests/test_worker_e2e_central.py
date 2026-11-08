@@ -99,7 +99,8 @@ class _CentralFalsaHandler(BaseHTTPRequestHandler):
             if len(self.server.pendientes_result) == 1:
                 self._json(500, {"code": "ERROR"})
             else:
-                self._json(200, {"confirmado": True})
+                job_id = ruta.split("/")[-2]
+                self._json(200, {"success": True, "job_id": job_id})
         elif ruta.endswith("/cancel-ack"):
             self.server.pendientes_cancel_ack.append(json.loads(datos or b"{}"))
             self._json(200, {"recibido": True})
@@ -224,23 +225,36 @@ def test_e2e_slot_sin_url_pide_presign_antes_del_put(tmp_path):
 
 
 def test_result_store_deduplica_por_job_e_intento():
-    """El store no reporta dos veces el mismo (job_id, attempt)."""
+    """El store acotado conserva solo las claves recientes, no los cuerpos."""
     tienda = ResultStore()
-    cuerpo = {"idempotency_key": idempotency_key("j1", 1)}
 
     async def _doble() -> tuple:
         primero = await tienda.already_reported("j1", 1)
-        await tienda.mark_reported("j1", 1, cuerpo)
+        await tienda.mark_reported("j1", 1)
         segundo = await tienda.already_reported("j1", 1)
-        await tienda.mark_reported("j1", 1, {"otro": True})
+        await tienda.mark_reported("j1", 1)
         tercero = await tienda.already_reported("j1", 1)
         return primero, segundo, tercero
 
     primero, segundo, tercero = asyncio.run(_doble())
-    assert primero is None
-    assert segundo == cuerpo
-    # El segundo marcado no pisa el primero: idempotencia local.
-    assert tercero == cuerpo
+    assert primero is False
+    assert segundo is True
+    assert tercero is True
+    assert len(tienda._reported) == 1
+    assert all(isinstance(key, tuple) for key in tienda._reported)
+
+
+def test_result_store_descarta_claves_antiguas_al_superar_el_limite():
+    tienda = ResultStore()
+
+    async def _llenar() -> tuple[bool, int]:
+        for attempt in range(tienda.MAX_REPORTED + 1):
+            await tienda.mark_reported("j1", attempt)
+        return await tienda.already_reported("j1", 0), len(tienda._reported)
+
+    primero, cantidad = asyncio.run(_llenar())
+    assert primero is False
+    assert cantidad == tienda.MAX_REPORTED
 
 
 def test_result_identifica_nodo_para_la_central():
@@ -253,6 +267,10 @@ def test_result_identifica_nodo_para_la_central():
 
             class Resp:
                 status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"success": True, "job_id": "j1"}
 
             return Resp()
 
@@ -270,6 +288,41 @@ def test_result_identifica_nodo_para_la_central():
     assert con_nodo is True
     assert sin_nodo is True
     assert cabeceras == {"X-Worker-Node": "192.0.2.9:8080"}
+
+
+def test_result_solo_acepta_confirmacion_2xx_del_mismo_job():
+    class Cliente:
+        def __init__(self, status: int, body: dict):
+            self.status = status
+            self.body = body
+
+        async def post(self, *args, **kwargs):
+            class Resp:
+                status_code = self.status
+
+                def json(inner_self):
+                    return self.body
+
+            return Resp()
+
+    async def _reportar() -> list[bool]:
+        estados = []
+        for status in (200, 302, 401, 403, 409, 422):
+            estados.append(await send_result(
+                Cliente(status, {"success": True, "job_id": "j1"}),
+                "https://central", "j1", {"result": "OK"}, max_attempts=1,
+            ))
+        otro_job = await send_result(
+            Cliente(200, {"success": True, "job_id": "j2"}),
+            "https://central", "j1", {"result": "OK"}, max_attempts=1,
+        )
+        sin_confirmacion = await send_result(
+            Cliente(204, {}), "https://central", "j1", {"result": "OK"},
+            max_attempts=1,
+        )
+        return estados + [otro_job, sin_confirmacion]
+
+    assert asyncio.run(_reportar()) == [True, False, False, False, False, False, False, False]
 
 
 def test_fabrica_navegador_stub_en_dev_y_sesion_falsa(monkeypatch):

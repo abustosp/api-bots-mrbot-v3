@@ -488,11 +488,16 @@ class LoggerCapture:
         for intento in range(4):
             try:
                 firmado = await presign(tar_gz.name, "application/gzip", tamano)
-                respuesta = await client.put(
-                    firmado["upload_url"], content=tar_gz.read_bytes(),
-                    headers={"Content-Type": "application/gzip"},
-                    timeout=TIMEOUT_SUBIDA_S,
-                )
+                with tar_gz.open("rb") as archivo:
+                    async def bloques():
+                        while bloque := archivo.read(65536):
+                            yield bloque
+
+                    respuesta = await client.put(
+                        firmado["upload_url"], content=bloques(),
+                        headers={"Content-Type": "application/gzip", "Content-Length": str(tamano)},
+                        timeout=TIMEOUT_SUBIDA_S,
+                    )
                 respuesta.raise_for_status()
                 return True
             except Exception as exc:  # noqa: BLE001 - nunca afecta al job

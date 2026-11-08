@@ -10,8 +10,12 @@ runner libera el permiso por resultado, excepcion, timeout o cancelacion.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
+
+from bot_worker.security.assignments import CLOCK_SKEW_SECONDS
 
 
 class WorkerSaturated(Exception):
@@ -38,6 +42,7 @@ class LocalJob:
     started_at: str | None = None
     deadline_at: str | None = None
     cancel_requested: bool = False
+    assignment_expires_at: str | None = None
 
     @property
     def key(self) -> tuple[str, int]:
@@ -53,6 +58,7 @@ class Acceptance:
 
 class JobSupervisor:
     HARD_MAX_CONCURRENCY = 10
+    MAX_ACCEPTANCES = 4096
 
     def __init__(self, configured: int = 5, queue_limit: int = 0) -> None:
         if not 1 <= configured <= self.HARD_MAX_CONCURRENCY:
@@ -67,7 +73,9 @@ class JobSupervisor:
         self._admission_lock = asyncio.Lock()
         self._running: dict[tuple[str, int], LocalJob] = {}
         self._tasks: dict[tuple[str, int], asyncio.Task[None]] = {}
-        self._acceptance_cache: dict[tuple[str, int, str], dict[str, Any]] = {}
+        self._acceptance_cache: dict[
+            tuple[str, int, str], tuple[dict[str, Any], float]
+        ] = {}
         self.counters: dict[str, int] = {
             "jobs_completed": 0,
             "jobs_failed": 0,
@@ -104,19 +112,35 @@ class JobSupervisor:
         async with self._admission_lock:
             if self.draining:
                 raise WorkerDraining()
+            now = time.time()
+            for key, (_, expires) in list(self._acceptance_cache.items()):
+                if expires < now and key[:2] not in self._running:
+                    del self._acceptance_cache[key]
             cached = self._acceptance_cache.get(
                 (job.job_id, job.attempt, job.lease_id)
             )
+            expires = float("inf")
+            if job.assignment_expires_at:
+                expires = datetime.fromisoformat(
+                    job.assignment_expires_at.replace("Z", "+00:00")
+                ).timestamp() + CLOCK_SKEW_SECONDS
             if cached is not None:
+                self._acceptance_cache[(job.job_id, job.attempt, job.lease_id)] = (
+                    cached[0], max(cached[1], expires)
+                )
                 return Acceptance(job=job, duplicate=True)
             for (jid, att), known in self._running.items():
                 if jid == job.job_id and att == job.attempt:
                     raise LeaseConflict()
             if not force and len(self._running) >= self.capacity + self.queue_limit:
                 raise WorkerSaturated()
+            # Nunca expulsar una firma vigente: saturar es más seguro que
+            # volver a ejecutar una asignación cuyo ACK se perdió.
+            if len(self._acceptance_cache) >= self.MAX_ACCEPTANCES:
+                raise WorkerSaturated()
             self._running[job.key] = job
             self._acceptance_cache[(job.job_id, job.attempt, job.lease_id)] = (
-                acceptance_body
+                acceptance_body, expires
             )
             self.peak_in_flight = max(self.peak_in_flight, len(self._running))
             return Acceptance(job=job)
@@ -124,7 +148,8 @@ class JobSupervisor:
     def duplicate_body(
         self, job_id: str, attempt: int, lease_id: str
     ) -> dict[str, Any] | None:
-        return self._acceptance_cache.get((job_id, attempt, lease_id))
+        cached = self._acceptance_cache.get((job_id, attempt, lease_id))
+        return cached[0] if cached is not None else None
 
     def track_task(
         self, key: tuple[str, int], task: asyncio.Task[None]

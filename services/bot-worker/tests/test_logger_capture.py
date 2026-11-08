@@ -48,7 +48,7 @@ def test_captura_redacta_comprime_sube_y_borra(tmp_path):
                 intentos["n"] += 1
                 if intentos["n"] == 1:
                     raise httpx.WriteTimeout("lento")
-                subidos[url] = content
+                subidos[url] = b"".join([bloque async for bloque in content])
                 return httpx.Response(200, request=httpx.Request("PUT", url))
 
         real_sleep = asyncio.sleep
@@ -77,6 +77,41 @@ def test_captura_redacta_comprime_sube_y_borra(tmp_path):
             datos = t.extractfile(n).read()
             assert b"Secreta123" not in datos
         assert b"***" in t.extractfile("job-1/logs/arba.log").read()
+
+
+def test_subida_logger_reintenta_desde_el_inicio_en_bloques(tmp_path, monkeypatch):
+    contenido = b"abcde" * 50_000
+    tar = tmp_path / "job-1.tar.gz"
+    tar.write_bytes(contenido)
+    cap = LoggerCapture(tmp_path / "ev", "job-1", "arba", "descargar")
+    intentos = []
+    firmas = []
+
+    async def presign(nombre, tipo, tamano):
+        firmas.append((nombre, tipo, tamano))
+        return {"upload_url": "https://s/job-1.tar.gz"}
+
+    class Cliente:
+        async def put(self, url, content, headers, **_):
+            assert headers == {"Content-Type": "application/gzip", "Content-Length": str(len(contenido))}
+            bloques = []
+            intentos.append(bloques)
+            async for bloque in content:
+                bloques.append(bloque)
+                if len(intentos) == 1:
+                    raise httpx.WriteTimeout("lento")
+            return httpx.Response(200, request=httpx.Request("PUT", url))
+
+    async def sin_espera(_):
+        pass
+
+    monkeypatch.setattr(asyncio, "sleep", sin_espera)
+    assert asyncio.run(cap.subir(Cliente(), presign, tar))
+    assert len(firmas) == len(intentos) == 2
+    assert len(intentos[0]) == 1
+    assert len(intentos[1]) > 1
+    assert max(map(len, intentos[1])) <= 65536
+    assert b"".join(intentos[1]) == contenido
 
 
 def test_request_json_con_solicitud_de_la_central(tmp_path):

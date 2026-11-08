@@ -244,11 +244,15 @@ class ArtifactStore:
             from bot_worker.bots.errors import ArtifactUploadError
 
             with open(path, "rb") as fh:
+                async def chunks():
+                    while chunk := fh.read(65536):
+                        yield chunk
+
                 try:
                     response = await http.put(
                         slot.put_url,
-                        content=fh.read(),
-                        headers={"Content-Type": content_type},
+                        content=chunks(),
+                        headers={"Content-Type": content_type, "Content-Length": str(size)},
                     )
                     response.raise_for_status()
                 except httpx.HTTPError:

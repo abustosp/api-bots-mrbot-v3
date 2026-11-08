@@ -344,9 +344,9 @@ class TestReporting(unittest.TestCase):
 
             self.assertEqual(idempotency_key("j", 2), "job:j:attempt:2")
             tienda = ResultStore()
-            self.assertIsNone(await tienda.already_reported("j", 1))
-            await tienda.mark_reported("j", 1, {"ok": True})
-            self.assertIsNotNone(await tienda.already_reported("j", 1))
+            self.assertFalse(await tienda.already_reported("j", 1))
+            await tienda.mark_reported("j", 1)
+            self.assertTrue(await tienda.already_reported("j", 1))
 
             class Cliente:
                 def __init__(self):
@@ -356,6 +356,9 @@ class TestReporting(unittest.TestCase):
                     self.urls.append(url)
                     class Resp:
                         status_code = 200
+
+                        def json(self):
+                            return {"success": True, "job_id": "j"}
 
                     return Resp()
 
