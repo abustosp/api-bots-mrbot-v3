@@ -21,6 +21,20 @@ from central_api.store import utcnow
 router = APIRouter()
 
 TERMINAL_OK = ("OK", "PARCIAL")
+INFRASTRUCTURE_ERROR_CATEGORIES = frozenset({
+    "INFRASTRUCTURE_ERROR",  # compatibilidad con workers anteriores
+    "CHROMIUM_CRASHED",
+    "WORKER_OOM",
+    "ARTIFACT_UPLOAD_FAILED",
+    "INTERNAL",
+})
+
+
+def _billing_status(result: str, error_category: str | None) -> str:
+    """Aplica la política de cuota a categorías reales del worker."""
+    if result in TERMINAL_OK or error_category not in INFRASTRUCTURE_ERROR_CATEGORIES:
+        return "CONFIRMADO"
+    return "REEMBOLSADO"
 
 
 class ArtifactBody(BaseModel):
@@ -129,13 +143,14 @@ async def _espejar_resultado_db(job_id: str, body: ResultBody) -> tuple[str, boo
         if created:
             from central_api.billing.postgres import settle_in_session
 
-            if body.result in TERMINAL_OK or (body.error_category or "") != "INFRASTRUCTURE_ERROR":
+            status = _billing_status(body.result, body.error_category)
+            if status == "CONFIRMADO":
                 await settle_in_session(sesion, job.id, status="CONFIRMADO")
             else:
                 await settle_in_session(
                     sesion,
                     job.id,
-                    status="REEMBOLSADO",
+                    status=status,
                     reason="INFRASTRUCTURE_ERROR",
                 )
         return str(job.status), not created
@@ -261,11 +276,12 @@ async def report_result(
             meta["data"] = {"schema_version": 1, **(body.data or {})}
         else:
             meta["error"] = body.error or {"error_code": "unexpected"}
-    if not db_configurado() and (terminal_ok or (body.error_category or "") != "INFRASTRUCTURE_ERROR"):
-        # COMPLETO o error de negocio: cobro confirmado por defecto.
+    billing_status = _billing_status(body.result, body.error_category)
+    if not db_configurado() and billing_status == "CONFIRMADO":
+        # Resultado correcto o error de negocio: cobro confirmado.
         confirm_usage(job.id)
     elif not db_configurado():
-        # Fallo de infraestructura: reembolso propuesto (libera la reserva).
+        # Fallo interno del servicio: reembolso de la reserva.
         refund_usage(job.id, motivo="INFRASTRUCTURE_ERROR")
     reaper_mod.clear_lease(job.id)
     if not dedup:
