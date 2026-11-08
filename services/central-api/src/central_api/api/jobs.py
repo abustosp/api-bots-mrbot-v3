@@ -101,8 +101,6 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
     Adapta la fila ORM a la forma que espera ``project_job`` (sin exponer
     columnas internas ni secretos).
     """
-    from types import SimpleNamespace
-
     try:
         import uuid
 
@@ -134,6 +132,14 @@ async def _visible_job_db(job_id: str, principal: ApiPrincipal):
             ).scalars().all()
     except Exception:  # noqa: BLE001 - fuera de ámbito o sin fila: 404
         return None
+    return await _hydrate_job_db(fila, resultado, artefactos)
+
+
+async def _hydrate_job_db(fila, resultado, artefactos):
+    """Proyecta una fila y sus datos asociados para lectura individual o listado."""
+    from types import SimpleNamespace
+
+    jid = fila.id
     creado = fila.created_at.isoformat() if fila.created_at else None
     ahora = utcnow()
     files = [
@@ -986,7 +992,7 @@ async def _list_jobs_db(
 
         from sqlalchemy import select
 
-        from central_api.models.execution import Job
+        from central_api.models.execution import Job, JobArtifact, JobResult
 
         owner = uuid.UUID(str(principal.user_id))
         border = uuid.UUID(_decode_cursor(cursor)) if cursor else None
@@ -1003,20 +1009,33 @@ async def _list_jobs_db(
             rows = (
                 await session.execute(statement.order_by(Job.id.desc()).limit(limit + 1))
             ).scalars().all()
+            page = rows[:limit]
+            ids = [row.id for row in page]
+            results = (
+                await session.execute(select(JobResult).where(JobResult.job_id.in_(ids)))
+            ).scalars().all() if ids else []
+            artifacts = (
+                await session.execute(
+                    select(JobArtifact)
+                    .where(JobArtifact.job_id.in_(ids))
+                    .order_by(JobArtifact.created_at, JobArtifact.id)
+                )
+            ).scalars().all() if ids else []
     except Exception:
         # DATABASE_URL es fuente canónica: no sustituir un error de base por un
         # store de proceso que podría omitir jobs creados por otra instancia.
         return None
 
     has_more = len(rows) > limit
-    page = rows[:limit]
+    results_by_job = {result.job_id: result for result in results}
+    artifacts_by_job: dict[Any, list] = {}
+    for artifact in artifacts:
+        artifacts_by_job.setdefault(artifact.job_id, []).append(artifact)
     items: list[dict[str, Any]] = []
     for row in page:
-        # Use the same scoped artifact/result hydration as GET /jobs/{job_id};
-        # list responses therefore keep the V2 meaning of ``data`` and ``files``.
-        hydrated = await _visible_job_db(str(row.id), principal)
-        if hydrated is None:
-            return None
+        hydrated = await _hydrate_job_db(
+            row, results_by_job.get(row.id), artifacts_by_job.get(row.id, [])
+        )
         items.append(project_job(hydrated, getattr(hydrated, "_meta", None)))
     return items, has_more
 
