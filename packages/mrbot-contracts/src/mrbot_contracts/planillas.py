@@ -211,23 +211,19 @@ def filtrar_csv_por_rango(
         columna = next((c for c in columnas_fecha if c in lector.fieldnames), None)
         if columna is None:
             raise ValueError("la planilla del portal no trae columna de fecha conocida")
-        filas = list(lector)
-        campos = lector.fieldnames
-    # ``DictReader`` acumula en la clave ``None`` los campos que sobran (pasa
-    # cuando un importe viene con coma decimal sin comillas): se descartan para
-    # que el CSV filtrado conserve solo las columnas del encabezado.
-    filas = [{k: v for k, v in fila.items() if k is not None} for fila in filas]
-    conservadas = [
-        fila
-        for fila in filas
-        if (dia := parsear_fecha_planilla(fila.get(columna))) is not None
-        and inicio <= dia <= fin
-    ]
-    with open(destino, "w", encoding="utf-8", newline="") as fh:
-        escritor = csv.DictWriter(fh, fieldnames=campos, delimiter=delimitador)
-        escritor.writeheader()
-        escritor.writerows(conservadas)
-    return len(conservadas)
+        # El origen ya está en memoria, por lo que también se admite escribir
+        # sobre la misma ruta. No acumular una segunda copia de las filas.
+        with open(destino, "w", encoding="utf-8", newline="") as salida:
+            escritor = csv.DictWriter(salida, fieldnames=lector.fieldnames, delimiter=delimitador,
+                                      extrasaction="ignore")
+            escritor.writeheader()
+            conservadas = 0
+            for fila in lector:
+                dia = parsear_fecha_planilla(fila.get(columna))
+                if dia is not None and inicio <= dia <= fin:
+                    escritor.writerow(fila)
+                    conservadas += 1
+    return conservadas
 
 
 def _normalizar_desde(valor: str) -> str:
