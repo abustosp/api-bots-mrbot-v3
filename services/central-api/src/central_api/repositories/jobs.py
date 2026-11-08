@@ -778,7 +778,7 @@ class JobRepository:
         ).scalars().all()
 
         outcome: dict[str, Any] = {
-            "requeued": [], "failed": [], "reconciled": []
+            "requeued": [], "failed": [], "reconciled": [], "refundable": []
         }
         final_status: dict[str, str] = {}
         for job in rows:
@@ -854,6 +854,11 @@ class JobRepository:
                     )
                 )
                 outcome["failed"].append(job.id)
+                if (
+                    previous is None and not has_artifacts and not has_success_event
+                    and int(job.attempts or 0) >= int(job.max_attempts or 0)
+                ):
+                    outcome["refundable"].append(job.id)
                 event_type = "FALLIDO"
 
             job.lease_expires_at = None

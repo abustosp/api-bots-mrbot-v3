@@ -40,12 +40,17 @@ async def reap_pg_vencidas() -> list[str]:
     if not db_configurado():
         return []
     try:
+        from central_api.billing.postgres import settle_in_session
         from central_api.repositories.jobs import JobRepository
 
         async with nueva_sesion() as sesion:
             outcome = await JobRepository(sesion).recover_expired_leases(
                 batch_size=get_settings().scheduler_batch_size
             )
+            for job_id in outcome["refundable"]:
+                await settle_in_session(
+                    sesion, job_id, status="REEMBOLSADO", reason="lease_expired"
+                )
     except Exception as exc:  # noqa: BLE001 - best-effort, never kill scheduler
         log.warning("reaper PostgreSQL falló: %s", type(exc).__name__)
         return []
