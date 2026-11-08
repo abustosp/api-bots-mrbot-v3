@@ -13,7 +13,7 @@ despliegue.
 ```
 infra/
 ├── README.md
-├── verify-all.sh                 # punto de entrada: corre todas las verificaciones
+├── verify-all.sh                 # punto de entrada de las verificaciones vigentes
 ├── check-consistency.py          # coherencia de vocabulario y rutas entre planes
 ├── validate-code-blocks.py       # sintaxis de los bloques de codigo de los planes
 ├── verify-packaging.sh           # compose y Dockerfiles contra las herramientas de Docker
@@ -63,79 +63,26 @@ Cada destino se despliega con lo minimo que necesita:
 
 ## Verificaciones
 
-Los planes de este repositorio no son solo prosa: las partes ejecutables se
-comprueban contra las herramientas reales. Un plan que no se verifica deriva,
-y la deriva llega hasta la implementacion.
+`make verify` ejecuta comprobaciones sobre los archivos presentes en el
+repositorio. Requiere Python 3 con `pyyaml` y Docker Compose; no requiere el
+daemon de Docker ni secretos.
 
 ```bash
-./infra/verify-all.sh                # todo, unos 12 segundos
-./infra/verify-worker-isolation.sh   # solo el aislamiento real del worker
+make verify
+./infra/verify-worker-isolation.sh   # solo el aislamiento del worker
+make compose-config                  # solo configuración Compose
 ```
 
-| Verificacion | Qué comprueba | Dependencias |
-|---|---|---|
-| `check-consistency.py` | Vocabulario de estados, rutas canónicas públicas e internas, rutas de salud, tablas del plan maestro presentes en el de base de datos, enlaces relativos, estilo | ninguna |
-| `validate-code-blocks.py` | Que los 97 bloques `json`, `python`, `yaml`, `toml` y `mermaid` de los planes parseen | `pyyaml` |
-| `verify-packaging.sh` | `docker compose config` sobre el compose del plan, ajustes de Playwright, y las invariantes **W-1**, **W-2**, **W-3**, **SEC-3** e **I-4** sobre el artefacto resuelto | docker, `pyyaml` |
-| `verify-worker-isolation.sh` | Los archivos reales del worker (manifiesto, Dockerfile, codigo y compose de `infra/`) sin driver PG ni secretos de la central: **W-1**, **SEC-3** e **I-4** sobre el artefacto real | `pyyaml` |
-| `postgres/verify-ddl.sh` | El DDL y la consulta de cola contra PostgreSQL 17 real, y las invariantes **I-1**, **I-2**, **I-3**, **S-2** | docker |
-
-Cada verificación extrae el artefacto **del propio plan**, no de una copia. Si
-alguien edita un plan y rompe la semántica, la verificación falla en vez de
-seguir probando algo obsoleto.
-
-Las cuatro son gates reales, no adornos. Se comprobó inyectando defectos a
-propósito: capacidad 8 en vez de 5, `DATABASE_URL` en el worker, un puerto
-publicado, un `EXISTS` quitado de la consulta de cola. En todos los casos la
-verificación falló señalando el problema concreto.
-
-### Defectos que estas verificaciones ya encontraron
-
-| Defecto | Dónde | Consecuencia si llegaba a producción |
-|---|---|---|
-| La CTE de reserva incrementaba `running_jobs` con la cola vacía | `plans/01-database` §11.1.1 | Cada ciclo en vacío consumía un slot. Tras 5 ciclos el worker figuraba `SATURADO` sin ejecutar nada, degradando la flota en silencio |
-| `pids_limit` junto a `deploy.resources` | `plans/06-infra` | `docker compose config` rechaza el proyecto entero. El stack no levantaba |
-| `/healthz` y `/readyz` en infra vs `/health` y `/ready` en la API | `plans/06-infra` | El `HEALTHCHECK` de la imagen apuntaba a una ruta que la aplicación no expone. Contenedor siempre unhealthy |
-| Tres rutas distintas para pedir URLs prefirmadas | 3 documentos | El worker y la central no se entendían |
-| `status:batch` y `cancel` en la matriz de migración | `plans/07-migracion` | Un cliente migrando seguía una ruta inexistente |
-| TOML con clave duplicada | `plans/00-arquitectura` | Ejemplo no copiable, `pyproject.toml` inválido |
-| Vocabulario de estados divergente en 4 documentos | varios | Enumeraciones incompatibles entre servicios |
-
-## Verificación del esquema
-
-`postgres/verify-ddl.sh` es lo único ejecutable que ya existe en este
-repositorio. Levanta un `postgres:17-alpine` efímero, extrae el DDL y la
-consulta de cola directamente de
-[`plans/01-database/plan.md`](../plans/01-database/plan.md), y comprueba 15
-propiedades del diseño.
-
-```bash
-./infra/postgres/verify-ddl.sh     # requiere docker, tarda unos 6 segundos
-```
-
-Qué verifica hoy, sin necesidad de código de aplicación:
-
-| Verifica | Invariante o criterio |
+| Verificación | Qué comprueba |
 |---|---|
-| El DDL se ejecuta sin errores en PostgreSQL 17 | base de todo lo demás |
-| Las 19 tablas canónicas existen, sin faltantes ni extras | criterio 1 |
-| Toda PK de `public` es `uuid` | I-2, criterios 2 y 3 |
-| Cero secuencias, cero `identity`, cero `serial` | **I-1**, criterio 4 |
-| `users` no tiene las columnas prohibidas | **I-3**, criterio 5 |
-| Una `Idempotency-Key` repetida es rechazada | **S-2**, criterio 9 |
-| `COMPLETO` sin `finished_at` es rechazado | criterio 12 |
-| La base rechaza `capacity > 10` y `running_jobs > 10` | **W-2** respaldado en base |
-| Claim con cola vacía no mueve el contador de slots | criterio 13, caso vacío |
-| 5 ráfagas de 12 claims sin doble asignación ni sobrecapacidad | criterio 13, seguridad |
-| La cola de 10 se drena entre 2 workers | criterio 13, vivacidad |
-| El claim usa el índice parcial con 50.000 jobs terminales | criterio 14 |
-| Un campo específico por bot es consultable por GIN `JSONB` | criterio 15 |
-| La vista de flota deriva `SATURADO`, `SANO` y `CAIDO` | criterio 20 |
+| `validate-code-blocks.py` | Sintaxis de bloques JSON, Python, YAML, TOML y estructura Mermaid en la documentación |
+| `verify-worker-isolation.sh` | Manifiesto, Dockerfile, código y Compose del worker sin drivers de base de datos ni secretos de la central |
+| `compose-config` | Validez del archivo `compose/docker-compose.yml` con Docker Compose, sin cargar `.env` ni resolver archivos de entorno de los servicios |
 
-El script lee la consulta de claim del plan en vez de llevar una copia. Si
-alguien edita el plan y rompe la semántica, la verificación falla en lugar de
-seguir probando una versión obsoleta. Ya encontró un defecto real: ver
-`plans/01-database/plan.md` §11.1.1.
+Las herramientas históricas `check-consistency.py`, `verify-packaging.sh` y
+`postgres/verify-ddl.sh` dependen de archivos `plans/` que no forman parte de
+este checkout. Se conservan para cuando esos planes estén disponibles y no
+forman parte de `make verify`.
 
 ## Stack
 

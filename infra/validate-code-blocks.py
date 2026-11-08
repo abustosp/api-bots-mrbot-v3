@@ -19,7 +19,7 @@ import pathlib
 import re
 import sys
 
-SKIP_DIRS = {".research", ".git"}
+SKIP_DIRS = {".research", ".git", ".venv", "venv", "node_modules"}
 
 # Lenguajes que este script sabe validar y como.
 JSON_LANGS = {"json"}
