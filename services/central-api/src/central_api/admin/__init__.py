@@ -11,6 +11,7 @@ from central_api.admin.audit import router as audit_router
 from central_api.admin.autoscale import router as autoscale_router
 from central_api.admin.backups import router as backups_router
 from central_api.admin.fleet import router as fleet_router
+from central_api.admin.artifacts import router as artifacts_router
 from central_api.admin.jobs import router as jobs_router
 from central_api.admin.panel import router as panel_router
 from central_api.admin.reporting import router as reporting_router
@@ -28,6 +29,7 @@ router.include_router(workers_admin_router, tags=["admin-workers"])
 router.include_router(users_router, tags=["admin-users"])
 router.include_router(reporting_router, tags=["admin-reporting"])
 router.include_router(retention_router, tags=["admin-retention"])
+router.include_router(artifacts_router, tags=["admin-artifacts"])
 router.include_router(jobs_router, tags=["admin-jobs"])
 router.include_router(fleet_router, tags=["admin-fleet"])
 router.include_router(updates_router, tags=["admin-updates"])

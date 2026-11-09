@@ -224,6 +224,7 @@ details > .details-body { padding: 0 14px 14px; }
       <button type="button" data-view="ephemeral">Workers efímeros</button>
       <button type="button" data-view="audit">Auditoría</button>
       <button type="button" data-view="backups">Backups</button>
+      <button type="button" data-view="artifacts">Artifacts</button>
     </nav>
     <div class="user-box hidden" id="user-box"><span class="muted">Sesión ADMIN_TOKEN</span><button class="button secondary small" type="button" id="logout-button">Salir</button></div>
   </header>
@@ -265,9 +266,10 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="executions">
-        <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla física de un bot. Solo se carga la selección actual, como en V2, para evitar una página kilométrica.</p>
-        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Tabla</label><div class="table-combobox" id="executions-table-combobox"><input id="executions-table-search" type="text" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="executions-table-listbox" aria-describedby="executions-table-help" placeholder="Buscar tablas..." autocomplete="off" required><span id="executions-table-help" class="visually-hidden">Escribe para filtrar. Usa las flechas para recorrer, Enter para seleccionar y Escape para cerrar.</span><div id="executions-table-listbox" class="table-combobox-listbox" role="listbox" aria-label="Tablas disponibles" hidden></div><select id="executions-table-select" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Cargando catálogo...</option></select></div></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Módulo / bot</label><input id="executions-bot" list="module-options" type="search" placeholder="Escribir para filtrar módulos" autocomplete="off"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas</label><select id="executions-limit"><option>25</option><option>50</option><option selected>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
+        <div class="kicker">Historial consultable</div><h2>Explorador de tablas</h2><p class="subtle">Selecciona una tabla de PostgreSQL o la tabla física de un bot.</p>
+        <form id="executions-filter" class="toolbar"><div class="field wide"><label for="executions-table-search">Tabla</label><div class="table-combobox" id="executions-table-combobox"><input id="executions-table-search" type="text" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="executions-table-listbox" aria-describedby="executions-table-help" placeholder="Buscar tablas..." autocomplete="off" required><span id="executions-table-help" class="visually-hidden">Escribe para filtrar. Usa las flechas para recorrer, Enter para seleccionar y Escape para cerrar.</span><div id="executions-table-listbox" class="table-combobox-listbox" role="listbox" aria-label="Tablas disponibles" hidden></div><select id="executions-table-select" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Cargando catálogo...</option></select></div></div><div class="field wide"><label for="executions-query">Texto</label><input id="executions-query" type="search" placeholder="job, bot, operación o usuario"></div><div class="field wide"><label for="executions-job">Job ID</label><input id="executions-job" type="search" placeholder="UUID del job"></div><div class="field"><label for="executions-bot">Módulo / bot</label><input id="executions-bot" list="module-options" type="search" placeholder="Escribir para filtrar módulos" autocomplete="off"></div><div class="field"><label for="executions-operation">Operación</label><input id="executions-operation" type="text" placeholder="opcional"></div><div class="field"><label for="executions-state">Estado</label><input id="executions-state" type="text" placeholder="COMPLETO"></div><div class="field"><label for="executions-user">Usuario</label><input id="executions-user" type="search" placeholder="email o UUID"></div><div class="field"><label for="executions-limit">Filas por página</label><select id="executions-limit"><option>25</option><option>50</option><option selected>100</option></select></div><button class="button primary" type="submit">Consultar</button></form>
         <datalist id="module-options"></datalist><p class="muted" id="execution-table-status" aria-live="polite">Selecciona una tabla.</p>
+        <div class="toolbar hidden" id="executions-pager"><button class="button secondary small" type="button" id="executions-prev">← Anterior</button><span class="muted" id="executions-page" aria-live="polite"></span><button class="button secondary small" type="button" id="executions-next">Siguiente →</button></div>
         <div class="bot-sections" id="bot-sections"><div class="empty">Selecciona una tabla para consultar.</div></div>
         <div class="table-wrap"><table><thead id="executions-head"><tr><th>Tabla</th><th>Datos</th></tr></thead><tbody id="executions-table"><tr><td colspan="2" class="empty">Selecciona una tabla.</td></tr></tbody></table></div>
       </section>
@@ -333,6 +335,20 @@ details > .details-body { padding: 0 14px 14px; }
         <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Actor</th><th>Objetivo</th><th>Resultado</th><th>Motivo</th></tr></thead><tbody id="audit-table"><tr><td colspan="6" class="empty">Cargando...</td></tr></tbody></table></div>
       </section>
 
+      <section class="view hidden" data-panel="artifacts">
+        <div class="kicker">Almacenamiento</div><h2>Eliminar artifacts</h2><p class="subtle">Elegí los buckets y un rango de fechas (por fecha de última modificación, UTC) o todos los objetos. El bucket de backups no figura y no se puede borrar desde acá. La eliminación es irreversible y no modifica los registros de jobs.</p>
+        <form id="artifacts-form" class="toolbar">
+          <fieldset class="field wide"><legend>Buckets</legend><div id="artifacts-buckets" class="copy-buttons">Cargando...</div><label class="checkbox-inline"><input type="checkbox" id="artifacts-all-buckets"> Seleccionar todos</label></fieldset>
+          <div class="field"><label class="checkbox-inline"><input type="checkbox" id="artifacts-todos"> Todos (sin filtro de fecha)</label></div>
+          <div class="field"><label for="artifacts-desde">Desde</label><input id="artifacts-desde" type="date"></div>
+          <div class="field"><label for="artifacts-hasta">Hasta</label><input id="artifacts-hasta" type="date"></div>
+          <div class="field wide"><label for="artifacts-motivo">Motivo (mínimo 10)</label><input id="artifacts-motivo" type="text" maxlength="500" placeholder="limpieza de artifacts antiguos"></div>
+          <button class="button secondary" type="button" id="artifacts-preview">Previsualizar</button>
+          <button class="button danger" type="button" id="artifacts-run">Eliminar</button>
+        </form>
+        <p class="muted" id="artifacts-status" aria-live="polite"></p>
+        <div class="table-wrap"><table><thead><tr><th>Bucket</th><th>Objetos</th><th>Tamaño</th><th>Eliminados</th><th>Fallidos</th></tr></thead><tbody id="artifacts-table"><tr><td colspan="5" class="empty">Sin resultados todavía.</td></tr></tbody></table></div>
+      </section>
       <section class="view hidden" data-panel="backups">
         <div class="kicker">Continuidad de datos</div><h2>Backups de la base</h2><p class="subtle">Los dumps se guardan en el bucket configurado (BACKUP_BUCKET) como un tar.gz con una tabla por archivo COPY y un manifiesto con la revisión de Alembic, columnas, filas y sha256. El restore requiere el esquema ya migrado: no recrea tablas. <strong>overwrite</strong> reemplaza los registros que se pisan por clave primaria; <strong>append</strong> agrega sin pisar nada (ON CONFLICT DO NOTHING). Las tablas sin clave primaria no permiten decidir el pisotón: se informan como «sin PK». El dump guarda además las llaves privadas (RSA_PRIVATE_KEY y ASSIGNMENT_SIGNING_KEY) en llaves.json: protegé el bucket. El tag se agrega al nombre del archivo. El dump incluye alembic_version: si restaurás un dump de otra revisión, el marcador vuelve a la del dump (el restore no recrea el esquema).</p>
         <div class="form-actions"><div class="field"><label for="backups-tag">Tag (opcional: produccion, testing, branch...)</label><input id="backups-tag" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" placeholder="produccion"></div><button class="button primary" type="button" id="backups-dump">Crear dump</button><button class="button secondary" type="button" id="backups-refresh">Actualizar lista</button><button class="button danger" type="button" id="backups-delete-selected" disabled>Eliminar seleccionados (0)</button><span class="muted" id="backups-status" aria-live="polite"></span></div>
@@ -424,7 +440,7 @@ details > .details-body { padding: 0 14px 14px; }
       link.href = url; link.download = `reporte_${$("#reports-tipo").value}_${$("#reports-desde").value}_${$("#reports-hasta").value}.csv`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
     } catch (error) { flash(error.message, "error"); }
   }
-  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, reports: initReports, fleet: loadFleet, ephemeral: loadEphemeral, audit: loadAudit, backups: loadBackups }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
+  function setView(view) { state.view = view; $$("[data-panel]").forEach((node) => node.classList.toggle("hidden", node.dataset.panel !== view)); $$("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view)); const loaders = { dashboard: loadDashboard, users: loadUsers, jobs: loadJobs, executions: loadExecutions, reports: initReports, fleet: loadFleet, ephemeral: loadEphemeral, audit: loadAudit, backups: loadBackups, artifacts: loadArtifactBuckets }; if (view === "jobs" || view === "executions") loadModuleOptions(); (loaders[view] || loadDashboard)(); }
   function cellValue(value) {
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "object") return payloadView(value, "Ver datos");
@@ -1203,13 +1219,13 @@ details > .details-body { padding: 0 14px 14px; }
     if (event) event.preventDefault(); const params = new URLSearchParams({ limit: "100" }); const values = [["estado", "#jobs-state"], ["bot", "#jobs-bot"], ["usuario", "#jobs-user"]]; values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
     try { const [data, metrics] = await Promise.all([api(`/admin/jobs?${params}`), api("/admin/jobs/metrics")]); const stateCards = Object.entries(metrics.por_estado || {}).map(([name, count]) => `<div class="card"><div class="metric"><span>${esc(name)}</span><strong>${esc(count)}</strong></div></div>`).join(""); $("#jobs-metrics").innerHTML = stateCards || `<div class="card"><div class="metric"><span>Total</span><strong>${esc(data.total || 0)}</strong></div></div>`; const rows = data.jobs || []; $("#jobs-table").innerHTML = rows.length ? rows.map((job) => `<tr><td>${idCode(job.job_id)}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado)}</span></td><td>${esc(job.resultado || "—")}</td><td>${esc(job.bot)}<br><span class="muted">${esc(job.operacion)}</span></td><td>${esc(job.usuario_email || job.usuario || "—")}</td><td>${idCode(job.user_id)}</td><td>${idCode(job.worker_id || job.worker)}</td><td>${esc(job.intento)}${job.max_intentos != null ? ` / ${esc(job.max_intentos)}` : ""}</td><td>${esc(job.prioridad ?? job.prioridad_admin ?? "—")}</td><td>${esc(job.app_version || "—")}${job.protocol_version != null ? `<br><span class="muted">proto ${esc(job.protocol_version)}</span>` : ""}</td><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(date(job.finalizado_en))}</td><td>${esc(date(job.lease_expira_en))}</td><td>${job.idempotency_key ? `<code class="job-id">${esc(job.idempotency_key)}</code>` : "—"}</td><td>${job.cancel_reason || job.cancelled_by ? `${esc(job.cancelled_by || "")}<br><span class="muted">${esc(job.cancel_reason || "")}</span>` : "—"}</td><td>${job.error_code || job.error_message ? `<code>${esc(job.error_code || "")}</code><br><span class="muted">${esc(job.error_message || "")}</span>` : "—"}</td><td class="actions"><div class="actions-inner"><button class="button secondary small" data-action="job-detail" data-id="${esc(job.job_id)}">Detalle</button>${copyButtons({ job_id: job.job_id, bot: job.bot, operation: job.operacion, status: job.estado, created_at: job.creado_en || job.created_at || null, request: null, response: null }, job.job_id)}${["PENDIENTE","ASIGNADO"].includes(job.estado) ? `<button class="button primary small" data-action="job-force" data-id="${esc(job.job_id)}">Forzar</button>` : ""}${["PENDIENTE","ASIGNADO","CORRIENDO"].includes(job.estado) ? `<button class="button danger small" data-action="job-cancel" data-id="${esc(job.job_id)}">Cancelar</button>` : ""}</div></td></tr>`).join("") : `<tr><td colspan="19" class="empty">No hay jobs para ese filtro.</td></tr>`; } catch (error) { flash(error.message, "error"); }
   }
-  async function loadExecutions(event) {
+  async function loadExecutions(event, offset = 0) {
     if (event) event.preventDefault();
     try {
       await loadTableCatalog();
       const tabla = $("#executions-table-select").value;
       if (!tabla) { flash("Selecciona una tabla para consultar.", "error"); return; }
-      const params = new URLSearchParams({ limit: $("#executions-limit").value, offset: "0", tabla });
+      const params = new URLSearchParams({ limit: $("#executions-limit").value, offset: String(offset), tabla });
       const values = [["q", "#executions-query"], ["job_id", "#executions-job"], ["bot", "#executions-bot"], ["operacion", "#executions-operation"], ["estado", "#executions-state"], ["usuario", "#executions-user"]];
       values.forEach(([key, selector]) => { const value = $(selector).value.trim(); if (value) params.set(key, value); });
       const data = await api(`/admin/records?${params}`);
@@ -1218,6 +1234,14 @@ details > .details-body { padding: 0 14px 14px; }
       const tablaLabel = data.catalogo?.label || data.tabla_resuelta || tabla;
       const countLabel = data.has_more ? `${shown} de al menos ${total} filas` : `${shown} de ${total} ${total === 1 ? "fila" : "filas"}`;
       $("#execution-table-status").textContent = `${tablaLabel} · ${data.fuente || "—"} · ${countLabel}`;
+      const pageSize = Number($("#executions-limit").value) || 100;
+      const pageOffset = Number(data.offset ?? offset) || 0;
+      state.execOffset = pageOffset;
+      state.execNext = data.next_offset ?? null;
+      $("#executions-page").textContent = `Página ${Math.floor(pageOffset / pageSize) + 1}${data.has_more ? "" : ` de ${Math.max(1, Math.ceil(total / pageSize))}`}`;
+      $("#executions-prev").disabled = pageOffset <= 0;
+      $("#executions-next").disabled = state.execNext == null;
+      $("#executions-pager").classList.toggle("hidden", pageOffset <= 0 && state.execNext == null);
       if (data.catalogo?.kind === "bot" || data.catalogo?.kind === "legacy") {
         $("#executions-head").innerHTML = "<tr><th>Tabla detallada por bot</th></tr>";
         $("#executions-table").innerHTML = `<tr><td class="empty">La tabla detallada se muestra arriba.</td></tr>`;
@@ -1548,6 +1572,43 @@ details > .details-body { padding: 0 14px 14px; }
       $("#backups-status").textContent = data.success ? `${rows.length} dump(s) en ${data.bucket}.` : `El bucket no respondió: ${data.error || "error"}.`;
     } catch (error) { flash(error.message, "error"); $("#backups-status").textContent = ""; }
   }
+  async function loadArtifactBuckets() {
+    try {
+      const data = await api("/admin/artifacts/buckets");
+      $("#artifacts-buckets").innerHTML = (data.buckets || []).map((name) => `<label class="checkbox-inline"><input type="checkbox" class="artifact-bucket" value="${esc(name)}"> ${esc(name)}</label>`).join("") || "—";
+    } catch (error) { flash(error.message, "error"); }
+  }
+  async function runArtifacts(dry_run) {
+    const buckets = $$(".artifact-bucket:checked").map((node) => node.value);
+    const todos = $("#artifacts-todos").checked, desde = $("#artifacts-desde").value, hasta = $("#artifacts-hasta").value;
+    if (!buckets.length) { flash("Elegí al menos un bucket.", "error"); return; }
+    if (!todos && !desde && !hasta) { flash("Indicá un rango de fechas o marcá 'Todos'.", "error"); return; }
+    const body = { buckets, todos, desde: desde || null, hasta: hasta || null, dry_run };
+    if (!dry_run) {
+      const motivo = $("#artifacts-motivo").value.trim();
+      if (motivo.length < 10) { flash("El motivo debe tener al menos 10 caracteres.", "error"); return; }
+      const alcance = todos ? "TODOS los objetos" : `los objetos entre ${desde || "el inicio"} y ${hasta || "hoy"}`;
+      const texto = window.prompt(`Se eliminarán ${alcance} de: ${buckets.join(", ")}.\nIrreversible. Escribí ELIMINAR para confirmar:`);
+      if (texto === null) return;
+      body.motivo = motivo; body.confirmation_text = texto;
+    }
+    const totals = new Map();
+    try {
+      let more = true;
+      while (more) {
+        $("#artifacts-status").textContent = dry_run ? "Contando..." : "Eliminando...";
+        const data = await api("/admin/artifacts/purge", { method: "POST", body: JSON.stringify(body) });
+        (data.resultados || []).forEach((r) => {
+          const t = totals.get(r.bucket) || { objetos: 0, bytes: 0, eliminados: 0, fallidos: 0, error: "" };
+          t.objetos += r.objetos || 0; t.bytes += r.bytes || 0; t.eliminados += r.eliminados || 0; t.fallidos += r.fallidos || 0; t.error = r.error || t.error;
+          totals.set(r.bucket, t);
+        });
+        $("#artifacts-table").innerHTML = [...totals].map(([name, t]) => `<tr><td><code>${esc(name)}</code></td><td>${t.error ? esc(t.error) : t.objetos}</td><td>${esc(humanBytes(t.bytes))}</td><td>${t.eliminados}</td><td>${t.fallidos}</td></tr>`).join("");
+        more = !dry_run && data.has_more && (data.resultados || []).every((r) => !r.error && !r.fallidos);
+      }
+      $("#artifacts-status").textContent = dry_run ? "Previsualización lista: no se eliminó nada." : "Eliminación terminada.";
+    } catch (error) { flash(error.message, "error"); $("#artifacts-status").textContent = ""; }
+  }
   async function createDump() {
     const motivo = window.prompt("Motivo del dump (mínimo 10 caracteres):", "dump manual desde panel V3");
     if (motivo === null) return;
@@ -1667,6 +1728,10 @@ details > .details-body { padding: 0 14px 14px; }
   document.addEventListener("click", (event) => { if (!$("#executions-table-combobox").contains(event.target)) closeTableOptions(true); });
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
   $("#executions-limit").addEventListener("change", () => loadExecutions());
+  $("#artifacts-preview").addEventListener("click", () => runArtifacts(true)); $("#artifacts-run").addEventListener("click", () => runArtifacts(false));
+  $("#artifacts-all-buckets").addEventListener("change", (event) => $$(".artifact-bucket").forEach((node) => { node.checked = event.target.checked; }));
+  $("#executions-prev").addEventListener("click", () => loadExecutions(null, Math.max(0, (state.execOffset || 0) - (Number($("#executions-limit").value) || 100))));
+  $("#executions-next").addEventListener("click", () => { if (state.execNext != null) loadExecutions(null, state.execNext); });
   $("#fleet-refresh").addEventListener("click", refreshFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-update-all").addEventListener("click", updateAllWorkers); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#fleet-relay-table").addEventListener("click", fleetAction); $("#add-relay-form").addEventListener("submit", addRelay); $("#relay-config-close").addEventListener("click", () => { $("#relay-config").classList.add("hidden"); $("#relay-config-toml").textContent = ""; $("#relay-config-env").textContent = ""; }); $("#relay-config").addEventListener("click", async (event) => { const b = event.target.closest("button[data-copy]"); if (!b) return; try { await writeClipboard($(b.dataset.copy).textContent); flash("Copiado."); } catch (error) { flash(error.message, "error"); } }); $("#audit-filter").addEventListener("submit", loadAudit);
   $("#eph-refresh").addEventListener("click", () => loadEphemeral(true)); $("#eph-zone").addEventListener("change", changeZone); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-launch-type").addEventListener("change", () => syncTypeInfo(true)); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
   $("#backups-dump").addEventListener("click", createDump); $("#backups-refresh").addEventListener("click", loadBackups); $("#backups-table").addEventListener("click", backupsAction); $("#backups-restore-run").addEventListener("click", runRestore); $("#backups-restore-cancel").addEventListener("click", closeRestore);

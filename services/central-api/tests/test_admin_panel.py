@@ -97,7 +97,8 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert 'id="new-send-credentials"' in cuerpo
     assert 'list="module-options"' in cuerpo
     assert 'id="module-options"' in cuerpo
-    assert "Solo se carga la selección actual" in cuerpo
+    assert "Solo se carga la selección actual" not in cuerpo
+    assert "executions-prev" in cuerpo and "executions-next" in cuerpo
     assert "renderPhysicalBotSection" in cuerpo
     assert "request_payload" in cuerpo
     assert "response_payload" in cuerpo

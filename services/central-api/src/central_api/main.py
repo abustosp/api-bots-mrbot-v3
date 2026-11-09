@@ -58,6 +58,7 @@ OPENAPI_TAGS = [
     {"name": "admin-workers", "description": "Administrar y monitorear las instancias de worker."},
     {"name": "admin-users", "description": "Administrar usuarios y permisos de acceso."},
     {"name": "admin-reporting", "description": "Consultar informes de actividad y resultados."},
+    {"name": "admin-artifacts", "description": "Eliminar artifacts de los buckets de objetos (excepto backups)."},
     {"name": "admin-retention", "description": "Consultar y administrar la conservación de datos."},
     {"name": "admin-jobs", "description": "Inspeccionar y administrar ejecuciones desde el panel."},
     {"name": "admin-fleet", "description": "Consultar y administrar el conjunto de workers disponibles."},
