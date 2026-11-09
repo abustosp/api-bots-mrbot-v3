@@ -1,9 +1,8 @@
 """Clave pública de la central para cifrar credenciales fiscales.
 
 Los clientes cifran ``clave`` con esta pública (RSA-OAEP-SHA256) y la envían
-como ``clave_encriptada`` (Base64). La central persiste solo el ciphertext y
-el panel lo descifra bajo demanda con auditoría
-(``GET /admin/jobs/{job_id}/credentials``).
+como ``clave_encriptada`` (Base64). La central persiste solo el ciphertext, que se
+borra al terminar el job (migración 0033).
 """
 
 from __future__ import annotations

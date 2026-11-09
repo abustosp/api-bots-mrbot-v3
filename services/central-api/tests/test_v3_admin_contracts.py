@@ -272,7 +272,7 @@ def test_alias_v2_plano_crea_registro_sin_credencial_en_payload(monkeypatch) -> 
         get_settings.cache_clear()
 
 
-def test_admin_registra_ejecuciones_y_revela_solo_con_auth(monkeypatch) -> None:
+def test_admin_registra_ejecuciones_sin_endpoint_de_credenciales(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_TOKEN", "admin-record-token")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("RSA_PRIVATE_KEY", raising=False)
@@ -286,15 +286,12 @@ def test_admin_registra_ejecuciones_y_revela_solo_con_auth(monkeypatch) -> None:
             json={"cuit_representante": "20123456786", "clave_representante": "admin-secret", "cuit_representado": "20123456786"},
         )
         job_id = created.json()["job_id"]
-        assert cliente.get(f"/admin/jobs/{job_id}/credentials").status_code == 401
+        assert cliente.get(f"/admin/jobs/{job_id}/credentials").status_code == 404
         headers = {"Authorization": "Bearer admin-record-token"}
         records = cliente.get("/admin/executions", headers=headers)
         assert records.status_code == 200
         assert records.json()["records"][0]["job"]["id"] == job_id
-        revealed = cliente.get(f"/admin/jobs/{job_id}/credentials", headers=headers)
-        assert revealed.status_code == 200
-        assert revealed.json()["credentials"]["clave"] == "admin-secret"
-        assert revealed.headers["cache-control"] == "private, no-store"
+        assert cliente.get(f"/admin/jobs/{job_id}/credentials", headers=headers).status_code == 404
     finally:
         JOBS.clear()
         get_settings.cache_clear()

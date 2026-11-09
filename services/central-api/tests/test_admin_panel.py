@@ -77,7 +77,8 @@ def test_panel_admin_renderiza_navegacion_y_vistas() -> None:
     assert "La clave se guarda cifrada, nunca en texto plano" in cuerpo
     assert 'value="habilitado">Activo' in cuerpo
     assert 'value="deshabilitado">Desactivado' in cuerpo
-    assert "credential-detail" in cuerpo
+    assert "credential-detail" not in cuerpo
+    assert "Ver credenciales" not in cuerpo
     assert "Archivos" in cuerpo
     assert "Asignado" in cuerpo
     assert "Finalizado" in cuerpo

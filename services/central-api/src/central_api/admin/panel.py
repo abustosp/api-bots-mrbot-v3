@@ -69,7 +69,8 @@ button { cursor: pointer; }
 .button.secondary { background: #fff8f1; border-color: var(--line); }
 .button.danger { color: #fff; background: var(--bad); }
 .button.small { padding: 7px 11px; font-size: 13px; }
-.copy-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.copy-buttons { display: flex; flex-direction: column; align-items: stretch; gap: 5px; margin-top: 6px; min-width: 190px; }
+.copy-buttons .button { white-space: nowrap; border-radius: 9px; text-align: center; }
 .user-box { display: flex; align-items: center; gap: 8px; }
 .user-box .muted { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 main { margin: 0 1.4%; }
@@ -501,15 +502,14 @@ details > .details-body { padding: 0 14px 14px; }
     const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
     const legacyTables = legacy.length ? legacy.map((table) => `<span class="pill">${esc(table)}</span>`).join(" ") : `<span class="muted">sin tabla histórica directa</span>`;
     const requestFields = requestFieldNames(records, "request");
-    const headings = ["Job", "Timestamp", "Asignado", "Iniciado", "Operación", "Usuario", "Estado", ...requestFields.map((field) => `Request · ${field}`), "Response JSON", "Archivos", "Credenciales", "Finalizado"];
+    const headings = ["Job", "Timestamp", "Asignado", "Iniciado", "Operación", "Usuario", "Estado", ...requestFields.map((field) => `Request · ${field}`), "Response JSON", "Archivos", "Finalizado"];
     const rows = records.length ? records.map((record) => {
       const job = record.job || {};
       const response = record.response ?? record.result;
-      const credentials = record.credentials || {};
       const request = flattenRequest(record.request || {});
       const requestCells = requestFields.map((field) => `<td>${requestCell(request[field])}</td>`).join("");
       const responseReceived = response?.received_at ? `<br><span class="muted">${esc(date(response.received_at))}</span>` : "";
-      return `<tr><td>${idCode(job.id)}</td><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td>${requestCells}<td>${payloadView(response, "Ver response")}${responseReceived}${copyButtons(copyContext({ request: record.request, response, credentials: record.credentials }, job))}</td><td>${artifactListView(record.artifacts)}</td><td>${credentials.available ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(job.id)}">Ver credenciales</button>` : "—"}</td><td>${esc(date(job.finalizado_en))}</td></tr>`;
+      return `<tr><td>${idCode(job.id)}</td><td>${esc(date(job.creado_en))}</td><td>${esc(date(job.asignado_en))}</td><td>${esc(date(job.iniciado_en))}</td><td>${esc(job.operacion || "—")}</td><td>${esc(job.usuario_email || job.usuario || job.user_id || "—")}</td><td><span class="status ${statusClass(job.estado)}">${esc(job.estado || "—")}</span></td>${requestCells}<td>${payloadView(response, "Ver response")}${responseReceived}${copyButtons(copyContext({ request: record.request, response, credentials: record.credentials }, job))}</td><td>${artifactListView(record.artifacts)}</td><td>${esc(date(job.finalizado_en))}</td></tr>`;
     }).join("") : `<tr><td colspan="${headings.length}" class="empty">Sin ejecuciones para este bot.</td></tr>`;
     node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} ejecuciones</span></span></summary><div class="bot-section-body"><div class="bot-section-meta"><strong>V1/V2:</strong> ${legacyTables}</div><div class="table-wrap"><table class="bot-table"><thead><tr>${headings.map((heading) => `<th>${esc(heading)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
@@ -537,30 +537,28 @@ details > .details-body { padding: 0 14px 14px; }
       if (column.key === "job_id" || column.key === "id") return `<td>${idCode(value)}</td>`;
       if (column.key === "status" || column.key === "estado") return `<td><span class="status ${statusClass(value)}">${esc(value || "—")}</span></td>`;
       return `<td>${esc(value ?? "—")}</td>`;
-    }).join("") + `<td>${record.job_id ? `<button class="button secondary small" data-action="credential-detail" data-id="${esc(record.job_id)}">Ver credenciales</button>` : "—"}${copyButtons(copyContext(record, {}), record.job_id || "")}</td>`;
+    }).join("") + `<td class="actions">${copyButtons(copyContext(record, {}), record.job_id || "") || "—"}</td>`;
     const rows = records.length
       ? records.map((record) => `<tr>${cells(record)}</tr>`).join("")
       : `<tr><td colspan="${Math.max(columns.length + 1, 1)}" class="empty">Sin registros para este bot y filtro.</td></tr>`;
     const operations = (section.operaciones || []).map((operation) => `<span class="pill">${esc(operation)}</span>`).join(" ");
-    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}<th>Credenciales / Copiar</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+    node.innerHTML = `<details class="bot-section" open><summary><span><strong>${esc(section.bot)}</strong> <span class="bot-section-meta">${operations}</span></span><span class="bot-section-meta"><span class="pill">${esc(section.total || 0)} filas</span><span class="pill">PostgreSQL</span></span></summary><div class="bot-section-body"><div class="table-wrap"><table class="bot-table"><thead><tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}<th class="actions-head">Copiar</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
   }
   function renderCanonicalTable(tableName, rows) {
     const head = $("#executions-head");
     const body = $("#executions-table");
     head.closest(".table-wrap").classList.remove("hidden");
-    const keys = (state.tableCatalog.find((item) => item.name === tableName) || {}).columns || [];
+    const keys = ((state.tableCatalog.find((item) => item.name === tableName) || {}).columns || []).filter((key) => key !== "credentials");
     const requestColumn = keys.find((key) => ["request_payload", "request"].includes(key));
     const columns = requestColumn ? requestColumns(rows, requestColumn, keys) : keys.map((key) => ({ key, label: key, kind: "field" }));
     const withCopy = rows.some((row) => hasPayload(row.request_payload ?? row.request) || hasPayload(row.response_payload ?? row.response ?? row.response_summary));
-    head.innerHTML = `<tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}${withCopy ? "<th>Copiar</th>" : ""}</tr>`;
+    head.innerHTML = `<tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join("")}${withCopy ? `<th class="actions-head">Copiar</th>` : ""}</tr>`;
     body.innerHTML = rows.length ? rows.map((row) => `<tr>${columns.map((column) => {
       const key = column.key;
       const value = columnValue(row, column);
-      if (key === "credentials" && value && value.available) return `<td><button class="button secondary small" data-action="credential-detail" data-id="${esc(row.id || row.job_id || "")}">Ver credenciales</button></td>`;
-      if (key === "credentials") return `<td><span class="muted">—</span></td>`;
       if (["estado", "resultado", "result", "status"].includes(key) && typeof value === "string") return `<td><span class="status ${statusClass(value)}">${esc(value)}</span></td>`;
       return `<td>${cellValue(value)}</td>`;
-    }).join("")}${withCopy ? `<td>${copyButtons(copyContext(row, {})) || "—"}</td>` : ""}</tr>`).join("") : `<tr><td colspan="${Math.max(keys.length, 1)}" class="empty">La tabla no contiene registros para este filtro.</td></tr>`;
+    }).join("")}${withCopy ? `<td class="actions">${copyButtons(copyContext(row, {})) || "—"}</td>` : ""}</tr>`).join("") : `<tr><td colspan="${Math.max(keys.length, 1)}" class="empty">La tabla no contiene registros para este filtro.</td></tr>`;
     $("#bot-sections").innerHTML = `<div class="empty">Vista de tabla canónica: ${esc(tableName)}.</div>`;
   }
   function filterTableOptions(query) {
@@ -1230,10 +1228,6 @@ details > .details-body { padding: 0 14px 14px; }
       }
     } catch (error) { flash(error.message, "error"); }
   }
-  async function executionAction(event) {
-    const button = event.target.closest("button[data-action]"); if (!button || button.dataset.action !== "credential-detail") return;
-    try { const data = await api(`/admin/jobs/${encodeURIComponent(button.dataset.id)}/credentials`); window.alert(`Credenciales de la ejecución ${button.dataset.id}:\n\n${json(data.credentials)}\n\nContexto:\n${json(data.credential_metadata || {})}`); } catch (error) { flash(error.message, "error"); }
-  }
   async function jobAction(event) {
     const button = event.target.closest("button[data-action]"); if (!button) return; const jobId = button.dataset.id;
     if (button.dataset.action === "job-detail") { try { const data = await api(`/admin/jobs/${encodeURIComponent(jobId)}`); window.alert(json(data)); } catch (error) { flash(error.message, "error"); } return; }
@@ -1672,7 +1666,7 @@ details > .details-body { padding: 0 14px 14px; }
   $("#executions-table-listbox").addEventListener("click", (event) => { const option = event.target.closest("[role=option]"); if (option) chooseTableOption(option.dataset.value); });
   document.addEventListener("click", (event) => { if (!$("#executions-table-combobox").contains(event.target)) closeTableOptions(true); });
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
-  $("#executions-limit").addEventListener("change", () => loadExecutions()); $("#executions-table").addEventListener("click", executionAction); $("#bot-sections").addEventListener("click", executionAction);
+  $("#executions-limit").addEventListener("change", () => loadExecutions());
   $("#fleet-refresh").addEventListener("click", refreshFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-update-all").addEventListener("click", updateAllWorkers); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#fleet-relay-table").addEventListener("click", fleetAction); $("#add-relay-form").addEventListener("submit", addRelay); $("#relay-config-close").addEventListener("click", () => { $("#relay-config").classList.add("hidden"); $("#relay-config-toml").textContent = ""; $("#relay-config-env").textContent = ""; }); $("#relay-config").addEventListener("click", async (event) => { const b = event.target.closest("button[data-copy]"); if (!b) return; try { await writeClipboard($(b.dataset.copy).textContent); flash("Copiado."); } catch (error) { flash(error.message, "error"); } }); $("#audit-filter").addEventListener("submit", loadAudit);
   $("#eph-refresh").addEventListener("click", () => loadEphemeral(true)); $("#eph-zone").addEventListener("change", changeZone); $("#eph-policy-form").addEventListener("submit", savePolicy); $("#eph-policy-reset").addEventListener("click", resetPolicy); $("#eph-sim-form").addEventListener("submit", simulatePolicy); $("#eph-launch-form").addEventListener("submit", launchEphemeral); $("#eph-launch-type").addEventListener("change", () => syncTypeInfo(true)); $("#eph-table").addEventListener("click", ephemeralAction); $("#eph-terminate-all").addEventListener("click", () => terminateAllEphemeral(false)); $("#eph-terminate-all-hard").addEventListener("click", () => terminateAllEphemeral(true)); $("#eph-toggle").addEventListener("click", toggleAutoscaler);
   $("#backups-dump").addEventListener("click", createDump); $("#backups-refresh").addEventListener("click", loadBackups); $("#backups-table").addEventListener("click", backupsAction); $("#backups-restore-run").addEventListener("click", runRestore); $("#backups-restore-cancel").addEventListener("click", closeRestore);

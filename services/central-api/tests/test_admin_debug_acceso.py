@@ -726,8 +726,8 @@ def test_panel_expone_tablas_claves_y_credenciales() -> None:
         assert endpoint in cuerpo
     assert "valor_fijo" in cuerpo
     assert "executions-job" in cuerpo
-    assert "credential-detail" in cuerpo
-    assert "Ver credenciales" in cuerpo
+    assert "credential-detail" not in cuerpo
+    assert "Ver credenciales" not in cuerpo
     assert "add-worker-form" in cuerpo
     assert "new-worker-node" in cuerpo
     assert "worker-remove" in cuerpo
