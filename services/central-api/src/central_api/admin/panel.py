@@ -336,7 +336,7 @@ details > .details-body { padding: 0 14px 14px; }
       </section>
 
       <section class="view hidden" data-panel="artifacts">
-        <div class="kicker">Almacenamiento</div><h2>Eliminar artifacts</h2><p class="subtle">Elegí los buckets y un rango de fechas (por fecha de última modificación, UTC) o todos los objetos. El bucket de backups no figura y no se puede borrar desde acá. La eliminación es irreversible y no modifica los registros de jobs.</p>
+        <div class="kicker">Almacenamiento</div><h2>Eliminar artifacts</h2><p class="subtle">Elegí los buckets y un rango de fechas (por fecha de última modificación, UTC) o todos los objetos. Los buckets de backups y github no figuran y no se pueden borrar desde acá. La eliminación es irreversible y no modifica los registros de jobs.</p>
         <form id="artifacts-form" class="toolbar">
           <fieldset class="field wide"><legend>Buckets</legend><div id="artifacts-buckets" class="copy-buttons">Cargando...</div><label class="checkbox-inline"><input type="checkbox" id="artifacts-all-buckets"> Seleccionar todos</label></fieldset>
           <div class="field"><label class="checkbox-inline"><input type="checkbox" id="artifacts-todos"> Todos (sin filtro de fecha)</label></div>

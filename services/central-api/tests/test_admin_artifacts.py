@@ -40,13 +40,15 @@ def _cliente(monkeypatch):
 def test_listado_excluye_backups(monkeypatch) -> None:
     c, _ = _cliente(monkeypatch)
     buckets = c.get("/admin/artifacts/buckets", headers=H).json()["buckets"]
-    assert "misfacilidades" in buckets and "mrbot-bots-api-bkp-db" not in buckets
+    assert "misfacilidades" in buckets and "mrbot-bots-api-bkp-db" not in buckets and "github" not in buckets
 
 
 def test_backups_rechazado_y_requiere_confirmacion(monkeypatch) -> None:
     c, fake = _cliente(monkeypatch)
     r = c.post("/admin/artifacts/purge", headers=H, json={"buckets": ["mrbot-bots-api-bkp-db"], "todos": True, "dry_run": False, "motivo": "x" * 12, "confirmation_text": "ELIMINAR"})
     assert r.status_code == 400 and "dump.tgz" in fake.objs["mrbot-bots-api-bkp-db"]
+    r = c.post("/admin/artifacts/purge", headers=H, json={"buckets": ["github"], "todos": True, "dry_run": False, "motivo": "x" * 12, "confirmation_text": "ELIMINAR"})
+    assert r.status_code == 400
     r = c.post("/admin/artifacts/purge", headers=H, json={"buckets": ["misfacilidades"], "todos": True, "dry_run": False, "motivo": "x" * 12})
     assert r.status_code == 400 and len(fake.objs["misfacilidades"]) == 2
 

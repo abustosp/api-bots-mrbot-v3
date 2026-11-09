@@ -24,6 +24,8 @@ router = APIRouter(prefix="/artifacts")
 
 #: Bucket de backups: nunca se borra desde esta sección.
 BUCKET_BACKUPS = "mrbot-bots-api-bkp-db"
+#: Buckets que nunca se borran desde esta sección.
+BUCKETS_PROTEGIDOS = frozenset({BUCKET_BACKUPS, "github"})
 #: Tope de objetos por llamada; el panel repite hasta que ``has_more`` sea false.
 MAX_OBJETOS_POR_LLAMADA = 5000
 CONFIRMACION = "ELIMINAR"
@@ -36,7 +38,7 @@ def buckets_elegibles(settings: Settings) -> list[str]:
         settings.object_storage_uploads_bucket,
         settings.object_storage_logger_bucket,
     }
-    prohibidos = {BUCKET_BACKUPS, settings.backup_bucket, ""}
+    prohibidos = {*BUCKETS_PROTEGIDOS, settings.backup_bucket, ""}
     return sorted(nombres - prohibidos)
 
 
@@ -121,7 +123,7 @@ def _procesar_bucket(
 @router.get("/buckets", summary="Listar buckets de artifacts eliminables")
 async def listar_buckets(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     require_admin(authorization)
-    return {"success": True, "buckets": buckets_elegibles(get_settings()), "excluidos": [BUCKET_BACKUPS]}
+    return {"success": True, "buckets": buckets_elegibles(get_settings()), "excluidos": sorted(BUCKETS_PROTEGIDOS)}
 
 
 @router.post(
@@ -132,7 +134,7 @@ async def listar_buckets(authorization: str | None = Header(default=None)) -> di
         "motivo (mínimo 10 caracteres) y confirmation_text=ELIMINAR. Filtra por fecha de "
         "última modificación (UTC, desde/hasta inclusivos) o todos=true. Procesa hasta "
         f"{MAX_OBJETOS_POR_LLAMADA} objetos por bucket y llamada; repetir mientras has_more sea true. "
-        "El bucket de backups está excluido."
+        "Los buckets de backups y github están excluidos."
     ),
 )
 async def purgar_artifacts(
@@ -143,8 +145,8 @@ async def purgar_artifacts(
     permitidos = set(buckets_elegibles(settings))
     pedidos = list(dict.fromkeys(body.buckets))
     for nombre in pedidos:
-        if nombre in {BUCKET_BACKUPS, settings.backup_bucket}:
-            raise HTTPException(status_code=400, detail="el bucket de backups no se puede borrar desde esta sección")
+        if nombre in BUCKETS_PROTEGIDOS or nombre == settings.backup_bucket:
+            raise HTTPException(status_code=400, detail=f"el bucket {nombre} está protegido y no se puede borrar desde esta sección")
         if nombre not in permitidos:
             raise HTTPException(status_code=400, detail=f"bucket no permitido: {nombre}")
     ini, fin = _rango(body)
