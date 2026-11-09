@@ -79,6 +79,22 @@ main { margin: 0 1.4%; }
   background: var(--panel); box-shadow: var(--shadow); animation: rise .35s ease;
 }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.art-card { border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: var(--panel-strong); margin: 14px 0; }
+.art-card h3 { margin: 0 0 10px; font-size: 14px; }
+.art-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.art-head input[type=search] { flex: 1 1 200px; min-width: 160px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 10px; font: inherit; }
+.art-count { margin-left: auto; font-size: 13px; }
+.bucket-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; max-height: 280px; overflow-y: auto; padding: 2px 4px 2px 2px; }
+.bucket-item { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.2; min-width: 0; }
+.bucket-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bucket-item input, .art-toggle input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
+.bucket-item:hover { border-color: var(--accent); }
+.bucket-item:has(input:checked) { border-color: var(--accent); background: #fff1ea; }
+.art-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.art-dates { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; margin-top: 12px; }
+.art-dates .field { flex: 0 1 190px; }
+.art-dates .field.grow { flex: 1 1 280px; }
+.art-dates.off .field:not(.grow) { opacity: .45; }
 .hidden { display: none !important; }
 h2 { margin: 0 0 8px; font-family: Georgia, serif; font-size: 24px; }
 h3 { margin: 0 0 7px; font-size: 17px; }
@@ -337,14 +353,17 @@ details > .details-body { padding: 0 14px 14px; }
 
       <section class="view hidden" data-panel="artifacts">
         <div class="kicker">Almacenamiento</div><h2>Eliminar artifacts</h2><p class="subtle">Elegí los buckets y un rango de fechas (por fecha de última modificación, UTC) o todos los objetos. Los buckets de backups y github no figuran y no se pueden borrar desde acá. La eliminación es irreversible y no modifica los registros de jobs.</p>
-        <form id="artifacts-form" class="toolbar">
-          <fieldset class="field wide"><legend>Buckets</legend><div id="artifacts-buckets" class="copy-buttons">Cargando...</div><label class="checkbox-inline"><input type="checkbox" id="artifacts-all-buckets"> Seleccionar todos</label></fieldset>
-          <div class="field"><label class="checkbox-inline"><input type="checkbox" id="artifacts-todos"> Todos (sin filtro de fecha)</label></div>
-          <div class="field"><label for="artifacts-desde">Desde</label><input id="artifacts-desde" type="date"></div>
-          <div class="field"><label for="artifacts-hasta">Hasta</label><input id="artifacts-hasta" type="date"></div>
-          <div class="field wide"><label for="artifacts-motivo">Motivo (mínimo 10)</label><input id="artifacts-motivo" type="text" maxlength="500" placeholder="limpieza de artifacts antiguos"></div>
-          <button class="button secondary" type="button" id="artifacts-preview">Previsualizar</button>
-          <button class="button danger" type="button" id="artifacts-run">Eliminar</button>
+        <form id="artifacts-form">
+          <div class="art-card"><h3>1. Buckets</h3>
+            <div class="art-head"><input type="search" id="artifacts-filter" placeholder="Filtrar buckets..." aria-label="Filtrar buckets"><label class="art-toggle"><input type="checkbox" id="artifacts-all-buckets"> Seleccionar visibles</label><span class="muted art-count" id="artifacts-count">0 seleccionados</span></div>
+            <div id="artifacts-buckets" class="bucket-grid" role="group" aria-label="Buckets">Cargando...</div></div>
+          <div class="art-card"><h3>2. Qué eliminar</h3>
+            <label class="art-toggle"><input type="checkbox" id="artifacts-todos"> Todos los objetos (sin filtro de fecha)</label>
+            <div class="art-dates" id="artifacts-dates">
+              <div class="field"><label for="artifacts-desde">Desde</label><input id="artifacts-desde" type="date"></div>
+              <div class="field"><label for="artifacts-hasta">Hasta</label><input id="artifacts-hasta" type="date"></div>
+              <div class="field grow"><label for="artifacts-motivo">Motivo (mínimo 10)</label><input id="artifacts-motivo" type="text" maxlength="500" placeholder="limpieza de artifacts antiguos"></div></div></div>
+          <div class="form-actions"><button class="button secondary" type="button" id="artifacts-preview">Previsualizar</button><button class="button danger" type="button" id="artifacts-run">Eliminar</button></div>
         </form>
         <p class="muted" id="artifacts-status" aria-live="polite"></p>
         <div class="table-wrap"><table><thead><tr><th>Bucket</th><th>Objetos</th><th>Tamaño</th><th>Eliminados</th><th>Fallidos</th></tr></thead><tbody id="artifacts-table"><tr><td colspan="5" class="empty">Sin resultados todavía.</td></tr></tbody></table></div>
@@ -1572,10 +1591,13 @@ details > .details-body { padding: 0 14px 14px; }
       $("#backups-status").textContent = data.success ? `${rows.length} dump(s) en ${data.bucket}.` : `El bucket no respondió: ${data.error || "error"}.`;
     } catch (error) { flash(error.message, "error"); $("#backups-status").textContent = ""; }
   }
+  function updateArtifactCount() { const n = $$(".artifact-bucket:checked").length; $("#artifacts-count").textContent = `${n} seleccionado${n === 1 ? "" : "s"}`; }
+  function syncArtifactDates() { const off = $("#artifacts-todos").checked; $("#artifacts-dates").classList.toggle("off", off); $("#artifacts-desde").disabled = off; $("#artifacts-hasta").disabled = off; }
   async function loadArtifactBuckets() {
     try {
       const data = await api("/admin/artifacts/buckets");
-      $("#artifacts-buckets").innerHTML = (data.buckets || []).map((name) => `<label class="checkbox-inline"><input type="checkbox" class="artifact-bucket" value="${esc(name)}"> ${esc(name)}</label>`).join("") || "—";
+      $("#artifacts-buckets").innerHTML = (data.buckets || []).map((name) => `<label class="bucket-item" data-name="${esc(name)}" title="${esc(name)}"><input type="checkbox" class="artifact-bucket" value="${esc(name)}"><span>${esc(name)}</span></label>`).join("") || "—";
+      updateArtifactCount();
     } catch (error) { flash(error.message, "error"); }
   }
   async function runArtifacts(dry_run) {
@@ -1729,7 +1751,10 @@ details > .details-body { padding: 0 14px 14px; }
   $("#executions-table-search").addEventListener("blur", () => window.setTimeout(() => closeTableOptions(true), 0));
   $("#executions-limit").addEventListener("change", () => loadExecutions());
   $("#artifacts-preview").addEventListener("click", () => runArtifacts(true)); $("#artifacts-run").addEventListener("click", () => runArtifacts(false));
-  $("#artifacts-all-buckets").addEventListener("change", (event) => $$(".artifact-bucket").forEach((node) => { node.checked = event.target.checked; }));
+  $("#artifacts-all-buckets").addEventListener("change", (event) => { $$(".bucket-item:not(.hidden) .artifact-bucket").forEach((node) => { node.checked = event.target.checked; }); updateArtifactCount(); });
+  $("#artifacts-buckets").addEventListener("change", updateArtifactCount);
+  $("#artifacts-filter").addEventListener("input", (event) => { const q = event.target.value.trim().toLowerCase(); $$(".bucket-item").forEach((node) => node.classList.toggle("hidden", !node.dataset.name.toLowerCase().includes(q))); });
+  $("#artifacts-todos").addEventListener("change", syncArtifactDates);
   $("#executions-prev").addEventListener("click", () => loadExecutions(null, Math.max(0, (state.execOffset || 0) - (Number($("#executions-limit").value) || 100))));
   $("#executions-next").addEventListener("click", () => { if (state.execNext != null) loadExecutions(null, state.execNext); });
   $("#fleet-refresh").addEventListener("click", refreshFleet); $("#fleet-evaluate").addEventListener("click", evaluateFleet); $("#fleet-update-all").addEventListener("click", updateAllWorkers); $("#fleet-outdated-only").addEventListener("change", loadFleet); $("#add-worker-form").addEventListener("submit", addWorker); $("#fleet-manual-table").addEventListener("click", fleetAction); $("#fleet-ephemeral-table").addEventListener("click", fleetAction); $("#fleet-relay-table").addEventListener("click", fleetAction); $("#add-relay-form").addEventListener("submit", addRelay); $("#relay-config-close").addEventListener("click", () => { $("#relay-config").classList.add("hidden"); $("#relay-config-toml").textContent = ""; $("#relay-config-env").textContent = ""; }); $("#relay-config").addEventListener("click", async (event) => { const b = event.target.closest("button[data-copy]"); if (!b) return; try { await writeClipboard($(b.dataset.copy).textContent); flash("Copiado."); } catch (error) { flash(error.message, "error"); } }); $("#audit-filter").addEventListener("submit", loadAudit);
