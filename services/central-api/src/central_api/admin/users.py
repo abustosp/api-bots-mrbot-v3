@@ -992,6 +992,17 @@ async def listar_usuarios(
                 requests_consumed=int(requests_consumed or 0),
             )
         claves_por_usuario[uid] = {}
+    from central_api.db import db_configurado
+
+    if db_configurado():
+        # Con PostgreSQL configurado es canónico: un usuario borrado de la base
+        # (p. ej. limpieza directa) no debe seguir listado desde la caché.
+        for uid in [u for u in usuarios_por_id if u not in usuarios_pg]:
+            usuarios_por_id.pop(uid)
+            USERS.pop(uid, None)
+            BILLING_ACCOUNTS.pop(uid, None)
+        for kid in [k for k, c in API_KEYS.items() if c.user_id not in usuarios_pg]:
+            API_KEYS.pop(kid)
     for key_id, user_id, prefix, scopes, expires_at, revoked_at, created_at, revelable in filas_claves:
         uid = str(user_id)
         expirada = expires_at is not None and expires_at <= ahora
