@@ -32,6 +32,7 @@ Playwright directo. El objeto ``servicio`` expone:
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -102,6 +103,21 @@ def generar_cabecera(
         + concepto.zfill(3)
         + str(cantidad_de_registros).zfill(4)
     )
+
+
+_NOMBRE_ARCHIVO_RE = re.compile(
+    r"F\d+\.cuit\.\d{11}\.fecha\.\d{8}\.nro\.\d{3}de\d{3}\.txt"
+)
+
+
+def validar_nombre_archivo_vep(nombre: str) -> None:
+    """ARCA rechaza el upload si el nombre no es ``F<form>.cuit.<CUIT>.fecha.<AAAAMMDD>.nro.NNNdeNNN.txt``."""
+    if not _NOMBRE_ARCHIVO_RE.fullmatch(nombre):
+        raise ValueError(
+            "el nombre del archivo debe ser "
+            "F<formulario>.cuit.<CUIT>.fecha.<AAAAMMDD>.nro.<NNN>de<NNN>.txt "
+            "(ej. F20001.cuit.20127478946.fecha.20260511.nro.001de001.txt)"
+        )
 
 
 def validar_archivo_vep(texto: str) -> int:
@@ -221,6 +237,7 @@ class VepArchivoPlugin:
             raise DeadlineExceededError("deadline agotado antes de navegar")
         try:
             archivo = runtime.artifact_store.resolve(entrada.archivo_path)
+            validar_nombre_archivo_vep(archivo.name)
             if not archivo.is_file() or archivo.suffix.lower() != ".txt":
                 raise ValueError("el archivo de entrada debe ser un TXT cargado previamente")
             contenido = archivo.read_bytes()

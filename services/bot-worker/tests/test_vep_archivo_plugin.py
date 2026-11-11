@@ -92,10 +92,12 @@ class _Presign:
         self.ids.append(artifact_id)
         return {"upload_url": "", "object_key": f"jobs/x/{artifact_id}"}
 
+NOMBRE_OK = "F20001.cuit.20123456786.fecha.20260511.nro.001de001.txt"
+
 
 def _ejecutar(tmp_path: Path, *, qr_disponible: bool = True, **entrada: Any) -> tuple[Any, _Servicio, _Presign]:
     plugin = VepArchivoPlugin()
-    archivo_path = entrada.setdefault("archivo_path", "vep.txt")
+    archivo_path = entrada.setdefault("archivo_path", NOMBRE_OK)
     (tmp_path / archivo_path).write_text(TXT, encoding="utf-8")
     payload = {"operacion": "generar", **entrada}
     validado = asyncio.run(plugin.validate(payload))
@@ -181,7 +183,7 @@ def test_medio_no_habilitado_se_rechaza_antes_del_portal(tmp_path: Path) -> None
     with pytest.raises(InvalidInputError):
         asyncio.run(
             plugin.validate(
-                {"operacion": "generar", "archivo_path": "vep.txt", "medio_pago": "paypal"}
+                {"operacion": "generar", "archivo_path": NOMBRE_OK, "medio_pago": "paypal"}
             )
         )
 
@@ -204,3 +206,15 @@ def test_archivo_no_encontrado_en_work_dir_se_rechaza_antes_del_portal(tmp_path:
     with pytest.raises(InvalidInputError):
         asyncio.run(plugin.execute(validado, runtime))
     assert servicio.medio_pago is None
+
+
+def test_nombre_de_archivo_invalido_se_rechaza_antes_del_portal(tmp_path: Path) -> None:
+    from bot_worker.bots.vep_archivo.plugin import validar_nombre_archivo_vep
+
+    validar_nombre_archivo_vep(NOMBRE_OK)
+    for malo in ("vep.txt", "SONDOS_IVA_202609_F20001.txt", NOMBRE_OK.replace(".txt", ".csv")):
+        with pytest.raises(ValueError):
+            validar_nombre_archivo_vep(malo)
+    (tmp_path / "vep.txt").write_text(TXT, encoding="utf-8")
+    with pytest.raises(InvalidInputError, match="nombre del archivo"):
+        _ejecutar(tmp_path, archivo_path="vep.txt")
