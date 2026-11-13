@@ -242,6 +242,9 @@ class VepArchivoPortal(PortalArca):
 
     async def _elegir_medio_pago(self, medio: str) -> None:
         page = self.page
+        # El tour "Gestión de VEP" de ARCA tapa los medios de pago.
+        with contextlib.suppress(Exception):
+            await page.get_by_text("Saltar intro", exact=True).click(timeout=5_000)
         await page.locator(f'img[id="{MEDIO_PAGO_IMG_IDS[medio]}"]').click(timeout=5_000)
         await self._esperar(500)
         with contextlib.suppress(Exception):

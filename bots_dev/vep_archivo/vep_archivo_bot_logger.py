@@ -588,6 +588,12 @@ async def generar_vep_desde_archivo_logger(
                 "xn_group": "1005",
             }
 
+            # El tour "Gestión de VEP" de ARCA tapa los medios de pago.
+            try:
+                await page1.get_by_text("Saltar intro", exact=True).click(timeout=5000)
+            except Exception:
+                pass
+
             try:
                 img_id = medio_pago_img_ids[medio_pago]
                 await page1.locator(f'img[id="{img_id}"]').click(timeout=5000)
