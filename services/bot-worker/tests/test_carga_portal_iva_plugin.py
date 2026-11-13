@@ -241,7 +241,7 @@ def test_si_todas_las_secciones_fallan_el_job_es_error(tmp_path: Path) -> None:
     assert resultado.errors[0].internal_diagnostic == "carga_todas_las_secciones_fallaron"
 
 
-def test_credito_fiscal_compras_se_completa_despues_del_cf_con_prorrateo(tmp_path: Path) -> None:
+def test_credito_fiscal_compras_se_completa_antes_del_cf_con_prorrateo(tmp_path: Path) -> None:
     portal = _PortalCarga()
     entrada = _entrada(
         CargaPortalIvaPlugin(), tmp_path, csv_cf_path="cf.csv", prorrateo_global=True
@@ -251,7 +251,7 @@ def test_credito_fiscal_compras_se_completa_despues_del_cf_con_prorrateo(tmp_pat
 
     assert resultado.result == "OK"
     nombres = [op[0] for op in portal.log]
-    assert nombres.index("cargar_csv") < nombres.index("credito_fiscal_compras")
+    assert nombres.index("credito_fiscal_compras") < nombres.index("cargar_csv")  # el portal bloquea la apertura CF si no
     assert ("credito_fiscal_compras", "150.75") in portal.log
     assert resultado.data["secciones"]["credito_fiscal_compras"] == "ok"
 

@@ -862,6 +862,16 @@ async def _ejecutar_carga_completa(
                 resultado["status"] = "sin_archivo" if "vacío" not in msg and "No existe" not in msg else "sin_movimientos"
                 warning_logs.append(f"Apertura {seccion} omitida: {msg}")
             else:
+                # Con prorrateo global el portal bloquea "Información Adicional > Crédito Fiscal"
+                # ("primero debe corregir los siguientes problemas") mientras el Crédito Fiscal
+                # Computable Global de Compras no coincida con los comprobantes. Por eso se completa
+                # ANTES de la apertura CF (los TXT ya quedaron procesados en este punto).
+                cf_global_previo = False
+                if seccion == "CF" and config.prorrateo_global:
+                    try:
+                        cf_global_previo = bool(await _ir_a_editar_credito_fiscal_en_compras(page, csv_path=path))
+                    except Exception as exc:
+                        warning_logs.append(f"Crédito fiscal compras (previo a la apertura CF) no se pudo completar: {exc}")
                 status = await _run_with_retry(
                     f"carga_CSV_{seccion}",
                     lambda: cargar_apertura_csv(page, seccion, path),
@@ -870,7 +880,7 @@ async def _ejecutar_carga_completa(
                 )
                 resultado["status"] = status
                 print(f"DIAG_CARGA: CSV {seccion} status={status}", flush=True)
-                if status == "ok" and seccion == "CF" and config.prorrateo_global:
+                if status == "ok" and seccion == "CF" and config.prorrateo_global and not cf_global_previo:
                     try:
                         await _ir_a_editar_credito_fiscal_en_compras(page, csv_path=path)
                     except Exception as exc:

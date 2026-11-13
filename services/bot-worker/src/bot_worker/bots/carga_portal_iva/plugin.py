@@ -328,19 +328,29 @@ class CargaPortalIvaPlugin:
                 ):
                     if not rutas_abs.get(campo):
                         continue
+                    # Con prorrateo global el portal bloquea "Informacion adicional > Credito
+                    # fiscal" ("primero debe corregir los siguientes problemas") mientras el
+                    # Credito Fiscal Computable Global de compras no coincida con los
+                    # comprobantes (los TXT ya fueron procesados en este punto). Por eso se
+                    # completa ANTES de la apertura CF; si ese paso falla, se reintenta despues.
+                    cf_global = seccion == "CF" and entrada.prorrateo_global and total_cf is not None
+                    if cf_global:
+                        await self._seccion(
+                            resultados["secciones"], "credito_fiscal_compras",
+                            self._credito_fiscal_compras(pagina, total_cf, runtime),
+                            pagina,
+                        )
+                        with contextlib.suppress(Exception):
+                            await pagina.volver_al_inicio()
                     await self._seccion(
                         resultados["secciones"], seccion,
                         self._cargar_apertura_csv(pagina, seccion, rutas_abs[campo], runtime),
                         pagina,
                     )
-                    # Precondicion del portal (igual que el V1): el CF Computable
-                    # Global se edita recien despues de que la apertura CF quedo
-                    # cargada (``status == "ok"``) y con el mismo CSV.
                     if (
-                        seccion == "CF"
-                        and entrada.prorrateo_global
-                        and total_cf is not None
+                        cf_global
                         and resultados["secciones"].get("CF") == f"{seccion}: cargado"
+                        and resultados["secciones"].get("credito_fiscal_compras") != "ok"
                     ):
                         await self._seccion(
                             resultados["secciones"], "credito_fiscal_compras",
