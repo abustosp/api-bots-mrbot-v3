@@ -40,17 +40,24 @@ irreversible exige backup probado, ventana y aprobacion explicita.
 
 `infra/deploy/bluegreen.sh` despliega la central en dos colores (`mrbot-central-blue|green`)
 detras de nginx-v2, que reparte solo entre contenedores `healthy`; no requiere cambios en nginx-v2.
-Prerrequisitos en el host: redes `proxy-edge` y `mrbot-db`, Postgres con
-`db.compose.yaml` + `db.bluegreen.compose.yaml`, y `infra/compose/.env.central`.
+Extiende el `central-api` de `docker-compose.yml` (secrets, certs, S3, mTLS) y se une a las redes y
+volumen del stack `mrbot-v3` (`STACK`); Postgres y los workers no se tocan (los workers siguen
+llegando por el alias `central-api` de la red `control`). Usa `infra/compose/.env`.
 
 ```text
-CENTRAL_IMAGE=registry/grupo/mrbot-central-api@sha256:<digest> \
+CENTRAL_IMAGE=<imagen local o registry@sha256:digest> \
 CENTRAL_DOMAIN=central-api.mrbot.com.ar ./infra/deploy/bluegreen.sh
+# primer corte desde el contenedor del stack, ademas: LEGACY_CONTAINER=mrbot-v3-central-api-1
 ```
 
 Migra (one-off), levanta el color inactivo, espera `healthy`, drena el activo
-(`/tmp/drain` hace fallar su healthcheck) y lo baja. Si el nuevo no queda sano, se baja y
-el activo sigue. Las migraciones deben ser expand: durante el solapamiento corren ambas versiones.
+(`/tmp/drain` hace fallar su healthcheck) y lo baja; con `LEGACY_CONTAINER` detiene ese
+contenedor. Si el nuevo no queda sano, se baja y el activo sigue. Las migraciones deben ser
+expand: durante el solapamiento corren ambas versiones.
+Tras el primer corte no correr `docker compose up central-api` del stack (recrearia el legacy);
+los workers/Postgres si se pueden seguir operando con el stack.
+Probado en api2 (stack aislado, imagen relay-fix2): legacy -> blue -> green, sondeo a
+`central-api:8000/ready` cada 0,5 s, 0 fallos.
 
 ## 3. Rollback
 
