@@ -1,0 +1,51 @@
+# Central en blue/green: se levanta UNA instancia por color, siempre con
+# `-p mrbot-central-<color>` (lo hace infra/deploy/bluegreen.sh). Ambos
+# colores comparten Postgres (red externa mrbot-db) y la ruta de nginx-v2
+# (misma etiqueta nginx.host.route), que reparte solo entre contenedores
+# healthy. No publica puertos al host.
+#
+# Drenaje sin cambiar nginx-v2: el healthcheck falla si existe /tmp/drain, asi
+# nginx-v2 saca al contenedor por el evento health_status mientras el proceso
+# termina sus requests en curso.
+
+services:
+  migrate:
+    extends:
+      file: central.compose.yaml
+      service: migrate
+    networks: [mrbot-db]
+
+  central-api:
+    extends:
+      file: central.compose.yaml
+      service: central-api
+    ports: !reset []
+    # shortcut: el autoscaler corre en ambos colores durante el solapamiento
+    # (~1 min); no se verifico que sea seguro, dejarlo en false si preocupa.
+    environment:
+      AUTOSCALE_ENABLED: ${AUTOSCALE_ENABLED:-false}
+    labels:
+      nginx.host.enable: "true"
+      nginx.host.route: "central-api"
+      nginx.host.domains: "${CENTRAL_DOMAIN:?definir CENTRAL_DOMAIN}"
+      nginx.host.port: "8000"
+      nginx.host.tls: "true"
+      nginx.host.profile: "long-running-api"
+    networks: [proxy-edge, mrbot-db]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,sys,urllib.request; sys.exit(1) if os.path.exists('/tmp/drain') else urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 60s
+
+networks:
+  proxy-edge:
+    external: true
+  mrbot-db:
+    external: true
