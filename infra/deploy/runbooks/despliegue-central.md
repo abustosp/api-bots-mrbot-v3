@@ -36,6 +36,22 @@ Las migraciones siguen expand/contract: agregar opcional, desplegar,
 rellenar y contraer en un despliegue posterior. Una migracion
 irreversible exige backup probado, ventana y aprobacion explicita.
 
+## 2b. Blue/green (sin corte)
+
+`infra/deploy/bluegreen.sh` despliega la central en dos colores (`mrbot-central-blue|green`)
+detras de nginx-v2, que reparte solo entre contenedores `healthy`; no requiere cambios en nginx-v2.
+Prerrequisitos en el host: redes `proxy-edge` y `mrbot-db`, Postgres con
+`db.compose.yaml` + `db.bluegreen.compose.yaml`, y `infra/compose/.env.central`.
+
+```text
+CENTRAL_IMAGE=registry/grupo/mrbot-central-api@sha256:<digest> \
+CENTRAL_DOMAIN=central-api.mrbot.com.ar ./infra/deploy/bluegreen.sh
+```
+
+Migra (one-off), levanta el color inactivo, espera `healthy`, drena el activo
+(`/tmp/drain` hace fallar su healthcheck) y lo baja. Si el nuevo no queda sano, se baja y
+el activo sigue. Las migraciones deben ser expand: durante el solapamiento corren ambas versiones.
+
 ## 3. Rollback
 
 1. Poner el worker nuevo en DRENANDO y guardar evidencia de cola.

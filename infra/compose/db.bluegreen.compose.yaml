@@ -1,0 +1,13 @@
+# Override de db.compose.yaml para que ambos colores de la central alcancen
+# Postgres por la red externa mrbot-db (host `postgres`).
+#   docker compose -f db.compose.yaml -f db.bluegreen.compose.yaml --env-file .env.db up -d
+services:
+  postgres:
+    networks:
+      default: {}
+      mrbot-db:
+        aliases: [postgres]
+
+networks:
+  mrbot-db:
+    external: true
